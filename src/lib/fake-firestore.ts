@@ -100,35 +100,53 @@ export async function getDoc(docRef: any) {
 }
 
 export async function setDoc(docRef: any, data: any, options?: any) {
-  await fetch(`/api/fs/${docRef.collectionName}/${docRef.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
+  try {
+    await fetch(`/api/fs/${docRef.collectionName}/${docRef.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  } catch (err) {
+    console.warn("setDoc network error:", err);
+  }
 }
 
 export async function addDoc(colRef: any, data: any) {
-  const res = await fetch(`/api/fs/${colRef.name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  const json = await res.json();
-  return { id: json.id };
+  try {
+    const res = await fetch(`/api/fs/${colRef.name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error("Add failed");
+    const json = await res.json();
+    return { id: json.id };
+  } catch (err) {
+    console.warn("addDoc network error:", err);
+    return { id: 'local_' + Date.now() };
+  }
 }
 
 export async function updateDoc(docRef: any, data: any) {
-  await fetch(`/api/fs/${docRef.collectionName}/${docRef.id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
+  try {
+    await fetch(`/api/fs/${docRef.collectionName}/${docRef.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  } catch (err) {
+    console.warn("updateDoc network error:", err);
+  }
 }
 
 export async function deleteDoc(docRef: any) {
-  await fetch(`/api/fs/${docRef.collectionName}/${docRef.id}`, {
-    method: 'DELETE'
-  });
+  try {
+    await fetch(`/api/fs/${docRef.collectionName}/${docRef.id}`, {
+      method: 'DELETE'
+    });
+  } catch (err) {
+    console.warn("deleteDoc network error:", err);
+  }
 }
 
 export function onSnapshot(q: any, onNext: (snapshot: any) => void, onError?: (err: any) => void) {
