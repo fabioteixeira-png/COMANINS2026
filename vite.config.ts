@@ -12,7 +12,6 @@ export default defineConfig(() => {
       },
     },
     optimizeDeps: {
-    include: ['firebase/app', 'firebase/firestore'],
       esbuildOptions: {
         target: 'es2022',
       },

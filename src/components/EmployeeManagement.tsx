@@ -7,7 +7,7 @@ import {
   AlertCircle, ChevronRight, User, AlertOctagon, Check, Camera, Upload,
   Paperclip, Download, X, Image, Maximize, Minimize
 } from 'lucide-react';
-import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, NrTrainingItem } from '../lib/firebase';
+import { PortalUser, Dependent, AuditLogEntry, AsoContractItem } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 
@@ -71,14 +71,6 @@ export default function EmployeeManagement({
   const [newAsoNotes, setNewAsoNotes] = useState('');
   const [newAsoDocFile, setNewAsoDocFile] = useState<File | null>(null);
 
-  // NrTraining local state
-  const [newNrTrainingName, setNewNrTrainingName] = useState('');
-  const [newNrCompletionDate, setNewNrCompletionDate] = useState('');
-  const [newNrValidityDate, setNewNrValidityDate] = useState('');
-  const [newNrStatus, setNewNrStatus] = useState<'Válido' | 'Vencido' | 'Próximo do Vencimento'>('Válido');
-  const [newNrNotes, setNewNrNotes] = useState('');
-  const [newNrDocFile, setNewNrDocFile] = useState<File | null>(null);
-
   // Form State for Create/Edit
   const [formData, setFormData] = useState<Partial<PortalUser>>({
     name: '',
@@ -133,7 +125,6 @@ export default function EmployeeManagement({
     asoAdmissionalDate: '',
     asoValidity: '',
     asoContracts: [],
-    nrTrainings: [],
     educationLevel: 'Ensino Técnico',
     certificatesList: ['NR-10', 'NR-35'],
     bank: '',
@@ -231,66 +222,6 @@ export default function EmployeeManagement({
     }));
   };
 
-  const handleAddNrTraining = () => {
-    if (!newNrTrainingName.trim()) {
-      alert('Por favor, informe o Nome do Treinamento / NR.');
-      return;
-    }
-
-    const newNrItem: NrTrainingItem = {
-      id: `nr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      trainingName: newNrTrainingName.trim(),
-      completionDate: newNrCompletionDate,
-      validityDate: newNrValidityDate,
-      status: newNrStatus,
-      notes: newNrNotes.trim(),
-      docUrl: ''
-    };
-
-    const processAddNr = (docUrl: string) => {
-      newNrItem.docUrl = docUrl;
-      const currentList = formData.nrTrainings || [];
-      const updatedList = [...currentList, newNrItem];
-      if (newNrItem.validityDate) {
-         updatedList.sort((a, b) => new Date(a.validityDate!).getTime() - new Date(b.validityDate!).getTime());
-      }
-
-      setFormData((prev) => ({
-        ...prev,
-        nrTrainings: updatedList
-      }));
-
-      setNewNrTrainingName('');
-      setNewNrCompletionDate('');
-      setNewNrValidityDate('');
-      setNewNrStatus('Válido');
-      setNewNrNotes('');
-      setNewNrDocFile(null);
-    };
-
-    if (newNrDocFile) {
-      if (newNrDocFile.size > 2 * 1024 * 1024) {
-        alert("O arquivo é muito grande. O tamanho máximo permitido é 2MB.");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        processAddNr(reader.result as string);
-      };
-      reader.readAsDataURL(newNrDocFile);
-    } else {
-      processAddNr('');
-    }
-  };
-
-  const handleRemoveNrTraining = (nrId: string) => {
-    const updatedList = (formData.nrTrainings || []).filter((item) => item.id !== nrId);
-    setFormData((prev) => ({
-      ...prev,
-      nrTrainings: updatedList
-    }));
-  };
-
   // EXPIRATION ALERTS ENGINE
   const expirationAlerts = useMemo(() => {
     const alerts: {
@@ -343,28 +274,6 @@ export default function EmployeeManagement({
             severity: diffDays < 0 ? 'vencido' : 'proximo'
           });
         }
-      }
-
-      // 1.5 NR Trainings
-      if (u.nrTrainings && u.nrTrainings.length > 0) {
-        u.nrTrainings.forEach((nrItem) => {
-          if (nrItem.validityDate) {
-            const valDate = new Date(nrItem.validityDate);
-            const diffDays = Math.ceil((valDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
-            if (diffDays <= 30) {
-              alerts.push({
-                id: `nr_${u.id}_${nrItem.id}`,
-                employeeName: u.name,
-                employeeRole: u.role,
-                type: 'Treinamento/NR',
-                description: `Treinamento [${nrItem.trainingName}] ${diffDays < 0 ? 'vencido' : 'vence em breve'}`,
-                date: nrItem.validityDate,
-                daysRemaining: diffDays,
-                severity: diffDays < 0 ? 'vencido' : 'proximo'
-              });
-            }
-          }
-        });
       }
 
       // 2. CNH
@@ -489,8 +398,6 @@ export default function EmployeeManagement({
       professionalRegValidity: '',
       asoAdmissionalDate: '',
       asoValidity: '',
-      asoContracts: [],
-      nrTrainings: [],
       educationLevel: 'Ensino Técnico',
       certificatesList: ['NR-10', 'NR-35'],
       bank: '',
@@ -708,7 +615,7 @@ export default function EmployeeManagement({
                     <th className="p-3">Contato</th>
                     <th className="p-3">Situação</th>
                     <th className="p-3">Validade ASO</th>
-                    <th className="p-3 text-right whitespace-nowrap">Ações</th>
+                    <th className="p-3 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -787,7 +694,7 @@ export default function EmployeeManagement({
                             )}
                           </td>
 
-                          <td className="p-3 text-right whitespace-nowrap">
+                          <td className="p-3 text-right">
                             <div className="flex items-center justify-end space-x-1.5">
                               <button
                                 onClick={() => handleOpenView(emp)}
@@ -1889,203 +1796,6 @@ export default function EmployeeManagement({
                         </div>
                       )}
                     </div>
-                  
-                    {/* SEÇÃO ESPECIAL: TREINAMENTOS NRs */}
-                    <div className="md:col-span-3 bg-indigo-50/60 border border-indigo-200 p-4 rounded-xl space-y-4 mt-4">
-                      <div className="flex items-center justify-between border-b border-indigo-200 pb-2">
-                        <div className="flex items-center space-x-2">
-                          <Award className="h-5 w-5 text-indigo-700" />
-                          <div>
-                            <h5 className="font-bold text-slate-900 text-sm">
-                              Treinamentos e NRs
-                            </h5>
-                            <p className="text-xs text-slate-600">
-                              Insira os treinamentos e NRs do colaborador, bem como suas validades e anexos de certificados.
-                            </p>
-                          </div>
-                        </div>
-                        <span className="text-[11px] font-mono font-bold bg-indigo-700 text-white px-2.5 py-1 rounded-full">
-                          {(formData.nrTrainings || []).length} Treinamento(s)
-                        </span>
-                      </div>
-
-                      {/* SUB-FORMULÁRIO DE ADIÇÃO DE TREINAMENTOS NR */}
-                      <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-3">
-                        <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                          + Adicionar Treinamento / NR
-                        </h6>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Nome do Treinamento / NR *</label>
-                            <input
-                              type="text"
-                              value={newNrTrainingName}
-                              onChange={(e) => setNewNrTrainingName(e.target.value)}
-                              placeholder="Ex: NR-35 Trabalho em Altura"
-                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Data de Realização</label>
-                            <input
-                              type="date"
-                              value={newNrCompletionDate}
-                              onChange={(e) => setNewNrCompletionDate(e.target.value)}
-                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Data de Validade</label>
-                            <input
-                              type="date"
-                              value={newNrValidityDate}
-                              onChange={(e) => setNewNrValidityDate(e.target.value)}
-                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Status do Treinamento</label>
-                            <select
-                              value={newNrStatus}
-                              onChange={(e) => setNewNrStatus(e.target.value as any)}
-                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-semibold"
-                            >
-                              <option value="Válido">Válido</option>
-                              <option value="Próximo do Vencimento">Próximo do Vencimento</option>
-                              <option value="Vencido">Vencido</option>
-                            </select>
-                          </div>
-
-                          <div className="sm:col-span-2">
-                            <label className="block font-semibold text-slate-700 mb-1">Certificado (PDF/Imagem) - Máx. 2MB</label>
-                            <input
-                              type="file"
-                              accept="application/pdf,image/*"
-                              onChange={(e) => setNewNrDocFile(e.target.files ? e.target.files[0] : null)}
-                              className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 cursor-pointer"
-                            />
-                          </div>
-                          <div className="sm:col-span-2">
-                            <label className="block font-semibold text-slate-700 mb-1">Observações</label>
-                            <input
-                              type="text"
-                              value={newNrNotes}
-                              onChange={(e) => setNewNrNotes(e.target.value)}
-                              placeholder="Ex: Treinamento prático"
-                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50"
-                            />
-                          </div>
-                          
-                          <div className="sm:col-span-2 md:col-span-4 flex items-end">
-                            <button
-                              type="button"
-                              onClick={handleAddNrTraining}
-                              className="w-full py-2 px-3 bg-indigo-700 text-white rounded-lg hover:bg-indigo-800 font-bold flex items-center justify-center space-x-1.5 shadow-sm transition-colors cursor-pointer"
-                            >
-                              <Plus className="h-4 w-4" />
-                              <span>Adicionar Treinamento / NR</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* LISTA DE TREINAMENTOS NR CADASTRADOS */}
-                      {(formData.nrTrainings || []).length > 0 && (
-                        <div className="space-y-2">
-                          <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                            Treinamentos e NRs Cadastrados:
-                          </h6>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {(formData.nrTrainings || []).map((nrItem, idx) => {
-                              const valDate = nrItem.validityDate ? new Date(nrItem.validityDate) : null;
-                              const today = new Date();
-                              today.setHours(0,0,0,0);
-                              const diffDays = valDate ? Math.ceil((valDate.getTime() - today.getTime()) / (1000 * 3600 * 24)) : 999;
-                              const isExpired = diffDays < 0;
-                              const isExpiringSoon = diffDays >= 0 && diffDays <= 30;
-
-                              return (
-                                <div
-                                  key={nrItem.id || idx}
-                                  className="p-3 bg-white border border-slate-200 rounded-xl flex flex-col justify-between space-y-2 shadow-xs"
-                                >
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div>
-                                      <div className="flex items-center space-x-2">
-                                        <h6 className="font-bold text-slate-900 text-xs">{nrItem.trainingName}</h6>
-                                      </div>
-                                      <p className="text-[11px] text-slate-500 mt-0.5">
-                                        Realizado: <b>{nrItem.completionDate ? new Date(nrItem.completionDate).toLocaleDateString('pt-BR') : '-'}</b>
-                                      </p>
-                                    </div>
-                                    <div className="flex flex-col items-end gap-1">
-                                      <span
-                                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded uppercase ${
-                                          nrItem.status === 'Válido'
-                                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                            : nrItem.status === 'Próximo do Vencimento'
-                                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                            : nrItem.status === 'Vencido'
-                                            ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                                            : 'bg-slate-100 text-slate-800 border border-slate-300'
-                                        }`}
-                                      >
-                                        {nrItem.status}
-                                      </span>
-                                      {isExpired ? (
-                                        <span className="text-[9px] font-extrabold bg-rose-600 text-white px-1.5 py-0.5 rounded">
-                                          Vencido há {Math.abs(diffDays)}d
-                                        </span>
-                                      ) : isExpiringSoon ? (
-                                        <span className="text-[9px] font-extrabold bg-amber-500 text-white px-1.5 py-0.5 rounded">
-                                          Vence em {diffDays}d
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
-                                    <div className="text-slate-600 font-mono">
-                                      Validade: <b className={isExpired ? 'text-rose-600' : isExpiringSoon ? 'text-amber-600' : 'text-slate-900'}>{nrItem.validityDate ? new Date(nrItem.validityDate).toLocaleDateString('pt-BR') : '-'}</b>
-                                    </div>
-                                    <div className="flex items-center space-x-1.5">
-                                      {nrItem.docUrl && (
-                                        <a
-                                          href={nrItem.docUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="p-1 text-indigo-700 hover:bg-indigo-50 rounded transition-colors"
-                                          title="Visualizar Certificado"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </a>
-                                      )}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveNrTraining(nrItem.id)}
-                                        className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                                        title="Excluir Treinamento"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                  {nrItem.notes && (
-                                    <p className="text-[10px] text-slate-600 bg-slate-50 p-1.5 rounded border border-slate-100 italic">
-                                      Obs: {nrItem.notes}
-                                    </p>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    
                   </div>
                 </div>
               )}
@@ -2845,45 +2555,6 @@ export default function EmployeeManagement({
                                 </span>
                               </td>
                               <td className="p-1.5 font-mono font-bold text-slate-800">{aso.validityDate}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-                
-                {/* TABELA DE TREINAMENTOS E NRs */}
-                {selectedUser.nrTrainings && selectedUser.nrTrainings.length > 0 && (
-                  <div className="pt-2 border-t border-slate-200">
-                    <span className="font-bold text-slate-800 text-[11px] block mb-1.5">
-                      Treinamentos e NRs:
-                    </span>
-                    <div className="border border-slate-300 rounded-lg overflow-hidden bg-white text-[10px]">
-                      <table className="w-full text-left border-collapse">
-                        <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-300">
-                          <tr>
-                            <th className="p-1.5">Treinamento / NR</th>
-                            <th className="p-1.5">Realização</th>
-                            <th className="p-1.5">Validade</th>
-                            <th className="p-1.5">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                          {selectedUser.nrTrainings.map((nr, idx) => (
-                            <tr key={nr.id || idx}>
-                              <td className="p-1.5 font-bold text-slate-900">{nr.trainingName}</td>
-                              <td className="p-1.5">{nr.completionDate ? new Date(nr.completionDate).toLocaleDateString('pt-BR') : '-'}</td>
-                              <td className="p-1.5 font-mono font-bold text-slate-800">{nr.validityDate ? new Date(nr.validityDate).toLocaleDateString('pt-BR') : '-'}</td>
-                              <td className="p-1.5">
-                                <span className={`font-bold px-1.5 py-0.5 rounded ${
-                                  nr.status === 'Válido' ? 'text-emerald-700 bg-emerald-50' : 
-                                  nr.status === 'Vencido' ? 'text-rose-700 bg-rose-50' : 
-                                  'text-amber-700 bg-amber-50'
-                                }`}>
-                                  {nr.status}
-                                </span>
-                              </td>
                             </tr>
                           ))}
                         </tbody>

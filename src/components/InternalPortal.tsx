@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { safeFetch } from "../utils/apiClient";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
 import {
@@ -698,10 +699,6 @@ export default function InternalPortal({
   const [editingDropdownValues, setEditingDropdownValues] = useState<any>([]);
   const [editingEmployeeTraining, setEditingEmployeeTraining] =
     useState<any>("");
-  const [trainingCertBase64, setTrainingCertBase64] = useState<string>("");
-  const [trainingCertName, setTrainingCertName] = useState<string>("");
-  const [examFileBase64, setExamFileBase64] = useState<string>("");
-  const [examFileName, setExamFileName] = useState<string>("");
   const [editingInventoryItem, setEditingInventoryItem] = useState<any>("");
   const [editingTraining, setEditingTraining] = useState<any>("");
   const [importError, setImportError] = useState<any>("");
@@ -828,8 +825,6 @@ export default function InternalPortal({
     any | null
   >(null);
   const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
-  const [selectedIntakeForReceipt, setSelectedIntakeForReceipt] = useState<SavedIntake | null>(null);
-  const [isUploadingReceipt, setIsUploadingReceipt] = useState<boolean>(false);
   const [photoModalInstrument, setPhotoModalInstrument] =
     useState<Instrument | null>(null);
   const [photoModalType, setPhotoModalType] = useState<
@@ -838,12 +833,6 @@ export default function InternalPortal({
   const [isUploadingInstPhoto, setIsUploadingInstPhoto] =
     useState<boolean>(false);
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null);
-
-  const [deliveryModalIntake, setDeliveryModalIntake] = useState<any>(null);
-  const [deliveryReceiptFile, setDeliveryReceiptFile] = useState<File | null>(null);
-  const [deliveryReceiptPreview, setDeliveryReceiptPreview] = useState<string>("");
-  const [isSubmittingDelivery, setIsSubmittingDelivery] = useState<boolean>(false);
-
   const [isCondicaoDropdownOpen, setIsCondicaoDropdownOpen] =
     useState<boolean>(false);
   const [showInventoryItemForm, setShowInventoryItemForm] =
@@ -1843,36 +1832,6 @@ Status atual: ${e.status}.`,
         }
       }
 
-      // 1e. Treinamentos NRs (Novo)
-      if (u.nrTrainings && u.nrTrainings.length > 0) {
-        u.nrTrainings.forEach((nrItem: any) => {
-          if (nrItem.validityDate) {
-            const valDate = new Date(
-              nrItem.validityDate +
-                (nrItem.validityDate.includes("T") ? "" : "T00:00:00"),
-            );
-            const diffDays = Math.ceil(
-              (valDate.getTime() - today.getTime()) / (1000 * 3600 * 24),
-            );
-            if (diffDays <= 30) {
-              trainingAlerts.push({
-                id: `nr_${u.id}_${nrItem.id || Math.random()}`,
-                employeeId: u.id,
-                employeeName: u.name,
-                employeeRole: u.role,
-                type: "Treinamento/NR",
-                category: "training",
-                title: `Treinamento/NR: ${nrItem.trainingName || "N/I"}`,
-                description: `Status: ${nrItem.status || "N/I"} • Validade: ${valDate.toLocaleDateString("pt-BR")}`,
-                date: nrItem.validityDate,
-                daysRemaining: diffDays,
-                severity: diffDays < 0 ? "vencido" : "proximo",
-              });
-            }
-          }
-        });
-      }
-
       // 1d. Aniversários de Nascimento
       if (u.birthDate) {
         const birthDate = new Date(u.birthDate + "T00:00:00");
@@ -1979,37 +1938,6 @@ Status atual: ${e.status}.`,
       ].sort(sortFn),
     };
   }, [internalUsers, employeeTrainings, medicalExams]);
-
-  useEffect(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const list = (employeeTrainings || []).map((record) => {
-      let dynamicStatus = record.status || "Válido";
-      if (record.expirationDate) {
-        const exp = new Date(record.expirationDate + "T00:00:00");
-        const diffDays = Math.ceil(
-          (exp.getTime() - today.getTime()) / (1000 * 3600 * 24),
-        );
-        if (diffDays < 0) {
-          dynamicStatus = "Vencido";
-        } else if (diffDays <= 30) {
-          dynamicStatus = "Próximo do vencimento";
-        } else {
-          dynamicStatus = "Válido";
-        }
-      } else if (record.scheduledDate) {
-        const sched = new Date(record.scheduledDate + "T00:00:00");
-        if (sched > today) {
-          dynamicStatus = "Agendado";
-        }
-      }
-      return {
-        ...record,
-        dynamicStatus,
-      };
-    });
-    setComputedEmployeeTrainings(list);
-  }, [employeeTrainings]);
 
   useEffect(() => {
     if (customLogoProp) {
@@ -2238,19 +2166,6 @@ Status atual: ${e.status}.`,
     return `${descriptions.slice(0, 2).join(", ")} +${descriptions.length - 2}`;
   };
 
-  const isMaterialDelivered = (intake: any, instrumentsList: any[] = []) => {
-    if (!intake) return false;
-    if (intake.status === "Entregue") {
-      return true;
-    }
-    const numEntrada = (intake.numEntrada || "").trim().toLowerCase();
-    if (!numEntrada) return false;
-    const matching = instrumentsList.filter(
-      (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada,
-    );
-    return matching.length > 0 && matching.every((i) => i.status === "Entregue");
-  };
-
   const getIntakeStatus = (intake: any, instrumentsList: any[]) => {
     const numEntrada = (intake.numEntrada || "").trim().toLowerCase();
     const totalAllowed = (intake.rows || []).reduce(
@@ -2274,11 +2189,8 @@ Status atual: ${e.status}.`,
         i.status === "Entregue" ||
         i.status === "Não Conforme",
     ).length;
-    const deliveredCount = matching.filter(
-      (i) => i.status === "Entregue",
-    ).length;
-    const availableOnlyCount = matching.filter(
-      (i) => i.status === "Disponível para Retirada",
+    const availableCount = matching.filter(
+      (i) => i.status === "Disponível para Retirada" || i.status === "Entregue",
     ).length;
 
     if (registeredCount === 0) {
@@ -2304,24 +2216,7 @@ Status atual: ${e.status}.`,
       };
     }
 
-    const isFullyDelivered =
-      (deliveredCount >= totalAllowed && totalAllowed > 0) ||
-      (matching.length > 0 && matching.every((i) => i.status === "Entregue")) ||
-      intake.status === "Entregue";
-
-    if (isFullyDelivered) {
-      return {
-        label: "Entregue",
-        badgeClass:
-          "bg-slate-800 text-white border border-slate-700 font-bold shadow-xs",
-        badgeDarkClass:
-          "bg-slate-800 text-white border border-slate-700 font-bold shadow-xs",
-        registeredCount,
-        totalAllowed,
-      };
-    }
-
-    if ((availableOnlyCount + deliveredCount) >= totalAllowed && totalAllowed > 0) {
+    if (availableCount >= totalAllowed && totalAllowed > 0) {
       return {
         label: "Disponível para Retirada",
         badgeClass:
@@ -3610,10 +3505,6 @@ Status atual: ${e.status}.`,
   };
 
   const handleEditIntakeModal = (intake: any) => {
-    if (isMaterialDelivered(intake, instruments)) {
-      alert("Esta entrada de material já teve seu material entregue ao cliente e não pode mais ser editada.");
-      return;
-    }
     setEditingIntakeId(intake.id);
     setIntakeNum(intake.numEntrada);
     setIntakeClientId(intake.clientId);
@@ -3627,71 +3518,6 @@ Status atual: ${e.status}.`,
   const handleOpenPhotosModal = (intake: any) => {
     setSelectedIntakeForPhotos(intake);
     setShowPhotosModal(true);
-  };
-
-  const handleOpenReceiptModal = (intake: SavedIntake) => {
-    setSelectedIntakeForReceipt(intake);
-  };
-
-  const handleUploadReceiptPhoto = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    if (!e.target.files || e.target.files.length === 0 || !selectedIntakeForReceipt)
-      return;
-    try {
-      setIsUploadingReceipt(true);
-      const compressedList = await compressMultipleImages([e.target.files[0]]);
-      const receiptUrl = compressedList[0];
-      if (!receiptUrl) return;
-
-      const updatedIntake: SavedIntake = {
-        ...selectedIntakeForReceipt,
-        receiptPhotoUrl: receiptUrl,
-        reciboFotoUrl: receiptUrl,
-      };
-
-      await saveIntakeDoc(updatedIntake);
-      setSelectedIntakeForReceipt(updatedIntake);
-      setSavedIntakes((prev) =>
-        prev.map((i) => (i.id === updatedIntake.id ? updatedIntake : i)),
-      );
-    } catch (err) {
-      console.error("Erro ao enviar recibo de devolução:", err);
-      alert("Erro ao enviar comprovante de devolução.");
-    } finally {
-      setIsUploadingReceipt(false);
-    }
-  };
-
-  const handleDeleteReceiptPhoto = async () => {
-    if (!selectedIntakeForReceipt) return;
-    if (!isUserAdmin) {
-      alert("Apenas administradores têm permissão para excluir o comprovante de devolução.");
-      return;
-    }
-    if (
-      !window.confirm(
-        "Deseja realmente excluir o comprovante de devolução do material?",
-      )
-    )
-      return;
-    try {
-      setIsUploadingReceipt(true);
-      const updatedIntake: SavedIntake = { ...selectedIntakeForReceipt };
-      delete updatedIntake.receiptPhotoUrl;
-      delete updatedIntake.reciboFotoUrl;
-
-      await saveIntakeDoc(updatedIntake);
-      setSelectedIntakeForReceipt(updatedIntake);
-      setSavedIntakes((prev) =>
-        prev.map((i) => (i.id === updatedIntake.id ? updatedIntake : i)),
-      );
-    } catch (err) {
-      console.error("Erro ao excluir recibo de devolução:", err);
-      alert("Erro ao excluir comprovante de devolução.");
-    } finally {
-      setIsUploadingReceipt(false);
-    }
   };
 
   const handleUploadPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3754,58 +3580,6 @@ Status atual: ${e.status}.`,
       );
     } catch (err) {
       console.error("Error deleting photo:", err);
-    }
-  };
-
-
-  const handleDeliveryReceiptChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    setDeliveryReceiptFile(file);
-    const compressed = await compressMultipleImages([file]);
-    if (compressed && compressed.length > 0) {
-      setDeliveryReceiptPreview(compressed[0]);
-    }
-  };
-
-  const handleSubmitDelivery = async () => {
-    if (!deliveryModalIntake) return;
-    setIsSubmittingDelivery(true);
-    
-    try {
-      const numEntrada = (deliveryModalIntake.numEntrada || "").trim().toLowerCase();
-
-      // 1. If there's a receipt photo preview, attach it to the Intake and set status to Entregue
-      const updatedIntake = {
-        ...deliveryModalIntake,
-        status: "Entregue",
-        ...(deliveryReceiptPreview ? { receiptPhotoUrl: deliveryReceiptPreview } : {})
-      };
-      await saveIntakeDoc(updatedIntake);
-
-      // 2. Update all matching instruments to status "Entregue"
-      if (numEntrada) {
-        const matchingInsts = instruments.filter(
-          (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada
-        );
-        for (const inst of matchingInsts) {
-          if (inst.status !== "Entregue") {
-            await updateInstrumentDoc(inst.id, { status: "Entregue" });
-            if (onUpdateInstrumentStatus) {
-              await onUpdateInstrumentStatus(inst.id, "Entregue");
-            }
-          }
-        }
-      }
-      
-      setDeliveryModalIntake(null);
-      setDeliveryReceiptFile(null);
-      setDeliveryReceiptPreview("");
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao confirmar entrega.");
-    } finally {
-      setIsSubmittingDelivery(false);
     }
   };
 
@@ -4209,9 +3983,8 @@ Status atual: ${e.status}.`,
 
   const getClientIp = async () => {
     try {
-      const res = await fetch("https://api.ipify.org?format=json");
-      const data = await res.json();
-      return data.ip;
+      const data = await safeFetch("https://api.ipify.org?format=json", { method: "GET", ttlMs: 300000 });
+      return data.ip || "192.168.1.1";
     } catch (e) {
       return "192.168.1." + Math.floor(Math.random() * 254 + 1);
     }
@@ -4387,11 +4160,8 @@ Status atual: ${e.status}.`,
         prev && prev.id === payslip.id ? { ...prev, ...updates } : prev,
       );
 
-      await fetch("/api/send-document-notification", {
+      await safeFetch("/api/send-document-notification", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
           employeeName: payslip.employeeName,
         documentType: payslip.documentType === "alimentacao" ? "Recibo de Alimentação" : payslip.documentType === "transporte" ? "Recibo de Vale Transporte" : payslip.documentType === "espelho_ponto" ? "Espelho de Ponto" : "Contra-cheque",
@@ -4497,33 +4267,38 @@ Status atual: ${e.status}.`,
         isAllFilled = false;
       } else {
         for (const p of benchPoints) {
-                    const vals = [];
-          if (p.refAsc1 !== "" && p.refAsc1 !== undefined) vals.push(Number(p.refAsc1));
-          if (p.refDesc1 !== "" && p.refDesc1 !== undefined) vals.push(Number(p.refDesc1));
-          if (p.refAsc2 !== "" && p.refAsc2 !== undefined) vals.push(Number(p.refAsc2));
-          if (p.refDesc2 !== "" && p.refDesc2 !== undefined) vals.push(Number(p.refDesc2));
-          
-          if (vals.length === 0) {
+          const a1 =
+            p.refAsc1 !== "" && p.refAsc1 !== undefined
+              ? Number(p.refAsc1)
+              : NaN;
+          const d1 =
+            p.refDesc1 !== "" && p.refDesc1 !== undefined
+              ? Number(p.refDesc1)
+              : NaN;
+          const a2 =
+            p.refAsc2 !== "" && p.refAsc2 !== undefined
+              ? Number(p.refAsc2)
+              : NaN;
+          const d2 =
+            p.refDesc2 !== "" && p.refDesc2 !== undefined
+              ? Number(p.refDesc2)
+              : NaN;
+
+          if (isNaN(a1) || isNaN(d1) || isNaN(a2) || isNaN(d2)) {
             isAllFilled = false;
             break;
           }
+          const vals = [a1, d1, a2, d2];
           const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
           const errVal = Math.abs(Number((p.nominal - avg).toFixed(2)));
 
           let currentMpe = benchMpe || 1.0;
           if (selectedInstrumentType === "manovacuometro" && p.nominal < 0) {
-            let scaleToPositive = 1;
-            const unitLower = (activeInst?.unit || "").toLowerCase();
-            if (unitLower.includes("psi")) scaleToPositive = 14.7;
-            else if (unitLower.includes("kpa")) scaleToPositive = 101.325;
-            else if (unitLower.includes("mpa")) scaleToPositive = 0.101325;
-            else if (unitLower.includes("mca")) scaleToPositive = 10.33;
-            
             const min = activeInst?.rangeMin || 0;
             if (min <= -700) {
-              currentMpe = (currentMpe / scaleToPositive) * 760;
+              currentMpe = currentMpe * 760;
             } else if (min <= -25) {
-              currentMpe = (currentMpe / scaleToPositive) * 29.92;
+              currentMpe = currentMpe * 29.92;
             }
           }
 
@@ -4537,15 +4312,19 @@ Status atual: ${e.status}.`,
         isAllFilled = false;
       } else {
         for (const tp of benchTransmitterPoints) {
-          const vals = [];
-          if (tp.measuredMaAsc !== "" && tp.measuredMaAsc !== undefined) vals.push(Number(tp.measuredMaAsc));
-          if (tp.measuredMaDesc !== "" && tp.measuredMaDesc !== undefined) vals.push(Number(tp.measuredMaDesc));
-          
-          if (vals.length === 0) {
+          const a =
+            tp.measuredMaAsc !== "" && tp.measuredMaAsc !== undefined
+              ? Number(tp.measuredMaAsc)
+              : NaN;
+          const d =
+            tp.measuredMaDesc !== "" && tp.measuredMaDesc !== undefined
+              ? Number(tp.measuredMaDesc)
+              : NaN;
+          if (isNaN(a) || isNaN(d)) {
             isAllFilled = false;
             break;
           }
-          const avgMa = vals.reduce((sum, v) => sum + v, 0) / vals.length;
+          const avgMa = (a + d) / 2;
           const errMa = Number((avgMa - tp.expectedMa).toFixed(3));
           const errPercentSpan = Math.abs(
             Number(((errMa / 16.0) * 100).toFixed(2)),
@@ -4563,9 +4342,15 @@ Status atual: ${e.status}.`,
         isAllFilled = false;
       } else {
         for (const sp of benchSwitchPoints) {
-          const trip = sp.tripAsc !== "" && sp.tripAsc !== undefined ? Number(sp.tripAsc) : NaN;
-          const reset = sp.resetDesc !== "" && sp.resetDesc !== undefined ? Number(sp.resetDesc) : NaN;
-          if (isNaN(trip)) { // only require trip
+          const trip =
+            sp.tripAsc !== "" && sp.tripAsc !== undefined
+              ? Number(sp.tripAsc)
+              : NaN;
+          const reset =
+            sp.resetDesc !== "" && sp.resetDesc !== undefined
+              ? Number(sp.resetDesc)
+              : NaN;
+          if (isNaN(trip) || isNaN(reset)) {
             isAllFilled = false;
             break;
           }
@@ -4773,9 +4558,8 @@ Status atual: ${e.status}.`,
 
       let aiAnalysis = "";
       try {
-        const res = await fetch("/api/generate-rnc", {
+        const data = await safeFetch("/api/generate-rnc", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             instrumentTag: activeInst?.tag,
             instrumentDescription: activeInst?.description,
@@ -4786,7 +4570,6 @@ Status atual: ${e.status}.`,
             range: `${activeInst?.rangeMin} a ${activeInst?.rangeMax} ${activeInst?.unit}`,
           }),
         });
-        const data = await res.json();
         aiAnalysis = data.analysis || "";
       } catch (err) {
         console.error("Erro ao chamar API RNC:", err);
@@ -4978,7 +4761,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         dataPrevistaSaida: intakeExpectedDate,
         contato: intakeContact,
         rows: intakeRows,
-        date: new Date().toISOString(),
       };
 
       const intakeToSave = {
@@ -5297,7 +5079,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </button>
         </nav>
       </aside>
-      <div className="flex-1 p-8 h-screen overflow-y-auto min-w-0">
+      <div className="flex-1 p-8 h-screen overflow-y-auto">
         {activeTab === "dashboard" && (
           <div className="space-y-8">
             {/* CARDS QUANTITATIVOS DA OPERAÇÃO & METROLOGIA (VISÍVEL PARA TODOS OS USUÁRIOS) */}
@@ -6067,15 +5849,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-[11px] sm:text-xs border-collapse table-fixed">
+                <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                      <th className="p-2 w-[18%]">Nome / Razão Social</th>
-                      <th className="p-2 w-[12%]">CNPJ / CPF</th>
-                      <th className="p-2 w-[20%]">E-mail</th>
-                      <th className="p-2 w-[12%]">Telefone</th>
-                      <th className="p-2 w-[22%]">Endereço Completo</th>
-                      <th className="p-2 w-[16%] text-right whitespace-nowrap">Ações</th>
+                      <th className="p-3">Nome / Razão Social</th>
+                      <th className="p-3">CNPJ / CPF</th>
+                      <th className="p-3">E-mail</th>
+                      <th className="p-3">Telefone</th>
+                      <th className="p-3">Endereço Completo</th>
+                      <th className="p-3 text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -6096,22 +5878,22 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           key={c.id}
                           className={`hover:bg-slate-50 transition-colors ${editingClient?.id === c.id ? "bg-blue-50/50" : ""}`}
                         >
-                          <td className="p-2 font-bold text-slate-900 break-words">
+                          <td className="p-3 font-bold text-slate-900">
                             {c.name}
                           </td>
-                          <td className="p-2 font-mono text-slate-700">
+                          <td className="p-3 font-mono text-slate-700">
                             {c.cnpj || "-"}
                           </td>
-                          <td className="p-2 text-slate-600 break-words">
+                          <td className="p-3 text-slate-600">
                             {c.email || "-"}
                           </td>
-                          <td className="p-2 text-slate-600">
+                          <td className="p-3 text-slate-600">
                             {c.phone || "-"}
                           </td>
-                          <td className="p-2 text-slate-600 break-words">
+                          <td className="p-3 text-slate-600">
                             {c.city || "-"}
                           </td>
-                          <td className="p-2 text-right whitespace-nowrap">
+                          <td className="p-3 text-right">
                             <div className="flex items-center justify-end space-x-1">
                               <button
                                 onClick={() => handleEditClient(c)}
@@ -6847,7 +6629,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       <th className="p-3">Range</th>
                       <th className="p-3">Tag Cliente</th>
                       <th className="p-3">Status</th>
-                      <th className="p-3 text-right whitespace-nowrap">Ações</th>
+                      <th className="p-3 text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -7252,6 +7034,29 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               <span>Certificado</span>
                             </button>
 
+                            {/* Entregar Button (Disponível após a emissão do certificado, ou para instrumentos RNC prontos para retirada) */}
+                            {((isCertEmitted && !isRncIssued) ||
+                              (isRncIssued &&
+                                (inst.status === "Disponível para Retirada" ||
+                                  inst.status === "Não Conforme"))) &&
+                              inst.status !== "Entregue" && (
+                                <button
+                                  onClick={async () => {
+                                    if (onUpdateInstrumentStatus) {
+                                      await onUpdateInstrumentStatus(
+                                        inst.id,
+                                        "Entregue",
+                                      );
+                                    }
+                                  }}
+                                  className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 cursor-pointer transition-colors"
+                                  title="Alterar o status deste instrumento para Entregue"
+                                >
+                                  <CheckCircle className="h-3 w-3" />
+                                  <span>Entregar</span>
+                                </button>
+                              )}
+
                             {/* RNC Button (Relatório de Não Conformidade) */}
                             {(inst.status === "Não Conforme" ||
                               inst.hasRnc ||
@@ -7539,29 +7344,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
                       {/* Action Buttons */}
                       <div className="flex items-center space-x-2 shrink-0 pt-2 md:pt-0">
-                        {(() => {
-                          const isDelivered = isMaterialDelivered(intake, instruments);
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => handleEditIntakeModal(intake)}
-                              disabled={isDelivered}
-                              title={
-                                isDelivered
-                                  ? "Material já foi entregue. Botão Ver/Editar inativo."
-                                  : "Ver / Editar Entrada"
-                              }
-                              className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1.5 border ${
-                                isDelivered
-                                  ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60"
-                                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer"
-                              }`}
-                            >
-                              <Eye className={`h-3.5 w-3.5 ${isDelivered ? "text-slate-400" : "text-slate-600"}`} />
-                              <span>Ver / Editar</span>
-                            </button>
-                          );
-                        })()}
+                        <button
+                          onClick={() => handleEditIntakeModal(intake)}
+                          className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer border border-slate-200"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-slate-600" />
+                          <span>Ver / Editar</span>
+                        </button>
 
                         <button
                           onClick={() => handleOpenPhotosModal(intake)}
@@ -7570,99 +7359,16 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               ? "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 shadow-xs font-bold"
                               : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
                           }`}
-                          title="Fotos do equipamento na entrada de material"
+                          title="Fotos referentes à entrada de material"
                         >
                           <Camera className="h-3.5 w-3.5 text-blue-600" />
                           <span>
-                            Fotos Entrada{" "}
+                            Fotos{" "}
                             {intake.photos && intake.photos.length > 0
                               ? `(${intake.photos.length})`
                               : ""}
                           </span>
                         </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenReceiptModal(intake)}
-                          className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer border ${
-                            (intake.receiptPhotoUrl || (intake as any).reciboFotoUrl)
-                              ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 shadow-xs font-bold"
-                              : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
-                          }`}
-                          title="Comprovante / Recibo de Devolução do Material"
-                        >
-                          <FileCheck className={`h-3.5 w-3.5 ${(intake.receiptPhotoUrl || (intake as any).reciboFotoUrl) ? "text-emerald-600" : "text-slate-500"}`} />
-                          <span>
-                            Recibo Devolução
-                            {(intake.receiptPhotoUrl || (intake as any).reciboFotoUrl) ? " ✓" : ""}
-                          </span>
-                        </button>
-
-                        {(() => {
-                          const numEntrada = (intake.numEntrada || "").trim().toLowerCase();
-                          const matchingInsts = numEntrada
-                            ? instruments.filter(
-                                (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada
-                              )
-                            : [];
-
-                          const isDelivered = isMaterialDelivered(intake, instruments);
-
-                          const readyInsts = matchingInsts.filter((inst) => {
-                            if (inst.status === "Entregue") return false;
-                            const rnc = rncReports.find((r: any) => r.instrumentId === inst.id);
-                            const isRncIssued = inst.status === "Não Conforme" || inst.hasRnc || !!rnc;
-                            const isCertEmitted =
-                              reports.some((r: any) => r.instrumentId === inst.id) ||
-                              inst.status === "Calibrado" ||
-                              inst.status === "Disponível para Retirada";
-
-                            return (
-                              (isCertEmitted && !isRncIssued) ||
-                              (isRncIssued &&
-                                (inst.status === "Disponível para Retirada" ||
-                                  inst.status === "Não Conforme")) ||
-                              inst.status === "Disponível para Retirada" ||
-                              inst.status === "Calibrado"
-                            );
-                          });
-
-                          const canDeliver =
-                            !isDelivered &&
-                            (readyInsts.length > 0 ||
-                              intake.status === "Disponível para Retirada");
-
-                          if (isDelivered) {
-                            return null;
-                          }
-
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDeliveryModalIntake(intake);
-                                setDeliveryReceiptFile(null);
-                                setDeliveryReceiptPreview("");
-                              }}
-                              disabled={!canDeliver}
-                              className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1.5 border shadow-xs ${
-                                canDeliver
-                                  ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 cursor-pointer"
-                                  : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60"
-                              }`}
-                              title={
-                                canDeliver
-                                  ? "Confirmar entrega do material ao cliente"
-                                  : matchingInsts.length === 0
-                                    ? "Nenhum instrumento cadastrado nesta guia de entrada"
-                                    : "Aguardando conclusão da calibração/liberação dos instrumentos para entrega"
-                              }
-                            >
-                              <CheckCircle className="h-3.5 w-3.5" />
-                              <span>Entregar</span>
-                            </button>
-                          );
-                        })()}
 
                         <button
                           onClick={() => setSelectedIntakeToPrint(intake)}
@@ -8341,24 +8047,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </div>
                       </div>
 
-                      <div className="flex items-start sm:items-center gap-4 w-full sm:w-auto">
-                        <div className="text-left sm:text-right bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-lg w-full sm:w-auto border sm:border-none border-slate-200">
-                          <div className="inline-block bg-royal-blue text-white font-mono text-sm font-black px-3 py-1 rounded-md uppercase tracking-wider">
-                            {selectedIntakeToPrint.numEntrada}
-                          </div>
-                          <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wide mt-1">
-                            Comprovante de Recebimento de Material
-                          </h2>
-                          <p className="text-[10px] text-slate-600">
-                            Data de Recebimento:{" "}
-                            <span className="font-bold text-slate-800">
-                              {selectedIntakeToPrint.dataEntrada}
-                            </span>
-                          </p>
+                      <div className="text-left sm:text-right bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-lg w-full sm:w-auto border sm:border-none border-slate-200">
+                        <div className="inline-block bg-royal-blue text-white font-mono text-sm font-black px-3 py-1 rounded-md uppercase tracking-wider">
+                          {selectedIntakeToPrint.numEntrada}
                         </div>
-                        <div className="p-1.5 bg-white border border-slate-200 rounded-lg shadow-sm hidden sm:block">
-                          <QRCodeSVG value="https://www.comanins.com.br" size={54} />
-                        </div>
+                        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wide mt-1">
+                          Comprovante de Recebimento de Material
+                        </h2>
+                        <p className="text-[10px] text-slate-600">
+                          Data de Recebimento:{" "}
+                          <span className="font-bold text-slate-800">
+                            {selectedIntakeToPrint.dataEntrada}
+                          </span>
+                        </p>
                       </div>
                     </div>
 
@@ -10894,27 +10595,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     let maxHysteresis = 0;
                     let maxRepeatability = 0;
                     let maxAbsError = 0;
-                    let scaleToPositive = 1;
-                    const unitLower = (inst.unit || "").toLowerCase();
-                    if (unitLower.includes("psi")) {
-                      scaleToPositive = 14.7;
-                    } else if (unitLower.includes("kpa")) {
-                      scaleToPositive = 101.325;
-                    } else if (unitLower.includes("mpa")) {
-                      scaleToPositive = 0.101325;
-                    } else if (unitLower.includes("mca")) {
-                      scaleToPositive = 10.33;
-                    }
-                    
-                    let normalizedMin = inst.rangeMin || 0;
-                    if (inst.typeSpec === "manovacuometro" && normalizedMin < 0) {
-                      if (normalizedMin <= -700) {
-                        normalizedMin = -(Math.abs(normalizedMin) / 760) * scaleToPositive;
-                      } else if (normalizedMin <= -25) {
-                        normalizedMin = -(Math.abs(normalizedMin) / 29.92) * scaleToPositive;
-                      }
-                    }
-                    let span = Math.abs((inst.rangeMax || 0) - normalizedMin) || 1;
+                    let span =
+                      Math.abs((inst.rangeMax || 0) - (inst.rangeMin || 0)) ||
+                      1;
                     const mpeVal =
                       report?.mpe !== undefined &&
                       report?.mpe !== null &&
@@ -10962,9 +10645,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       let normalizedAbsErr = absErr;
                       if (inst.typeSpec === "manovacuometro" && p.nominal < 0) {
                         const minVal = inst.rangeMin || 0;
-                        if (minVal <= -700) normalizedAbsErr = (absErr / 760) * scaleToPositive;
+                        if (minVal <= -700) normalizedAbsErr = absErr / 760;
                         else if (minVal <= -25)
-                          normalizedAbsErr = (absErr / 29.92) * scaleToPositive;
+                          normalizedAbsErr = absErr / 29.92;
                       }
 
                       if (count > 0 && normalizedAbsErr > maxAbsError) {
@@ -10982,9 +10665,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           p.nominal < 0
                         ) {
                           const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedHyst1 = (hyst1 / 760) * scaleToPositive;
+                          if (minVal <= -700) normalizedHyst1 = hyst1 / 760;
                           else if (minVal <= -25)
-                            normalizedHyst1 = (hyst1 / 29.92) * scaleToPositive;
+                            normalizedHyst1 = hyst1 / 29.92;
                         }
                         if (normalizedHyst1 > maxHysteresis)
                           maxHysteresis = normalizedHyst1;
@@ -10998,9 +10681,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           p.nominal < 0
                         ) {
                           const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedHyst2 = (hyst2 / 760) * scaleToPositive;
+                          if (minVal <= -700) normalizedHyst2 = hyst2 / 760;
                           else if (minVal <= -25)
-                            normalizedHyst2 = (hyst2 / 29.92) * scaleToPositive;
+                            normalizedHyst2 = hyst2 / 29.92;
                         }
                         if (normalizedHyst2 > maxHysteresis)
                           maxHysteresis = normalizedHyst2;
@@ -11016,9 +10699,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           p.nominal < 0
                         ) {
                           const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedRepAsc = (repAsc / 760) * scaleToPositive;
+                          if (minVal <= -700) normalizedRepAsc = repAsc / 760;
                           else if (minVal <= -25)
-                            normalizedRepAsc = (repAsc / 29.92) * scaleToPositive;
+                            normalizedRepAsc = repAsc / 29.92;
                         }
                         if (normalizedRepAsc > maxRepeatability)
                           maxRepeatability = normalizedRepAsc;
@@ -11031,9 +10714,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           p.nominal < 0
                         ) {
                           const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedRepDesc = (repDesc / 760) * scaleToPositive;
+                          if (minVal <= -700) normalizedRepDesc = repDesc / 760;
                           else if (minVal <= -25)
-                            normalizedRepDesc = (repDesc / 29.92) * scaleToPositive;
+                            normalizedRepDesc = repDesc / 29.92;
                         }
                         if (normalizedRepDesc > maxRepeatability)
                           maxRepeatability = normalizedRepDesc;
@@ -11287,7 +10970,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 </span>{" "}
                                 {(() => {
                                   const raw =
-                                    report?.date ||
                                     (inst as any).calibrationDate ||
                                     inst.lastCalibrationDate ||
                                     (inst as any).date;
@@ -11295,7 +10977,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     return new Date().toLocaleDateString(
                                       "pt-BR",
                                     );
-                                  return formatDateBR(raw);
+                                  if (raw.includes("-")) {
+                                    const p = raw.split("-");
+                                    if (p.length === 3 && p[0].length === 4)
+                                      return `${p[2]}/${p[1]}/${p[0]}`;
+                                  }
+                                  return raw;
                                 })()}
                               </p>
                               <p>
@@ -13156,7 +12843,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           <th className="p-3">Validade</th>
                           <th className="p-3">Laboratório RBC</th>
                           <th className="p-3 text-center">Status</th>
-                          <th className="p-3 text-right whitespace-nowrap">Ações</th>
+                          <th className="p-3 text-right">Ações</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -13236,7 +12923,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     </span>
                                   )}
                                 </td>
-                                <td className="p-3 text-right whitespace-nowrap">
+                                <td className="p-3 text-right">
                                   <div className="flex items-center justify-end space-x-2">
                                     <button
                                       type="button"
@@ -14592,8 +14279,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <button
                   onClick={() => {
                     setEditingEmployeeTraining(null);
-                    setTrainingCertBase64("");
-                    setTrainingCertName("");
                     setShowEmployeeTrainingForm(true);
                   }}
                   className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
@@ -14768,8 +14453,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 <button
                                   onClick={() => {
                                     setEditingEmployeeTraining(record);
-                                    setTrainingCertBase64(record.certificateUrl || "");
-                                    setTrainingCertName(record.certificateUrl ? "Certificado Anexado" : "");
                                     setShowEmployeeTrainingForm(true);
                                   }}
                                   className="p-1 text-slate-400 hover:text-royal-blue transition-colors"
@@ -15394,8 +15077,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <button
                     onClick={() => {
                       setEditingExam(null);
-                      setExamFileBase64("");
-                      setExamFileName("");
                       setShowExamForm(true);
                     }}
                     className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm"
@@ -15527,48 +15208,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   {exam.status}
                                 </span>
                               </td>
-                              <td className="p-3 text-right whitespace-nowrap">
+                              <td className="p-3 text-right">
                                 <div className="flex justify-end space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {exam.pdfUrl && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        if (exam.pdfUrl?.startsWith("data:")) {
-                                          try {
-                                            const parts = exam.pdfUrl.split(",");
-                                            const mime = parts[0].split(":")[1].split(";")[0];
-                                            const byteString = atob(parts[1]);
-                                            const ab = new ArrayBuffer(byteString.length);
-                                            const ia = new Uint8Array(ab);
-                                            for (let i = 0; i < byteString.length; i++) {
-                                              ia[i] = byteString.charCodeAt(i);
-                                            }
-                                            const blob = new Blob([ab], { type: mime });
-                                            const blobUrl = URL.createObjectURL(blob);
-                                            window.open(blobUrl, "_blank");
-                                          } catch (err) {
-                                            console.error("Erro ao abrir PDF ASO:", err);
-                                            alert("Erro ao abrir o ASO.");
-                                          }
-                                        } else {
-                                          window.open(exam.pdfUrl, "_blank");
-                                        }
-                                      }}
-                                      className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-blue-50 rounded transition-colors"
-                                      title="Ver ASO / Anexo"
-                                    >
-                                      <FileText className="h-4 w-4 text-royal-blue" />
-                                    </button>
-                                  )}
                                   <button
                                     onClick={() => {
                                       setEditingExam(exam);
-                                      setExamFileBase64(exam.pdfUrl || "");
-                                      setExamFileName(exam.pdfUrl ? "ASO Anexado" : "");
                                       setShowExamForm(true);
                                     }}
                                     className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-blue-50 rounded transition-colors"
-                                    title="Editar Exame"
                                   >
                                     <Edit className="h-4 w-4" />
                                   </button>
@@ -15644,7 +15291,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <th className="p-4 font-semibold w-1/4 text-center">
                           Validade (Meses)
                         </th>
-                        <th className="p-4 font-semibold text-right whitespace-nowrap">Ações</th>
+                        <th className="p-4 font-semibold text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -15742,7 +15389,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         nextExamDate:
                           (formData.get("nextExamDate") as string) || undefined,
                         notes: (formData.get("notes") as string) || undefined,
-                        pdfUrl: examFileBase64 || undefined,
                       };
                       try {
                         if (editingExam) {
@@ -15752,8 +15398,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         }
                         setShowExamForm(false);
                         setEditingExam(null);
-                        setExamFileBase64("");
-                        setExamFileName("");
                       } catch (err) {
                         console.error(err);
                         alert("Erro ao salvar exame.");
@@ -15852,54 +15496,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
                           placeholder="Anotações adicionais..."
                         />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                          Anexo ASO / Documento do Exame (PDF ou Imagem)
-                        </label>
-                        <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 bg-slate-50 text-center hover:bg-slate-100 transition-colors">
-                          <input
-                            type="file"
-                            accept="application/pdf,image/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                if (file.size > 2 * 1024 * 1024) {
-                                  alert("O arquivo é muito grande. O tamanho máximo permitido é 2MB.");
-                                  return;
-                                }
-                                const reader = new FileReader();
-                                reader.onload = () => {
-                                  setExamFileBase64(reader.result as string);
-                                  setExamFileName(file.name);
-                                };
-                                reader.readAsDataURL(file);
-                              }
-                            }}
-                            className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-royal-blue file:text-white hover:file:bg-blue-700 cursor-pointer"
-                          />
-                          <p className="text-xs text-slate-500 mt-1">Formato: PDF, PNG, JPG (Máx. 2MB)</p>
-                        </div>
-
-                        {examFileBase64 && (
-                          <div className="mt-2 flex items-center justify-between text-xs bg-emerald-50 text-emerald-800 p-2.5 rounded-lg border border-emerald-200">
-                            <div className="flex items-center space-x-2 truncate">
-                              <FileText className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                              <span className="truncate font-semibold">{examFileName || "ASO Anexado"}</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setExamFileBase64("");
-                                setExamFileName("");
-                              }}
-                              className="text-red-600 hover:text-red-800 font-bold ml-2 text-xs bg-white px-2 py-1 rounded border border-red-200 shadow-sm"
-                            >
-                              Remover
-                            </button>
-                          </div>
-                        )}
                       </div>
                     </div>
 
@@ -16232,7 +15828,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             <th className="px-6 py-4">Arquivo Anexo</th>
                             <th className="px-6 py-4">Data de Publicação</th>
                             <th className="px-6 py-4">Status</th>
-                            <th className="px-6 py-4 text-right whitespace-nowrap">Ações</th>
+                            <th className="px-6 py-4 text-right">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -16345,7 +15941,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             <th className="px-6 py-4">
                               Trilha de Auditoria (IP / Data e Hora)
                             </th>
-                            <th className="px-6 py-4 text-right whitespace-nowrap">Ações</th>
+                            <th className="px-6 py-4 text-right">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -17317,8 +16913,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-slate-900 mb-4">
               {editingEmployeeTraining
-                ? "Editar Registro de Treinamento / NR"
-                : "Registrar Realização de Treinamento / NR"}
+                ? "Editar Registro"
+                : "Registrar Realização"}
             </h3>
             <form
               onSubmit={async (e) => {
@@ -17346,8 +16942,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   const res = formData.get("et_result") as string;
                   if (res) data.result = res;
 
-                  data.certificateUrl = trainingCertBase64 || "";
-
                   if (editingEmployeeTraining) {
                     await updateEmployeeTrainingDoc(
                       editingEmployeeTraining.id,
@@ -17357,8 +16951,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     await addEmployeeTrainingDoc(data);
                   }
                   setShowEmployeeTrainingForm(false);
-                  setTrainingCertBase64("");
-                  setTrainingCertName("");
                 } catch (err) {
                   console.error("Error saving employee training:", err);
                   alert("Erro ao salvar o registro de treinamento.");
@@ -17384,10 +16976,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   ))}
                 </select>
               </div>
-
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Treinamento / Norma Regulamentadora (NR) *
+                  Treinamento *
                 </label>
                 <select
                   required
@@ -17408,15 +16999,26 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     }
                   }}
                 >
-                  <option value="">Selecione o treinamento/NR...</option>
+                  <option value="">Selecione...</option>
                   {trainings.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} {t.validityMonths > 0 ? `(Validade: ${t.validityMonths} meses)` : "(Sem expiração)"}
+                      {t.name}
                     </option>
                   ))}
                 </select>
               </div>
-
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Status (Automático)
+                </label>
+                <input
+                  disabled
+                  value="Calculado automaticamente"
+                  type="text"
+                  className="w-full bg-slate-100 text-slate-500 border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <input type="hidden" name="et_status" value="Agendado" />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">
@@ -17426,7 +17028,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     name="et_completion"
                     defaultValue={
                       editingEmployeeTraining?.completionDate
-                        ? editingEmployeeTraining.completionDate.split("T")[0]
+                        ? new Date(editingEmployeeTraining.completionDate)
+                            .toISOString()
+                            .split("T")[0]
                         : ""
                     }
                     type="date"
@@ -17447,13 +17051,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Data Vencimento / Validade
+                    Data Vencimento
                   </label>
                   <input
                     name="et_expiration"
                     defaultValue={
                       editingEmployeeTraining?.expirationDate
-                        ? editingEmployeeTraining.expirationDate.split("T")[0]
+                        ? new Date(editingEmployeeTraining.expirationDate)
+                            .toISOString()
+                            .split("T")[0]
                         : ""
                     }
                     type="date"
@@ -17461,17 +17067,18 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Data Programada / Agendada
+                    Data Programada
                   </label>
                   <input
                     name="et_scheduled"
                     defaultValue={
                       editingEmployeeTraining?.scheduledDate
-                        ? editingEmployeeTraining.scheduledDate.split("T")[0]
+                        ? new Date(editingEmployeeTraining.scheduledDate)
+                            .toISOString()
+                            .split("T")[0]
                         : ""
                     }
                     type="date"
@@ -17480,64 +17087,16 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Resultado / Nota
+                    Resultado (Nota)
                   </label>
                   <input
                     name="et_result"
                     defaultValue={editingEmployeeTraining?.result || ""}
                     type="text"
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    placeholder="Ex: Aprovado, 100%"
+                    placeholder="Ex: Aprovado, 9.5"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Anexo do Certificado de Treinamento / NR (PDF ou Imagem)
-                </label>
-                <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 bg-slate-50 text-center hover:bg-slate-100 transition-colors">
-                  <input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        if (file.size > 2 * 1024 * 1024) {
-                          alert("O arquivo é muito grande. O tamanho máximo permitido é 2MB.");
-                          return;
-                        }
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          setTrainingCertBase64(reader.result as string);
-                          setTrainingCertName(file.name);
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                    className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-royal-blue file:text-white hover:file:bg-blue-700 cursor-pointer"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Formato: PDF, PNG, JPG (Máx. 2MB)</p>
-                </div>
-
-                {trainingCertBase64 && (
-                  <div className="mt-2 flex items-center justify-between text-xs bg-emerald-50 text-emerald-800 p-2.5 rounded-lg border border-emerald-200">
-                    <div className="flex items-center space-x-2 truncate">
-                      <FileText className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span className="truncate font-semibold">{trainingCertName || "Certificado Anexado"}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTrainingCertBase64("");
-                        setTrainingCertName("");
-                      }}
-                      className="text-red-600 hover:text-red-800 font-bold ml-2 text-xs bg-white px-2 py-1 rounded border border-red-200 shadow-sm"
-                    >
-                      Remover
-                    </button>
-                  </div>
-                )}
               </div>
 
               <div className="pt-4 flex space-x-3">
@@ -17550,7 +17109,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-royal-blue text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm"
+                  className="flex-1 px-4 py-2 bg-royal-blue text-white rounded-lg font-semibold hover:bg-blue-700"
                 >
                   Salvar
                 </button>
@@ -17908,269 +17467,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         </div>
       )}
 
-      {/* MODAL: RECIBO DE DEVOLUÇÃO DA ENTRADA */}
-      {selectedIntakeForReceipt && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
-            {/* Modal Header */}
-            <div className="bg-emerald-700 text-white p-5 sm:p-6 flex items-center justify-between border-b border-emerald-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-white/20 rounded-xl border border-white/30 text-white">
-                  <FileCheck className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">
-                    Recibo / Comprovante de Devolução
-                  </h3>
-                  <p className="text-xs text-emerald-100">
-                    Guia de Entrada #{selectedIntakeForReceipt.numEntrada} •{" "}
-                    {clients.find((c) => c.id === selectedIntakeForReceipt.clientId)?.name || "Cliente"}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedIntakeForReceipt(null)}
-                className="p-2 text-emerald-200 hover:text-white hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6 space-y-6">
-              {selectedIntakeForReceipt.receiptPhotoUrl || (selectedIntakeForReceipt as any).reciboFotoUrl ? (
-                <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-900 text-xs font-semibold gap-2">
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
-                      Comprovante de devolução anexado à Entrada de Material.
-                    </span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFullscreenPhoto(
-                            selectedIntakeForReceipt.receiptPhotoUrl ||
-                              (selectedIntakeForReceipt as any).reciboFotoUrl
-                          )
-                        }
-                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>Ver Tela Cheia</span>
-                      </button>
-                      {isUserAdmin && (
-                        <button
-                          type="button"
-                          onClick={handleDeleteReceiptPhoto}
-                          disabled={isUploadingReceipt}
-                          className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          <span>Excluir</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Image Display */}
-                  <div className="relative border-2 border-slate-200 rounded-2xl overflow-hidden bg-slate-900/5 flex items-center justify-center p-2 min-h-[250px]">
-                    <img
-                      src={
-                        selectedIntakeForReceipt.receiptPhotoUrl ||
-                        (selectedIntakeForReceipt as any).reciboFotoUrl
-                      }
-                      alt={`Recibo Devolução Entrada ${selectedIntakeForReceipt.numEntrada}`}
-                      className="max-h-[450px] w-auto object-contain rounded-xl shadow-md cursor-pointer hover:opacity-95 transition-opacity"
-                      onClick={() =>
-                        setFullscreenPhoto(
-                          selectedIntakeForReceipt.receiptPhotoUrl ||
-                            (selectedIntakeForReceipt as any).reciboFotoUrl
-                        )
-                      }
-                    />
-                  </div>
-                </div>
-              ) : (
-                /* Upload Box if not uploaded */
-                <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center space-y-4 hover:border-emerald-500 transition-colors">
-                  <div className="mx-auto w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                    {isUploadingReceipt ? (
-                      <RefreshCw className="h-7 w-7 animate-spin" />
-                    ) : (
-                      <Upload className="h-7 w-7" />
-                    )}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-800 text-sm">
-                      Anexar Recibo / Comprovante de Devolução
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      Faça o upload da imagem ou documento do recibo assinado na entrega/retirada do material.
-                    </p>
-                  </div>
-
-                  <label className="inline-flex items-center space-x-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-md">
-                    <Plus className="h-4 w-4" />
-                    <span>
-                      {isUploadingReceipt
-                        ? "Enviando e Salvando..."
-                        : "Selecionar Arquivo do Computador"}
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      disabled={isUploadingReceipt}
-                      onChange={handleUploadReceiptPhoto}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex items-center justify-between">
-              <span className="text-xs text-slate-500 font-mono">
-                Entrada: {selectedIntakeForReceipt.numEntrada}
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedIntakeForReceipt(null)}
-                className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: ENTREGA DE MATERIAL */}
-      {deliveryModalIntake && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
-            {/* Modal Header */}
-            <div className="bg-emerald-600 text-white p-5 flex items-center justify-between border-b border-emerald-700">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-white/20 rounded-xl border border-white/30 text-white">
-                  <CheckCircle className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="font-display font-extrabold text-lg">
-                    Confirmar Entrega de Material
-                  </h3>
-                  <p className="text-emerald-100 text-[10px] font-medium">
-                    Anexar recibo assinado e marcar como Entregue
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setDeliveryModalIntake(null);
-                  setDeliveryReceiptFile(null);
-                  setDeliveryReceiptPreview("");
-                }}
-                className="text-emerald-200 hover:text-white transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-5">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
-                <p className="text-xs font-semibold text-slate-700">Guia de Entrada Selecionada:</p>
-                <p className="text-sm font-bold text-slate-900">
-                  Entrada #{deliveryModalIntake.numEntrada}
-                </p>
-                <p className="text-xs text-slate-600">
-                  Cliente: {clients.find(c => c.id === deliveryModalIntake.clientId)?.name || "Cliente não informado"}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Data Entrada: {deliveryModalIntake.dataEntrada || "N/A"}
-                </p>
-              </div>
-              
-              <div className="space-y-3">
-                <label className="block text-sm font-bold text-slate-800">
-                  Comprovante de Entrega (Opcional)
-                </label>
-                <p className="text-[10px] text-slate-500">
-                  Faça o upload do recibo assinado por quem retirou o material. Esta imagem ficará anexada à Entrada de Material.
-                </p>
-                
-                {deliveryModalIntake.receiptPhotoUrl && !deliveryReceiptPreview && (
-                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs flex items-start gap-2">
-                    <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-bold">Recibo já anexado</p>
-                      <p>A guia de entrada ({deliveryModalIntake.numEntrada}) já possui um comprovante. Você pode prosseguir ou enviar uma nova imagem.</p>
-                    </div>
-                  </div>
-                )}
-                
-                {deliveryReceiptPreview ? (
-                  <div className="relative border-2 border-slate-200 rounded-xl overflow-hidden group">
-                    <img src={deliveryReceiptPreview} alt="Recibo" className="w-full h-auto max-h-60 object-contain bg-slate-50" />
-                    <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <button
-                        onClick={() => {
-                          setDeliveryReceiptFile(null);
-                          setDeliveryReceiptPreview("");
-                        }}
-                        className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-md"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        <span>Remover Imagem</span>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center w-full">
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-xl cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <Upload className="w-6 h-6 mb-2 text-slate-500" />
-                        <p className="mb-1 text-xs text-slate-500 font-semibold">
-                          <span className="text-emerald-600">Clique para anexar</span> ou arraste a imagem
-                        </p>
-                        <p className="text-[10px] text-slate-400">SVG, PNG, JPG ou GIF (Max. 5MB)</p>
-                      </div>
-                      <input type="file" accept="image/*" onChange={handleDeliveryReceiptChange} className="hidden" />
-                    </label>
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="bg-slate-50 border-t border-slate-200 p-4 flex items-center justify-end gap-3">
-              <button
-                onClick={() => {
-                  setDeliveryModalIntake(null);
-                  setDeliveryReceiptFile(null);
-                  setDeliveryReceiptPreview("");
-                }}
-                className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleSubmitDelivery}
-                disabled={isSubmittingDelivery}
-                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                {isSubmittingDelivery ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle className="h-4 w-4" />
-                )}
-                <span>Confirmar Entrega</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* MODAL: FOTO DO INSTRUMENTO (CADASTRO / CALIBRADO) */}
       {photoModalInstrument && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
@@ -18341,17 +17637,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             />
                           </label>
 
-                          {isUserAdmin && (
-                            <button
-                              type="button"
-                              onClick={handleDeleteInstrumentPhoto}
-                              disabled={isUploadingInstPhoto}
-                              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <Trash2 className="h-4 w-4 text-rose-600" />
-                              <span>Excluir Foto</span>
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={handleDeleteInstrumentPhoto}
+                            disabled={isUploadingInstPhoto}
+                            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Trash2 className="h-4 w-4 text-rose-600" />
+                            <span>Excluir Foto</span>
+                          </button>
                         </div>
                       )}
                     </div>

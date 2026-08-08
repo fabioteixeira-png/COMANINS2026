@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { safeFetch } from '../utils/apiClient';
 import { QRCodeSVG } from 'qrcode.react';
 import ComaninsLogo from './ComaninsLogo';
 import { maskPhone } from '../utils/masks';
@@ -144,11 +145,8 @@ export default function PublicSite({ onNavigateToPortal, onSubmitContact, custom
         
         // Send email via backend server
         try {
-          await fetch('/api/send-contact-email', {
+          await safeFetch('/api/send-contact-email', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
             body: JSON.stringify({
               name,
               company,

@@ -3,6 +3,7 @@ import { Plus, Search, MessageSquare, Paperclip, Send, CheckCircle, Clock, FileT
 import { InternalTicket, TicketMessage } from "../types";
 import { syncInternalTickets, saveInternalTicket, PortalUser } from "../lib/firebase";
 import { compressImageToWebResolution } from "../lib/imageCompressor";
+import { safeFetch } from "../utils/apiClient";
 
 export default function InternalCommunication({ currentUser }: { currentUser: PortalUser | null }) {
   const [tickets, setTickets] = useState<InternalTicket[]>([]);
@@ -60,9 +61,8 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     await saveInternalTicket(ticket);
     
     // SEND NOTIFICATION TO FINANCEIRO
-    fetch("/api/send-email", {
+    safeFetch("/api/send-email", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: "financeiro@comanins.com.br",
         subject: `Novo Chamado: ${ticket.title}`,
@@ -107,9 +107,8 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     
     if (isFinanceOrAdmin) {
       // Notify creator
-      fetch("/api/send-email", {
+      safeFetch("/api/send-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: updatedTicket.creatorEmail,
           subject: `Resposta no seu chamado: ${updatedTicket.title}`,
@@ -123,9 +122,8 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
       }).catch(console.error);
     } else {
       // Notify financeiro
-      fetch("/api/send-email", {
+      safeFetch("/api/send-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: "financeiro@comanins.com.br",
           subject: `Nova interação no chamado: ${updatedTicket.title}`,

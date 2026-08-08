@@ -1,9 +1,6 @@
-const initializeApp = (config: any) => {};
-const getApps = () => [];
-const getApp = () => {};
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
-
   collection,
   doc,
   setDoc,
@@ -19,14 +16,18 @@ import {
   limit,
   startAfter,
   DocumentData,
-  QueryDocumentSnapshot,
-  where
-} from './fake-firestore';
+  QueryDocumentSnapshot
+} from 'firebase/firestore';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { Client, Instrument, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog } from '../types';
 import { generateAuthKey } from '../utils/authKey';
 
-// Database initialization for PostgreSQL backend
-export const db = getFirestore();
+// Initialize Firebase
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+export const db = firebaseConfig.firestoreDatabaseId
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(app);
 
 export enum OperationType {
   CREATE = 'create',
@@ -208,10 +209,7 @@ export interface SavedIntake {
   dataEntrada: string;
   dataPrevistaSaida: string;
   contato: string;
-  date?: string;
   photos?: string[];
-  receiptPhotoUrl?: string;
-  reciboFotoUrl?: string;
   rows: {
     quant: number;
     descricao: string;
@@ -261,16 +259,6 @@ export interface AuditLogEntry {
 }
 
 import { InternalTicket } from "../types";
-export interface NrTrainingItem {
-  id: string;
-  trainingName: string;
-  completionDate?: string;
-  validityDate?: string;
-  status?: 'Válido' | 'Vencido' | 'Próximo do Vencimento';
-  docUrl?: string; // Certificate URL
-  notes?: string;
-}
-
 export interface PortalUser {
   id: string;
   name: string;
@@ -335,7 +323,6 @@ export interface PortalUser {
   asoAdmissionalDate?: string;
   asoValidity?: string; // YYYY-MM-DD
   asoContracts?: AsoContractItem[]; // ASOs por Contrato / Unidade / Área
-  nrTrainings?: NrTrainingItem[]; // Treinamentos NRs
   educationLevel?: string;
   certificatesList?: string[];
 
@@ -444,6 +431,99 @@ export function handleQuotaOrError(err: any): void {
   }
 }
 
+// Subscription Multiplexer / Deduplicator
+interface SharedSubChannel<T> {
+  listeners: Set<(data: T) => void>;
+  unsubFirestore: (() => void) | null;
+  lastData: T | null;
+  isStarting: boolean;
+}
+
+const activeChannels = new Map<string, SharedSubChannel<any>>();
+
+export function createSharedSync<T>(
+  channelKey: string,
+  cacheKey: string,
+  fallbackData: T,
+  startListener: (onData: (data: T) => void, onError: (err: any) => void) => () => void
+): (callback: (data: T) => void) => () => void {
+  return (callback: (data: T) => void) => {
+    let channel = activeChannels.get(channelKey);
+    if (!channel) {
+      channel = {
+        listeners: new Set(),
+        unsubFirestore: null,
+        lastData: getLocalCache<T>(cacheKey, fallbackData),
+        isStarting: false,
+      };
+      activeChannels.set(channelKey, channel);
+    }
+
+    channel.listeners.add(callback);
+
+    // Deliver latest cached/in-memory data immediately to new subscriber
+    if (channel.lastData !== null && channel.lastData !== undefined) {
+      try {
+        callback(channel.lastData);
+      } catch (e) {
+        console.error(`Error in shared sync callback (${channelKey}):`, e);
+      }
+    }
+
+    // Initialize Firestore onSnapshot if not already active
+    if (!channel.unsubFirestore && !channel.isStarting) {
+      channel.isStarting = true;
+      try {
+        const unsub = startListener(
+          (newData) => {
+            if (channel) {
+              channel.lastData = newData;
+              setLocalCache(cacheKey, newData);
+              channel.listeners.forEach((cb) => {
+                try {
+                  cb(newData);
+                } catch (e) {
+                  console.error(`Error broadcasting update (${channelKey}):`, e);
+                }
+              });
+            }
+          },
+          (err) => {
+            handleQuotaOrError(err);
+            if (channel && channel.lastData !== null) {
+              channel.listeners.forEach((cb) => {
+                try {
+                  cb(channel.lastData!);
+                } catch (e) {}
+              });
+            }
+          }
+        );
+        channel.unsubFirestore = unsub;
+      } catch (err) {
+        handleQuotaOrError(err);
+      } finally {
+        channel.isStarting = false;
+      }
+    }
+
+    // Return cleanup function
+    return () => {
+      if (channel) {
+        channel.listeners.delete(callback);
+        if (channel.listeners.size === 0) {
+          if (channel.unsubFirestore) {
+            try {
+              channel.unsubFirestore();
+            } catch (e) {}
+          }
+          activeChannels.delete(channelKey);
+        }
+      }
+    };
+  };
+}
+
 export async function getPaginatedDocs<T>(
   colName: string,
   pageSize: number = 25,
@@ -472,17 +552,21 @@ export async function getPaginatedDocs<T>(
 
 // 1. Clients
 export async function syncClients(callback: (clients: Client[]) => void) {
-  const cached = getLocalCache<Client[]>('clients', INITIAL_CLIENTS);
-  callback(cached);
-  const q = query(collection(db, 'clients'), limit(2000));
-  return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Client));
-    setLocalCache('clients', list);
-    callback(list);
-  }, (err) => {
-    handleQuotaOrError(err);
-    callback(getLocalCache<Client[]>('clients', INITIAL_CLIENTS));
-  });
+  const shared = createSharedSync<Client[]>(
+    'clients',
+    'clients',
+    INITIAL_CLIENTS,
+    (onData, onError) => {
+      const q = query(collection(db, 'clients'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Client));
+          onData(list);
+        }
+      }, onError);
+    }
+  );
+  return shared(callback);
 }
 
 export async function addClientDoc(data: Omit<Client, 'id'>): Promise<Client> {
@@ -514,17 +598,21 @@ export async function updateClientDoc(client: Client): Promise<Client> {
 
 // 2. Instruments
 export async function syncInstruments(callback: (instruments: Instrument[]) => void) {
-  const cached = getLocalCache<Instrument[]>('instruments', []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'instruments'), limit(2000));
-  return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
-    setLocalCache('instruments', list);
-    callback(list);
-  }, (err) => {
-    handleQuotaOrError(err);
-    callback(getLocalCache<Instrument[]>('instruments', []));
-  });
+  const shared = createSharedSync<Instrument[]>(
+    'instruments',
+    'instruments',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'instruments'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
+          onData(list);
+        }
+      }, onError);
+    }
+  );
+  return shared(callback);
 }
 
 export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'> & Partial<Pick<Instrument, 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'>>): Promise<Instrument> {
@@ -604,33 +692,29 @@ export async function deleteInstrumentDoc(id: string): Promise<void> {
 
 // 3. Calibration Reports
 export async function syncReports(callback: (reports: CalibrationReport[]) => void) {
-  const cached = getLocalCache<CalibrationReport[]>('calibrationReports', []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'calibrationReports'), orderBy('date', 'desc'), limit(2000));
-  return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
-    setLocalCache('calibrationReports', list);
-    callback(list);
-  }, (err) => {
-    handleQuotaOrError(err);
-    callback(getLocalCache<CalibrationReport[]>('calibrationReports', []));
-  });
+  const shared = createSharedSync<CalibrationReport[]>(
+    'calibrationReports',
+    'calibrationReports',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'calibrationReports'), orderBy('date', 'desc'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
+          onData(list);
+        }
+      }, onError);
+    }
+  );
+  return shared(callback);
 }
 
 export async function saveCalibrationDoc(data: {
   instrumentId: string;
   technicianName: string;
-  instrumentType?: string;
-  metrologicalNorm?: string;
-  sensorType?: string;
-  outputSignal?: string;
-  setPoint?: number;
-  contactType?: string;
   accuracyClass?: string;
   mpe?: number;
-  points?: any[];
-  transmitterPoints?: any[];
-  switchPoints?: any[];
+  points: any[];
   observations: string;
   curveCount?: number;
   certNumber?: string;
@@ -671,32 +755,10 @@ export async function saveCalibrationDoc(data: {
       }, 0);
       const avg = count > 0 ? sum / count : 0;
       const err = Number((p.nominal - avg).toFixed(2));
-      let absErr = Math.abs(err);
+      const absErr = Math.abs(err);
+      if (absErr > maxError) maxError = absErr;
       
-      let scaleToPositive = 1;
-      const unitLower = (activeInst.unit || "").toLowerCase();
-      if (unitLower.includes("psi")) scaleToPositive = 14.7;
-      else if (unitLower.includes("kpa")) scaleToPositive = 101.325;
-      else if (unitLower.includes("mpa")) scaleToPositive = 0.101325;
-      else if (unitLower.includes("mca")) scaleToPositive = 10.33;
-
-      let normalizedAbsErr = absErr;
-      if (activeInst.typeSpec === "manovacuometro" && p.nominal < 0) {
-        const minVal = activeInst.rangeMin || 0;
-        if (minVal <= -700) normalizedAbsErr = (absErr / 760) * scaleToPositive;
-        else if (minVal <= -25) normalizedAbsErr = (absErr / 29.92) * scaleToPositive;
-      }
-
-      if (normalizedAbsErr > maxError) maxError = normalizedAbsErr;
-      
-      let currentMpe = data.mpe !== undefined ? data.mpe : (activeInst.mpe || 1.0);
-      if (activeInst.typeSpec === "manovacuometro" && p.nominal < 0) {
-        const min = activeInst.rangeMin || 0;
-        if (min <= -700) currentMpe = (currentMpe / scaleToPositive) * 760;
-        else if (min <= -25) currentMpe = (currentMpe / scaleToPositive) * 29.92;
-      }
-      
-      const pass = absErr <= currentMpe;
+      const pass = absErr <= (data.mpe !== undefined ? data.mpe : (activeInst.mpe || 1.0));
       return { ...p, pass };
     }
 
@@ -734,52 +796,20 @@ export async function saveCalibrationDoc(data: {
     };
   });
 
-  let scaleToPos = 1;
-  const uLow = (activeInst.unit || "").toLowerCase();
-  if (uLow.includes("psi")) scaleToPos = 14.7;
-  else if (uLow.includes("kpa")) scaleToPos = 101.325;
-  else if (uLow.includes("mpa")) scaleToPos = 0.101325;
-  else if (uLow.includes("mca")) scaleToPos = 10.33;
-  
-  let normMin = activeInst.rangeMin || 0;
-  if (activeInst.typeSpec === "manovacuometro" && normMin < 0) {
-    if (normMin <= -700) normMin = -(Math.abs(normMin) / 760) * scaleToPos;
-    else if (normMin <= -25) normMin = -(Math.abs(normMin) / 29.92) * scaleToPos;
-  }
-  const span = Math.abs((activeInst.rangeMax || 0) - normMin) || 1;
+  const span = activeInst.rangeMax - activeInst.rangeMin;
   const maxRelativeError = span > 0 ? Number(((maxError / span) * 100).toFixed(4)) : 0;
-  const approved = processedPoints.length > 0 ? processedPoints.every(p => p.pass) : true;
+  const approved = processedPoints.every(p => p.pass);
 
   const reportId = 'r_' + Date.now();
   const generatedAuthKey = generateAuthKey();
-  const now = new Date();
-  const getLocalDateStr = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const calDateStr = getLocalDateStr(now);
-  const nextCal = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
-  const nextCalStr = getLocalDateStr(nextCal);
-
   const report: CalibrationReport = {
     id: reportId,
     certNumber: data.certNumber,
     authKey: generatedAuthKey,
     instrumentId: data.instrumentId,
     technicianName: data.technicianName || 'Técnico Responsável',
-    date: calDateStr,
+    date: new Date().toISOString().split('T')[0],
     points: processedPoints,
-    transmitterPoints: data.transmitterPoints || [],
-    switchPoints: data.switchPoints || [],
-    instrumentType: data.instrumentType as any,
-    metrologicalNorm: data.metrologicalNorm,
-    sensorType: data.sensorType,
-    outputSignal: data.outputSignal,
-    setPoint: data.setPoint,
-    contactType: data.contactType,
     maxError,
     maxRelativeError,
     maxHysteresis,
@@ -790,11 +820,14 @@ export async function saveCalibrationDoc(data: {
     referenceStandards: data.referenceStandards || []
   };
 
+  const nextCal = new Date();
+  nextCal.setFullYear(nextCal.getFullYear() + 1);
+
   const updatedInst: Instrument = {
     ...activeInst,
     status: 'Aguardando Emissão de Certificado',
     lastCalibrationDate: report.date,
-    nextCalibrationDate: nextCalStr
+    nextCalibrationDate: nextCal.toISOString().split('T')[0]
   };
 
   await Promise.all([
@@ -957,16 +990,13 @@ export async function saveIntakeSequenceConfig(config: IntakeSequenceConfig): Pr
 export async function syncIntakes(callback: (intakes: SavedIntake[]) => void) {
   const cached = getLocalCache<SavedIntake[]>('savedIntakes', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'savedIntakes'), limit(2000));
+  const q = query(collection(db, 'savedIntakes'), orderBy('date', 'desc'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SavedIntake));
-    list.sort((a, b) => {
-      const aVal = a.date || a.id;
-      const bVal = b.date || b.id;
-      return bVal.localeCompare(aVal);
-    });
-    setLocalCache('savedIntakes', list);
-    callback(list);
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SavedIntake));
+      setLocalCache('savedIntakes', list);
+      callback(list);
+    }
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<SavedIntake[]>('savedIntakes', []));
@@ -1017,7 +1047,7 @@ export async function syncPortalUsers(callback: (users: PortalUser[]) => void) {
           return;
         }
       } catch (e) {
-        // console.error('Error checking portalUsers seed flag:', e);
+        console.error('Error checking portalUsers seed flag:', e);
       }
       const saved = localStorage.getItem('comanins_portal_users_cache');
       if (saved) {
@@ -1108,11 +1138,13 @@ export async function deletePortalUserDoc(idOrUsername: string): Promise<void> {
 export async function syncEmployeeBirthdays(callback: (birthdays: EmployeeBirthday[]) => void) {
   const cached = getLocalCache<EmployeeBirthday[]>('employeeBirthdays', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'employeeBirthdays'), limit(2000));
+  const q = query(collection(db, 'employeeBirthdays'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeBirthday));
-    setLocalCache('employeeBirthdays', list);
-    callback(list);
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeBirthday));
+      setLocalCache('employeeBirthdays', list);
+      callback(list);
+    }
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<EmployeeBirthday[]>('employeeBirthdays', []));
@@ -1253,17 +1285,11 @@ export async function saveCompanySettings(data: any): Promise<void> {
 export async function syncSitePhotosConfig(callback: (photos: any[]) => void) {
   const colRef = collection(db, 'sitePhotos');
   return onSnapshot(colRef, (colSnapshot) => {
-    if (colSnapshot && !colSnapshot.empty) {
+    if (!colSnapshot.empty) {
       const photos: any[] = [];
-      if (typeof colSnapshot.forEach === 'function') {
-        colSnapshot.forEach((docSnap: any) => {
-          photos.push({ id: docSnap.id, ...docSnap.data() });
-        });
-      } else if (Array.isArray(colSnapshot.docs)) {
-        colSnapshot.docs.forEach((docSnap: any) => {
-          photos.push({ id: docSnap.id, ...docSnap.data() });
-        });
-      }
+      colSnapshot.forEach((docSnap) => {
+        photos.push({ id: docSnap.id, ...docSnap.data() });
+      });
       photos.sort((a, b) => {
         const orderA = typeof a.order === 'number' ? a.order : (parseInt((a.id || '').replace(/\D/g, '')) || 0);
         const orderB = typeof b.order === 'number' ? b.order : (parseInt((b.id || '').replace(/\D/g, '')) || 0);
@@ -1326,7 +1352,7 @@ export async function saveSitePhotosConfig(list: any[]): Promise<void> {
 export const syncInventoryItems = (callback: (items: InventoryItem[]) => void) => {
   const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'inventoryItems'), limit(2000));
+  const q = query(collection(db, 'inventoryItems'), limit(25));
   return onSnapshot(q, (snapshot) => {
     const items: InventoryItem[] = [];
     snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() } as InventoryItem));
@@ -1356,7 +1382,7 @@ export const deleteInventoryItemDoc = async (id: string) => {
 export const syncInventoryTransactions = (callback: (transactions: InventoryTransaction[]) => void) => {
   const cached = getLocalCache<InventoryTransaction[]>('inventoryTransactions', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'inventoryTransactions'), orderBy('date', 'desc'), limit(2000));
+  const q = query(collection(db, 'inventoryTransactions'), orderBy('date', 'desc'), limit(25));
   return onSnapshot(q, (snapshot) => {
     const transactions: InventoryTransaction[] = [];
     snapshot.forEach(doc => transactions.push({ id: doc.id, ...doc.data() } as InventoryTransaction));
@@ -1377,7 +1403,7 @@ export const addInventoryTransactionDoc = async (transaction: Omit<InventoryTran
 export function syncReferenceStandards(callback: (standards: ReferenceStandard[]) => void) {
   const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'referenceStandards'), limit(2000));
+  const q = query(collection(db, 'referenceStandards'), limit(25));
   return onSnapshot(q, (snapshot) => {
     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ReferenceStandard));
     setLocalCache('referenceStandards', list);
@@ -1406,11 +1432,13 @@ export async function deleteReferenceStandardDoc(id: string): Promise<void> {
 export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void) {
   const cached = getLocalCache<MedicalExam[]>('medical_exams', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'medical_exams'), limit(2000));
+  const q = query(collection(db, 'medical_exams'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
-    setLocalCache('medical_exams', list);
-    callback(list);
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
+      setLocalCache('medical_exams', list);
+      callback(list);
+    }
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<MedicalExam[]>('medical_exams', []));
@@ -1607,11 +1635,13 @@ export async function resetIndividualCollection(type: string): Promise<void> {
 export async function syncPayslips(callback: (payslips: Payslip[]) => void) {
   const cached = getLocalCache<Payslip[]>('payslips', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'payslips'), limit(2000));
+  const q = query(collection(db, 'payslips'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
-    setLocalCache('payslips', list);
-    callback(list);
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
+      setLocalCache('payslips', list);
+      callback(list);
+    }
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<Payslip[]>('payslips', []));
@@ -1637,12 +1667,14 @@ export async function deletePayslipDoc(id: string): Promise<void> {
 export async function syncCalibrationAuditLogs(callback: (logs: CalibrationAuditLog[]) => void) {
   const cached = getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'calibrationAuditLogs'), limit(2000));
+  const q = query(collection(db, 'calibrationAuditLogs'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog));
-    list.sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
-    setLocalCache('calibrationAuditLogs', list);
-    callback(list);
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog));
+      list.sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
+      setLocalCache('calibrationAuditLogs', list);
+      callback(list);
+    }
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []));
@@ -1664,11 +1696,13 @@ export async function deleteCalibrationAuditLogDoc(id: string): Promise<void> {
 export async function syncRncReports(callback: (reports: RncReport[]) => void) {
   const cached = getLocalCache<RncReport[]>('rncReports', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'rncReports'), orderBy('date', 'desc'), limit(2000));
+  const q = query(collection(db, 'rncReports'), orderBy('date', 'desc'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as RncReport));
-    setLocalCache('rncReports', list);
-    callback(list);
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as RncReport));
+      setLocalCache('rncReports', list);
+      callback(list);
+    }
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<RncReport[]>('rncReports', []));
@@ -1691,17 +1725,19 @@ export async function deleteRncDoc(id: string): Promise<void> {
 import { FinanceTransaction, FinanceContract, FinanceMeasurement } from '../types';
 
 export const syncFinanceTransactions = (callback: (transactions: FinanceTransaction[]) => void) => {
-  const cached = getLocalCache<FinanceTransaction[]>('financeTransactions', []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'financeTransactions'), orderBy('date', 'desc'), limit(2000));
-  return onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction));
-    setLocalCache('financeTransactions', items);
-    callback(items);
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback(getLocalCache<FinanceTransaction[]>('financeTransactions', []));
-  });
+  const shared = createSharedSync<FinanceTransaction[]>(
+    'financeTransactions',
+    'financeTransactions',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'financeTransactions'), orderBy('date', 'desc'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction));
+        onData(items);
+      }, onError);
+    }
+  );
+  return shared(callback);
 };
 
 export const addFinanceTransaction = async (transaction: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -1728,17 +1764,19 @@ export const deleteFinanceTransaction = async (id: string) => {
 };
 
 export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) => void) => {
-  const cached = getLocalCache<FinanceContract[]>('financeContracts', []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'financeContracts'), limit(2000));
-  return onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract));
-    setLocalCache('financeContracts', items);
-    callback(items);
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback(getLocalCache<FinanceContract[]>('financeContracts', []));
-  });
+  const shared = createSharedSync<FinanceContract[]>(
+    'financeContracts',
+    'financeContracts',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'financeContracts'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract));
+        onData(items);
+      }, onError);
+    }
+  );
+  return shared(callback);
 };
 
 export const addFinanceContract = async (contract: Omit<FinanceContract, 'id'>) => {
@@ -1757,17 +1795,19 @@ export const deleteFinanceContract = async (id: string) => {
 };
 
 export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurement[]) => void) => {
-  const cached = getLocalCache<FinanceMeasurement[]>('financeMeasurements', []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'financeMeasurements'), orderBy('createdAt', 'desc'), limit(2000));
-  return onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement));
-    setLocalCache('financeMeasurements', items);
-    callback(items);
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback(getLocalCache<FinanceMeasurement[]>('financeMeasurements', []));
-  });
+  const shared = createSharedSync<FinanceMeasurement[]>(
+    'financeMeasurements',
+    'financeMeasurements',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'financeMeasurements'), orderBy('createdAt', 'desc'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement));
+        onData(items);
+      }, onError);
+    }
+  );
+  return shared(callback);
 };
 
 export const addFinanceMeasurement = async (measurement: Omit<FinanceMeasurement, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -1795,17 +1835,19 @@ export const deleteFinanceMeasurement = async (id: string) => {
 
 // Generic Finance Operations
 export const syncFinanceCollection = <T>(collectionName: string, callback: (data: T[]) => void) => {
-  const cached = getLocalCache<T[]>(collectionName, []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, collectionName), limit(2000));
-  return onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T));
-    setLocalCache(collectionName, items);
-    callback(items);
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback(getLocalCache<T[]>(collectionName, []));
-  });
+  const shared = createSharedSync<T[]>(
+    `financeCollection_${collectionName}`,
+    collectionName,
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, collectionName), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T));
+        onData(items);
+      }, onError);
+    }
+  );
+  return shared(callback);
 };
 
 export const addFinanceDoc = async (collectionName: string, data: any) => {
@@ -1835,7 +1877,7 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
   try {
     const cached = getLocalCache<InternalTicket[]>('internal_tickets', []);
     if (cached.length > 0) callback(cached);
-    const q = query(collection(db, "internal_tickets"), limit(2000));
+    const q = query(collection(db, "internal_tickets"), limit(25));
     return onSnapshot(
       q,
       (snapshot) => {
@@ -1878,7 +1920,7 @@ export async function deleteInternalTicket(id: string): Promise<void> {
 export async function syncAccessAuditLogs(callback: (logs: AccessAuditLog[]) => void) {
   const cached = getLocalCache<AccessAuditLog[]>('accessAuditLogs', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'accessAuditLogs'), limit(2000));
+  const q = query(collection(db, 'accessAuditLogs'), limit(25));
   return onSnapshot(q, (snapshot) => {
     if (snapshot.empty) {
       callback([]);

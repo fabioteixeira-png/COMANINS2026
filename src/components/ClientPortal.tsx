@@ -636,7 +636,11 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                         <p><span className="font-bold">Data de calibração:</span> {(() => {
                           const raw = selectedReport?.date || (inst as any)?.calibrationDate || inst?.lastCalibrationDate;
                           if (!raw) return new Date().toLocaleDateString('pt-BR');
-                          return formatDateBR(raw);
+                          if (raw.includes('-')) {
+                            const p = raw.split('-');
+                            if (p.length === 3 && p[0].length === 4) return `${p[2]}/${p[1]}/${p[0]}`;
+                          }
+                          return raw;
                         })()}</p>
                         <p><span className="font-bold">Data de emissão:</span> {new Date().toLocaleDateString('pt-BR')}</p>
                       </div>

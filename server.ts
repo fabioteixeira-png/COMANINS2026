@@ -6,33 +6,25 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { db } from './src/db/index.ts';
-import { documents } from './src/db/schema.ts';
-import { eq } from 'drizzle-orm';
+import { users } from './src/db/schema.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import firebaseConfig from './firebase-applet-config.json' with { type: "json" };
+
+const firebaseApp = initializeApp(firebaseConfig);
+const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId || undefined);
+
+
 // Load env variables
 dotenv.config();
-
-async function getPgCollectionDocs(colName: string): Promise<any[]> {
-  try {
-    const rows = await db.select().from(documents).where(eq(documents.collectionName, colName));
-    return rows.map(r => ({ id: r.id, ...(r.data as any) }));
-  } catch (err) {
-    console.error(`Error querying PostgreSQL collection ${colName}:`, err);
-    return [];
-  }
-}
-
-import { fsApi } from './src/server/fs-api.ts';
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: "50mb" }));
-
-// Mount Firestore replacement API
-app.use('/api/fs', fsApi);
+app.use(express.json());
 
 // In-Memory Database State with File Persistence
 const DB_FILE = path.join(process.cwd(), "db.json");
@@ -246,9 +238,10 @@ cron.schedule('0 8 * * *', async () => {
     today.setHours(0, 0, 0, 0);
 
     // 1. Verificar Aniversários (<= 7 dias)
-    const bdayItems = await getPgCollectionDocs('employeeBirthdays');
-    const upcomingBdays: any[] = [];
-    bdayItems.forEach(b => {
+    const bdaySnapshot = await getDocs(collection(firestoreDb, 'employeeBirthdays'));
+    const upcomingBdays = [];
+    bdaySnapshot.forEach(doc => {
+      const b = doc.data();
       let bdayThisYear = new Date(today.getFullYear(), b.month - 1, b.day);
       if (bdayThisYear < today) {
         bdayThisYear = new Date(today.getFullYear() + 1, b.month - 1, b.day);
@@ -262,9 +255,10 @@ cron.schedule('0 8 * * *', async () => {
     });
 
     // 2. Verificar Estoque (Quantidade <= Minima)
-    const invItems = await getPgCollectionDocs('inventoryItems');
-    const lowStockItems: any[] = [];
-    invItems.forEach(item => {
+    const invSnapshot = await getDocs(collection(firestoreDb, 'inventoryItems'));
+    const lowStockItems = [];
+    invSnapshot.forEach(doc => {
+      const item = doc.data();
       if (item.quantity <= item.minQuantity) {
         lowStockItems.push({
           name: item.name,
@@ -276,11 +270,18 @@ cron.schedule('0 8 * * *', async () => {
     });
 
     // 3. Verificar Treinamentos (Vencidos ou <= 7 dias)
-    const internalUsers = await getPgCollectionDocs('internalUsers');
-    const trainings = await getPgCollectionDocs('trainings');
-    const empTrItems = await getPgCollectionDocs('employeeTrainings');
-    const upcomingTrainings: any[] = [];
-    empTrItems.forEach(record => {
+    const empSnapshot = await getDocs(collection(firestoreDb, 'internalUsers'));
+    const internalUsers = [];
+    empSnapshot.forEach(doc => internalUsers.push({ id: doc.id, ...doc.data() }));
+
+    const trSnapshot = await getDocs(collection(firestoreDb, 'trainings'));
+    const trainings = [];
+    trSnapshot.forEach(doc => trainings.push({ id: doc.id, ...doc.data() }));
+
+    const empTrSnapshot = await getDocs(collection(firestoreDb, 'employeeTrainings'));
+    const upcomingTrainings = [];
+    empTrSnapshot.forEach(doc => {
+      const record = doc.data();
       const user = internalUsers.find(u => u.id === record.employeeId);
       const training = trainings.find(t => t.id === record.trainingId);
       
@@ -396,9 +397,10 @@ app.post("/api/test-notifications", async (req, res) => {
     today.setHours(0, 0, 0, 0);
 
     // 1. Verificar Aniversários (<= 7 dias)
-    const bdayItems = await getPgCollectionDocs('employeeBirthdays');
-    const upcomingBdays: any[] = [];
-    bdayItems.forEach(b => {
+    const bdaySnapshot = await getDocs(collection(firestoreDb, 'employeeBirthdays'));
+    const upcomingBdays = [];
+    bdaySnapshot.forEach(doc => {
+      const b = doc.data();
       let bdayThisYear = new Date(today.getFullYear(), b.month - 1, b.day);
       if (bdayThisYear < today) {
         bdayThisYear = new Date(today.getFullYear() + 1, b.month - 1, b.day);
@@ -412,9 +414,10 @@ app.post("/api/test-notifications", async (req, res) => {
     });
 
     // 2. Verificar Estoque (Quantidade <= Minima)
-    const invItems = await getPgCollectionDocs('inventoryItems');
-    const lowStockItems: any[] = [];
-    invItems.forEach(item => {
+    const invSnapshot = await getDocs(collection(firestoreDb, 'inventoryItems'));
+    const lowStockItems = [];
+    invSnapshot.forEach(doc => {
+      const item = doc.data();
       if (item.quantity <= item.minQuantity) {
         lowStockItems.push({
           name: item.name,
@@ -426,11 +429,18 @@ app.post("/api/test-notifications", async (req, res) => {
     });
 
     // 3. Verificar Treinamentos (Vencidos ou <= 7 dias)
-    const internalUsers = await getPgCollectionDocs('internalUsers');
-    const trainings = await getPgCollectionDocs('trainings');
-    const empTrItems = await getPgCollectionDocs('employeeTrainings');
-    const upcomingTrainings: any[] = [];
-    empTrItems.forEach(record => {
+    const empSnapshot = await getDocs(collection(firestoreDb, 'internalUsers'));
+    const internalUsers = [];
+    empSnapshot.forEach(doc => internalUsers.push({ id: doc.id, ...doc.data() }));
+
+    const trSnapshot = await getDocs(collection(firestoreDb, 'trainings'));
+    const trainings = [];
+    trSnapshot.forEach(doc => trainings.push({ id: doc.id, ...doc.data() }));
+
+    const empTrSnapshot = await getDocs(collection(firestoreDb, 'employeeTrainings'));
+    const upcomingTrainings = [];
+    empTrSnapshot.forEach(doc => {
+      const record = doc.data();
       const user = internalUsers.find(u => u.id === record.employeeId);
       const training = trainings.find(t => t.id === record.trainingId);
       
@@ -809,6 +819,34 @@ app.put("/api/contacts/:id", (req, res) => {
   res.json(msg);
 });
 
+// Helper function to invoke Gemini API with Exponential Backoff Retry for 429 Rate Limits
+async function callGeminiWithRetry(fn: () => Promise<any>, maxRetries = 3, initialDelay = 1000): Promise<any> {
+  let attempt = 0;
+  let delay = initialDelay;
+  while (attempt <= maxRetries) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const errStr = String(err?.message || err);
+      const isRateLimit =
+        errStr.includes("429") ||
+        errStr.includes("Rate exceeded") ||
+        errStr.includes("RESOURCE_EXHAUSTED") ||
+        errStr.includes("Quota");
+
+      if (isRateLimit && attempt < maxRetries) {
+        attempt++;
+        const jitter = Math.random() * 250;
+        console.warn(`[Gemini API] HTTP 429 Rate Exceeded detectado. Tentativa ${attempt}/${maxRetries}. Aguardando ${delay + jitter}ms...`);
+        await new Promise((r) => setTimeout(r, delay + jitter));
+        delay *= 2;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // AI Portal Assistant - Using Gemini API
 app.post("/api/chat", async (req, res) => {
   const { messages } = req.body;
@@ -854,21 +892,25 @@ Suas diretrizes:
 4. Mantenha as respostas focadas e evite respostas extremamente longas desnecessariamente, a menos que solicitado um passo a passo do cálculo de incerteza de medição ou detalhamento técnico.
 5. Nunca cite segredos internos ou que você está rodando sob uma plataforma artificial. Mostre-se como o assistente metrológico oficial da COMANINS.`;
 
-    const response = await gemini.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: [
-        { text: promptHistory }
-      ],
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      }
-    });
+    const response = await callGeminiWithRetry(() =>
+      gemini.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          { text: promptHistory }
+        ],
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        }
+      })
+    );
 
     res.json({ text: response.text });
   } catch (err: any) {
     console.error("Erro na chamada da API Gemini:", err);
-    res.status(500).json({ error: "Erro ao processar requisição de IA: " + err.message });
+    res.json({
+      text: "O assistente técnico de IA da COMANINS está temporariamente com alta demanda. As orientações da base local de metrologia permanecem totalmente disponíveis."
+    });
   }
 });
 
@@ -905,10 +947,12 @@ Por favor, forneça um texto técnico bem estruturado em 3 seções:
 
 Sua resposta deve ser em português do Brasil, altamente profissional, objetiva e clara.`;
 
-    const response = await gemini.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-    });
+    const response = await callGeminiWithRetry(() =>
+      gemini.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      })
+    );
 
     res.json({ analysis: response.text || 'Análise concluída.' });
   } catch (err: any) {

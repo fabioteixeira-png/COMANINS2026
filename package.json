@@ -5,15 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --target=node18 --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
-    "@supabase/server": "^1.4.1",
-    "@supabase/supabase-js": "^2.112.2",
     "@tailwindcss/vite": "^4.1.14",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^8.0.1",
@@ -22,6 +20,8 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
+    "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "node-cron": "^4.6.0",

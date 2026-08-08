@@ -1,10 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
+import { adminAuth } from '../lib/firebase-admin.ts';
+import { DecodedIdToken } from 'firebase-admin/auth';
 
 export interface AuthRequest extends Request {
-  user?: {
-    uid: string;
-    email?: string;
-  };
+  user?: DecodedIdToken;
 }
 
 export const requireAuth = async (
@@ -19,16 +18,11 @@ export const requireAuth = async (
 
   const token = authHeader.split('Bearer ')[1];
   try {
-    let decoded: any = { uid: 'user_' + token, email: 'user@comanins.com.br' };
-    if (token.includes('.')) {
-      try {
-        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-        decoded = { uid: payload.sub || payload.uid || 'user_' + Date.now(), email: payload.email || '' };
-      } catch (e) {}
-    }
-    req.user = decoded;
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    req.user = decodedToken;
     next();
   } catch (error) {
+    console.error('Error verifying Firebase ID token:', error);
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };

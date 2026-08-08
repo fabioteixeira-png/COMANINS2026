@@ -281,7 +281,6 @@ export interface MedicalExam {
   status: 'Apto' | 'Inapto' | 'Pendente';
   nextExamDate?: string;
   notes?: string;
-  pdfUrl?: string;
 }
 
 export interface PayslipItem {
