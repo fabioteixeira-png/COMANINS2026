@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "clients": {
+      "title": "Clientes",
+      "description": "Empresas e clientes atendidos pela Comanins",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "cnpj": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "password": { "type": "string" }
+      },
+      "required": ["name", "cnpj"]
+    },
+    "instruments": {
+      "title": "Instrumentos / Equipamentos",
+      "description": "Equipamentos em triagem, calibração ou concluídos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tag": { "type": "string" },
+        "description": { "type": "string" },
+        "brand": { "type": "string" },
+        "model": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "category": { "type": "string" },
+        "rangeMin": { "type": "number" },
+        "rangeMax": { "type": "number" },
+        "unit": { "type": "string" },
+        "mpe": { "type": "number" },
+        "lastCalibrationDate": { "type": "string" },
+        "nextCalibrationDate": { "type": "string" },
+        "status": { "type": "string" },
+        "clientId": { "type": "string" }
+      },
+      "required": ["tag", "clientId", "status"]
+    },
+    "calibrationReports": {
+      "title": "Relatórios de Calibração",
+      "description": "Certificados e relatórios emitidos para os instrumentos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "instrumentId": { "type": "string" },
+        "technicianName": { "type": "string" },
+        "date": { "type": "string" },
+        "points": { "type": "array" },
+        "maxError": { "type": "number" },
+        "maxRelativeError": { "type": "number" },
+        "approved": { "type": "boolean" },
+        "observations": { "type": "string" }
+      },
+      "required": ["instrumentId", "date"]
+    },
+    "savedIntakes": {
+      "title": "Guias de Entrada de Material",
+      "description": "Guias de recebimento e triagem de materiais",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "numEntrada": { "type": "string" },
+        "clientId": { "type": "string" },
+        "dataEntrada": { "type": "string" },
+        "dataPrevistaSaida": { "type": "string" },
+        "contato": { "type": "string" },
+        "rows": { "type": "array" }
+      },
+      "required": ["numEntrada", "clientId"]
+    },
+    "contactMessages": {
+      "title": "Mensagens de Contato",
+      "description": "Solicitações de orçamento e mensagens do site público",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "message": { "type": "string" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["name", "email"]
+    },
+    "portalUsers": {
+      "title": "Usuários do Portal Interno",
+      "description": "Técnicos e administradores com acesso ao portal interno",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "role"]
+    },
+    "payslips": {
+      "title": "Contra-cheques",
+      "description": "Comprovantes de rendimento e contra-cheques dos colaboradores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "employeeRegister": { "type": "string" },
+        "employeeCpf": { "type": "string" },
+        "employeeRole": { "type": "string" },
+        "month": { "type": "string" },
+        "baseSalary": { "type": "number" },
+        "grossSalary": { "type": "number" },
+        "liquidSalary": { "type": "number" },
+        "totalDescontos": { "type": "number" },
+        "fgtsBase": { "type": "number" },
+        "fgtsValue": { "type": "number" },
+        "irpfBase": { "type": "number" },
+        "inssBase": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "items": { "type": "array" },
+        "lgpdConsentAccepted": { "type": "boolean" },
+        "lgpdConsentDate": { "type": "string" },
+        "visualized": { "type": "boolean" },
+        "visualizedAt": { "type": "string" },
+        "visualizedIp": { "type": "string" },
+        "visualizedUserAgent": { "type": "string" }
+      },
+      "required": ["employeeId", "month", "liquidSalary"]
+    }
+  }
+}
