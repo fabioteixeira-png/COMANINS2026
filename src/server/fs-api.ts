@@ -6,7 +6,19 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 
+import { runMigration } from '../../scripts/migrate-to-supabase.js';
+
 export const fsApi = Router();
+
+// POST /api/fs/sync-to-supabase
+fsApi.post('/sync-to-supabase', async (req, res) => {
+  try {
+    const result = await runMigration();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 const DB_JSON_PATH = path.join(process.cwd(), 'db.json');
 
