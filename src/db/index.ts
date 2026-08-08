@@ -19,7 +19,7 @@ export const createPool = () => {
         connectionString,
         max: 10,
         connectionTimeoutMillis: 15000,
-        ssl: connectionString.includes('supabase.co') ? { rejectUnauthorized: false } : undefined,
+        ssl: (connectionString.includes('supabase.co') || connectionString.includes('supabase.com')) ? { rejectUnauthorized: false } : undefined,
       });
     } else {
       global._postgresPool = new Pool({
