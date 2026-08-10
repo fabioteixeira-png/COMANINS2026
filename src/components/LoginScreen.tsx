@@ -12,6 +12,7 @@ export interface InternalUser {
   register: string;
   password?: string;
   mustChangePassword?: boolean;
+  permissionLevel?: string;
 }
 
 interface LoginScreenProps {

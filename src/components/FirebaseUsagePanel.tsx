@@ -88,7 +88,7 @@ export default function FirebaseUsagePanel({ onNavigateToAudit }: FirebaseUsageP
   };
 
   // Convert moduleBreakdown object into sorted list by reads
-  const modulesList = Object.entries(telemetry.moduleBreakdown).map(([name, usage]) => ({
+  const modulesList = Object.entries(telemetry.moduleBreakdown).map(([name, usage]: [string, any]) => ({
     name,
     ...usage,
     readsShare: telemetry.dailyReads > 0 ? Math.round((usage.reads / telemetry.dailyReads) * 100) : 0,

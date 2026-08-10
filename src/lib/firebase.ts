@@ -718,7 +718,7 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
     'calibrationReports',
     [],
     (onData, onError) => {
-      const q = query(collection(db, 'calibrationReports'), orderBy('date', 'desc'), limit(25));
+      const q = query(collection(db, 'calibrationReports'), );
       return onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
           const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
@@ -1011,12 +1011,20 @@ export async function saveIntakeSequenceConfig(config: IntakeSequenceConfig): Pr
 export async function syncIntakes(callback: (intakes: SavedIntake[]) => void) {
   const cached = getLocalCache<SavedIntake[]>('savedIntakes', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'savedIntakes'), orderBy('date', 'desc'), limit(25));
+  const q = query(collection(db, 'savedIntakes'), limit(50));
   return onSnapshot(q, async (snapshot) => {
     if (!snapshot.empty) {
+      // Sort in memory by ID descending (which is essentially timestamp descending since IDs are Date.now())
       const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SavedIntake));
+      list.sort((a, b) => {
+        if (a.id > b.id) return -1;
+        if (a.id < b.id) return 1;
+        return 0;
+      });
       setLocalCache('savedIntakes', list);
       callback(list);
+    } else {
+      callback([]);
     }
   }, (err) => {
     handleQuotaOrError(err);
