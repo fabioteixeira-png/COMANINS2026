@@ -59,6 +59,20 @@ export default function IntakeLabelPrintModal({ instrument, client, onClose }: I
       {/* 40mm = 151.18px at 96 DPI, let's use actual mm for print and fixed pixels for preview */}
       <style>{`
         @media print {
+          body * {
+            visibility: hidden;
+          }
+          #print-label-container, #print-label-container * {
+            visibility: visible;
+          }
+          #print-label-container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            margin: 0;
+            padding: 0;
+            background: white !important;
+          }
           @page {
             size: 40mm 40mm;
             margin: 0;
@@ -73,7 +87,7 @@ export default function IntakeLabelPrintModal({ instrument, client, onClose }: I
         }
       `}</style>
       
-      <div className="bg-white w-[40mm] h-[40mm] shadow-2xl relative print:shadow-none print:border-none print:m-0 print:rounded-none flex items-center justify-center p-1 mx-auto mt-4 sm:mt-0 border border-slate-200 box-border overflow-hidden">
+      <div id="print-label-container" className="bg-white w-[40mm] h-[40mm] shadow-2xl relative print:shadow-none print:border-none print:m-0 print:rounded-none flex items-center justify-center p-1 mx-auto mt-4 sm:mt-0 border border-slate-200 box-border overflow-hidden">
         {/* Label Content */}
         <div className="w-full h-full border border-black p-1 flex flex-col justify-between" style={{ fontFamily: 'Arial, sans-serif' }}>
           
