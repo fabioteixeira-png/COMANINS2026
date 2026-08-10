@@ -7,13 +7,15 @@ import {
   AlertCircle, ChevronRight, User, AlertOctagon, Check, Camera, Upload,
   Paperclip, Download, X, Image, Maximize, Minimize
 } from 'lucide-react';
-import { PortalUser, Dependent, AuditLogEntry, AsoContractItem } from '../lib/firebase';
+import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc, deleteEmployeeTrainingDoc } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 
 interface EmployeeManagementProps {
   currentUser: { name: string; username: string; role: string; register: string; permissionLevel?: string } | null;
   internalUsers: PortalUser[];
+  employeeTrainings?: any[];
+  trainings?: any[];
   dropdownOptions?: any;
   onAddInternalUser: (user: Omit<PortalUser, 'id'>) => void;
   onUpdateInternalUser?: (id: string, updates: Partial<PortalUser>) => void;
@@ -27,6 +29,8 @@ interface EmployeeManagementProps {
 export default function EmployeeManagement({
   currentUser,
   internalUsers,
+  employeeTrainings = [],
+  trainings = [],
   dropdownOptions,
   onAddInternalUser,
   onUpdateInternalUser,
@@ -70,6 +74,122 @@ export default function EmployeeManagement({
   const [newAsoClinicDoctor, setNewAsoClinicDoctor] = useState('');
   const [newAsoNotes, setNewAsoNotes] = useState('');
   const [newAsoDocFile, setNewAsoDocFile] = useState<File | null>(null);
+
+  // NR Training launch form state
+  const [newNrTrainingId, setNewNrTrainingId] = useState('');
+  const [newNrCustomName, setNewNrCustomName] = useState('');
+  const [newNrCompletionDate, setNewNrCompletionDate] = useState('');
+  const [newNrExpirationDate, setNewNrExpirationDate] = useState('');
+  const [newNrScheduledDate, setNewNrScheduledDate] = useState('');
+  const [newNrStatus, setNewNrStatus] = useState<'Válido' | 'Agendado' | 'Pendente' | 'Vencido'>('Válido');
+  const [newNrResult, setNewNrResult] = useState('Aprovado');
+  const [newNrInstitution, setNewNrInstitution] = useState('COMANINS');
+  const [newNrCertificateUrl, setNewNrCertificateUrl] = useState('');
+  const [newNrCertificateFile, setNewNrCertificateFile] = useState<File | null>(null);
+  const [isSavingNrTraining, setIsSavingNrTraining] = useState(false);
+
+  const standardNrOptions = [
+    'NR-06 (EPI)',
+    'NR-10 (Seg. em Eletricidade)',
+    'NR-10 SEP (Sistema Elétrico de Potência)',
+    'NR-12 (Máquinas e Equipamentos)',
+    'NR-18 (Construção Civil)',
+    'NR-33 (Espaço Confinado)',
+    'NR-35 (Trabalho em Altura)',
+    'Operador de Empilhadeira',
+    'Primeiros Socorros / Brigada',
+    'Metrologia & Calibração Industrial',
+  ];
+
+  const handleAddNrTraining = async () => {
+    if (!newNrTrainingId && !newNrCustomName) {
+      alert('Selecione um treinamento do catálogo ou informe o nome do curso de NR.');
+      return;
+    }
+
+    const empId = formData.id || formData.username || selectedUser?.id || selectedUser?.username;
+    const empName = formData.name || selectedUser?.name || 'Colaborador';
+
+    if (!empId) {
+      alert('Por favor, informe a Matrícula/Username na aba 1 (Dados Pessoais) antes de lançar o treinamento.');
+      return;
+    }
+
+    setIsSavingNrTraining(true);
+    try {
+      const selectedCatalog = (trainings || []).find((t: any) => t.id === newNrTrainingId);
+      let courseName = selectedCatalog?.name || newNrCustomName || 'Treinamento NR';
+      if (newNrTrainingId.startsWith('std-')) {
+        courseName = newNrTrainingId.replace('std-', '');
+      }
+
+      let expDate = newNrExpirationDate;
+      if (!expDate && newNrCompletionDate && selectedCatalog?.validityMonths) {
+        const compDate = new Date(newNrCompletionDate + 'T00:00:00');
+        compDate.setMonth(compDate.getMonth() + selectedCatalog.validityMonths);
+        expDate = compDate.toISOString().split('T')[0];
+      }
+
+      let fileDataUrl = newNrCertificateUrl;
+      if (newNrCertificateFile) {
+        fileDataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(newNrCertificateFile);
+        }) as string;
+      }
+
+      const payload: any = {
+        employeeId: empId,
+        employeeName: empName,
+        trainingId: newNrTrainingId || 'custom',
+        trainingName: courseName,
+        completionDate: newNrCompletionDate,
+        expirationDate: expDate,
+        scheduledDate: newNrScheduledDate,
+        status: newNrStatus,
+        result: newNrResult,
+        certificateUrl: fileDataUrl,
+        institution: newNrInstitution,
+      };
+
+      await addEmployeeTrainingDoc(payload);
+
+      // Auto-add to certificatesList if it's not there
+      const currentCerts = formData.certificatesList || [];
+      if (!currentCerts.includes(courseName)) {
+        setFormData((prev: any) => ({ ...prev, certificatesList: [...currentCerts, courseName] }));
+      }
+
+      setNewNrTrainingId('');
+      setNewNrCustomName('');
+      setNewNrCompletionDate('');
+      setNewNrExpirationDate('');
+      setNewNrScheduledDate('');
+      setNewNrStatus('Válido');
+      setNewNrResult('Aprovado');
+      setNewNrCertificateUrl('');
+      setNewNrCertificateFile(null);
+      setNewNrInstitution('COMANINS');
+
+      alert('Treinamento de NR lançado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao lançar treinamento de NR:', err);
+      alert('Ocorreu um erro ao lançar o treinamento.');
+    } finally {
+      setIsSavingNrTraining(false);
+    }
+  };
+
+  const handleRemoveNrTraining = async (id: string) => {
+    if (!confirm('Deseja realmente remover este registro de treinamento de NR?')) return;
+    try {
+      await deleteEmployeeTrainingDoc(id);
+    } catch (err) {
+      console.error('Erro ao remover treinamento:', err);
+      alert('Erro ao remover o treinamento.');
+    }
+  };
 
   // Form State for Create/Edit
   const [formData, setFormData] = useState<Partial<PortalUser>>({
@@ -1796,6 +1916,255 @@ export default function EmployeeManagement({
                         </div>
                       )}
                     </div>
+
+                    {/* SEÇÃO ESPECIAL: TREINAMENTOS DE NR, CAPACITAÇÕES E CERTIFICAÇÕES */}
+                    <div className="md:col-span-3 bg-amber-50/60 border border-amber-200 p-4 rounded-xl space-y-4">
+                      <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+                        <div className="flex items-center space-x-2">
+                          <Award className="h-5 w-5 text-amber-700" />
+                          <div>
+                            <h5 className="font-bold text-slate-900 text-sm">
+                              Treinamentos de NR, Capacitações Técnicas e Certificações
+                            </h5>
+                            <p className="text-xs text-slate-600">
+                              Lançamento de cursos de Normas Regulamentadoras (NRs), validades de certificados e habilitações do colaborador.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* SUB-FORMULÁRIO DE LANÇAMENTO DE TREINAMENTO NR */}
+                      <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-3">
+                        <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                          Lançar / Registrar Novo Treinamento, Capacitação ou Reciclagem de NR
+                        </h6>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                          <div className="sm:col-span-2">
+                            <label className="block font-semibold text-slate-700 mb-1">Catálogo de Treinamentos / NRs *</label>
+                            <select
+                              value={newNrTrainingId}
+                              onChange={(e) => setNewNrTrainingId(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold"
+                            >
+                              <option value="">Selecione um curso do catálogo ou digite abaixo...</option>
+                              <optgroup label="Cursos / Certificações (Perfil)">
+                                {standardNrOptions.map((nr, idx) => (
+                                  <option key={`std-${idx}`} value={`std-${nr}`}>{nr}</option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="Catálogo de Treinamentos (Corporativo)">
+                                {(trainings || []).map((tr: any) => (
+                                  <option key={tr.id} value={tr.id}>
+                                    {tr.name} ({tr.workloadHours || 0}h • Validade: {tr.validityMonths ? `${tr.validityMonths}m` : 'Sem Vencimento'})
+                                  </option>
+                                ))}
+                              </optgroup>
+                              <option value="custom">Outro (Informar Nome Manualmente)</option>
+                            </select>
+                          </div>
+
+                          {(!newNrTrainingId || newNrTrainingId === 'custom' || newNrTrainingId.startsWith('std-')) && (
+                            <div className="sm:col-span-2">
+                              <label className="block font-semibold text-slate-700 mb-1">Nome do Curso / NR (Manual) *</label>
+                              <input
+                                type="text"
+                                value={newNrTrainingId.startsWith('std-') ? newNrTrainingId.replace('std-', '') : newNrCustomName}
+                                onChange={(e) => setNewNrCustomName(e.target.value)}
+                                disabled={newNrTrainingId.startsWith('std-')}
+                                placeholder="Ex: NR-10 Módulo Avançado, NR-35 Prático..."
+                                className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold"
+                              />
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Data da Realização</label>
+                            <input
+                              type="date"
+                              value={newNrCompletionDate}
+                              onChange={(e) => setNewNrCompletionDate(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Data de Validade (Vencimento)</label>
+                            <input
+                              type="date"
+                              value={newNrExpirationDate}
+                              onChange={(e) => setNewNrExpirationDate(e.target.value)}
+                              placeholder="Calculado auto se em branco"
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono font-bold text-amber-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Data Agendada (Se futuro)</label>
+                            <input
+                              type="date"
+                              value={newNrScheduledDate}
+                              onChange={(e) => setNewNrScheduledDate(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Status do Treinamento</label>
+                            <select
+                              value={newNrStatus}
+                              onChange={(e) => setNewNrStatus(e.target.value as any)}
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold text-slate-900"
+                            >
+                              <option value="Válido">Válido</option>
+                              <option value="Agendado">Agendado</option>
+                              <option value="Pendente">Pendente</option>
+                              <option value="Vencido">Vencido</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Instituição / Instrutor</label>
+                            <input
+                              type="text"
+                              value={newNrInstitution}
+                              onChange={(e) => setNewNrInstitution(e.target.value)}
+                              placeholder="Ex: COMANINS, SENAI..."
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Resultado / Nota</label>
+                            <input
+                              type="text"
+                              value={newNrResult}
+                              onChange={(e) => setNewNrResult(e.target.value)}
+                              placeholder="Ex: Aprovado (100%)"
+                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-semibold"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="block font-semibold text-slate-700 mb-1">Anexar Certificado (PDF ou Foto)</label>
+                            <label className="cursor-pointer w-full bg-white border border-slate-300 rounded-lg p-2 flex items-center justify-between text-slate-600 hover:bg-slate-100 transition-colors">
+                              <span className="truncate max-w-[200px] font-mono text-[11px]">
+                                {newNrCertificateFile ? newNrCertificateFile.name : 'Selecionar arquivo...'}
+                              </span>
+                              <Upload className="h-4 w-4 text-amber-700 shrink-0 ml-1" />
+                              <input
+                                type="file"
+                                accept=".pdf,image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  if (e.target.files && e.target.files[0]) {
+                                    setNewNrCertificateFile(e.target.files[0]);
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+
+                          <div className="sm:col-span-2 md:col-span-4 flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={handleAddNrTraining}
+                              disabled={isSavingNrTraining}
+                              className="py-2.5 px-5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold flex items-center space-x-2 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <Plus className="h-4 w-4" />
+                              <span>{isSavingNrTraining ? 'Lançando...' : 'Lançar Treinamento NR'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3. LISTA DE TREINAMENTOS DE NR CADASTRADOS PARA ESTE COLABORADOR */}
+                      {(() => {
+                        const currentEmpId = formData.id || formData.username || selectedUser?.id || selectedUser?.username;
+                        const currentEmpName = formData.name || selectedUser?.name;
+                        const userRecords = (employeeTrainings || []).filter(
+                          (t: any) =>
+                            t.employeeId === currentEmpId ||
+                            t.employeeId === selectedUser?.id ||
+                            t.employeeId === selectedUser?.username ||
+                            t.employeeName === currentEmpName
+                        );
+
+                        if (userRecords.length === 0) return null;
+
+                        return (
+                          <div className="space-y-2">
+                            <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center justify-between">
+                              <span>3. Treinamentos e NRs Registrados ({userRecords.length})</span>
+                            </h6>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {userRecords.map((rec: any, idx: number) => {
+                                const trCat = (trainings || []).find((tr: any) => tr.id === rec.trainingId);
+                                const name = trCat?.name || rec.trainingName || 'Treinamento NR';
+                                const status = rec.dynamicStatus || rec.status || 'Válido';
+
+                                let badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+                                if (status === 'Vencido') badgeColor = 'bg-red-100 text-red-800 border-red-300';
+                                if (status === 'Próximo do vencimento' || status === 'Pendente') badgeColor = 'bg-amber-100 text-amber-800 border-amber-300';
+                                if (status === 'Agendado') badgeColor = 'bg-blue-100 text-blue-800 border-blue-300';
+
+                                return (
+                                  <div key={rec.id || idx} className="p-3 bg-white border border-slate-200 rounded-xl flex flex-col justify-between space-y-2 shadow-xs">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <h6 className="font-bold text-slate-900 text-xs">{name}</h6>
+                                        <p className="text-[11px] text-slate-500 mt-0.5">
+                                          Instituição: <b>{rec.institution || 'COMANINS'}</b> {rec.result ? `• Result: ${rec.result}` : ''}
+                                        </p>
+                                      </div>
+                                      <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded border ${badgeColor}`}>
+                                        {status}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
+                                      <div className="text-slate-600 font-mono">
+                                        Realização: <b>{rec.completionDate ? new Date(rec.completionDate + (rec.completionDate.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('pt-BR') : '-'}</b>
+                                        {rec.expirationDate && (
+                                          <span className="ml-2">
+                                            Validade: <b className={status === 'Vencido' ? 'text-rose-600' : 'text-slate-900'}>{new Date(rec.expirationDate + (rec.expirationDate.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('pt-BR')}</b>
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center space-x-1.5">
+                                        {rec.certificateUrl && (
+                                          <a
+                                            href={rec.certificateUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors"
+                                            title="Ver Certificado"
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                          </a>
+                                        )}
+                                        {isUserAdmin && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveNrTraining(rec.id)}
+                                            className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                                            title="Excluir Registro de Treinamento"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 </div>
               )}
@@ -2508,10 +2877,11 @@ export default function EmployeeManagement({
                 </div>
               </div>
 
-              {/* Section 4: Documentos Trabalhistas */}
+              {/* Section 4: Documentos Trabalhistas, Registros e NRs */}
               <div className="border border-slate-300 rounded-xl p-4 space-y-3 bg-slate-50/50">
-                <h4 className="font-bold text-slate-900 uppercase border-b border-slate-300 pb-1 text-xs text-royal-blue">
-                  4. DOCUMENTOS TRABALHISTAS, REGISTROS E EXAMES ASO
+                <h4 className="font-bold text-slate-900 uppercase border-b border-slate-300 pb-1 text-xs text-royal-blue flex items-center justify-between">
+                  <span>4. DADOS TRABALHISTAS, REGISTROS, ASO E TREINAMENTOS NR</span>
+                  <Award className="h-3.5 w-3.5 text-royal-blue" />
                 </h4>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                   <div><b>PIS/NIS:</b> {selectedUser.pis || 'N/A'}</div>
@@ -2523,6 +2893,109 @@ export default function EmployeeManagement({
                   <div><b>Validade Reg. Profissional:</b> {selectedUser.professionalRegValidity || 'N/A'}</div>
                   <div><b>Escolaridade:</b> {selectedUser.educationLevel || 'N/A'}</div>
                 </div>
+
+                {/* Badges de Certificados e NRs Habilitadas */}
+                {selectedUser.certificatesList && selectedUser.certificatesList.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider block">
+                      Certificações e NRs Habilitadas no Perfil:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedUser.certificatesList.map((cert: string, idx: number) => (
+                        <span key={idx} className="bg-royal-blue/10 text-royal-blue border border-royal-blue/20 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3 text-royal-blue" />
+                          {cert}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tabela de Treinamentos NRs do Colaborador */}
+                {(() => {
+                  const userTrainings = (employeeTrainings || []).filter(
+                    (t: any) =>
+                      t.employeeId === selectedUser.id ||
+                      t.employeeId === selectedUser.username ||
+                      t.employeeName === selectedUser.name
+                  );
+
+                  if (userTrainings.length === 0) return null;
+
+                  return (
+                    <div className="pt-2 border-t border-slate-200">
+                      <span className="font-bold text-slate-800 text-[11px] block mb-1">
+                        Histórico de Treinamentos de NR Cadastrados:
+                      </span>
+                      <div className="border border-slate-300 rounded-lg overflow-hidden bg-white text-[10px]">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-300">
+                            <tr>
+                              <th className="p-1.5">Treinamento / Curso</th>
+                              <th className="p-1.5">Realização</th>
+                              <th className="p-1.5">Validade</th>
+                              <th className="p-1.5">Status</th>
+                              <th className="p-1.5 text-center">Certificado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {userTrainings.map((rec: any, idx: number) => {
+                              const trCatalog = (trainings || []).find((tr: any) => tr.id === rec.trainingId);
+                              const name = trCatalog?.name || rec.trainingName || 'Treinamento';
+                              const status = rec.dynamicStatus || rec.status || 'Válido';
+
+                              let badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                              if (status === 'Vencido') badgeStyle = 'bg-red-50 text-red-800 border-red-200';
+                              if (status === 'Próximo do vencimento' || status === 'Pendente') badgeStyle = 'bg-amber-50 text-amber-800 border-amber-200';
+                              if (status === 'Agendado') badgeStyle = 'bg-blue-50 text-blue-800 border-blue-200';
+
+                              return (
+                                <tr key={rec.id || idx}>
+                                  <td className="p-1.5 font-bold text-slate-900">
+                                    {name}
+                                    {trCatalog?.workloadHours ? (
+                                      <span className="text-[9px] text-slate-500 block font-normal">
+                                        Carga: {trCatalog.workloadHours}h • {rec.institution || trCatalog.institution || 'COMANINS'}
+                                      </span>
+                                    ) : null}
+                                  </td>
+                                  <td className="p-1.5 text-slate-700 font-mono">
+                                    {rec.completionDate ? new Date(rec.completionDate + (rec.completionDate.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('pt-BR') : rec.scheduledDate ? `Agendado: ${new Date(rec.scheduledDate + (rec.scheduledDate.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('pt-BR')}` : '-'}
+                                  </td>
+                                  <td className="p-1.5 font-mono font-bold text-slate-800">
+                                    {rec.expirationDate ? new Date(rec.expirationDate + (rec.expirationDate.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('pt-BR') : '-'}
+                                  </td>
+                                  <td className="p-1.5">
+                                    <span className={`px-2 py-0.5 rounded-full border font-bold text-[9px] ${badgeStyle}`}>
+                                      {status}
+                                    </span>
+                                  </td>
+                                  <td className="p-1.5 text-center">
+                                    {rec.certificateUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          window.open(rec.certificateUrl, '_blank');
+                                        }}
+                                        className="bg-royal-blue/10 hover:bg-royal-blue/20 text-royal-blue px-2 py-0.5 rounded font-bold text-[9px] inline-flex items-center gap-1 print:hidden"
+                                      >
+                                        <FileText className="w-3 h-3" />
+                                        <span>Ver</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-400 italic text-[9px]">-</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* TABELA DE ASOs POR CONTRATO */}
                 {selectedUser.asoContracts && selectedUser.asoContracts.length > 0 && (

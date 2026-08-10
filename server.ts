@@ -12,7 +12,9 @@ import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs } from 'firebase/firestore';
-import firebaseConfig from './firebase-applet-config.json' with { type: "json" };
+const firebaseConfig = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8')
+);
 
 const firebaseApp = initializeApp(firebaseConfig);
 const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId || undefined);

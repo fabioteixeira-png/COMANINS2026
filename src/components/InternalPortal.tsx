@@ -851,9 +851,45 @@ export default function InternalPortal({
   const [benchSubmitting, setBenchSubmitting] = useState<boolean>(false);
   const [benchSuccessMessage, setBenchSuccessMessage] = useState<string>("");
   const [chatLoading, setChatLoading] = useState<boolean>(false);
-  const [computedEmployeeTrainings, setComputedEmployeeTrainings] = useState<
-    any[]
-  >([]);
+  const [employeeTrainings, setEmployeeTrainings] = useState<any[]>([]);
+  const [trainings, setTrainings] = useState<any[]>([]);
+
+  const computedEmployeeTrainings = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return (employeeTrainings || []).map((record: any) => {
+      const training = (trainings || []).find((t: any) => t.id === record.trainingId);
+      
+      let expDateStr = record.expirationDate || "";
+      if (!expDateStr && record.completionDate && training?.validityMonths) {
+        const compDate = new Date(record.completionDate + (record.completionDate.includes("T") ? "" : "T00:00:00"));
+        compDate.setMonth(compDate.getMonth() + training.validityMonths);
+        expDateStr = compDate.toISOString().split("T")[0];
+      }
+
+      let dynamicStatus = record.status || "Válido";
+      if (record.scheduledDate && !record.completionDate) {
+        dynamicStatus = "Agendado";
+      } else if (expDateStr) {
+        const expDate = new Date(expDateStr + (expDateStr.includes("T") ? "" : "T00:00:00"));
+        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+        if (diffDays < 0) {
+          dynamicStatus = "Vencido";
+        } else if (diffDays <= 30) {
+          dynamicStatus = "Próximo do vencimento";
+        } else {
+          dynamicStatus = "Válido";
+        }
+      }
+
+      return {
+        ...record,
+        expirationDate: expDateStr,
+        dynamicStatus,
+      };
+    });
+  }, [employeeTrainings, trainings]);
   const [savedIntakes, setSavedIntakes] = useState<any[]>([]);
   const [issuedCertificates, setIssuedCertificates] = useState<
     Record<string, boolean>
@@ -966,7 +1002,6 @@ export default function InternalPortal({
     [],
   );
   const [employeeBirthdays, setEmployeeBirthdays] = useState<any[]>([]);
-  const [employeeTrainings, setEmployeeTrainings] = useState<any[]>([]);
   const [medicalExams, setMedicalExams] = useState<MedicalExam[]>([]);
 
   // Reference Standards State
@@ -1867,23 +1902,41 @@ Status atual: ${e.status}.`,
       }
     });
 
-    // 2. Treinamentos (employeeTrainings)
-    (employeeTrainings || []).forEach((t: any) => {
-      if (
-        t.status === "Vencido" ||
-        t.status === "Pendente" ||
-        t.status === "Agendado"
-      ) {
-        const isExpired = t.status === "Vencido";
+    // 2. Treinamentos (computedEmployeeTrainings - Filtro 30 dias)
+    (computedEmployeeTrainings || []).forEach((t: any) => {
+      const user = (internalUsers || []).find(
+        (u: any) => u.id === t.employeeId || u.username === t.employeeId
+      );
+      const training = (trainings || []).find((cat: any) => cat.id === t.trainingId);
+      const trainingName = training?.name || t.trainingName || "Treinamento / NR";
+      const empName = user?.name || t.employeeName || "Colaborador";
+
+      let expDateStr = t.expirationDate || "";
+      let diffDays = 15;
+      if (expDateStr) {
+        const expDate = new Date(expDateStr + (expDateStr.includes("T") ? "" : "T00:00:00"));
+        diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+      } else if (t.scheduledDate) {
+        const schDate = new Date(t.scheduledDate + (t.scheduledDate.includes("T") ? "" : "T00:00:00"));
+        diffDays = Math.ceil((schDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+      } else if (t.dynamicStatus === "Vencido" || t.status === "Vencido") {
+        diffDays = -1;
+      }
+
+      const isExpired = diffDays < 0 || t.dynamicStatus === "Vencido" || t.status === "Vencido";
+      const isWithin30Days = diffDays <= 30;
+
+      if (isExpired || isWithin30Days || t.dynamicStatus === "Agendado" || t.status === "Agendado" || t.status === "Pendente") {
         trainingAlerts.push({
           id: `train_${t.id}`,
-          employeeName: t.employeeName,
+          employeeId: t.employeeId,
+          employeeName: empName,
           type: "Treinamento",
           category: "training",
-          title: `Treinamento/NR: ${t.trainingName || "Curso"}`,
-          description: `Status: ${t.status} • Data: ${t.trainingDate ? new Date(t.trainingDate).toLocaleDateString("pt-BR") : "N/I"}`,
-          date: t.trainingDate || "",
-          daysRemaining: isExpired ? -1 : 15,
+          title: `Treinamento/NR: ${trainingName}`,
+          description: `Colaborador: ${empName} • Status: ${isExpired ? "Vencido" : t.dynamicStatus || t.status} • Validade/Data: ${expDateStr ? new Date(expDateStr + (expDateStr.includes("T") ? "" : "T00:00:00")).toLocaleDateString("pt-BR") : t.completionDate || "N/I"}`,
+          date: expDateStr || t.completionDate || "",
+          daysRemaining: diffDays,
           severity: isExpired ? "vencido" : "proximo",
         });
       }
@@ -4804,7 +4857,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [logoPreview, setLogoPreview] = useState<string>("");
   const [logoSuccessMsg, setLogoSuccessMsg] = useState<string>("");
-  const [trainings, setTrainings] = useState<any[]>([]);
 
   const [examTypesCatalog, setExamTypesCatalog] = useState<ExamTypeItem[]>([]);
   const [editingExamType, setEditingExamType] = useState<ExamTypeItem | null>(
@@ -14239,6 +14291,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               currentUser={currentUser}
               dropdownOptions={dropdownOptions}
               internalUsers={internalUsers}
+              employeeTrainings={employeeTrainings}
+              trainings={trainings}
               onAddInternalUser={onAddInternalUser}
               onUpdateInternalUser={onUpdateInternalUser}
               onDeleteInternalUser={onDeleteInternalUser}
