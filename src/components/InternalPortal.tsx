@@ -146,6 +146,9 @@ import {
   FileSpreadsheet,
   ArrowLeft,
 } from "lucide-react";
+import FirebaseUsagePanel from "./FirebaseUsagePanel";
+import NotificationBellPopover from "./NotificationBellPopover";
+import IntakeLabelPrintModal from "./IntakeLabelPrintModal";
 import {
   ResponsiveContainer,
   LineChart,
@@ -811,6 +814,8 @@ export default function InternalPortal({
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
   const [selectedInstId, setSelectedInstId] = useState<any>("");
   const [selectedIntakeToPrint, setSelectedIntakeToPrint] = useState<any>("");
+  const [selectedInstLabelToPrint, setSelectedInstLabelToPrint] = useState<any>(null);
+  const [instLabelClient, setInstLabelClient] = useState<any>(null);
   const [selectedLabInstId, setSelectedLabInstId] = useState<any>("");
   const [selectedPsvInstId, setSelectedPsvInstId] = useState<any>("");
   const [seqSuccessMsg, setSeqSuccessMsg] = useState<any>("");
@@ -5120,6 +5125,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <Settings className="h-4 w-4 text-slate-500" />
                 <span>Configurações</span>
               </button>
+              <button
+                onClick={() => setActiveTab("consumo_firebase")}
+                className={`w-full text-left px-3 py-2 rounded font-medium flex items-center space-x-2 transition-colors ${
+                  activeTab === "consumo_firebase"
+                    ? "bg-blue-50 text-royal-blue font-bold"
+                    : "text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <Database className="h-4 w-4 text-slate-500" />
+                <span>Consumo Firebase</span>
+              </button>
             </>
           )}
 
@@ -5132,6 +5148,52 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         </nav>
       </aside>
       <div className="flex-1 p-8 h-screen overflow-y-auto">
+        {/* Top Navigation Header with Notification Bell */}
+        <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+              Portal Interno COMANINS
+            </span>
+            <h2 className="text-xl font-display font-extrabold text-slate-900 capitalize">
+              {activeTab === "consumo_firebase"
+                ? "Controle de Consumo Firebase"
+                : activeTab === "dashboard"
+                ? "Painel Geral & Indicadores"
+                : activeTab === "instruments"
+                ? "Calibração e Instrumental"
+                : activeTab === "colaboradores"
+                ? "Gestão de Colaboradores (RH)"
+                : activeTab === "financeiro"
+                ? "Gestão Financeira & Contratos"
+                : activeTab === "auditoria"
+                ? "Auditoria & Registro Metrológico"
+                : activeTab === "configuracoes"
+                ? "Configurações do Sistema"
+                : activeTab}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <NotificationBellPopover
+              onOpenFirebaseUsage={() => setActiveTab("consumo_firebase")}
+            />
+
+            <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-slate-200">
+              <div className="text-right">
+                <span className="text-xs font-bold text-slate-900 block leading-tight">
+                  {currentUser?.name || "Administrador"}
+                </span>
+                <span className="text-[10px] text-slate-500 block">
+                  {currentUser?.role || "Usuário"} ({currentUser?.permissionLevel || "Acesso Total"})
+                </span>
+              </div>
+              <div className="w-9 h-9 rounded-full bg-royal-blue text-white font-extrabold text-xs flex items-center justify-center shadow-xs">
+                {(currentUser?.name || "A").substring(0, 2).toUpperCase()}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {activeTab === "dashboard" && (
           <div className="space-y-8">
             {/* CARDS QUANTITATIVOS DA OPERAÇÃO & METROLOGIA (VISÍVEL PARA TODOS OS USUÁRIOS) */}
@@ -7084,6 +7146,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             >
                               <FileCheck className="h-3 w-3" />
                               <span>Certificado</span>
+                            </button>
+
+                            {/* Etiqueta 40x40 Button */}
+                            <button
+                              onClick={() => {
+                                setSelectedInstLabelToPrint(inst);
+                                setInstLabelClient(client);
+                              }}
+                              className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors bg-teal-600 hover:bg-teal-700 text-white border-teal-600 cursor-pointer"
+                              title="Imprimir Etiqueta de Identificação (40x40mm)"
+                            >
+                              <Printer className="h-3 w-3" />
+                              <span>Etiqueta 40x40</span>
                             </button>
 
                             {/* Entregar Button (Disponível após a emissão do certificado, ou para instrumentos RNC prontos para retirada) */}
@@ -11417,6 +11492,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {/* TAB: FINANCEIRO */}
         {activeTab === "financeiro" && <FinanceManagement />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
+
+        {/* TAB: CONSUMO FIREBASE */}
+        {activeTab === "consumo_firebase" && (
+          <FirebaseUsagePanel onNavigateToAudit={() => setActiveTab("auditoria")} />
+        )}
 
         {/* TAB: CONFIGURAÇÕES E ADMINISTRAÇÃO */}
         {(activeTab === "configuracoes" ||
@@ -19801,6 +19881,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             </form>
           </div>
         </div>
+      )}
+
+      {selectedInstLabelToPrint && (
+        <IntakeLabelPrintModal
+          instrument={selectedInstLabelToPrint}
+          client={instLabelClient}
+          onClose={() => {
+            setSelectedInstLabelToPrint(null);
+            setInstLabelClient(null);
+          }}
+        />
       )}
     </div>
   );

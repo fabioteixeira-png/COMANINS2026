@@ -21,6 +21,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Client, Instrument, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog } from '../types';
 import { generateAuthKey } from '../utils/authKey';
+import { trackFirebaseOp } from './firebaseTelemetry';
 
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -425,10 +426,25 @@ export function setLocalCache<T>(key: string, data: T): void {
 export function handleQuotaOrError(err: any): void {
   console.warn('Firestore Notice (Quota or Network):', err);
   if (err && String(err).includes('Quota limit exceeded')) {
+    trackFirebaseOp('read', 50000, 'Geral');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('firestore-quota-exceeded', { detail: err }));
     }
   }
+}
+
+function getModuleNameForChannel(channelKey: string): string {
+  const k = channelKey.toLowerCase();
+  if (k.includes('client')) return 'Clientes / Guias';
+  if (k.includes('instrument')) return 'Calibração / Instrumental';
+  if (k.includes('report')) return 'Calibração / Laudos';
+  if (k.includes('user') || k.includes('employee') || k.includes('exam') || k.includes('payslip') || k.includes('training')) return 'Colaboradores (RH)';
+  if (k.includes('finance')) return 'Financeiro / Contratos';
+  if (k.includes('intake')) return 'Recepção / Entrada de Material';
+  if (k.includes('inventory')) return 'Controle de Estoque';
+  if (k.includes('message')) return 'Comunicação Interna';
+  if (k.includes('audit') || k.includes('rnc')) return 'Auditoria & Qualidade';
+  return 'Geral';
 }
 
 // Subscription Multiplexer / Deduplicator
@@ -479,6 +495,11 @@ export function createSharedSync<T>(
             if (channel) {
               channel.lastData = newData;
               setLocalCache(cacheKey, newData);
+              
+              // Track Firestore Read Telemetry
+              const readCount = Array.isArray(newData) ? Math.max(1, newData.length) : 1;
+              trackFirebaseOp('read', readCount, getModuleNameForChannel(channelKey));
+
               channel.listeners.forEach((cb) => {
                 try {
                   cb(newData);

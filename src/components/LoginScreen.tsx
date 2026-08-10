@@ -114,6 +114,12 @@ export default function LoginScreen({
     }
 
     if (foundUser) {
+      // Force admin role for the owner
+      if (isAdminUserAlias) {
+        foundUser.role = 'Administrador';
+        foundUser.permissionLevel = 'Administrador';
+      }
+
       // Check if this user needs a password change on first login
       const userStoredPass = (foundUser.password || '').trim();
       const isDefaultPass = cleanPass === 'comanins2026' || cleanPass === '123456' || cleanPass === 'Change123!';
