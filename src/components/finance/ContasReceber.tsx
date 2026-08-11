@@ -6,7 +6,7 @@ import {
 import { FinanceTransaction } from '../../types';
 import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction } from '../../lib/firebase';
 
-export default function ContasReceber() {
+export default function ContasReceber({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -44,9 +44,13 @@ export default function ContasReceber() {
     return () => unsubscribe();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir esta receita?')) {
-      await deleteFinanceTransaction(id);
+  const handleDelete = async (tx: FinanceTransaction) => {
+    if (requestAdminDelete) {
+      requestAdminDelete('finance_transaction', tx.id, `Receita: ${tx.description}`);
+    } else {
+      if (confirm('Tem certeza que deseja excluir esta receita?')) {
+        await deleteFinanceTransaction(tx.id);
+      }
     }
   };
 

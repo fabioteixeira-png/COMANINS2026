@@ -9,7 +9,7 @@ import {
   syncFinanceContracts 
 } from '../../lib/firebase';
 
-export default function FinanceMedicoes() {
+export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
   const [showModal, setShowModal] = useState(false);
   const [measurements, setMeasurements] = useState<FinanceMeasurement[]>([]);
   const [contracts, setContracts] = useState<FinanceContract[]>([]);
@@ -43,9 +43,13 @@ export default function FinanceMedicoes() {
     };
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir esta medição?')) {
-      await deleteFinanceMeasurement(id);
+  const handleDelete = async (med: FinanceMeasurement) => {
+    if (requestAdminDelete) {
+      requestAdminDelete('finance_measurement', med.id, `Medição: ${med.contractNumber} (${med.period})`);
+    } else {
+      if (confirm('Tem certeza que deseja excluir esta medição?')) {
+        await deleteFinanceMeasurement(med.id);
+      }
     }
   };
 

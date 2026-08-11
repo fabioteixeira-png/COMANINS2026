@@ -3,7 +3,7 @@ import { Plus, Search, Filter, Edit, Trash2, CheckCircle, Briefcase, BarChart, X
 import { FinanceContract } from '../../types';
 import { syncFinanceContracts, deleteFinanceContract, addFinanceContract, updateFinanceContract } from '../../lib/firebase';
 
-export default function FinanceContratos() {
+export default function FinanceContratos({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
   const [showModal, setShowModal] = useState(false);
   const [contracts, setContracts] = useState<FinanceContract[]>([]);
   const [editingItem, setEditingItem] = useState<FinanceContract | null>(null);
@@ -26,9 +26,13 @@ export default function FinanceContratos() {
     return () => unsubscribe();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este contrato?')) {
-      await deleteFinanceContract(id);
+  const handleDelete = async (contract: FinanceContract) => {
+    if (requestAdminDelete) {
+      requestAdminDelete('finance_contract', contract.id, `Contrato: ${contract.contractNumber} - ${contract.clientName}`);
+    } else {
+      if (confirm('Tem certeza que deseja excluir este contrato?')) {
+        await deleteFinanceContract(contract.id);
+      }
     }
   };
 

@@ -68,6 +68,24 @@ interface ClientPortalProps {
 }
 
 export default function ClientPortal({ client, instruments, reports, customLogo, onLogout }: ClientPortalProps) {
+  const getClientStatus = (inst: Instrument, allInsts: Instrument[]) => {
+    if (inst.status === 'Disponível para Retirada') {
+      if (!inst.numeroDaEntrada) return 'Disponível para Retirada';
+      
+      const intakeInstruments = allInsts.filter(i => i.numeroDaEntrada === inst.numeroDaEntrada);
+      const allReady = intakeInstruments.every(i => 
+        i.status === 'Disponível para Retirada' || 
+        i.status === 'Entregue' || 
+        i.status === 'Não Conforme'
+      );
+      
+      if (!allReady) {
+        return 'Aguardando Calibração';
+      }
+    }
+    return inst.status;
+  };
+
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
@@ -85,13 +103,26 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
     }
   }, []);
 
+  
   // Filter instruments belonging to this client
   const clientInstruments = instruments.filter(inst => inst.clientId === client.id);
 
+  const displayStatuses = new Map<string, string>();
+  clientInstruments.forEach(inst => {
+    displayStatuses.set(inst.id, getClientStatus(inst, clientInstruments));
+  });
+
   // Stats calculation
   const totalInstruments = clientInstruments.length;
-  const pendingInstruments = clientInstruments.filter(inst => inst.status === 'Aguardando Triagem' || inst.status === 'Em Calibração').length;
-  const completedInstruments = clientInstruments.filter(inst => inst.status === 'Calibrado' || inst.status === 'Entregue').length;
+  const pendingInstruments = clientInstruments.filter(inst => {
+    const s = displayStatuses.get(inst.id);
+    return s === 'Aguardando Triagem' || s === 'Em Calibração' || s === 'Aguardando Calibração' || s === 'Aguardando Emissão de Certificado';
+  }).length;
+  const completedInstruments = clientInstruments.filter(inst => {
+    const s = displayStatuses.get(inst.id);
+    return s === 'Calibrado' || s === 'Entregue' || s === 'Disponível para Retirada' || s === 'Não Conforme';
+  }).length;
+
 
   // Filter and search including authKey & certNumber
   const filteredInstruments = clientInstruments.filter(inst => {
@@ -110,12 +141,13 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                           certNumbers.some(cn => cn.includes(query)) ||
                           authKeys.some(ak => ak.includes(query));
     
+    const dStatus = displayStatuses.get(inst.id);
     if (statusFilter === 'all') return matchesSearch;
     if (statusFilter === 'pending') {
-      return matchesSearch && (inst.status === 'Aguardando Triagem' || inst.status === 'Em Calibração');
+      return matchesSearch && (dStatus === 'Aguardando Triagem' || dStatus === 'Em Calibração' || dStatus === 'Aguardando Calibração' || dStatus === 'Aguardando Emissão de Certificado');
     }
     if (statusFilter === 'completed') {
-      return matchesSearch && (inst.status === 'Calibrado' || inst.status === 'Entregue');
+      return matchesSearch && (dStatus === 'Calibrado' || dStatus === 'Entregue' || dStatus === 'Disponível para Retirada' || dStatus === 'Não Conforme');
     }
     return matchesSearch;
   }).sort((a, b) => {
@@ -349,7 +381,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredInstruments.map(inst => {
-                  const hasCertificate = inst.status === 'Calibrado' || inst.status === 'Entregue';
+                  const dStatus = displayStatuses.get(inst.id) || inst.status;
+                  const hasCertificate = dStatus === 'Calibrado' || dStatus === 'Entregue' || dStatus === 'Disponível para Retirada';
                   return (
                     <tr key={inst.id} className="hover:bg-slate-55 transition-colors">
                       <td className="p-4">
@@ -372,13 +405,13 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                       <td className="p-4">
                         <div className="flex flex-col space-y-1">
                           <span className={`px-2 py-0.5 rounded font-mono font-bold text-[9px] w-fit uppercase ${
-                            inst.status === 'Aguardando Triagem' 
+                            dStatus === 'Aguardando Triagem' 
                               ? 'bg-slate-100 text-slate-600 border border-slate-200' 
-                              : inst.status === 'Em Calibração' 
+                              : (dStatus === 'Em Calibração' || dStatus === 'Aguardando Calibração') 
                               ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse' 
                               : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                           }`}>
-                            {inst.status === 'Aguardando Triagem' ? 'Aguardando Triagem' : inst.status}
+                            {dStatus}
                           </span>
                           {inst.lastCalibrationDate && (
                             <span className="text-[9px] text-slate-500 block font-mono">Calibração: {inst.lastCalibrationDate}</span>

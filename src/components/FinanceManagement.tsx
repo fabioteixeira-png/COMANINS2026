@@ -35,7 +35,10 @@ import AtivosInvestimentos from './finance/AtivosInvestimentos';
 import TributosRetencoes from './finance/TributosRetencoes';
 import AlertasNotificacoes from './finance/AlertasNotificacoes';
 
-export default function FinanceManagement() {
+interface FinanceManagementProps {
+  requestAdminDelete?: (type: string, id: string, name: string) => void;
+}
+export default function FinanceManagement({ requestAdminDelete }: FinanceManagementProps) {
   const [activeSubTab, setActiveSubTab] = useState('dashboard');
   
   // Operational Mode state saved in localStorage (defaults to homologado/production)
@@ -219,10 +222,10 @@ export default function FinanceManagement() {
       {/* Conditional Rendering of all submodules */}
       <div className="space-y-6">
         {activeSubTab === 'dashboard' && <div className="animate-fade-in"><DashboardFinanceiro /></div>}
-        {activeSubTab === 'pagar' && <div className="animate-fade-in"><ContasPagar /></div>}
-        {activeSubTab === 'receber' && <div className="animate-fade-in"><ContasReceber /></div>}
-        {activeSubTab === 'contratos' && <div className="animate-fade-in"><FinanceContratos /></div>}
-        {activeSubTab === 'medicoes' && <div className="animate-fade-in"><FinanceMedicoes /></div>}
+        {activeSubTab === 'pagar' && <div className="animate-fade-in"><ContasPagar requestAdminDelete={requestAdminDelete} /></div>}
+        {activeSubTab === 'receber' && <div className="animate-fade-in"><ContasReceber requestAdminDelete={requestAdminDelete} /></div>}
+        {activeSubTab === 'contratos' && <div className="animate-fade-in"><FinanceContratos requestAdminDelete={requestAdminDelete} /></div>}
+        {activeSubTab === 'medicoes' && <div className="animate-fade-in"><FinanceMedicoes requestAdminDelete={requestAdminDelete} /></div>}
         {activeSubTab === 'fluxo' && <div className="animate-fade-in"><FluxoCaixa /></div>}
         {activeSubTab === 'conciliacao' && <div className="animate-fade-in"><ConciliacaoBancaria /></div>}
         {activeSubTab === 'orcamento' && <div className="animate-fade-in"><OrcamentoPrevistoRealizado /></div>}
@@ -230,7 +233,7 @@ export default function FinanceManagement() {
         {activeSubTab === 'cartoes' && <div className="animate-fade-in"><CartoesCorporativos /></div>}
         {activeSubTab === 'reembolsos' && <div className="animate-fade-in"><ReembolsosAdiantamentos /></div>}
         {activeSubTab === 'relatorios' && <div className="animate-fade-in"><RelatoriosFinanceiros /></div>}
-        {activeSubTab === 'cadastros' && <div className="animate-fade-in"><CadastrosFinanceiros /></div>}
+        {activeSubTab === 'cadastros' && <div className="animate-fade-in"><CadastrosFinanceiros requestAdminDelete={requestAdminDelete} /></div>}
         {activeSubTab === 'aprovacoes' && <div className="animate-fade-in"><CentralAprovacoes /></div>}
         {activeSubTab === 'auditoria' && <div className="animate-fade-in"><AuditoriaAlteracoes /></div>}
         {activeSubTab === 'pessoal' && <div className="animate-fade-in"><CustosPessoalContrato /></div>}

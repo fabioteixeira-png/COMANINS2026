@@ -22,7 +22,7 @@ interface Category {
   status: string;
 }
 
-export default function CadastrosFinanceiros() {
+export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
   const [activeTab, setActiveTab] = useState<'contas' | 'plano'>('contas');
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -142,15 +142,23 @@ export default function CadastrosFinanceiros() {
     }
   };
 
-  const handleDeleteAccount = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir esta conta bancária? Lançamentos vinculados perderão a referência.')) {
-      await deleteFinanceDoc('financeBankAccounts', id);
+  const handleDeleteAccount = async (banco: any) => {
+    if (requestAdminDelete) {
+      requestAdminDelete('finance_bank', banco.id, `Conta Bancária: ${banco.bankName}`);
+    } else {
+      if (confirm('Tem certeza que deseja excluir esta conta bancária? Lançamentos vinculados perderão a referência.')) {
+        await deleteFinanceDoc('financeBankAccounts', banco.id);
+      }
     }
   };
 
-  const handleDeleteCategory = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir esta categoria do Plano de Contas?')) {
-      await deleteFinanceDoc('financeCategories', id);
+  const handleDeleteCategory = async (cat: any) => {
+    if (requestAdminDelete) {
+      requestAdminDelete('finance_category', cat.id, `Categoria: ${cat.name}`);
+    } else {
+      if (confirm('Tem certeza que deseja excluir esta categoria do Plano de Contas?')) {
+        await deleteFinanceDoc('financeCategories', cat.id);
+      }
     }
   };
 
@@ -300,7 +308,7 @@ export default function CadastrosFinanceiros() {
                       <td className="px-6 py-3 text-emerald-600">✓ Ativo</td>
                       <td className="px-6 py-3 text-center">
                         <button 
-                          onClick={() => handleDeleteCategory(cat.id)}
+                          onClick={() => handleDeleteCategory(cat)}
                           className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
                           title="Excluir Categoria"
                         >

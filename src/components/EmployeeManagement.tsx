@@ -853,7 +853,7 @@ export default function EmployeeManagement({
                                   }}
                                   className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors"
                                   title="Excluir Colaborador"
-                                 hidden={!isUserAdmin}>
+                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>
                               )}

@@ -1081,7 +1081,19 @@ export default function InternalPortal({
       | "training"
       | "employee_training"
       | "message"
-      | "audit_log";
+      | "audit_log"
+      | "payslip"
+      | "exam"
+      | "exam_type"
+      | "intake_photo"
+      | "inst_photo_reg"
+      | "inst_photo_calib"
+      | "rnc"
+      | "finance_transaction"
+      | "finance_contract"
+      | "finance_measurement"
+      | "finance_bank"
+      | "finance_category";
     id: string;
     name: string;
   } | null>(null);
@@ -1101,7 +1113,19 @@ export default function InternalPortal({
       | "training"
       | "employee_training"
       | "message"
-      | "audit_log",
+      | "audit_log"
+      | "payslip"
+      | "exam"
+      | "exam_type"
+      | "intake_photo"
+      | "inst_photo_reg"
+      | "inst_photo_calib"
+      | "rnc"
+      | "finance_transaction"
+      | "finance_contract"
+      | "finance_measurement"
+      | "finance_bank"
+      | "finance_category",
     id: string,
     name: string,
   ) => {
@@ -1180,6 +1204,48 @@ export default function InternalPortal({
           await deleteEmployeeTrainingDoc(deleteTarget.id);
         } else if (deleteTarget.type === "audit_log") {
           await deleteCalibrationAuditLogDoc(deleteTarget.id);
+        } else if (deleteTarget.type === "payslip") {
+          await deletePayslipDoc(deleteTarget.id);
+          setPayslips((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+        } else if (deleteTarget.type === "exam") {
+          await deleteMedicalExamDoc(deleteTarget.id);
+        } else if (deleteTarget.type === "exam_type") {
+          const updated = examTypesCatalog.filter((t) => t.id !== deleteTarget.id);
+          await saveExamTypes(updated);
+        } else if (deleteTarget.type === "intake_photo") {
+          const [intakeId, idxStr] = deleteTarget.id.split("::");
+          const photoIndex = parseInt(idxStr, 10);
+          if (selectedIntakeForPhotos && selectedIntakeForPhotos.id === intakeId) {
+            const existingPhotos = selectedIntakeForPhotos.photos || [];
+            const updatedPhotos = existingPhotos.filter((_, idx) => idx !== photoIndex);
+            await updateIntakePhotosDoc(intakeId, updatedPhotos);
+            setSavedIntakes((prev) =>
+              prev.map((intake) =>
+                intake.id === intakeId
+                  ? { ...intake, photos: updatedPhotos }
+                  : intake,
+              ),
+            );
+            setSelectedIntakeForPhotos((prev) =>
+              prev ? { ...prev, photos: updatedPhotos } : null,
+            );
+          }
+        } else if (deleteTarget.type === "inst_photo_reg") {
+          await updateInstrumentDoc(deleteTarget.id, { photoRegistration: "" });
+          setPhotoModalInstrument((prev) => prev && prev.id === deleteTarget.id ? { ...prev, photoRegistration: "" } : prev);
+        } else if (deleteTarget.type === "inst_photo_calib") {
+          await updateInstrumentDoc(deleteTarget.id, { photoCalibrated: "" });
+          setPhotoModalInstrument((prev) => prev && prev.id === deleteTarget.id ? { ...prev, photoCalibrated: "" } : prev);
+        } else if (deleteTarget.type === "finance_transaction") {
+          await import("../lib/firebase").then(m => m.deleteFinanceTransaction(deleteTarget.id));
+        } else if (deleteTarget.type === "finance_contract") {
+          await import("../lib/firebase").then(m => m.deleteFinanceContract(deleteTarget.id));
+        } else if (deleteTarget.type === "finance_measurement") {
+          await import("../lib/firebase").then(m => m.deleteFinanceMeasurement(deleteTarget.id));
+        } else if (deleteTarget.type === "finance_bank") {
+          await import("../lib/firebase").then(m => m.deleteFinanceDoc('financeBankAccounts', deleteTarget.id));
+        } else if (deleteTarget.type === "finance_category") {
+          await import("../lib/firebase").then(m => m.deleteFinanceDoc('financeCategories', deleteTarget.id));
         }
       }
 
@@ -4278,18 +4344,12 @@ Status atual: ${e.status}.`,
   };
 
   const handleDeletePayslip = async (id: string) => {
-    if (
-      !window.confirm(
-        "Tem certeza de que deseja excluir permanentemente este contra-cheque?",
-      )
-    )
-      return;
-    try {
-      await deletePayslipDoc(id);
-      setPayslips((prev) => prev.filter((p) => p.id !== id));
-    } catch (e) {
-      console.error("Erro ao deletar contra-cheque:", e);
-    }
+    const p = payslips.find((x) => x.id === id);
+    requestAdminDelete(
+      "payslip",
+      id,
+      `Contra-cheque ${p?.month || ''} (${p?.employeeName || ''})`
+    );
   };
 
   const handleSaveCalibrationBench = async (e: React.FormEvent) => {
@@ -6025,7 +6085,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 }
                                 className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 hover:bg-rose-50 rounded-lg cursor-pointer"
                                 title="Remover Cliente"
-                                hidden={!isUserAdmin}
+                                
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -7244,7 +7304,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               }
                               className="text-slate-400 hover:text-rose-700 transition-colors p-1 cursor-pointer"
                               title="Excluir Calibração/Equipamento (Requer Senha do Administrador)"
-                              hidden={!isUserAdmin}
+                              
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -7514,7 +7574,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           }}
                           className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                           title="Excluir entrada"
-                          hidden={!isUserAdmin}
+                          
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -7960,7 +8020,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           handleDeleteIntake(editingIntakeId, intakeNum)
                         }
                         className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl border border-rose-200 text-xs transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
-                        hidden={!isUserAdmin}
+                        
                       >
                         <Trash2 className="h-4 w-4 text-rose-600" />
                         <span>Excluir Guia</span>
@@ -10580,7 +10640,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     }
                                     className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                                     title="Excluir registro de auditoria (requer senha do Administrador)"
-                                    hidden={!isUserAdmin}
+                                    
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -10932,7 +10992,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             }
                             className="p-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-md cursor-pointer"
                             title="Excluir Certificado de Calibração (Requer Senha do Administrador)"
-                            hidden={!isUserAdmin}
+                            
                           >
                             <Trash2 className="h-4 w-4" />
                             <span>Excluir Calibração</span>
@@ -11490,7 +11550,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: FINANCEIRO */}
-        {activeTab === "financeiro" && <FinanceManagement />}
+        {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
 
         {/* TAB: CONSUMO FIREBASE */}
@@ -13087,7 +13147,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                       }
                                       className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                                       title="Excluir Padrão"
-                                      hidden={!isUserAdmin}
+                                      
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </button>
@@ -14602,7 +14662,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     )
                                   }
                                   className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-                                  hidden={!isUserAdmin}
+                                  
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>
@@ -14664,7 +14724,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 requestAdminDelete("training", t.id, t.title)
                               }
                               className="p-1 text-slate-400 hover:text-red-500"
-                              hidden={!isUserAdmin}
+                              
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -14894,7 +14954,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     }
                                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                     title="Excluir Item"
-                                    hidden={!isUserAdmin}
+                                    
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -15173,7 +15233,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     }
                                     className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                                     title="Excluir"
-                                    hidden={!isUserAdmin}
+                                    
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -15354,14 +15414,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     <Edit className="h-4 w-4" />
                                   </button>
                                   <button
-                                    onClick={async () => {
-                                      if (
-                                        confirm(
-                                          "Tem certeza que deseja excluir este exame?",
-                                        )
-                                      ) {
-                                        await deleteMedicalExamDoc(exam.id);
-                                      }
+                                    onClick={() => {
+                                      requestAdminDelete("exam", exam.id, `Exame Médico (${exam.examDate})`);
                                     }}
                                     className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
                                   >
@@ -15455,17 +15509,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 <Edit className="h-4 w-4" />
                               </button>
                               <button
-                                onClick={async () => {
-                                  if (
-                                    confirm(
-                                      "Tem certeza que deseja excluir este tipo de exame?",
-                                    )
-                                  ) {
-                                    const updated = examTypesCatalog.filter(
-                                      (t) => t.id !== tipo.id,
-                                    );
-                                    await saveExamTypes(updated);
-                                  }
+                                onClick={() => {
+                                  requestAdminDelete("exam_type", tipo.id, `Tipo de Exame: ${tipo.name}`);
                                 }}
                                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
                               >
@@ -16148,7 +16193,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 <button
                                   onClick={() => handleDeletePayslip(p.id)}
                                   className="text-red-600 font-bold hover:underline"
-                                  hidden={!isUserAdmin}
+                                  
                                 >
                                   Excluir
                                 </button>
@@ -17560,7 +17605,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               onClick={() => handleDeletePhoto(index)}
                               className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition-transform hover:scale-105 cursor-pointer"
                               title="Excluir foto"
-                              hidden={!isUserAdmin}
+                              
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
