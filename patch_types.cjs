@@ -1,7 +1,7 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/components/InternalPortal.tsx', 'utf8');
-
-code = code.replace('| "finance_category";', '| "finance_category"\n      | "intake_devolution";');
-code = code.replace('| "finance_category"', '| "finance_category"\n      | "intake_devolution"');
-
-fs.writeFileSync('src/components/InternalPortal.tsx', code);
+let code = fs.readFileSync('src/types.ts', 'utf8');
+code = code.replace(
+  "export type CalibrationStatus = 'Aguardando Triagem' | 'Aguardando Calibração' | 'Em Calibração' | 'Calibrado' | 'Aguardando Emissão de Certificado' | 'Entregue' | 'Não Conforme' | 'Disponível para Retirada';",
+  "export type CalibrationStatus = 'Aguardando Triagem' | 'Aguardando Calibração' | 'Em Calibração' | 'Calibrado' | 'Aguardando Emissão de Certificado' | 'Entregue' | 'Não Conforme' | 'Disponível para Retirada' | 'RNC';"
+);
+fs.writeFileSync('src/types.ts', code);

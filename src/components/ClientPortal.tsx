@@ -632,7 +632,7 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                     </div>
                     <div className="grid grid-cols-3">
                       <span className="font-semibold text-slate-500">Cliente:</span>
-                      <span className="col-span-2 text-slate-800 line-clamp-1">{client.companyName}</span>
+                      <span className="col-span-2 text-slate-800 line-clamp-1">{client.name}</span>
                     </div>
                   </div>
                 </div>
@@ -678,7 +678,7 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                       Aprovação do Cliente
                     </div>
                     <div className="text-slate-400 text-[9px]">
-                      {client.companyName}
+                      {client.name}
                     </div>
                   </div>
                 </div>
