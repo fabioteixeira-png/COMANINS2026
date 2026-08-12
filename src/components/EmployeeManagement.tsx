@@ -2672,8 +2672,8 @@ export default function EmployeeManagement({
                                 onChange={(e) => {
                                   const file = e.target.files?.[0];
                                   if (file) {
-                                    if (file.size > 10 * 1024 * 1024) {
-                                      alert('O arquivo deve ter no máximo 10MB.');
+                                    if (file.size > 800 * 1024) {
+                                      alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo deve ter no máximo 800KB devido às limitações do sistema.\nPor favor, comprima o arquivo e tente novamente.');
                                       return;
                                     }
                                     setNewDocFile(file);
@@ -2684,6 +2684,10 @@ export default function EmployeeManagement({
                                 }}
                               />
                             </label>
+                            <p className="text-[10px] font-bold text-rose-600 mt-1.5 flex items-start space-x-1">
+                              <span>⚠️</span>
+                              <span>Tamanho máximo: 800KB por arquivo. Arquivos maiores não serão salvos.</span>
+                            </p>
                           </div>
                         </div>
 
@@ -2697,6 +2701,10 @@ export default function EmployeeManagement({
                               }
                               if (!newDocFile) {
                                 alert('Por favor, selecione um arquivo.');
+                                return;
+                              }
+                              if (newDocFile.size > 800 * 1024) {
+                                alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo selecionado ultrapassa o limite de 800KB e não será salvo. Por favor, escolha um arquivo menor.');
                                 return;
                               }
 
