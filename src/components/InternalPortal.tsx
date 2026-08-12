@@ -646,6 +646,7 @@ export default function InternalPortal({
   const [activePayslipTab, setActivePayslipTab] = useState<
     "meus" | "gerenciar"
   >("meus");
+  const [payslipMonthFilter, setPayslipMonthFilter] = useState<string>("all");
 
   useEffect(() => {
     if (!currentUser || isUserAdmin) return;
@@ -16213,14 +16214,29 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <div className="space-y-6">
                   {/* Complete List with Audit Log */}
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="p-6 border-b border-slate-100">
-                      <h3 className="font-bold text-slate-900">
-                        Histórico Geral de Emissões & Logs de Segurança (LGPD)
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Acompanhamento em tempo real de contra-cheques gerados e
-                        quem os visualizou.
-                      </p>
+                    <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h3 className="font-bold text-slate-900">
+                          Histórico Geral de Emissões & Logs de Segurança (LGPD)
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Acompanhamento em tempo real de contra-cheques gerados e
+                          quem os visualizou.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-600">Mês:</span>
+                        <select
+                          className="px-3 py-1.5 border border-slate-300 rounded-md text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-royal-blue"
+                          value={payslipMonthFilter}
+                          onChange={(e) => setPayslipMonthFilter(e.target.value)}
+                        >
+                          <option value="all">Todos os Meses</option>
+                          {Array.from(new Set(payslips.map((p) => p.month).filter(Boolean))).sort().map((m) => (
+                            <option key={m} value={m as string}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
                     <div className="overflow-x-auto">
@@ -16240,6 +16256,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {[...payslips]
+                            .filter((p) => payslipMonthFilter === "all" || p.month === payslipMonthFilter)
                             .sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""))
                             .map((p) => (
                             <tr
