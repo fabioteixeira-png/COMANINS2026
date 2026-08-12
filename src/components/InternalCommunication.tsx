@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Search, MessageSquare, Paperclip, Send, CheckCircle, Clock, FileText, User, X, Mail } from "lucide-react";
+import { Plus, Search, MessageSquare, Paperclip, Send, CheckCircle, Clock, FileText, User, X, Mail, Trash2 } from "lucide-react";
 import { InternalTicket, TicketMessage } from "../types";
-import { syncInternalTickets, saveInternalTicket, PortalUser } from "../lib/firebase";
+import { syncInternalTickets, saveInternalTicket, deleteInternalTicket, PortalUser } from "../lib/firebase";
 import { compressImageToWebResolution } from "../lib/imageCompressor";
 import { safeFetch } from "../utils/apiClient";
 
@@ -75,7 +75,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
           <p>Acesse o portal para responder.</p>
         `
       })
-    }).catch(console.error);
+    }).then(res => console.log("Email response:", res)).catch(console.error);
 
     setShowNewTicketModal(false);
     setNewTitle("");
@@ -120,7 +120,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
             <p>Acesse o portal para visualizar e continuar o atendimento.</p>
           `
         })
-      }).catch(console.error);
+      }).then(res => console.log("Email response:", res)).catch(console.error);
     } else {
       // Notify financeiro
       safeFetch("/api/send-email", {
@@ -136,11 +136,25 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
             <p>Acesse o portal para responder.</p>
           `
         })
-      }).catch(console.error);
+      }).then(res => console.log("Email response:", res)).catch(console.error);
     }
     
     setMessageText("");
     setMessageAttachments([]);
+  };
+
+
+  const handleDeleteTicket = async () => {
+    if (!selectedTicket || !isUserAdmin) return;
+    if (window.confirm("Tem certeza que deseja excluir este chamado permanentemente? Essa ação não pode ser desfeita.")) {
+      try {
+        await deleteInternalTicket(selectedTicket.id);
+        setSelectedTicket(null);
+      } catch (err) {
+        console.error("Erro ao excluir", err);
+        alert("Falha ao excluir chamado.");
+      }
+    }
   };
 
   const handleCloseTicket = async () => {
@@ -303,15 +317,27 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                   <span className="flex items-center"><Clock className="h-4 w-4 mr-1 text-slate-400" /> {new Date(selectedTicket.createdAt).toLocaleString()}</span>
                 </div>
               </div>
-              {selectedTicket.status !== 'finalizado' && (
-                <button 
-                  onClick={handleCloseTicket}
-                  className="px-4 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-semibold text-sm rounded-lg flex items-center space-x-2 transition-colors"
-                >
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Finalizar Chamado</span>
-                </button>
-              )}
+              <div className="flex items-center space-x-2">
+                {isUserAdmin && (
+                  <button 
+                    onClick={handleDeleteTicket}
+                    className="px-4 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 font-semibold text-sm rounded-lg flex items-center space-x-2 transition-colors"
+                    title="Excluir Chamado (Apenas Administrador)"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span>Excluir</span>
+                  </button>
+                )}
+                {selectedTicket.status !== 'finalizado' && (
+                  <button 
+                    onClick={handleCloseTicket}
+                    className="px-4 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-semibold text-sm rounded-lg flex items-center space-x-2 transition-colors"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    <span>Finalizar Chamado</span>
+                  </button>
+                )}
+              </div>
             </div>
             
             {/* Conversation */}

@@ -146,6 +146,7 @@ import {
   UserCheck,
   FileSpreadsheet,
   ArrowLeft,
+  Menu
 } from "lucide-react";
 import FirebaseUsagePanel from "./FirebaseUsagePanel";
 import NotificationBellPopover from "./NotificationBellPopover";
@@ -629,9 +630,11 @@ export default function InternalPortal({
   const [afterHoursPassword, setAfterHoursPassword] = useState("");
   const [afterHoursJustification, setAfterHoursJustification] = useState("");
   const [afterHoursBypass, setAfterHoursBypass] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const setActiveTab = (t: any) => {
     setRawActiveTab(t);
+    setIsMobileMenuOpen(false);
   };
 
   const [rhSubTab, setRhSubTab] = useState<
@@ -5115,13 +5118,30 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
-        <div className="p-6 flex items-center justify-center border-b border-slate-100">
+      {/* Mobile Sidebar Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/50 z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col transform transition-transform duration-300 ease-in-out
+        md:relative md:translate-x-0
+        ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}
+      `}>
+        <div className="p-6 flex items-center justify-center border-b border-slate-100 relative">
           <ComaninsLogo
             src={customLogo}
             size={180}
             className="max-h-12 w-auto"
           />
+          <button 
+            className="md:hidden absolute right-4 text-slate-500 hover:bg-slate-100 p-1 rounded"
+            onClick={() => setIsMobileMenuOpen(false)}
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
           <button
@@ -5305,10 +5325,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </button>
         </nav>
       </aside>
-      <div className="flex-1 p-8 h-screen overflow-y-auto">
+      <div className="flex-1 p-4 md:p-8 h-screen overflow-y-auto w-full">
         {/* Top Navigation Header with Notification Bell */}
         <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
-          <div>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="md:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+            <div>
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
               Portal Interno COMANINS
             </span>
@@ -5329,6 +5356,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 ? "Configurações do Sistema"
                 : activeTab}
             </h2>
+          </div>
           </div>
 
           <div className="flex items-center gap-3">
