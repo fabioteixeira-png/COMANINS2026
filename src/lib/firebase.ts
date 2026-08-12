@@ -1921,7 +1921,7 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
   try {
     const cached = getLocalCache<InternalTicket[]>('internal_tickets', []);
     if (cached.length > 0) callback(cached);
-    const q = query(collection(db, "internal_tickets"), limit(25));
+    const q = query(collection(db, "internal_tickets"));
     return onSnapshot(
       q,
       (snapshot) => {

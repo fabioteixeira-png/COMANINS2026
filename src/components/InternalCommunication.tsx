@@ -20,7 +20,8 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
   const [messageAttachments, setMessageAttachments] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const isFinanceOrAdmin = currentUser?.role === "Financeiro" || currentUser?.role === "Administrador";
+  const isUserAdmin = currentUser?.permissionLevel === "Administrador" || currentUser?.role === "Administrador" || currentUser?.role === "Admin" || currentUser?.role === "admin" || currentUser?.role === "Diretoria" || currentUser?.role === "master";
+  const isFinanceOrAdmin = isUserAdmin || currentUser?.role === "Financeiro" || currentUser?.role === "Recursos Humanos (RH)";
 
   useEffect(() => {
     const unsub = syncInternalTickets((list) => {
@@ -46,7 +47,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     
     const ticket: InternalTicket = {
       id: "ticket_" + Date.now().toString() + "_" + Math.random().toString(36).substring(2, 9),
-      creatorId: currentUser.id,
+      creatorId: currentUser.username,
       creatorName: currentUser.name || currentUser.username,
       creatorEmail: currentUser.username, // username is email
       title: newTitle,
@@ -89,7 +90,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     
     const newMessage: TicketMessage = {
       id: "msg_" + Date.now().toString(),
-      senderId: currentUser.id,
+      senderId: currentUser.username,
       senderName: currentUser.name || currentUser.username,
       text: messageText,
       createdAt: new Date().toISOString(),
@@ -179,7 +180,8 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
   };
 
   const filteredTickets = tickets.filter(t => {
-    if (!isFinanceOrAdmin && t.creatorId !== currentUser?.id) return false;
+    const isCreator = t.creatorId === currentUser?.username || t.creatorName === currentUser?.name || t.creatorName === currentUser?.username;
+    if (!isFinanceOrAdmin && !isCreator) return false;
     
     const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           t.creatorName.toLowerCase().includes(searchTerm.toLowerCase());
@@ -339,7 +341,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
               
               {/* Messages */}
               {selectedTicket.messages.map(msg => {
-                const isMe = msg.senderId === currentUser?.id;
+                const isMe = msg.senderId === currentUser?.username;
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[80%] rounded-xl p-4 shadow-sm ${isMe ? 'bg-royal-blue text-white' : 'bg-white border border-slate-200'}`}>

@@ -261,25 +261,25 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-12 print:min-h-0 print:h-auto print:block print:pb-0 print:bg-white">
       {/* Navbar */}
-      <header className="bg-royal-blue text-white shadow-md sticky top-0 z-40 print:hidden">
+      <header className="bg-white border-b border-slate-200 text-slate-900 shadow-sm sticky top-0 z-40 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-3">
-              <ComaninsLogo size={140} src={customLogo} color="#ffffff" className="max-h-10 w-auto" />
+              <ComaninsLogo size={140} src={customLogo} className="max-h-10 w-auto" />
               <div>
-                <span className="font-display font-extrabold text-sm tracking-wider text-white block">COMANINS Portal</span>
-                <span className="text-[10px] text-blue-100 font-mono tracking-widest uppercase">Área do Cliente</span>
+                <span className="font-display font-extrabold text-sm tracking-wider text-slate-900 block">COMANINS Portal</span>
+                <span className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Área do Cliente</span>
               </div>
             </div>
 
             <div className="flex items-center space-x-4">
               <div className="text-right hidden sm:block">
-                <span className="text-xs font-bold text-white block">{client.name}</span>
-                <span className="text-[10px] text-blue-100 font-mono">CNPJ: {client.cnpj}</span>
+                <span className="text-xs font-bold text-slate-900 block">{client.name}</span>
+                <span className="text-[10px] text-slate-500 font-mono">CNPJ: {client.cnpj}</span>
               </div>
               <button
                 onClick={onLogout}
-                className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 border border-white/20"
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 border border-slate-200 shadow-sm"
               >
                 <LogOut className="h-3.5 w-3.5" />
                 <span>Sair</span>

@@ -4735,7 +4735,7 @@ Status atual: ${e.status}.`,
           setBenchStandardA("");
           setBenchStandardB("");
           setBenchStandardC("");
-          setActiveTab("dashboard");
+          setActiveTab("instruments");
         }, 3000);
       }
     } catch (err) {
