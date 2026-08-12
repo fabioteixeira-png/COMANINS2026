@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
+  where,
   collection,
   doc,
   setDoc,
@@ -211,6 +212,7 @@ export interface SavedIntake {
   dataPrevistaSaida: string;
   contato: string;
   photos?: string[];
+  photoDevolution?: string;
   rows: {
     quant: number;
     descricao: string;
@@ -1048,6 +1050,15 @@ export async function saveIntakeDoc(intake: SavedIntake): Promise<void> {
   await setDoc(doc(db, 'savedIntakes', intake.id), intake);
 }
 
+export async function updateIntakeDevolutionPhoto(id: string, photoBase64: string): Promise<void> {
+  const ref = doc(db, 'savedIntakes', id);
+  if (photoBase64) {
+    await updateDoc(ref, { photoDevolution: photoBase64 });
+  } else {
+    await updateDoc(ref, { photoDevolution: deleteField() });
+  }
+}
+
 export async function updateIntakePhotosDoc(id: string, photos: string[]): Promise<void> {
   await updateDoc(doc(db, 'savedIntakes', id), { photos });
 }
@@ -1232,7 +1243,13 @@ export async function syncEmployeeTrainings(callback: (records: EmployeeTraining
 
 export async function addEmployeeTrainingDoc(data: Omit<EmployeeTrainingRecord, 'id'>): Promise<EmployeeTrainingRecord> {
   const newId = 'etr_' + Date.now();
-  const fullItem: EmployeeTrainingRecord = { ...data, id: newId };
+  
+  // Clean undefined values
+  const cleanData = Object.fromEntries(
+    Object.entries(data).filter(([_, v]) => v !== undefined)
+  );
+  
+  const fullItem: any = { ...cleanData, id: newId };
   await setDoc(doc(db, 'employeeTrainings', newId), fullItem);
   return fullItem;
 }
@@ -1970,4 +1987,16 @@ export async function addAccessAuditLog(data: Omit<AccessAuditLog, 'id'>): Promi
   const logEntry: AccessAuditLog = { ...data, id: newId };
   await setDoc(doc(db, 'accessAuditLogs', newId), logEntry);
   return logEntry;
+}
+
+export async function syncClientIntakes(clientId: string, callback: (intakes: SavedIntake[]) => void) {
+  const q = query(collection(db, 'savedIntakes'), where('clientId', '==', clientId));
+  return onSnapshot(q, (snapshot) => {
+    if (!snapshot.empty) {
+      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SavedIntake));
+      callback(list);
+    } else {
+      callback([]);
+    }
+  });
 }

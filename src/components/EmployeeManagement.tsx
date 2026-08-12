@@ -80,7 +80,6 @@ export default function EmployeeManagement({
   const [newNrCustomName, setNewNrCustomName] = useState('');
   const [newNrCompletionDate, setNewNrCompletionDate] = useState('');
   const [newNrExpirationDate, setNewNrExpirationDate] = useState('');
-  const [newNrScheduledDate, setNewNrScheduledDate] = useState('');
   const [newNrStatus, setNewNrStatus] = useState<'Válido' | 'Agendado' | 'Pendente' | 'Vencido'>('Válido');
   const [newNrResult, setNewNrResult] = useState('Aprovado');
   const [newNrInstitution, setNewNrInstitution] = useState('COMANINS');
@@ -132,11 +131,21 @@ export default function EmployeeManagement({
 
       let fileDataUrl = newNrCertificateUrl;
       if (newNrCertificateFile) {
-        fileDataUrl = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsDataURL(newNrCertificateFile);
-        }) as string;
+        if (newNrCertificateFile.type.startsWith('image/')) {
+          fileDataUrl = await compressImageToWebResolution(newNrCertificateFile, 1200, 1200, 0.7);
+        } else {
+          if (newNrCertificateFile.size > 500 * 1024) {
+            alert("O arquivo do certificado (PDF) é muito grande (" + (newNrCertificateFile.size / 1024).toFixed(1) + "KB). O tamanho máximo permitido para salvar no banco é de 500KB. Reduza o arquivo e tente novamente.");
+            setIsSavingNrTraining(false);
+            return;
+          }
+          fileDataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.onerror = (e) => reject(new Error("Erro ao ler o arquivo."));
+            reader.readAsDataURL(newNrCertificateFile);
+          });
+        }
       }
 
       const payload: any = {
@@ -146,7 +155,6 @@ export default function EmployeeManagement({
         trainingName: courseName,
         completionDate: newNrCompletionDate,
         expirationDate: expDate,
-        scheduledDate: newNrScheduledDate,
         status: newNrStatus,
         result: newNrResult,
         certificateUrl: fileDataUrl,
@@ -165,7 +173,6 @@ export default function EmployeeManagement({
       setNewNrCustomName('');
       setNewNrCompletionDate('');
       setNewNrExpirationDate('');
-      setNewNrScheduledDate('');
       setNewNrStatus('Válido');
       setNewNrResult('Aprovado');
       setNewNrCertificateUrl('');
@@ -173,9 +180,9 @@ export default function EmployeeManagement({
       setNewNrInstitution('COMANINS');
 
       alert('Treinamento de NR lançado com sucesso!');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao lançar treinamento de NR:', err);
-      alert('Ocorreu um erro ao lançar o treinamento.');
+      alert('Ocorreu um erro ao salvar no banco de dados. Tente sem o anexo primeiro ou verifique a conexão: ' + (err.message || err.toString()));
     } finally {
       setIsSavingNrTraining(false);
     }
@@ -275,7 +282,7 @@ export default function EmployeeManagement({
   const [newDepCpf, setNewDepCpf] = useState('');
 
   // ASO Contract Handlers
-  const handleAddAsoContract = () => {
+  const handleAddAsoContract = async () => {
     if (!newAsoContractName.trim()) {
       alert('Por favor, informe o Nome do Contrato ou Cliente.');
       return;
@@ -323,17 +330,44 @@ export default function EmployeeManagement({
     };
 
     if (newAsoDocFile) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        processAdd((e.target?.result as string) || '');
-      };
-      reader.readAsDataURL(newAsoDocFile);
+      if (newAsoDocFile.type.startsWith('image/')) {
+        try {
+          const compressed = await compressImageToWebResolution(newAsoDocFile, 1200, 1200, 0.7);
+          processAdd(compressed);
+        } catch (err) {
+          console.error("Erro ao comprimir imagem:", err);
+          alert("Erro ao processar imagem.");
+        }
+      } else {
+        if (newAsoDocFile.size > 500 * 1024) {
+          alert("O arquivo do ASO (PDF) é muito grande (" + (newAsoDocFile.size / 1024).toFixed(1) + "KB). O limite é de 500KB.");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          processAdd((e.target?.result as string) || '');
+        };
+        reader.readAsDataURL(newAsoDocFile);
+      }
     } else {
       processAdd('');
     }
   };
 
   const handleRemoveAsoContract = (asoId: string) => {
+    if (currentUser?.role !== 'Administrador') {
+      alert("Apenas administradores podem excluir ASOs.");
+      return;
+    }
+    const pwd = window.prompt("Digite sua senha de administrador para confirmar a exclusão deste ASO:");
+    if (pwd === null) return;
+    
+    const adminUser = internalUsers.find(u => u.username === currentUser.username);
+    if (!adminUser || adminUser.password !== pwd.trim()) {
+      alert("Senha incorreta.");
+      return;
+    }
+
     const updatedList = (formData.asoContracts || []).filter((item) => item.id !== asoId);
     setFormData((prev) => ({
       ...prev,
@@ -1883,15 +1917,44 @@ export default function EmployeeManagement({
 
                                     <div className="flex items-center space-x-1.5">
                                       {asoItem.docUrl && (
-                                        <a
-                                          href={asoItem.docUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors"
-                                          title="Visualizar Anexo ASO"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </a>
+                                        <div className="flex items-center space-x-1">
+                                          <button
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              if (asoItem.docUrl?.startsWith("data:")) {
+                                                try {
+                                                  const byteString = atob(asoItem.docUrl.split(",")[1]);
+                                                  const mimeString = asoItem.docUrl.split(",")[0].split(":")[1].split(";")[0];
+                                                  const ab = new ArrayBuffer(byteString.length);
+                                                  const ia = new Uint8Array(ab);
+                                                  for (let i = 0; i < byteString.length; i++) {
+                                                    ia[i] = byteString.charCodeAt(i);
+                                                  }
+                                                  const blob = new Blob([ab], { type: mimeString });
+                                                  const blobUrl = URL.createObjectURL(blob);
+                                                  window.open(blobUrl, "_blank");
+                                                } catch (err) {
+                                                  console.error("Erro ao abrir ASO", err);
+                                                  alert("Erro ao abrir o ASO.");
+                                                }
+                                              } else {
+                                                window.open(asoItem.docUrl, "_blank");
+                                              }
+                                            }}
+                                            className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                                            title="Visualizar Anexo ASO"
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                          </button>
+                                          <a
+                                            href={asoItem.docUrl}
+                                            download={`ASO_${(formData.name || 'Colaborador').replace(/\s+/g, '_')}_${asoItem.validityDate}`}
+                                            className="p-1 text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                                            title="Baixar ASO"
+                                          >
+                                            <Download className="h-4 w-4" />
+                                          </a>
+                                        </div>
                                       )}
                                       <button
                                         type="button"
@@ -1999,15 +2062,7 @@ export default function EmployeeManagement({
                             />
                           </div>
 
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Data Agendada (Se futuro)</label>
-                            <input
-                              type="date"
-                              value={newNrScheduledDate}
-                              onChange={(e) => setNewNrScheduledDate(e.target.value)}
-                              className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono"
-                            />
-                          </div>
+
 
                           <div>
                             <label className="block font-semibold text-slate-700 mb-1">Status do Treinamento</label>
@@ -2135,15 +2190,44 @@ export default function EmployeeManagement({
 
                                       <div className="flex items-center space-x-1.5">
                                         {rec.certificateUrl && (
-                                          <a
-                                            href={rec.certificateUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors"
-                                            title="Ver Certificado"
-                                          >
-                                            <Eye className="h-4 w-4" />
-                                          </a>
+                                          <div className="flex items-center space-x-1">
+                                            <button
+                                              onClick={(e) => {
+                                                e.preventDefault();
+                                                if (rec.certificateUrl?.startsWith("data:")) {
+                                                  try {
+                                                    const byteString = atob(rec.certificateUrl.split(",")[1]);
+                                                    const mimeString = rec.certificateUrl.split(",")[0].split(":")[1].split(";")[0];
+                                                    const ab = new ArrayBuffer(byteString.length);
+                                                    const ia = new Uint8Array(ab);
+                                                    for (let i = 0; i < byteString.length; i++) {
+                                                      ia[i] = byteString.charCodeAt(i);
+                                                    }
+                                                    const blob = new Blob([ab], { type: mimeString });
+                                                    const blobUrl = URL.createObjectURL(blob);
+                                                    window.open(blobUrl, "_blank");
+                                                  } catch (err) {
+                                                    console.error("Erro ao abrir certificado", err);
+                                                    alert("Erro ao abrir o certificado.");
+                                                  }
+                                                } else {
+                                                  window.open(rec.certificateUrl, "_blank");
+                                                }
+                                              }}
+                                              className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                                              title="Ver Certificado"
+                                            >
+                                              <Eye className="h-4 w-4" />
+                                            </button>
+                                            <a
+                                              href={rec.certificateUrl}
+                                              download={`Certificado_${name.replace(/\s+/g, '_')}_${currentEmpName?.replace(/\s+/g, '_') || 'Colaborador'}`}
+                                              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                                              title="Baixar Certificado"
+                                            >
+                                              <Download className="h-4 w-4" />
+                                            </a>
+                                          </div>
                                         )}
                                         {isUserAdmin && (
                                           <button

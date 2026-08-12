@@ -16,6 +16,7 @@ import {
   syncIntakes,
   saveIntakeDoc,
   updateIntakePhotosDoc,
+  updateIntakeDevolutionPhoto,
   deleteIntakeDoc,
   clearAllSavedIntakes,
   syncIntakeSequenceConfig,
@@ -601,15 +602,6 @@ export default function InternalPortal({
         currentUser?.role === "master" ||
         currentUser?.role === "Diretor"));
 
-  const [activeTab, setRawActiveTab] = useState<any>("dashboard");
-  const [accessAuditLogs, setAccessAuditLogs] = useState<AccessAuditLog[]>([]);
-  const [showAfterHoursModal, setShowAfterHoursModal] = useState(false);
-  const [afterHoursTargetTab, setAfterHoursTargetTab] = useState("");
-  const [afterHoursTargetSubTab, setAfterHoursTargetSubTab] = useState("");
-  const [afterHoursPassword, setAfterHoursPassword] = useState("");
-  const [afterHoursJustification, setAfterHoursJustification] = useState("");
-  const [afterHoursBypass, setAfterHoursBypass] = useState(false);
-
   const checkIsAfterHours = () => {
     const now = new Date();
     const h = now.getHours();
@@ -617,7 +609,26 @@ export default function InternalPortal({
     return (h > 17 || (h === 17 && m >= 30)) || (h < 7);
   };
 
+  const initIsRestricted = 
+    checkIsAfterHours() &&
+    !(
+      currentUser?.permissionLevel === "Administrador" ||
+      (!currentUser?.permissionLevel &&
+        (currentUser?.role === "Administrador" ||
+          currentUser?.role === "Admin" ||
+          currentUser?.role === "admin" ||
+          currentUser?.role === "master" ||
+          currentUser?.role === "Diretor"))
+    );
 
+  const [activeTab, setRawActiveTab] = useState<any>(initIsRestricted ? "colaboradores" : "dashboard");
+  const [accessAuditLogs, setAccessAuditLogs] = useState<AccessAuditLog[]>([]);
+  const [showAfterHoursModal, setShowAfterHoursModal] = useState(false);
+  const [afterHoursTargetTab, setAfterHoursTargetTab] = useState("");
+  const [afterHoursTargetSubTab, setAfterHoursTargetSubTab] = useState("");
+  const [afterHoursPassword, setAfterHoursPassword] = useState("");
+  const [afterHoursJustification, setAfterHoursJustification] = useState("");
+  const [afterHoursBypass, setAfterHoursBypass] = useState(false);
 
   const setActiveTab = (t: any) => {
     setRawActiveTab(t);
@@ -630,7 +641,7 @@ export default function InternalPortal({
     | "treinamentos"
     | "exames"
     | "contra_cheques"
-  >("cadastro");
+  >(initIsRestricted ? "contra_cheques" : "cadastro");
   const [payslips, setPayslips] = useState<Payslip[]>([]);
   const [activePayslipTab, setActivePayslipTab] = useState<
     "meus" | "gerenciar"
@@ -826,6 +837,9 @@ export default function InternalPortal({
   const [showIntakeLookup, setShowIntakeLookup] = useState<any>(false);
   const [showIntakeModal, setShowIntakeModal] = useState<any>(false);
   const [showPhotosModal, setShowPhotosModal] = useState<boolean>(false);
+  const [showDevolutionModal, setShowDevolutionModal] = useState<boolean>(false);
+  const [selectedIntakeForDevolution, setSelectedIntakeForDevolution] = useState<any>(null);
+  const [isUploadingDevolution, setIsUploadingDevolution] = useState(false);
   const [selectedIntakeForPhotos, setSelectedIntakeForPhotos] = useState<
     any | null
   >(null);
@@ -1093,7 +1107,9 @@ export default function InternalPortal({
       | "finance_contract"
       | "finance_measurement"
       | "finance_bank"
-      | "finance_category";
+      | "finance_category"
+      | "intake_devolution"
+      | "intake_devolution";
     id: string;
     name: string;
   } | null>(null);
@@ -1125,7 +1141,8 @@ export default function InternalPortal({
       | "finance_contract"
       | "finance_measurement"
       | "finance_bank"
-      | "finance_category",
+      | "finance_category"
+      | "intake_devolution",
     id: string,
     name: string,
   ) => {
@@ -1246,6 +1263,16 @@ export default function InternalPortal({
           await import("../lib/firebase").then(m => m.deleteFinanceDoc('financeBankAccounts', deleteTarget.id));
         } else if (deleteTarget.type === "finance_category") {
           await import("../lib/firebase").then(m => m.deleteFinanceDoc('financeCategories', deleteTarget.id));
+        } else if (deleteTarget.type === "intake_devolution") {
+          await updateIntakeDevolutionPhoto(deleteTarget.id, "");
+          setSelectedIntakeForDevolution((prev) => prev && prev.id === deleteTarget.id ? { ...prev, photoDevolution: "" } : prev);
+          setSavedIntakes((prev) =>
+            prev.map((item) =>
+              item.id === deleteTarget.id
+                ? { ...item, photoDevolution: "" }
+                : item,
+            ),
+          );
         }
       }
 
@@ -2314,7 +2341,7 @@ Status atual: ${e.status}.`,
         i.status === "Não Conforme",
     ).length;
     const availableCount = matching.filter(
-      (i) => i.status === "Disponível para Retirada" || i.status === "Entregue",
+      (i) => i.status === "Disponível para Retirada" || i.status === "Entregue" || i.status === "Não Conforme",
     ).length;
 
     if (registeredCount === 0) {
@@ -2335,6 +2362,22 @@ Status atual: ${e.status}.`,
           "bg-blue-50 text-blue-700 border border-blue-200 font-semibold",
         badgeDarkClass:
           "bg-blue-500/10 text-blue-400 border border-blue-500/30 font-semibold",
+        registeredCount,
+        totalAllowed,
+      };
+    }
+
+    const deliveredCount = matching.filter(
+      (i) => i.status === "Entregue",
+    ).length;
+
+    if (deliveredCount >= totalAllowed && totalAllowed > 0) {
+      return {
+        label: "Entregue",
+        badgeClass:
+          "bg-teal-50 text-teal-700 border border-teal-200 font-bold",
+        badgeDarkClass:
+          "bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold",
         registeredCount,
         totalAllowed,
       };
@@ -3637,6 +3680,60 @@ Status atual: ${e.status}.`,
     setIntakeContact(intake.contato);
     setIntakeRows(intake.rows || []);
     setShowIntakeModal(true);
+  };
+
+  const handleOpenDevolutionModal = (intake: any) => {
+    setSelectedIntakeForDevolution(intake);
+    setShowDevolutionModal(true);
+  };
+
+  const handleUploadDevolutionPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0 || !selectedIntakeForDevolution) return;
+    try {
+      setIsUploadingDevolution(true);
+      const file = e.target.files[0];
+      const compressed = await compressImage(file, 800, 800, 0.7);
+      
+      await updateIntakeDevolutionPhoto(selectedIntakeForDevolution.id, compressed);
+      
+      // Encontrar instrumentos dessa entrada e mudar para Entregue
+      const numEntrada = (selectedIntakeForDevolution.numEntrada || "").trim().toLowerCase();
+      const matchingInstruments = instruments.filter(
+          (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada
+      );
+      
+      if (onUpdateInstrumentStatus) {
+        for (const inst of matchingInstruments) {
+          if (inst.status !== "Entregue") {
+            await onUpdateInstrumentStatus(inst.id, "Entregue");
+          }
+        }
+      }
+
+      setSelectedIntakeForDevolution({
+        ...selectedIntakeForDevolution,
+        photoDevolution: compressed,
+      });
+
+      setSavedIntakes((prev) =>
+        prev.map((item) =>
+          item.id === selectedIntakeForDevolution.id
+            ? { ...item, photoDevolution: compressed }
+            : item,
+        ),
+      );
+    } catch (err) {
+      console.error("Error uploading devolution photo:", err);
+    } finally {
+      setIsUploadingDevolution(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleDeleteDevolutionPhoto = () => {
+    if (selectedIntakeForDevolution) {
+      requestAdminDelete("intake_devolution", selectedIntakeForDevolution.id, `Foto Devolução (Entrada ${selectedIntakeForDevolution.numEntrada})`);
+    }
   };
 
   const handleOpenPhotosModal = (intake: any) => {
@@ -7221,28 +7318,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               <span>Etiqueta 40x40</span>
                             </button>
 
-                            {/* Entregar Button (Disponível após a emissão do certificado, ou para instrumentos RNC prontos para retirada) */}
-                            {((isCertEmitted && !isRncIssued) ||
-                              (isRncIssued &&
-                                (inst.status === "Disponível para Retirada" ||
-                                  inst.status === "Não Conforme"))) &&
-                              inst.status !== "Entregue" && (
-                                <button
-                                  onClick={async () => {
-                                    if (onUpdateInstrumentStatus) {
-                                      await onUpdateInstrumentStatus(
-                                        inst.id,
-                                        "Entregue",
-                                      );
-                                    }
-                                  }}
-                                  className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 cursor-pointer transition-colors"
-                                  title="Alterar o status deste instrumento para Entregue"
-                                >
-                                  <CheckCircle className="h-3 w-3" />
-                                  <span>Entregar</span>
-                                </button>
-                              )}
+
 
                             {/* RNC Button (Relatório de Não Conformidade) */}
                             {(inst.status === "Não Conforme" ||
@@ -7565,6 +7641,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           <Printer className="h-3.5 w-3.5" />
                           <span>Imprimir Entrada</span>
                         </button>
+
+                        {(statusInfo.label === "Disponível para Retirada" || statusInfo.label === "Entregue") && (
+                          <button
+                            onClick={() => handleOpenDevolutionModal(intake)}
+                            className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                            title={statusInfo.label === "Entregue" ? "Ver Protocolo de Devolução" : "Entregar / Anexar Protocolo"}
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            <span>{statusInfo.label === "Entregue" ? "Ver Devolução" : "Entregar"}</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -8014,17 +8101,35 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   {/* Modal Footer */}
                   <div className="bg-slate-100 p-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                     {editingIntakeId ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDeleteIntake(editingIntakeId, intakeNum)
-                        }
-                        className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl border border-rose-200 text-xs transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
+                      <div className="flex items-center space-x-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteIntake(editingIntakeId, intakeNum)
+                          }
+                          className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl border border-rose-200 text-xs transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
+                        >
+                          <Trash2 className="h-4 w-4 text-rose-600" />
+                          <span>Excluir Guia</span>
+                        </button>
                         
-                      >
-                        <Trash2 className="h-4 w-4 text-rose-600" />
-                        <span>Excluir Guia</span>
-                      </button>
+                        {(() => {
+                          const currentIntake = savedIntakes.find(i => i.id === editingIntakeId);
+                          if (currentIntake && currentIntake.photoDevolution) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenDevolutionModal(currentIntake)}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold rounded-xl border border-teal-200 text-xs transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
+                              >
+                                <CheckCircle className="h-4 w-4 text-teal-600" />
+                                <span>Ver Devolução</span>
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                     ) : (
                       <div />
                     )}
@@ -14590,6 +14695,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             <td className="px-6 py-4 text-center">
                               <div className="flex justify-center space-x-2">
                                 {record.certificateUrl && (
+                                  <>
                                   <button
                                     onClick={(e) => {
                                       e.preventDefault();
@@ -14643,6 +14749,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   >
                                     <FileText className="h-4 w-4" />
                                   </button>
+                                  <a
+                                    href={record.certificateUrl}
+                                    download={`Certificado_${(user?.name || record.employeeId).replace(/\s+/g, '_')}`}
+                                    className="p-1 text-emerald-600 hover:text-emerald-700 transition-colors cursor-pointer"
+                                    title="Baixar Certificado"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                  </>
                                 )}
                                 <button
                                   onClick={() => {
@@ -17489,7 +17604,112 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         </div>
       )}
 
-      {/* MODAL: FOTOS DA ENTRADA DE MATERIAL */}
+      
+      {/* MODAL: FOTO DE DEVOLUÇÃO (ENTREGAR) */}
+      {showDevolutionModal && selectedIntakeForDevolution && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
+          <div className="bg-white w-full max-w-xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 space-y-0 text-slate-900">
+            <div className="bg-slate-900 text-white p-5 sm:p-6 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-600/20 rounded-xl border border-emerald-500/30 text-emerald-400">
+                  <CheckCircle className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">
+                    Devolução da Entrada #{selectedIntakeForDevolution.numEntrada}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {clients.find(
+                      (c) => c.id === selectedIntakeForDevolution.clientId,
+                    )?.name || "Cliente"}{" "}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDevolutionModal(false);
+                  setSelectedIntakeForDevolution(null);
+                }}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-5 sm:p-6 space-y-6">
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex gap-3 text-sm text-blue-800 leading-relaxed">
+                <ShieldCheck className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                <div>
+                  <p>
+                    Anexe a foto do documento ou protocolo de devolução assinado pelo cliente.
+                    <strong> Isso marcará todos os instrumentos desta guia como Entregue.</strong>
+                  </p>
+                </div>
+              </div>
+
+              {!selectedIntakeForDevolution.photoDevolution ? (
+                <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors">
+                  <Camera className="h-10 w-10 text-slate-400 mb-3" />
+                  <p className="text-sm font-semibold text-slate-700 mb-1">
+                    Anexar Foto de Devolução
+                  </p>
+                  <p className="text-xs text-slate-500 mb-4 max-w-xs">
+                    Tire uma foto ou selecione do seu dispositivo.
+                  </p>
+                  <label className="px-4 py-2 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-lg cursor-pointer shadow-sm transition-colors text-sm flex items-center space-x-2">
+                    {isUploadingDevolution ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Camera className="h-4 w-4" />
+                    )}
+                    <span>
+                      {isUploadingDevolution
+                        ? "Processando..."
+                        : "Selecionar Foto"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleUploadDevolutionPhoto}
+                      className="hidden"
+                      disabled={isUploadingDevolution}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center h-64">
+                  <img
+                    src={selectedIntakeForDevolution.photoDevolution}
+                    alt="Devolução"
+                    className="max-h-full max-w-full object-contain"
+                  />
+                  <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
+                    <a
+                      href={selectedIntakeForDevolution.photoDevolution}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 bg-white text-slate-900 rounded-lg font-bold text-xs flex items-center space-x-1 hover:bg-slate-100 shadow"
+                    >
+                      <Eye className="h-4 w-4" />
+                      <span>Ampliar</span>
+                    </a>
+                    <button
+                      onClick={handleDeleteDevolutionPhoto}
+                      className="p-2 bg-rose-500 text-white rounded-lg font-bold text-xs flex items-center space-x-1 hover:bg-rose-600 shadow"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span>Excluir</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+\n      {/* MODAL: FOTOS DA ENTRADA DE MATERIAL */}
       {showPhotosModal && selectedIntakeForPhotos && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
           <div className="bg-white w-full max-w-3xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 space-y-0 text-slate-900">

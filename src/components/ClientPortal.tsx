@@ -32,6 +32,8 @@ import {
 import { Client, Instrument, CalibrationReport } from '../types';
 import { PrivacyPolicyModal } from './LGPDPrivacy';
 import { getReportAuthKey } from '../utils/authKey';
+import { syncClientIntakes, SavedIntake } from '../lib/firebase';
+
 
 const formatDateBR = (dateStr: string | undefined): string => {
   if (!dateStr) return '—';
@@ -68,19 +70,45 @@ interface ClientPortalProps {
 }
 
 export default function ClientPortal({ client, instruments, reports, customLogo, onLogout }: ClientPortalProps) {
+  const [clientIntakes, setClientIntakes] = useState<SavedIntake[]>([]);
+  
+  useEffect(() => {
+    if (client?.id) {
+      const unsub = syncClientIntakes(client.id, (list) => {
+        setClientIntakes(list);
+      });
+      return () => unsub.then(fn => fn());
+    }
+  }, [client?.id]);
+
   const getClientStatus = (inst: Instrument, allInsts: Instrument[]) => {
-    if (inst.status === 'Disponível para Retirada') {
-      if (!inst.numeroDaEntrada) return 'Disponível para Retirada';
+    if (inst.status === 'Disponível para Retirada' || inst.status === 'Entregue') {
+      if (!inst.numeroDaEntrada) return inst.status;
       
-      const intakeInstruments = allInsts.filter(i => i.numeroDaEntrada === inst.numeroDaEntrada);
-      const allReady = intakeInstruments.every(i => 
+      const numEntrada = inst.numeroDaEntrada.trim().toLowerCase();
+      const intake = clientIntakes.find(i => (i.numEntrada || '').trim().toLowerCase() === numEntrada);
+      
+      let expectedCount = 0;
+      if (intake && intake.rows) {
+         expectedCount = intake.rows.reduce((sum, r) => sum + (Number(r.quant) || 0), 0);
+      }
+      
+      const intakeInstruments = allInsts.filter(i => (i.numeroDaEntrada || '').trim().toLowerCase() === numEntrada);
+      const readyCount = intakeInstruments.filter(i => 
+        i.status === 'Disponível para Retirada' || 
+        i.status === 'Entregue' || 
+        i.status === 'Não Conforme'
+      ).length;
+      
+      // Se não sabemos a quantidade esperada (sem intake salvo), baseamos apenas no que está lançado.
+      const allReady = expectedCount > 0 ? (readyCount >= expectedCount) : intakeInstruments.every(i => 
         i.status === 'Disponível para Retirada' || 
         i.status === 'Entregue' || 
         i.status === 'Não Conforme'
       );
       
       if (!allReady) {
-        return 'Aguardando Calibração';
+        return inst.status === 'Entregue' ? 'Entregue' : 'Aguardando Calibração'; // se já foi entregue, mantem.
       }
     }
     return inst.status;
