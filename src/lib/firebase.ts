@@ -1681,13 +1681,11 @@ export async function resetIndividualCollection(type: string): Promise<void> {
 export async function syncPayslips(callback: (payslips: Payslip[]) => void) {
   const cached = getLocalCache<Payslip[]>('payslips', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'payslips'), limit(25));
+  const q = query(collection(db, 'payslips'));
   return onSnapshot(q, (snapshot) => {
-    if (!snapshot.empty) {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
-      setLocalCache('payslips', list);
-      callback(list);
-    }
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
+    setLocalCache('payslips', list);
+    callback(list);
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<Payslip[]>('payslips', []));

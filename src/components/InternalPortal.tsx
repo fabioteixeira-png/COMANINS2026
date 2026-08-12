@@ -16239,7 +16239,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {payslips.map((p) => (
+                          {[...payslips]
+                            .sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""))
+                            .map((p) => (
                             <tr
                               key={p.id}
                               className="hover:bg-slate-50 transition-colors"

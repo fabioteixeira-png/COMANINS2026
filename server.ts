@@ -930,24 +930,38 @@ app.post("/api/generate-rnc", async (req, res) => {
   }
 
   try {
-    const prompt = `Você é um Engenheiro Metrologista Sênior do laboratório COMANINS.
-Gere uma Análise Técnica e Recomendação de Não Conformidade técnica e profissional para inclusão em um Relatório de Não Conformidade (RNC).
+    const prompt = `Você é um Engenheiro Metrologista Sênior e Especialista em Qualidade (ABNT NBR ISO/IEC 17025) do laboratório COMANINS.
+Sua tarefa é gerar uma Análise Técnica e Recomendação de Não Conformidade (RNC) extremamente detalhada, técnica e embasada para ser apresentada aos clientes corporativos/industriais.
 
-Dados do Instrumento:
+Dados do Instrumento Submetido à Análise:
 - TAG: ${instrumentTag || 'N/A'}
 - Descrição: ${instrumentDescription || 'N/A'}
 - COMA/Certificado: ${coma || 'N/A'}
 - Cliente: ${clientName || 'N/A'}
-- Faixa de Medição: ${range || 'N/A'}
-- Técnico Responsável: ${technicianName || 'N/A'}
-- Motivo da Não Conformidade/Falha informado: "${reason || 'Falha na calibração'}"
+- Faixa de Medição/Capacidade: ${range || 'N/A'}
+- Técnico/Metrologista Responsável: ${technicianName || 'N/A'}
+- Defeito ou Motivo apontado no laboratório: "${reason || 'Falha na calibração'}"
 
-Por favor, forneça um texto técnico bem estruturado em 3 seções:
-1. DIAGNÓSTICO E DESCRIÇÃO TÉCNICA DA FALHA
-2. AVALIAÇÃO DO IMPACTO METROLÓGICO
-3. RECOMENDAÇÕES E AÇÕES CORRETIVAS SUGERIDAS (Manutenção, Recalibração ou Descarte).
+DIRETRIZES DE GERAÇÃO:
+- Utilize terminologia técnica avançada de metrologia, calibração e instrumentação (ex: histerese, repetitividade, erro fiduciário, incerteza de medição, desvio, tolerância, VVC).
+- O relatório deve transmitir alta credibilidade técnica, embasamento normativo e rigor científico.
+- O texto não deve ser genérico. Aprofunde-se na provável mecânica, eletrônica ou física do erro apontado ("${reason}").
 
-Sua resposta deve ser em português do Brasil, altamente profissional, objetiva e clara.`;
+Forneça a análise obrigatoriamente estruturada nas seguintes 4 seções detalhadas:
+
+1. DIAGNÓSTICO METROLÓGICO E DESCRIÇÃO TÉCNICA DA ANOMALIA
+(Explique tecnicamente o que o defeito apontado significa na prática para a física ou eletrônica do instrumento. Detalhe como essa falha ocorre e quais os mecanismos internos ou externos que podem ter causado este desvio ou quebra de conformidade).
+
+2. AVALIAÇÃO DE IMPACTO NO PROCESSO E RISCO DE QUALIDADE
+(Explique detalhadamente as consequências do uso deste instrumento no estado atual. Como a falha afeta a incerteza da medição, a rastreabilidade e quais os riscos para o processo produtivo ou controle de qualidade do cliente).
+
+3. FUNDAMENTAÇÃO NORMATIVA E GESTÃO DE QUALIDADE (ISO/IEC 17025)
+(Mencione o impacto na garantia de resultados válidos, enfatizando a justificativa técnica para a reprovação do item ensaiado e a suspensão imediata de seu uso para proteger a conformidade do cliente).
+
+4. AÇÕES CORRETIVAS E RECOMENDAÇÕES DIRETAS
+(Liste recomendações rigorosas: indique se é cabível manutenção corretiva, ajuste e posterior recalibração, ou se a melhor conduta técnica e econômica é o descarte e substituição do equipamento).
+
+Sua resposta deve ser entregue em texto contínuo bem formatado, utilizando jargão técnico adequado, linguagem corporativa formal e em Português do Brasil. O resultado final será impresso no certificado oficial do cliente.`;
 
     const response = await callGeminiWithRetry(() =>
       gemini.models.generateContent({
