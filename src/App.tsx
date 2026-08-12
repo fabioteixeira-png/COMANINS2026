@@ -285,8 +285,13 @@ export default function App() {
         return acc;
       }, {} as any);
       await updatePortalUserDoc(id, cleanUpdates);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating internal user in Firestore:', err);
+      if (err.message && err.message.includes("exceeds the maximum allowed size")) {
+         alert("⚠️ ERRO: ARMAZENAMENTO EXCEDIDO!\n\nAs alterações não foram salvas porque o tamanho total dos dados (incluindo imagens e PDFs anexados) ultrapassou o limite do banco de dados (1MB). Apague alguns anexos antes de salvar.");
+      } else {
+         alert("⚠️ Erro ao salvar alterações: " + err.message);
+      }
     }
   };
 

@@ -7,7 +7,7 @@ import {
   AlertCircle, ChevronRight, User, AlertOctagon, Check, Camera, Upload,
   Paperclip, Download, X, Image, Maximize, Minimize
 } from 'lucide-react';
-import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc, deleteEmployeeTrainingDoc } from '../lib/firebase';
+import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 
@@ -58,8 +58,10 @@ export default function EmployeeManagement({
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<PortalUser | null>(null);
   const [activeFormTab, setActiveFormTab] = useState<number>(1); // 1 to 7
-
+  
   // Document attachment local state
+  const [userDocuments, setUserDocuments] = useState<EmployeeDocument[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [newDocName, setNewDocName] = useState('');
   const [newDocType, setNewDocType] = useState('RG / CPF');
   const [newDocFile, setNewDocFile] = useState<File | null>(null);
@@ -579,10 +581,16 @@ export default function EmployeeManagement({
   };
 
   // Open Edit Modal
-  const handleOpenEdit = (user: PortalUser) => {
+  const handleOpenEdit = async (user: PortalUser) => {
     setSelectedUser(user);
     setFormData({ ...user });
     setActiveFormTab(1);
+    
+    setIsLoadingDocs(true);
+    const docs = await getEmployeeDocuments(user.id);
+    setUserDocuments(docs);
+    setIsLoadingDocs(false);
+    
     setShowEditModal(true);
   };
 
@@ -2694,7 +2702,12 @@ export default function EmployeeManagement({
                         <div className="flex justify-end">
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
+                              if (!selectedUser) {
+                                alert('Você precisa salvar o colaborador antes de anexar documentos. Crie o cadastro primeiro e depois edite para adicionar os arquivos.');
+                                return;
+                              }
+
                               if (!newDocName.trim()) {
                                 alert('Por favor, informe uma descrição/nome para o documento.');
                                 return;
@@ -2703,31 +2716,40 @@ export default function EmployeeManagement({
                                 alert('Por favor, selecione um arquivo.');
                                 return;
                               }
-                              if (newDocFile.size > 800 * 1024) {
-                                alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo selecionado ultrapassa o limite de 800KB e não será salvo. Por favor, escolha um arquivo menor.');
-                                return;
+                              
+                              let fileUrl = "";
+                              
+                              if (newDocFile.type.startsWith('image/')) {
+                                fileUrl = await compressImageToWebResolution(newDocFile, 1200, 1200, 0.7);
+                              } else {
+                                if (newDocFile.size > 1000 * 1024) {
+                                  alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo selecionado ultrapassa o limite de 1MB por documento. Por favor, escolha um arquivo menor.');
+                                  return;
+                                }
+                                fileUrl = await new Promise((resolve) => {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => resolve(reader.result as string);
+                                  reader.readAsDataURL(newDocFile);
+                                });
                               }
 
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                const fileUrl = reader.result as string;
+                              try {
                                 const newDoc = {
-                                  id: `doc_${Date.now()}`,
+                                  userId: selectedUser.id,
                                   name: `${newDocType} - ${newDocName.trim()}`,
                                   type: newDocType,
                                   url: fileUrl,
                                   date: new Date().toLocaleDateString('pt-BR')
                                 };
-
-                                setFormData({
-                                  ...formData,
-                                  attachedDocs: [...(formData.attachedDocs || []), newDoc]
-                                });
-
+                                
+                                const savedDoc = await addEmployeeDocument(newDoc);
+                                setUserDocuments([...userDocuments, savedDoc]);
+                                
                                 setNewDocName('');
                                 setNewDocFile(null);
-                              };
-                              reader.readAsDataURL(newDocFile);
+                              } catch (err) {
+                                alert("Erro ao salvar documento: " + err);
+                              }
                             }}
                             className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center space-x-1.5 shadow-sm"
                           >
@@ -2739,13 +2761,17 @@ export default function EmployeeManagement({
 
                       {/* Lista de Documentos Anexados */}
                       <div className="space-y-2">
-                        {(formData.attachedDocs || []).length === 0 ? (
+                        {isLoadingDocs ? (
+                          <div className="flex justify-center p-4">
+                             <span className="text-slate-400 text-xs">Carregando documentos...</span>
+                          </div>
+                        ) : userDocuments.length === 0 ? (
                           <p className="text-slate-400 italic text-[11px] text-center py-4 border border-dashed border-slate-200 rounded-xl bg-white">
                             Nenhum documento anexado ainda a este colaborador.
                           </p>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {(formData.attachedDocs || []).map((docItem, index) => (
+                            {userDocuments.map((docItem, index) => (
                               <div
                                 key={docItem.id || index}
                                 className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between hover:border-royal-blue/40 transition-colors shadow-sm"
@@ -2774,11 +2800,15 @@ export default function EmployeeManagement({
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setFormData({
-                                        ...formData,
-                                        attachedDocs: (formData.attachedDocs || []).filter((_, i) => i !== index)
-                                      });
+                                    onClick={async () => {
+                                      if (confirm('Deseja realmente excluir este anexo definitivamente?')) {
+                                        try {
+                                          await deleteEmployeeDocument(docItem.id);
+                                          setUserDocuments(userDocuments.filter(d => d.id !== docItem.id));
+                                        } catch (err) {
+                                          alert("Erro ao excluir: " + err);
+                                        }
+                                      }
                                     }}
                                     className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                                     title="Excluir Anexo"
@@ -3167,14 +3197,16 @@ export default function EmployeeManagement({
                 <h4 className="font-bold text-slate-900 uppercase border-b border-slate-300 pb-1 text-xs text-royal-blue flex items-center justify-between">
                   <span>7. DOCUMENTOS E ANEXOS DIVERSOS DO COLABORADOR</span>
                   <span className="font-normal normal-case text-[10px] text-slate-500">
-                    {(selectedUser.attachedDocs || []).length} anexo(s)
+                    {userDocuments.length} anexo(s)
                   </span>
                 </h4>
-                {(selectedUser.attachedDocs || []).length === 0 ? (
+                {isLoadingDocs ? (
+                  <span className="text-slate-500 italic text-[11px]">Carregando documentos...</span>
+                ) : userDocuments.length === 0 ? (
                   <p className="text-slate-500 italic text-[11px]">Nenhum documento anexado a este colaborador.</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    {(selectedUser.attachedDocs || []).map((docItem, index) => (
+                    {userDocuments.map((docItem, index) => (
                       <div key={docItem.id || index} className="p-2 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-[11px]">
                         <div className="flex items-center space-x-2 truncate pr-2">
                           <FileText className="h-4 w-4 text-royal-blue shrink-0" />

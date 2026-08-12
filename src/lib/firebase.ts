@@ -357,6 +357,43 @@ export interface PortalUser {
   adminNotes?: string;
 }
 
+
+export interface EmployeeDocument {
+  id: string;
+  userId: string;
+  name: string;
+  type: string;
+  url: string;
+  date: string;
+}
+
+export async function addEmployeeDocument(docData: Omit<EmployeeDocument, 'id'>): Promise<EmployeeDocument> {
+  if (!db) throw new Error("Firebase não inicializado.");
+  const docRef = await addDoc(collection(db, 'employeeDocuments'), docData);
+  return { id: docRef.id, ...docData };
+}
+
+export async function getEmployeeDocuments(userId: string): Promise<EmployeeDocument[]> {
+  if (!db) return [];
+  try {
+    const q = query(collection(db, 'employeeDocuments'), where('userId', '==', userId));
+    const snapshot = await getDocs(q);
+    const docs: EmployeeDocument[] = [];
+    snapshot.forEach(doc => {
+      docs.push({ id: doc.id, ...doc.data() } as EmployeeDocument);
+    });
+    return docs;
+  } catch (error) {
+    console.error("Erro ao buscar documentos do colaborador:", error);
+    return [];
+  }
+}
+
+export async function deleteEmployeeDocument(docId: string): Promise<void> {
+  if (!db) throw new Error("Firebase não inicializado.");
+  await deleteDoc(doc(db, 'employeeDocuments', docId));
+}
+
 export const INITIAL_PORTAL_USERS: PortalUser[] = [
   {
     id: "user_felype",
