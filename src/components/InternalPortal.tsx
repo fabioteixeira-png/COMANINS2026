@@ -5325,7 +5325,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </button>
         </nav>
       </aside>
-      <div className="flex-1 p-4 md:p-8 h-screen overflow-y-auto w-full">
+      <div className="flex-1 min-w-0 p-3 sm:p-6 md:p-8 h-screen overflow-y-auto w-full">
         {/* Top Navigation Header with Notification Bell */}
         <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
@@ -5339,7 +5339,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
               Portal Interno COMANINS
             </span>
-            <h2 className="text-xl font-display font-extrabold text-slate-900 capitalize">
+            <h2 className="text-lg sm:text-xl font-display font-extrabold text-slate-900 capitalize">
               {activeTab === "consumo_firebase"
                 ? "Controle de Consumo Firebase"
                 : activeTab === "dashboard"
@@ -5385,7 +5385,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             {/* CARDS QUANTITATIVOS DA OPERAÇÃO & METROLOGIA (VISÍVEL PARA TODOS OS USUÁRIOS) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {/* Card 1: Guias de Entrada */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-indigo-600 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-indigo-600 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
                     <FileText className="w-5 h-5" />
@@ -5394,7 +5394,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Guias de Entrada
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-indigo-600 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-indigo-600 leading-none">
                       {savedIntakes.length}
                     </span>
                   </div>
@@ -5402,7 +5402,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 2: Aguardando Cadastro */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-royal-blue relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-royal-blue relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-royal-blue shrink-0">
                     <Layers className="w-5 h-5" />
@@ -5411,7 +5411,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Aguardando Cadastro
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-royal-blue leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-royal-blue leading-none">
                       {countPending}
                     </span>
                   </div>
@@ -5419,7 +5419,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 3: Aguardando Calibração */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-slate-500 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-slate-500 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-600 shrink-0">
                     <Clock className="w-5 h-5" />
@@ -5428,7 +5428,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Aguardando Calibração
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-slate-600 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-slate-600 leading-none">
                       {countAguardandoCalibracao}
                     </span>
                   </div>
@@ -5436,7 +5436,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 4: Em Calibração */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-amber-500 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-amber-500 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
                     <Activity className="w-5 h-5" />
@@ -5445,7 +5445,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Em Calibração
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-amber-600 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-amber-600 leading-none">
                       {countEmCalibracao}
                     </span>
                   </div>
@@ -5453,7 +5453,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 5: Calibrados */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-emerald-600 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-emerald-600 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
                     <ClipboardCheck className="w-5 h-5" />
@@ -5462,7 +5462,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Calibrados
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-emerald-600 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-emerald-600 leading-none">
                       {countCalibrado}
                     </span>
                   </div>
@@ -5470,7 +5470,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 6: Aguardando Emissão Certificado */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-teal-600 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-teal-600 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 shrink-0">
                     <Award className="w-5 h-5" />
@@ -5479,7 +5479,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Aguardando Certificado
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-teal-600 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-teal-600 leading-none">
                       {countAguardandoCertificado}
                     </span>
                   </div>
@@ -5487,7 +5487,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 7: Disponível para Retirada */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-indigo-500 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-indigo-500 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-700 shrink-0">
                     <Package className="w-5 h-5" />
@@ -5496,7 +5496,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Disponível p/ Retirada
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-indigo-700 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-indigo-700 leading-none">
                       {countDisponivelRetirada}
                     </span>
                   </div>
@@ -5504,7 +5504,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 8: Não Conforme (RNC) */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-rose-600 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-rose-600 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600 shrink-0">
                     <AlertTriangle className="w-5 h-5" />
@@ -5513,7 +5513,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Não Conforme (RNC)
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-rose-600 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-rose-600 leading-none">
                       {countRnc}
                     </span>
                   </div>
@@ -5521,7 +5521,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
 
               {/* Card 9: Entregue */}
-              <div className="bg-white p-5 rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-slate-800 relative overflow-hidden">
+              <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col items-start shadow-xs border border-slate-200 border-t-4 border-t-slate-800 relative overflow-hidden">
                 <div className="flex items-center gap-3 z-10 w-full">
                   <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-800 shrink-0">
                     <CheckCircle className="w-5 h-5" />
@@ -5530,7 +5530,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">
                       Entregues / Devolvidos
                     </span>
-                    <span className="text-2xl font-display font-extrabold text-slate-800 leading-none">
+                    <span className="text-xl sm:text-2xl font-display font-extrabold text-slate-800 leading-none">
                       {countEntregue}
                     </span>
                   </div>
@@ -5964,7 +5964,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900">
                   Base de Clientes
                 </h2>
                 <p className="text-sm text-slate-600">
@@ -6136,7 +6136,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             )}
 
             {/* Client List */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden shadow-lg">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-slate-200 flex items-center space-x-2 bg-slate-50">
                 <Search className="h-4 w-4 text-slate-500" />
                 <input
@@ -6152,12 +6152,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                      <th className="p-3">Nome / Razão Social</th>
-                      <th className="p-3">CNPJ / CPF</th>
-                      <th className="p-3">E-mail</th>
-                      <th className="p-3">Telefone</th>
-                      <th className="p-3">Endereço Completo</th>
-                      <th className="p-3 text-right">Ações</th>
+                      <th className="p-3 whitespace-nowrap">Nome / Razão Social</th>
+                      <th className="p-3 whitespace-nowrap">CNPJ / CPF</th>
+                      <th className="p-3 whitespace-nowrap">E-mail</th>
+                      <th className="p-3 whitespace-nowrap">Telefone</th>
+                      <th className="p-3 whitespace-nowrap">Endereço Completo</th>
+                      <th className="p-3 whitespace-nowrap text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -6251,7 +6251,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900">
                   Inventário de Instrumentos
                 </h2>
                 <p className="text-sm text-slate-600">
@@ -6923,13 +6923,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-sans">
-                      <th className="p-3">ID / Certificado</th>
-                      <th className="p-3">Descrição</th>
-                      <th className="p-3">Cliente</th>
-                      <th className="p-3">Range</th>
-                      <th className="p-3">Tag Cliente</th>
-                      <th className="p-3">Status</th>
-                      <th className="p-3 text-right">Ações</th>
+                      <th className="p-3 whitespace-nowrap">ID / Certificado</th>
+                      <th className="p-3 whitespace-nowrap">Descrição</th>
+                      <th className="p-3 whitespace-nowrap">Cliente</th>
+                      <th className="p-3 whitespace-nowrap">Range</th>
+                      <th className="p-3 whitespace-nowrap">Tag Cliente</th>
+                      <th className="p-3 whitespace-nowrap">Status</th>
+                      <th className="p-3 whitespace-nowrap text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -7431,14 +7431,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             {/* Top Header Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-950">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
                   Entrada de Material
                 </h2>
               </div>
 
               <button
                 onClick={handleOpenNewIntakeModal}
-                className="px-5 py-3 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center space-x-2 text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer"
+                className="px-4 py-2 sm:px-5 sm:py-3 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center space-x-2 text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
                 <span>Nova Entrada</span>
@@ -7914,22 +7914,22 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <table className="w-full text-left text-[11px] border-collapse bg-white">
                           <thead>
                             <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                              <th className="p-3 font-bold uppercase tracking-wider w-16 text-center">
+                              <th className="p-3 whitespace-nowrap font-bold uppercase tracking-wider w-16 text-center">
                                 Qtde
                               </th>
-                              <th className="p-3 font-bold uppercase tracking-wider">
+                              <th className="p-3 whitespace-nowrap font-bold uppercase tracking-wider">
                                 Descrição do Equipamento
                               </th>
-                              <th className="p-3 font-bold uppercase tracking-wider w-32">
+                              <th className="p-3 whitespace-nowrap font-bold uppercase tracking-wider w-32">
                                 Escala/Range
                               </th>
-                              <th className="p-3 font-bold uppercase tracking-wider w-32">
+                              <th className="p-3 whitespace-nowrap font-bold uppercase tracking-wider w-32">
                                 Unidade
                               </th>
-                              <th className="p-3 font-bold uppercase tracking-wider w-48">
+                              <th className="p-3 whitespace-nowrap font-bold uppercase tracking-wider w-48">
                                 Observações / TAG
                               </th>
-                              <th className="p-3 font-bold uppercase tracking-wider w-12 text-center">
+                              <th className="p-3 whitespace-nowrap font-bold uppercase tracking-wider w-12 text-center">
                                 Ações
                               </th>
                             </tr>
@@ -8213,11 +8213,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       <table className="w-full text-left text-xs border-collapse font-mono">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-sans uppercase font-bold text-[10px]">
-                            <th className="p-3">Nº Ficha</th>
-                            <th className="p-3">Cliente</th>
-                            <th className="p-3">Entrada</th>
-                            <th className="p-3">Contato</th>
-                            <th className="p-3 text-center">Ação</th>
+                            <th className="p-3 whitespace-nowrap">Nº Ficha</th>
+                            <th className="p-3 whitespace-nowrap">Cliente</th>
+                            <th className="p-3 whitespace-nowrap">Entrada</th>
+                            <th className="p-3 whitespace-nowrap">Contato</th>
+                            <th className="p-3 whitespace-nowrap text-center">Ação</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -8566,7 +8566,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {activeTab === "etiquetas" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-display font-extrabold text-slate-950">
+              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
                 Gerador de Etiquetas de Calibração
               </h2>
               <p className="text-sm text-slate-600">
@@ -8729,7 +8729,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <ArrowRight className="h-5 w-5 rotate-180" />
               </button>
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900">
                   Registro de Calibração
                 </h2>
                 <p className="text-sm text-slate-600">
@@ -10328,7 +10328,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <ShieldCheck className="h-7 w-7" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-display font-extrabold text-slate-950 flex items-center gap-2">
+                    <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 flex items-center gap-2">
                       <span>Auditoria e Controle de Calibração</span>
                       <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
                         Rastreabilidade em Tempo Real
@@ -10389,7 +10389,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
               {/* Stat Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 print:grid-cols-4">
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-slate-500">
                     <span className="text-xs font-bold uppercase tracking-wider">
                       Total Auditado
@@ -10404,7 +10404,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   </p>
                 </div>
 
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-slate-500">
                     <span className="text-xs font-bold uppercase tracking-wider">
                       Tempo Médio
@@ -10429,7 +10429,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   </p>
                 </div>
 
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-slate-500">
                     <span className="text-xs font-bold uppercase tracking-wider">
                       Maior Duração
@@ -10452,7 +10452,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   </p>
                 </div>
 
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-slate-500">
                     <span className="text-xs font-bold uppercase tracking-wider">
                       Técnico Principal
@@ -10665,13 +10665,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       <table className="w-full text-left text-xs text-slate-700">
                         <thead className="bg-slate-100/80 text-slate-800 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                           <tr>
-                            <th className="p-3.5">Certificado</th>
-                            <th className="p-3.5">TAG / Instrumento</th>
-                            <th className="p-3.5">Técnico Calibrador</th>
-                            <th className="p-3.5">Hora Início</th>
-                            <th className="p-3.5">Hora Fim</th>
-                            <th className="p-3.5">Tempo de Execução</th>
-                            <th className="p-3.5 text-right print:hidden">
+                            <th className="p-3 whitespace-nowrap.5">Certificado</th>
+                            <th className="p-3 whitespace-nowrap.5">TAG / Instrumento</th>
+                            <th className="p-3 whitespace-nowrap.5">Técnico Calibrador</th>
+                            <th className="p-3 whitespace-nowrap.5">Hora Início</th>
+                            <th className="p-3 whitespace-nowrap.5">Hora Fim</th>
+                            <th className="p-3 whitespace-nowrap.5">Tempo de Execução</th>
+                            <th className="p-3 whitespace-nowrap.5 text-right print:hidden">
                               Ações
                             </th>
                           </tr>
@@ -10797,7 +10797,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <ShieldAlert className="h-7 w-7" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-display font-extrabold text-slate-950 flex items-center gap-2">
+                    <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 flex items-center gap-2">
                       <span>Auditoria de Acesso ao Sistema</span>
                       <span className="text-xs bg-rose-100 text-rose-800 font-bold px-2.5 py-0.5 rounded-full border border-rose-200">
                         Acessos Restritos (Fora do Horário)
@@ -10833,11 +10833,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <table className="w-full text-left text-sm text-slate-600">
                       <thead className="bg-slate-50 text-slate-700 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
                         <tr>
-                          <th className="p-3.5">Data e Hora</th>
-                          <th className="p-3.5">Usuário (Solicitante)</th>
-                          <th className="p-3.5">Ação</th>
-                          <th className="p-3.5">Detalhes / Justificativa</th>
-                          <th className="p-3.5">Autorizado Por</th>
+                          <th className="p-3 whitespace-nowrap.5">Data e Hora</th>
+                          <th className="p-3 whitespace-nowrap.5">Usuário (Solicitante)</th>
+                          <th className="p-3 whitespace-nowrap.5">Ação</th>
+                          <th className="p-3 whitespace-nowrap.5">Detalhes / Justificativa</th>
+                          <th className="p-3 whitespace-nowrap.5">Autorizado Por</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -10866,7 +10866,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6 print:space-y-0">
             <div className="print:hidden flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-950">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
                   Emissão de Certificados
                 </h2>
                 <p className="text-sm text-slate-600">
@@ -11576,7 +11576,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {activeTab === "quantitativo_dia" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-display font-extrabold text-slate-950">
+              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
                 Quantitativo de Calibrações por Dia
               </h2>
               <p className="text-sm text-slate-600">
@@ -11697,7 +11697,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           activeTab === "cadastro_usuarios") && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-display font-extrabold text-slate-950 flex items-center space-x-2">
+              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 flex items-center space-x-2">
                 <Settings className="h-7 w-7 text-royal-blue" />
                 <span>Configurações do Sistema e Portal</span>
               </h2>
@@ -13162,14 +13162,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <table className="w-full text-left text-xs border-collapse bg-white">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 uppercase text-[10px]">
-                          <th className="p-3">Identificação</th>
-                          <th className="p-3">Nº Certificado</th>
-                          <th className="p-3">Tipo do Instrumento</th>
-                          <th className="p-3">Faixa (Range)</th>
-                          <th className="p-3">Validade</th>
-                          <th className="p-3">Laboratório RBC</th>
-                          <th className="p-3 text-center">Status</th>
-                          <th className="p-3 text-right">Ações</th>
+                          <th className="p-3 whitespace-nowrap">Identificação</th>
+                          <th className="p-3 whitespace-nowrap">Nº Certificado</th>
+                          <th className="p-3 whitespace-nowrap">Tipo do Instrumento</th>
+                          <th className="p-3 whitespace-nowrap">Faixa (Range)</th>
+                          <th className="p-3 whitespace-nowrap">Validade</th>
+                          <th className="p-3 whitespace-nowrap">Laboratório RBC</th>
+                          <th className="p-3 whitespace-nowrap text-center">Status</th>
+                          <th className="p-3 whitespace-nowrap text-right">Ações</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -13753,7 +13753,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
                     <button
                       onClick={handleGenerateJsonBackup}
-                      className="px-5 py-3 bg-royal-blue hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs flex items-center space-x-2 shadow-md transition-all cursor-pointer whitespace-nowrap"
+                      className="px-4 py-2 sm:px-5 sm:py-3 bg-royal-blue hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs flex items-center space-x-2 shadow-md transition-all cursor-pointer whitespace-nowrap"
                     >
                       <Download className="h-4 w-4" />
                       <span>Gerar & Baixar Backup Completo (.json)</span>
@@ -14588,7 +14588,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
                   <CheckSquare className="h-7 w-7 text-royal-blue" />
                   <span>Controle de Treinamentos</span>
                 </h2>
@@ -14942,7 +14942,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
                   <Layers className="h-7 w-7 text-royal-blue" />
                   <span>Controle de Estoque Avançado</span>
                 </h2>
@@ -15188,7 +15188,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {activeTab === "aniversarios" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
+              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
                 <Calendar className="h-7 w-7 text-royal-blue" />
                 <span>Aniversariantes da Equipe</span>
               </h2>
@@ -15401,7 +15401,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
                   <Activity className="h-7 w-7 text-royal-blue" />
                   <span>Controle de Exames Médicos</span>
                 </h2>
@@ -15467,22 +15467,22 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                        <th className="p-3 font-semibold border-b border-slate-200">
+                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
                           Colaborador
                         </th>
-                        <th className="p-3 font-semibold border-b border-slate-200">
+                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
                           Tipo de Exame
                         </th>
-                        <th className="p-3 font-semibold border-b border-slate-200">
+                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
                           Data do Exame
                         </th>
-                        <th className="p-3 font-semibold border-b border-slate-200">
+                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
                           Vencimento
                         </th>
-                        <th className="p-3 font-semibold border-b border-slate-200 text-center">
+                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200 text-center">
                           Status
                         </th>
-                        <th className="p-3 font-semibold border-b border-slate-200 text-right">
+                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200 text-right">
                           Ações
                         </th>
                       </tr>
@@ -15977,7 +15977,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
                   <FileText className="h-7 w-7 text-royal-blue" />
                   <span>Portal de Demonstrativos (RH)</span>
                 </h2>
@@ -16386,7 +16386,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
                   <Bot className="h-7 w-7 text-blue-400" />
                   <span>Metrology Copilot AI</span>
                 </h2>
@@ -16510,7 +16510,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {activeTab === "importar_dados" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-display font-extrabold text-slate-900 flex items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center gap-2">
                 <Database className="h-7 w-7 text-emerald-400" />
                 <span>Importação de Dados Metrológicos</span>
               </h2>
