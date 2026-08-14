@@ -7,7 +7,9 @@ import {
   AlertCircle, ChevronRight, User, AlertOctagon, Check, Camera, Upload,
   Paperclip, Download, X, Image, Maximize, Minimize
 } from 'lucide-react';
-import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument } from '../lib/firebase';
+import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc,
+  addEmployeeAsoDoc,
+  deleteEmployeeAsoDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 
@@ -15,6 +17,7 @@ interface EmployeeManagementProps {
   currentUser: { name: string; username: string; role: string; register: string; permissionLevel?: string } | null;
   internalUsers: PortalUser[];
   employeeTrainings?: any[];
+  employeeAsos?: any[];
   trainings?: any[];
   dropdownOptions?: any;
   onAddInternalUser: (user: Omit<PortalUser, 'id'>) => void;
@@ -30,6 +33,7 @@ export default function EmployeeManagement({
   currentUser,
   internalUsers,
   employeeTrainings = [],
+  employeeAsos = [],
   trainings = [],
   dropdownOptions,
   onAddInternalUser,
@@ -64,7 +68,7 @@ export default function EmployeeManagement({
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [newDocName, setNewDocName] = useState('');
   const [newDocType, setNewDocType] = useState('RG / CPF');
-  const [newDocFile, setNewDocFile] = useState<File | null>(null);
+  const [newDocFiles, setNewDocFiles] = useState<File[]>([]);
 
   // ASO per contract local state
   const [newAsoContractName, setNewAsoContractName] = useState('');
@@ -356,7 +360,7 @@ export default function EmployeeManagement({
     }
   };
 
-  const handleRemoveAsoContract = (asoId: string) => {
+    const handleRemoveAsoContract = async (asoId: string) => {
     if (currentUser?.role !== 'Administrador') {
       alert("Apenas administradores podem excluir ASOs.");
       return;
@@ -364,18 +368,28 @@ export default function EmployeeManagement({
     const pwd = window.prompt("Digite sua senha de administrador para confirmar a exclusão deste ASO:");
     if (pwd === null) return;
     
-    const adminUser = internalUsers.find(u => u.username === currentUser.username);
+    const adminUser = internalUsers.find(u => u.username === currentUser?.username);
     if (!adminUser || adminUser.password !== pwd.trim()) {
       alert("Senha incorreta.");
       return;
     }
 
-    const updatedList = (formData.asoContracts || []).filter((item) => item.id !== asoId);
-    setFormData((prev) => ({
-      ...prev,
-      asoContracts: updatedList,
-      asoValidity: updatedList[0]?.validityDate || ''
-    }));
+    try {
+      if (asoId.startsWith('easo_')) {
+        await deleteEmployeeAsoDoc(asoId);
+      } else {
+        // Fallback for legacy ASOs stored in formData
+        const updatedList = (formData.asoContracts || []).filter((item: any) => item.id !== asoId);
+        setFormData((prev: any) => ({
+          ...prev,
+          asoContracts: updatedList,
+          asoValidity: updatedList[0]?.validityDate || ''
+        }));
+      }
+    } catch (err) {
+      console.error("Erro ao remover ASO:", err);
+      alert("Erro ao remover ASO.");
+    }
   };
 
   // EXPIRATION ALERTS ENGINE
@@ -1731,7 +1745,7 @@ export default function EmployeeManagement({
                           </div>
                         </div>
                         <span className="text-[11px] font-mono font-bold bg-royal-blue text-white px-2.5 py-1 rounded-full">
-                          {(formData.asoContracts || []).length} ASO(s) Registrado(s)
+                          {((employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username)).length + (formData.asoContracts || []).length)} ASO(s) Registrado(s)
                         </span>
                       </div>
 
@@ -1859,13 +1873,19 @@ export default function EmployeeManagement({
                       </div>
 
                       {/* LISTA DE ASOs CADASTRADOS POR CONTRATO */}
-                      {(formData.asoContracts || []).length > 0 && (
+                      {(() => {
+                        const asoRecords = [
+                          ...(formData.asoContracts || []),
+                          ...(employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username))
+                        ].filter((v,i,a) => a.findIndex(t=>(t.id === v.id))===i);
+                        
+                        return asoRecords.length > 0 && (
                         <div className="space-y-2">
                           <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
                             ASOs Ativos Cadastrados:
                           </h6>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {(formData.asoContracts || []).map((asoItem, idx) => {
+                            {asoRecords.map((asoItem, idx) => {
                               const valDate = asoItem.validityDate ? new Date(asoItem.validityDate) : null;
                               const today = new Date();
                               today.setHours(0,0,0,0);
@@ -1985,7 +2005,7 @@ export default function EmployeeManagement({
                             })}
                           </div>
                         </div>
-                      )}
+                      );})()}
                     </div>
 
                     {/* SEÇÃO ESPECIAL: TREINAMENTOS DE NR, CAPACITAÇÕES E CERTIFICAÇÕES */}
@@ -2670,23 +2690,27 @@ export default function EmployeeManagement({
                             <label className="block font-semibold mb-1 text-slate-700">Arquivo (PDF, Imagem, Word)</label>
                             <label className="cursor-pointer w-full bg-white border border-slate-300 rounded-lg p-2 flex items-center justify-between text-slate-600 hover:bg-slate-100 transition-colors">
                               <span className="truncate max-w-[180px] font-mono text-[11px]">
-                                {newDocFile ? newDocFile.name : 'Selecionar arquivo...'}
+                                {newDocFiles.length > 0 ? `${newDocFiles.length} arquivo(s) selecionado(s)` : 'Selecionar arquivo(s).../'}
                               </span>
                               <Upload className="h-4 w-4 text-royal-blue shrink-0 ml-1" />
                               <input
                                 type="file"
                                 accept=".pdf,image/*,.doc,.docx"
                                 className="hidden"
+                                multiple
                                 onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    if (file.size > 800 * 1024) {
-                                      alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo deve ter no máximo 800KB devido às limitações do sistema.\nPor favor, comprima o arquivo e tente novamente.');
-                                      return;
-                                    }
-                                    setNewDocFile(file);
-                                    if (!newDocName) {
-                                      setNewDocName(file.name.replace(/\.[^/.]+$/, ''));
+                                  const files = Array.from(e.target.files || []) as File[];
+                                  if (files.length > 0) {
+                                    const validFiles = files.filter(f => {
+                                      if (f.size > 1000 * 1024) {
+                                        alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo ' + f.name + ' ultrapassa 1MB e será ignorado.');
+                                        return false;
+                                      }
+                                      return true;
+                                    });
+                                    setNewDocFiles([...newDocFiles, ...validFiles]);
+                                    if (!newDocName && validFiles.length > 0) {
+                                      setNewDocName(validFiles[0].name.replace(/\.[^/.]+$/, ''));
                                     }
                                   }
                                 }}
@@ -2712,41 +2736,48 @@ export default function EmployeeManagement({
                                 alert('Por favor, informe uma descrição/nome para o documento.');
                                 return;
                               }
-                              if (!newDocFile) {
-                                alert('Por favor, selecione um arquivo.');
+                              if (newDocFiles.length === 0) {
+                                alert('Por favor, selecione pelo menos um arquivo.');
+                                return;
+                              }
+                              const empId = selectedUser?.id || formData.id || formData.username;
+                              if (!empId) {
+                                alert('Por favor, informe a Matrícula ou Nome de Usuário primeiro (aba 1 ou 7) ou salve o cadastro antes de anexar documentos.');
                                 return;
                               }
                               
-                              let fileUrl = "";
-                              
-                              if (newDocFile.type.startsWith('image/')) {
-                                fileUrl = await compressImageToWebResolution(newDocFile, 1200, 1200, 0.7);
-                              } else {
-                                if (newDocFile.size > 1000 * 1024) {
-                                  alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo selecionado ultrapassa o limite de 1MB por documento. Por favor, escolha um arquivo menor.');
-                                  return;
-                                }
-                                fileUrl = await new Promise((resolve) => {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => resolve(reader.result as string);
-                                  reader.readAsDataURL(newDocFile);
-                                });
-                              }
-
                               try {
-                                const newDoc = {
-                                  userId: selectedUser.id,
-                                  name: `${newDocType} - ${newDocName.trim()}`,
-                                  type: newDocType,
-                                  url: fileUrl,
-                                  date: new Date().toLocaleDateString('pt-BR')
-                                };
+                                const savedDocs = [];
+                                for (let i = 0; i < newDocFiles.length; i++) {
+                                  const f = newDocFiles[i];
+                                  let fileUrl = "";
+                                  if (f.type.startsWith('image/')) {
+                                    fileUrl = await compressImageToWebResolution(f, 1200, 1200, 0.7);
+                                  } else {
+                                    fileUrl = await new Promise((resolve) => {
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => resolve(reader.result as string);
+                                      reader.readAsDataURL(f);
+                                    });
+                                  }
+
+                                  const docName = newDocFiles.length > 1 ? `${newDocType} - ${newDocName.trim()} (${i+1})` : `${newDocType} - ${newDocName.trim()}`;
+                                  const newDoc = {
+                                    userId: empId,
+                                    name: docName,
+                                    type: newDocType,
+                                    url: fileUrl,
+                                    date: new Date().toLocaleDateString('pt-BR')
+                                  };
+                                  
+                                  const savedDoc = await addEmployeeDocument(newDoc);
+                                  savedDocs.push(savedDoc);
+                                }
                                 
-                                const savedDoc = await addEmployeeDocument(newDoc);
-                                setUserDocuments([...userDocuments, savedDoc]);
-                                
+                                setUserDocuments([...userDocuments, ...savedDocs]);
                                 setNewDocName('');
-                                setNewDocFile(null);
+                                setNewDocFiles([]);
+                                alert('Documentos anexados com sucesso!');
                               } catch (err) {
                                 alert("Erro ao salvar documento: " + err);
                               }
@@ -3120,7 +3151,13 @@ export default function EmployeeManagement({
                 })()}
 
                 {/* TABELA DE ASOs POR CONTRATO */}
-                {selectedUser.asoContracts && selectedUser.asoContracts.length > 0 && (
+                {(() => {
+                  const asoRecords = [
+                    ...(selectedUser.asoContracts || []),
+                    ...(employeeAsos || []).filter(a => a.employeeId === selectedUser?.id || a.employeeId === selectedUser?.username)
+                  ].filter((v,i,a) => a.findIndex(t=>(t.id === v.id))===i);
+                  
+                  return asoRecords.length > 0 && (
                   <div className="pt-2 border-t border-slate-200">
                     <span className="font-bold text-slate-800 text-[11px] block mb-1.5">
                       ASOs Específicos por Contrato / Unidade / Área:
@@ -3137,7 +3174,7 @@ export default function EmployeeManagement({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200">
-                          {selectedUser.asoContracts.map((aso, idx) => (
+                          {asoRecords.map((aso, idx) => (
                             <tr key={aso.id || idx}>
                               <td className="p-1.5 font-bold text-slate-900">{aso.contractName}</td>
                               <td className="p-1.5">{aso.unitArea}</td>
@@ -3156,7 +3193,7 @@ export default function EmployeeManagement({
                       </table>
                     </div>
                   </div>
-                )}
+                );})()}
               </div>
 
               {/* Section 5: Dados Bancários (Confidencial LGPD) */}

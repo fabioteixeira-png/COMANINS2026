@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+
 import { safeFetch } from "../utils/apiClient";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
@@ -30,6 +31,7 @@ import {
   updateTrainingDoc,
   deleteTrainingDoc,
   syncEmployeeTrainings,
+  syncEmployeeAsos,
   addEmployeeTrainingDoc,
   updateEmployeeTrainingDoc,
   deleteEmployeeTrainingDoc,
@@ -911,6 +913,7 @@ export default function InternalPortal({
   const [benchSuccessMessage, setBenchSuccessMessage] = useState<string>("");
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [employeeTrainings, setEmployeeTrainings] = useState<any[]>([]);
+  const [employeeAsos, setEmployeeAsos] = useState<any[]>([]);
   const [trainings, setTrainings] = useState<any[]>([]);
 
   const computedEmployeeTrainings = React.useMemo(() => {
@@ -1617,6 +1620,7 @@ export default function InternalPortal({
     unsubs.push(syncEmployeeBirthdays((list) => setEmployeeBirthdays(list)));
     unsubs.push(syncTrainings((list) => setTrainings(list)));
     unsubs.push(syncEmployeeTrainings((list) => setEmployeeTrainings(list)));
+    unsubs.push(syncEmployeeAsos((list) => setEmployeeAsos(list)));
     unsubs.push(syncMedicalExams((list) => setMedicalExams(list)));
     unsubs.push(syncPayslips((list) => setPayslips(list)));
     unsubs.push(syncExamTypes((list) => setExamTypesCatalog(list)));
@@ -14627,6 +14631,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               dropdownOptions={dropdownOptions}
               internalUsers={internalUsers}
               employeeTrainings={employeeTrainings}
+              employeeAsos={employeeAsos}
               trainings={trainings}
               onAddInternalUser={onAddInternalUser}
               onUpdateInternalUser={onUpdateInternalUser}

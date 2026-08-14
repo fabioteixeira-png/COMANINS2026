@@ -240,6 +240,11 @@ export interface AttachedDocument {
   date?: string;
 }
 
+export interface EmployeeAsoRecord extends AsoContractItem {
+  employeeId: string;
+  employeeName: string;
+}
+
 export interface AsoContractItem {
   id: string;
   contractName: string;
@@ -1265,6 +1270,35 @@ export async function updateTrainingDoc(id: string, data: Partial<Training>): Pr
 
 export async function deleteTrainingDoc(id: string): Promise<void> {
   await deleteDoc(doc(db, 'trainings', id));
+}
+
+// 8.5 Employee ASOs
+export async function syncEmployeeAsos(callback: (records: EmployeeAsoRecord[]) => void) {
+  const colRef = collection(db, 'employeeAsos');
+  return onSnapshot(colRef, (snapshot) => {
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeAsoRecord));
+    callback(list);
+  }, (err) => {
+    console.error('Firestore syncEmployeeAsos error:', err);
+  });
+}
+
+export async function addEmployeeAsoDoc(data: Omit<EmployeeAsoRecord, 'id'>): Promise<EmployeeAsoRecord> {
+  const newId = 'easo_' + Date.now();
+  const cleanData = Object.fromEntries(
+    Object.entries(data).filter(([_, v]) => v !== undefined)
+  );
+  const fullItem: any = { ...cleanData, id: newId };
+  await setDoc(doc(db, 'employeeAsos', newId), fullItem);
+  return fullItem;
+}
+
+export async function updateEmployeeAsoDoc(id: string, data: Partial<EmployeeAsoRecord>): Promise<void> {
+  await updateDoc(doc(db, 'employeeAsos', id), data);
+}
+
+export async function deleteEmployeeAsoDoc(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'employeeAsos', id));
 }
 
 // 9. Employee Trainings
