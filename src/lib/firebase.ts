@@ -378,15 +378,26 @@ export async function addEmployeeDocument(docData: Omit<EmployeeDocument, 'id'>)
   return { id: docRef.id, ...docData };
 }
 
-export async function getEmployeeDocuments(userId: string): Promise<EmployeeDocument[]> {
+export async function getEmployeeDocuments(userId: string, username?: string): Promise<EmployeeDocument[]> {
   if (!db) return [];
   try {
-    const q = query(collection(db, 'employeeDocuments'), where('userId', '==', userId));
-    const snapshot = await getDocs(q);
+    const q1 = query(collection(db, 'employeeDocuments'), where('userId', '==', userId));
+    const snapshot1 = await getDocs(q1);
     const docs: EmployeeDocument[] = [];
-    snapshot.forEach(doc => {
+    snapshot1.forEach(doc => {
       docs.push({ id: doc.id, ...doc.data() } as EmployeeDocument);
     });
+
+    if (username && username !== userId) {
+      const q2 = query(collection(db, 'employeeDocuments'), where('userId', '==', username));
+      const snapshot2 = await getDocs(q2);
+      snapshot2.forEach(doc => {
+        if (!docs.some(d => d.id === doc.id)) {
+          docs.push({ id: doc.id, ...doc.data() } as EmployeeDocument);
+        }
+      });
+    }
+
     return docs;
   } catch (error) {
     console.error("Erro ao buscar documentos do colaborador:", error);

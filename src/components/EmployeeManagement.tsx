@@ -601,7 +601,7 @@ export default function EmployeeManagement({
     setActiveFormTab(1);
     
     setIsLoadingDocs(true);
-    const docs = await getEmployeeDocuments(user.id);
+    const docs = await getEmployeeDocuments(user.id, user.username);
     setUserDocuments(docs);
     setIsLoadingDocs(false);
     
@@ -609,8 +609,13 @@ export default function EmployeeManagement({
   };
 
   // Open Full Ficha Modal (View)
-  const handleOpenView = (user: PortalUser) => {
+  const handleOpenView = async (user: PortalUser) => {
     setSelectedUser(user);
+    
+    setIsLoadingDocs(true);
+    const docs = await getEmployeeDocuments(user.id, user.username);
+    setUserDocuments(docs);
+    setIsLoadingDocs(false);
 
     // Append view audit log entry
     const newLog: AuditLogEntry = {
