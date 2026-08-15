@@ -311,28 +311,48 @@ export default function EmployeeManagement({
       docUrl: ''
     };
 
-    const processAdd = (docUrl: string) => {
+    const processAdd = async (docUrl: string) => {
       newAsoItem.docUrl = docUrl;
-      const currentList = formData.asoContracts || [];
-      const updatedList = [...currentList, newAsoItem];
-      updatedList.sort((a, b) => new Date(a.validityDate).getTime() - new Date(b.validityDate).getTime());
+      
+      const empId = selectedUser?.id || formData.id || formData.username;
+      if (!empId) {
+        alert('Por favor, primeiro salve o colaborador usando o botão "Salvar Alterações" no final da página (Aba 1) antes de registrar um ASO.');
+        return;
+      }
+      
+      try {
+        await addEmployeeAsoDoc({
+          employeeId: empId,
+          employeeName: formData.name || selectedUser?.name || 'Desconhecido',
+          ...newAsoItem
+        });
+        
+        alert('ASO registrado com sucesso!');
 
-      setFormData((prev) => ({
-        ...prev,
-        asoContracts: updatedList,
-        asoValidity: updatedList[0]?.validityDate || prev.asoValidity
-      }));
+        // Update validity date in formData just for display/logic sync
+        setFormData((prev) => {
+          const currentList = prev.asoContracts || [];
+          const updatedList = [...currentList, newAsoItem];
+          updatedList.sort((a, b) => new Date(a.validityDate).getTime() - new Date(b.validityDate).getTime());
+          return {
+            ...prev,
+            asoValidity: updatedList[0]?.validityDate || prev.asoValidity
+          };
+        });
 
-      // Reset sub-form
-      setNewAsoContractName('');
-      setNewAsoUnitArea('');
-      setNewAsoExamType('Periódico');
-      setNewAsoExamDate('');
-      setNewAsoValidityDate('');
-      setNewAsoStatus('Apto');
-      setNewAsoClinicDoctor('');
-      setNewAsoNotes('');
-      setNewAsoDocFile(null);
+        // Reset sub-form
+        setNewAsoContractName('');
+        setNewAsoUnitArea('');
+        setNewAsoExamType('Periódico');
+        setNewAsoExamDate('');
+        setNewAsoValidityDate('');
+        setNewAsoStatus('Apto');
+        setNewAsoClinicDoctor('');
+        setNewAsoNotes('');
+        setNewAsoDocFile(null);
+      } catch (err) {
+        alert('Erro ao salvar ASO: ' + err);
+      }
     };
 
     if (newAsoDocFile) {
@@ -653,16 +673,24 @@ export default function EmployeeManagement({
     if (selectedUser && onUpdateInternalUser) {
       // Update existing
       const isPasswordChanged = formData.password && formData.password !== selectedUser.password;
-      onUpdateInternalUser(selectedUser.id, {
+      
+      const updatePayload: any = {
         ...formData,
         permissionLevel: (formData as any).permissionLevel || 'Padrão',
         mustChangePassword: isPasswordChanged ? true : (formData.mustChangePassword ?? selectedUser.mustChangePassword),
         auditLogs: logs
-      });
+      };
+      
+      // Force scrub legacy bloated fields to prevent 1MB limit errors
+      updatePayload.attachedDocs = null;
+      updatePayload.asoContracts = null;
+      updatePayload.employeeTrainings = null;
+      
+      onUpdateInternalUser(selectedUser.id, updatePayload);
       alert('Cadastro do colaborador atualizado com sucesso!');
     } else {
       // Create new
-      onAddInternalUser({
+      const createPayload: any = {
         ...(formData as PortalUser),
         name: formData.name || '',
         username: formData.username?.trim().toLowerCase() || '',
@@ -672,7 +700,11 @@ export default function EmployeeManagement({
         password: formData.password || 'comanins2026',
         mustChangePassword: true,
         auditLogs: logs
-      });
+      };
+      createPayload.attachedDocs = null;
+      createPayload.asoContracts = null;
+      createPayload.employeeTrainings = null;
+      onAddInternalUser(createPayload);
       alert('Novo colaborador cadastrado com sucesso! No primeiro acesso, o colaborador deverá alterar a senha padrão.');
     }
 
@@ -2655,7 +2687,7 @@ export default function EmployeeManagement({
                           </p>
                         </div>
                         <span className="bg-blue-50 text-royal-blue font-bold px-2.5 py-1 rounded-full text-xs border border-blue-200">
-                          {(formData.attachedDocs || []).length} Documento(s) Anexado(s)
+                          {userDocuments.length} Documento(s) Anexado(s)
                         </span>
                       </div>
 

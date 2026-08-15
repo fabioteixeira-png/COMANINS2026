@@ -1203,7 +1203,8 @@ export async function updatePortalUserDoc(id: string, updates: Partial<PortalUse
   try {
     await updateDoc(doc(db, 'portalUsers', id), updates);
   } catch (e) {
-    console.warn('Firestore updatePortalUserDoc offline fallback:', e);
+    console.error('Firestore updatePortalUserDoc error:', e);
+    throw e;
   }
   try {
     const saved = localStorage.getItem('comanins_portal_users_cache');

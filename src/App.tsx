@@ -1,4 +1,5 @@
 import React, { Component, useState, useEffect } from 'react';
+import { deleteField } from 'firebase/firestore';
 import PublicSite from './components/PublicSite';
 import InternalPortal from './components/InternalPortal';
 import ClientPortal from './components/ClientPortal';
@@ -279,7 +280,9 @@ export default function App() {
   const handleUpdateInternalUser = async (id: string, updates: Partial<PortalUser>) => {
     try {
       const cleanUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
-        if (value !== undefined) {
+        if (value === null) {
+          acc[key] = deleteField();
+        } else if (value !== undefined) {
           acc[key] = value;
         }
         return acc;
