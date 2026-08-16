@@ -1,50 +1,53 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/lib/firebase.ts', 'utf8');
 
-if (!code.includes('export interface EmployeeAsoRecord')) {
-  const asoDefIndex = code.indexOf('export interface AsoContractItem {');
-  if (asoDefIndex > -1) {
-    code = code.replace('export interface AsoContractItem {', `export interface EmployeeAsoRecord extends AsoContractItem {
-  employeeId: string;
-  employeeName: string;
+const interfaceDef = `
+export interface FieldServiceRecord {
+  id: string;
+  tag: string;
+  description: string;
+  serialNumber: string;
+  certificate: string;
+  interventionDate: string;
+  technician: string;
+  status: string;
+  notes: string;
 }
 
-export interface AsoContractItem {`);
-  }
-
-  const syncFunctionsIndex = code.indexOf('// 9. Employee Trainings');
-  if (syncFunctionsIndex > -1) {
-    code = code.slice(0, syncFunctionsIndex) + `// 8.5 Employee ASOs
-export async function syncEmployeeAsos(callback: (records: EmployeeAsoRecord[]) => void) {
-  const colRef = collection(db, 'employeeAsos');
+export async function syncFieldServiceRecords(callback: (records: FieldServiceRecord[]) => void) {
+  const colRef = collection(db, 'fieldServiceRecords');
   return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeAsoRecord));
+    const list: FieldServiceRecord[] = [];
+    snapshot.forEach(doc => {
+      list.push({ id: doc.id, ...doc.data() } as FieldServiceRecord);
+    });
     callback(list);
   }, (err) => {
-    console.error('Firestore syncEmployeeAsos error:', err);
+    console.error("Error syncing field service records:", err);
   });
 }
 
-export async function addEmployeeAsoDoc(data: Omit<EmployeeAsoRecord, 'id'>): Promise<EmployeeAsoRecord> {
-  const newId = 'easo_' + Date.now();
-  const cleanData = Object.fromEntries(
-    Object.entries(data).filter(([_, v]) => v !== undefined)
-  );
-  const fullItem: any = { ...cleanData, id: newId };
-  await setDoc(doc(db, 'employeeAsos', newId), fullItem);
-  return fullItem;
+export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {
+  const colRef = collection(db, 'fieldServiceRecords');
+  const docRef = await addDoc(colRef, data);
+  return { id: docRef.id, ...data };
 }
 
-export async function updateEmployeeAsoDoc(id: string, data: Partial<EmployeeAsoRecord>): Promise<void> {
-  await updateDoc(doc(db, 'employeeAsos', id), data);
+export async function updateFieldServiceRecord(id: string, data: Partial<FieldServiceRecord>): Promise<void> {
+  const docRef = doc(db, 'fieldServiceRecords', id);
+  await updateDoc(docRef, data);
 }
 
-export async function deleteEmployeeAsoDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'employeeAsos', id));
+export async function deleteFieldServiceRecord(id: string): Promise<void> {
+  const docRef = doc(db, 'fieldServiceRecords', id);
+  await deleteDoc(docRef);
 }
+`;
 
-` + code.slice(syncFunctionsIndex);
-  }
+if (!code.includes('export interface FieldServiceRecord')) {
+  code += interfaceDef;
+  fs.writeFileSync('src/lib/firebase.ts', code);
+  console.log('Firebase functions added.');
+} else {
+  console.log('Firebase functions already exist.');
 }
-
-fs.writeFileSync('src/lib/firebase.ts', code);

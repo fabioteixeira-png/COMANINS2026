@@ -18,7 +18,7 @@ import {
   startAfter,
   DocumentData,
   QueryDocumentSnapshot
-} from 'firebase/firestore';
+, writeBatch } from "firebase/firestore";
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Client, Instrument, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog } from '../types';
 import { generateAuthKey } from '../utils/authKey';
@@ -2080,4 +2080,85 @@ export async function syncClientIntakes(clientId: string, callback: (intakes: Sa
       callback([]);
     }
   });
+}
+
+export interface FieldServiceRecord {
+  id: string;
+  tag: string;
+  equipamento: string;
+  localizacao: string;
+  certificate: string;
+  interventionDate: string;
+  technician: string;
+  area: string;
+  range: string;
+  operacao: string;
+  unidadeMedida: string;
+  categoria: string;
+  emissaoPdf: string;
+  ordemServico: string;
+  tipoServico: string;
+  observacao: string;
+  unidade: string;
+}
+
+export async function syncFieldServiceRecords(callback: (records: FieldServiceRecord[]) => void) {
+  const colRef = collection(db, 'fieldServiceRecords');
+  return onSnapshot(colRef, (snapshot) => {
+    const list: FieldServiceRecord[] = [];
+    snapshot.forEach(doc => {
+      list.push({ id: doc.id, ...doc.data() } as FieldServiceRecord);
+    });
+    callback(list);
+  }, (err) => {
+    console.error("Error syncing field service records:", err);
+  });
+}
+
+export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {
+  const colRef = collection(db, 'fieldServiceRecords');
+  const docRef = await addDoc(colRef, data);
+  return { id: docRef.id, ...data };
+}
+
+export async function updateFieldServiceRecord(id: string, data: Partial<FieldServiceRecord>): Promise<void> {
+  const docRef = doc(db, 'fieldServiceRecords', id);
+  await updateDoc(docRef, data);
+}
+
+export async function deleteFieldServiceRecord(id: string): Promise<void> {
+  const docRef = doc(db, 'fieldServiceRecords', id);
+  await deleteDoc(docRef);
+}
+
+export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecord, 'id'>[]): Promise<void> {
+  const colRef = collection(db, 'fieldServiceRecords');
+  const chunks = [];
+  for (let i = 0; i < records.length; i += 500) {
+    chunks.push(records.slice(i, i + 500));
+  }
+  for (const chunk of chunks) {
+    const batch = writeBatch(db);
+    for (const record of chunk) {
+      const docRef = doc(colRef);
+      batch.set(docRef, record);
+    }
+    await batch.commit();
+  }
+}
+
+export async function clearAllFieldServiceRecords(): Promise<void> {
+  const colRef = collection(db, 'fieldServiceRecords');
+  const snapshot = await getDocs(colRef);
+  const chunks = [];
+  for (let i = 0; i < snapshot.docs.length; i += 500) {
+    chunks.push(snapshot.docs.slice(i, i + 500));
+  }
+  for (const chunk of chunks) {
+    const batch = writeBatch(db);
+    for (const d of chunk) {
+      batch.delete(d.ref);
+    }
+    await batch.commit();
+  }
 }

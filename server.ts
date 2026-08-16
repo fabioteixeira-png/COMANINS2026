@@ -27,7 +27,8 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // In-Memory Database State with File Persistence
 const DB_FILE = path.join(process.cwd(), "db.json");
@@ -1135,6 +1136,83 @@ app.get("/api/download-dist", (req, res) => {
 // Start server using an async wrapper to prevent top-level await in CommonJS bundling
 async function startServer() {
   // Vite Setup (Development vs. Production)
+
+  app.post("/api/parse-field-service-image", async (req, res) => {
+    try {
+      const { imageBase64 } = req.body;
+      if (!imageBase64) {
+        return res.status(400).json({ error: "No image provided." });
+      }
+
+      const aiClient = getGeminiClient();
+      if (!aiClient) {
+        return res.status(503).json({ error: "Gemini API key is missing or invalid." });
+      }
+
+      // Prepare image for Gemini Vision
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+      
+      const prompt = `
+You are an expert data entry assistant. Analyze this image of a handwritten or printed field service form/certificate.
+Extract the following information and return ONLY a JSON object with these keys (no markdown formatting, just pure JSON). If a field is not found or unreadable, set its value to an empty string.
+
+Required JSON format:
+{
+  "tag": "String - Equipment Tag/ID",
+  "equipamento": "String - Nome do equipamento",
+  "localizacao": "String - Localização",
+  "certificate": "String - Certificate number (very important)",
+  "interventionDate": "String - Date of intervention (DD/MM/YYYY se possível)",
+  "technician": "String - Name of technician / Técnico",
+  "area": "String - Área",
+  "range": "String - Range ou Faixa",
+  "operacao": "String - Operação",
+  "unidadeMedida": "String - Unidade de medida",
+  "categoria": "String - Categoria",
+  "emissaoPdf": "String - Emissão PDF (ex: Sim/Não)",
+  "ordemServico": "String - Ordem de serviço / OS",
+  "tipoServico": "String - Tipo de serviço",
+  "observacao": "String - Observação",
+  "unidade": "String - Unidade (local)"
+}
+`;
+
+      const response = await aiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          { role: "user", parts: [
+              { text: prompt },
+              { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+            ] 
+          }
+        ],
+        config: {
+            temperature: 0.2,
+            responseMimeType: "application/json"
+        }
+      });
+
+      const textOutput = response.text;
+      let parsedData = {};
+      try {
+          parsedData = JSON.parse(textOutput);
+      } catch (e) {
+          // Fallback if there is a problem parsing
+          const jsonMatch = textOutput.match(/\{.*\}/s);
+          if (jsonMatch) {
+              parsedData = JSON.parse(jsonMatch[0]);
+          } else {
+              throw new Error("Could not parse AI response as JSON");
+          }
+      }
+
+      res.json(parsedData);
+    } catch (err: any) {
+      console.error("Error processing field service image:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

@@ -190,6 +190,7 @@ import {
 } from "../types";
 import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
+import FieldService from "./FieldService";
 import FinanceManagement from "./FinanceManagement";
 import InternalCommunication from "./InternalCommunication";
 import { generateAuthKey, getReportAuthKey } from "../utils/authKey";
@@ -5251,6 +5252,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           >
             <Gauge className="h-4 w-4 text-slate-500" />
             <span>Calibração</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("field_service")}
+            className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+              activeTab === "field_service"
+                ? "bg-blue-50 text-royal-blue font-bold"
+                : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span>Serviço de Campo</span>
           </button>
           {!isLimitedRole && (
             <>
@@ -11749,6 +11761,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: FINANCEIRO */}
+        {activeTab === "field_service" && <FieldService />}
         {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
 
