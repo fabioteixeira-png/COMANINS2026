@@ -635,10 +635,8 @@ export async function syncClients(callback: (clients: Client[]) => void) {
     (onData, onError) => {
       const q = query(collection(db, 'clients'));
       return onSnapshot(q, (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Client));
-          onData(list);
-        }
+        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Client));
+        onData(list);
       }, onError);
     }
   );
@@ -681,10 +679,8 @@ export async function syncInstruments(callback: (instruments: Instrument[]) => v
     (onData, onError) => {
       const q = query(collection(db, 'instruments'), limit(25));
       return onSnapshot(q, (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
-          onData(list);
-        }
+        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
+        onData(list);
       }, onError);
     }
   );
@@ -775,10 +771,8 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
     (onData, onError) => {
       const q = query(collection(db, 'calibrationReports'), );
       return onSnapshot(q, (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
-          onData(list);
-        }
+        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
+        onData(list);
       }, onError);
     }
   );
@@ -1234,11 +1228,9 @@ export async function syncEmployeeBirthdays(callback: (birthdays: EmployeeBirthd
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'employeeBirthdays'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    if (!snapshot.empty) {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeBirthday));
-      setLocalCache('employeeBirthdays', list);
-      callback(list);
-    }
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeBirthday));
+    setLocalCache('employeeBirthdays', list);
+    callback(list);
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<EmployeeBirthday[]>('employeeBirthdays', []));
@@ -1563,11 +1555,9 @@ export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void)
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'medical_exams'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    if (!snapshot.empty) {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
-      setLocalCache('medical_exams', list);
-      callback(list);
-    }
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
+    setLocalCache('medical_exams', list);
+    callback(list);
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<MedicalExam[]>('medical_exams', []));
@@ -1796,12 +1786,10 @@ export async function syncCalibrationAuditLogs(callback: (logs: CalibrationAudit
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'calibrationAuditLogs'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    if (!snapshot.empty) {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog));
-      list.sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
-      setLocalCache('calibrationAuditLogs', list);
-      callback(list);
-    }
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog));
+    list.sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
+    setLocalCache('calibrationAuditLogs', list);
+    callback(list);
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []));
@@ -1825,11 +1813,9 @@ export async function syncRncReports(callback: (reports: RncReport[]) => void) {
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'rncReports'), orderBy('date', 'desc'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    if (!snapshot.empty) {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as RncReport));
-      setLocalCache('rncReports', list);
-      callback(list);
-    }
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as RncReport));
+    setLocalCache('rncReports', list);
+    callback(list);
   }, (err) => {
     handleQuotaOrError(err);
     callback(getLocalCache<RncReport[]>('rncReports', []));
