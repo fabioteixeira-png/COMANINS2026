@@ -333,9 +333,23 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <h3 className="font-bold text-slate-900">Certificados Disponíveis</h3>
+                <div className="relative w-full sm:w-auto">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Search className="h-3.5 w-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Filtrar certificado, TAG..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-royal-blue focus:border-royal-blue w-full sm:w-64"
+                  />
+                </div>
               </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm whitespace-nowrap">
                   <thead>
@@ -359,7 +373,14 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                            };
                         }
                         return null;
-                      }).filter(Boolean);
+                      }).filter(Boolean).filter(({ fsRecord, inst }: any) => {
+                        const term = searchTerm.trim().toLowerCase();
+                        if (!term) return true;
+                        const cert = (fsRecord.certificate || inst.certificateNumber || "").toLowerCase();
+                        const tag = (fsRecord.tag || inst.tag || "").toLowerCase();
+                        const equip = (fsRecord.equipamento || "").toLowerCase();
+                        return cert.includes(term) || tag.includes(term) || equip.includes(term);
+                      });
 
                       if (correlatedRecords.length === 0) {
                         return (

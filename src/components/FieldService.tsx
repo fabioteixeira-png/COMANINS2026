@@ -195,13 +195,15 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
           }, {} as Record<string, any>);
 
           const cert = normalizedRow['certificado'] || normalizedRow['cert'] || '';
-          if (!cert) continue; 
+          const strCert = String(cert).trim();
           
-          if (existingCerts.has(String(cert))) {
+          if (strCert !== '' && existingCerts.has(strCert)) {
             duplicates++;
             continue;
           }
-          existingCerts.add(String(cert));
+          if (strCert !== '') {
+            existingCerts.add(strCert);
+          }
 
           newRecordsToImport.push({
             cliente: String(normalizedRow['cliente'] || ''),
@@ -355,12 +357,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleSaveRecord = async () => {
-    if (!formData.certificate) {
-      alert("O campo Certificado é obrigatório.");
-      return;
-    }
-
-    const isDuplicate = records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
+    const isDuplicate = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
     if (isDuplicate) {
       alert("Erro: Este Certificado já está registrado na planilha!");
       return;
@@ -686,7 +683,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {COLUMNS.filter(c => c.id !== 'observacao').map(col => (
                   <div key={col.id}>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">{col.label} {col.id === 'certificate' ? '*' : ''}</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{col.label}</label>
                     <input 
                       type="text" 
                       value={(formData as any)[col.id] || ''} 

@@ -633,7 +633,7 @@ export async function syncClients(callback: (clients: Client[]) => void) {
     'clients',
     INITIAL_CLIENTS,
     (onData, onError) => {
-      const q = query(collection(db, 'clients'), limit(25));
+      const q = query(collection(db, 'clients'));
       return onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
           const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Client));

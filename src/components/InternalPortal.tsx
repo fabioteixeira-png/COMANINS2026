@@ -2544,6 +2544,7 @@ Status atual: ${e.status}.`,
             city: clientCity.trim(),
             password:
               clientPassword.trim() || editingClient.password || "123456",
+            isFieldService: clientIsFieldService,
           });
         }
         alert("Cadastro do cliente atualizado com sucesso!");
@@ -2556,6 +2557,7 @@ Status atual: ${e.status}.`,
             phone: clientPhone.trim(),
             city: clientCity.trim(),
             password: clientPassword.trim() || "123456",
+            isFieldService: clientIsFieldService,
           });
         }
         alert("Cliente cadastrado e salvo no banco de dados com sucesso!");
@@ -2739,8 +2741,23 @@ Status atual: ${e.status}.`,
         Status: "Calibrado",
         Numero_Certificado: "CERT-2025-001",
         Tecnico: "Eng. Carlos Moreira",
-        Observacoes:
-          "Instrumento em conformidade de acordo com a ABNT NBR ISO/IEC 17025.",
+        Observacoes: "Instrumento em conformidade de acordo com a ABNT NBR ISO/IEC 17025.",
+        Padroes_Utilizados: "CERT-PADRAO-01, CERT-PADRAO-02",
+        P1_Nominal: 0,
+        P1_Padrao: 0.01,
+        P1_Instrumento: 0.05,
+        P2_Nominal: 5,
+        P2_Padrao: 5.01,
+        P2_Instrumento: 5.02,
+        P3_Nominal: 10,
+        P3_Padrao: 10.02,
+        P3_Instrumento: 10.05,
+        P4_Nominal: "",
+        P4_Padrao: "",
+        P4_Instrumento: "",
+        P5_Nominal: "",
+        P5_Padrao: "",
+        P5_Instrumento: "",
       },
     ];
     const ws = XLSX.utils.json_to_sheet(data);
@@ -3599,14 +3616,33 @@ Status atual: ${e.status}.`,
             });
 
             if (certNumber && onSaveCalibration) {
-              await onSaveCalibration({
-                instrumentId: savedInst.id,
-                certNumber,
-                technicianName: tech,
-                observations: obs,
-                referenceStandardIds: [],
-                referenceStandards: [],
-                points: [
+              const padroesRaw = row.padroes_utilizados || row["padrões utilizados"] || "";
+              const selectedStds = padroesRaw ? padroesRaw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+              const matchedStds = referenceStandards.filter((rs) => selectedStds.some((s) => rs.certificateNumber.toLowerCase().includes(s.toLowerCase()) || rs.identification?.toLowerCase().includes(s.toLowerCase())));
+              
+              let parsedPoints = [];
+              for (let i = 1; i <= 10; i++) {
+                const nom = row[`p${i}_nominal`];
+                const pad = row[`p${i}_padrao`] || row[`p${i}_padrão`];
+                const instVal = row[`p${i}_instrumento`];
+                if (nom !== undefined && nom !== "") {
+                  const n = Number(String(nom).replace(",", "."));
+                  const p = pad !== undefined && pad !== "" ? Number(String(pad).replace(",", ".")) : n;
+                  const v = instVal !== undefined && instVal !== "" ? Number(String(instVal).replace(",", ".")) : n;
+                  parsedPoints.push({
+                    id: `p${i}`,
+                    nominalValue: n,
+                    standardValue: p,
+                    instrumentValue: v,
+                    error: Number((v - p).toFixed(4)),
+                    mpe,
+                    pass: Math.abs(v - p) <= mpe,
+                  });
+                }
+              }
+
+              if (parsedPoints.length === 0) {
+                 parsedPoints = [
                   {
                     id: "p1",
                     nominalValue: rMin,
@@ -3634,7 +3670,17 @@ Status atual: ${e.status}.`,
                     mpe,
                     pass: true,
                   },
-                ],
+                ];
+              }
+
+              await onSaveCalibration({
+                instrumentId: savedInst.id,
+                certNumber,
+                technicianName: tech,
+                observations: obs,
+                referenceStandardIds: matchedStds.map(s => s.id),
+                referenceStandards: matchedStds,
+                points: parsedPoints,
               });
             }
             successCount++;
@@ -4660,7 +4706,8 @@ Status atual: ${e.status}.`,
       if (onSaveCalibration) {
         const year = new Date().getFullYear();
         const nextNum = certSequence.nextNumber || 1;
-        const generatedCertNumber = `${certSequence.prefix}${nextNum}`;
+        const generatedCertNumber = activeInst?.certificateNumber || `${certSequence.prefix}${nextNum}`;
+        const isNewNumber = !activeInst?.certificateNumber;
 
         const selectedStandards = [
           benchStandardA,
@@ -4700,11 +4747,13 @@ Status atual: ${e.status}.`,
           approved: true,
         });
 
-        // Update certificate sequence
-        await saveCertSequenceConfig({
-          ...certSequence,
-          nextNumber: nextNum + 1,
-        });
+        // Update certificate sequence if a new one was generated
+        if (isNewNumber) {
+          await saveCertSequenceConfig({
+            ...certSequence,
+            nextNumber: nextNum + 1,
+          });
+        }
 
         // Record Calibration Audit Log (Timing)
         const endTimeIso = new Date().toISOString();
@@ -6361,6 +6410,32 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={handleDownloadCalibrationsTemplate}
+                  className="px-3 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 text-xs font-semibold rounded-lg flex items-center space-x-1 cursor-pointer transition-colors"
+                  title="Baixar Modelo de Excel para Importação de Calibrações"
+                >
+                  <Download className="h-4 w-4" />
+                  <span className="hidden sm:inline">Baixar Modelo</span>
+                </button>
+                <label
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold rounded-lg flex items-center space-x-1 cursor-pointer transition-colors"
+                  title="Importar Calibrações via Excel"
+                >
+                  <Upload className="h-4 w-4" />
+                  <span className="hidden sm:inline">Importar Calibrações</span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      setImportType("calibrations");
+                      setActiveTab("configuracoes");
+                      setConfigSubTab("import");
+                      handleCSVFileChange(e);
+                    }}
+                  />
+                </label>
+                <button
                   onClick={() => {
                     if (!showInstForm) {
                       const nextNum = certSequence.nextNumber || 1;
@@ -6371,7 +6446,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg flex items-center space-x-1 cursor-pointer"
                 >
                   <Plus className="h-4 w-4" />
-                  <span>Novo Instrumento</span>
+                  <span className="hidden sm:inline">Novo Instrumento</span>
                 </button>
               </div>
             </div>
