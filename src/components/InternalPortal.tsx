@@ -864,6 +864,8 @@ export default function InternalPortal({
   const [psvTechnician, setPsvTechnician] = useState<any>("");
   const [psvType, setPsvType] = useState<any>("");
   const [selectedCertificateId, setSelectedCertificateId] = useState<any>("");
+  const [fieldServiceEquip, setFieldServiceEquip] = useState<string>("");
+  const [fieldServiceTag, setFieldServiceTag] = useState<string>("");
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
   const [selectedInstId, setSelectedInstId] = useState<any>("");
@@ -10953,6 +10955,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               <button
                 onClick={() => {
                   setSelectedCertificateId("");
+                  setFieldServiceTag("");
+                  setFieldServiceEquip("");
                   setActiveTab("instruments");
                 }}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 border border-slate-200 shadow-sm cursor-pointer"
@@ -11211,6 +11215,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           <button
                             onClick={() => {
                               setSelectedCertificateId("");
+                  setFieldServiceEquip("");
                               setActiveTab("instruments");
                             }}
                             className="p-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-all flex items-center text-xs font-bold shadow-sm cursor-pointer"
@@ -11303,9 +11308,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 {inst.description}
                               </p>
                               <p>
-                                <span className="font-bold">Tag Cliente:</span>{" "}
-                                {inst.tag || "—"}
+                                <span className="font-bold">TAG do Cliente:</span>{" "}
+                                {fieldServiceTag || inst.tag || "—"}
                               </p>
+                              {fieldServiceEquip && (
+                                <p>
+                                  <span className="font-bold">Equipamento:</span>{" "}
+                                  {fieldServiceEquip}
+                                </p>
+                              )}
                               <p>
                                 <span className="font-bold">Marca:</span>{" "}
                                 {inst.brand || "Não Consta"}
@@ -11761,7 +11772,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: FINANCEIRO */}
-        {activeTab === "field_service" && <FieldService />}
+        {activeTab === "field_service" && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
         {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
 

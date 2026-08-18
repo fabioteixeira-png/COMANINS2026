@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns } from 'lucide-react';
+import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { Instrument } from '../types';
 import { 
   FieldServiceRecord, 
   syncFieldServiceRecords, 
   addFieldServiceRecord, 
   updateFieldServiceRecord, 
   bulkAddFieldServiceRecords,
-  clearAllFieldServiceRecords 
+  clearAllFieldServiceRecords, deleteFieldServiceRecord, syncPortalUsers, PortalUser, syncInstruments 
 } from '../lib/firebase';
 
 const parseDateForSort = (dString: string) => {
@@ -24,11 +25,10 @@ const parseDateForSort = (dString: string) => {
 
 const COLUMNS = [
   { id: 'certificate', label: 'Certificado', minW: '120px' },
-  { id: 'cliente', label: 'Cliente', minW: '150px' },
+  { id: 'interventionDate', label: 'Data Intervenção', minW: '120px' },
   { id: 'tag', label: 'Tag', minW: '120px' },
   { id: 'equipamento', label: 'Equipamento', minW: '150px' },
   { id: 'localizacao', label: 'Localização', minW: '150px' },
-  { id: 'interventionDate', label: 'Data Intervenção', minW: '120px' },
   { id: 'technician', label: 'Técnico', minW: '120px' },
   { id: 'area', label: 'Área', minW: '120px' },
   { id: 'range', label: 'Range', minW: '120px' },
@@ -40,10 +40,17 @@ const COLUMNS = [
   { id: 'tipoServico', label: 'Tipo Serv.', minW: '120px' },
   { id: 'observacao', label: 'Observação', minW: '150px' },
   { id: 'unidade', label: 'Unidade', minW: '120px' },
+  { id: 'cliente', label: 'Cliente', minW: '150px' },
 ] as const;
 
-export default function FieldService() {
+
+interface FieldServiceProps {
+  onPrintCertificate?: (instId: string, tagData: string, equipmentData: string) => void;
+}
+export default function FieldService({ onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
+  const [internalUsers, setInternalUsers] = useState<PortalUser[]>([]);
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // Pagination
@@ -67,6 +74,52 @@ export default function FieldService() {
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
+  
+  
+  // Sorting State
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const [editingCell, setEditingCell] = useState<{rowId: string, colId: string} | null>(null);
+
+  const handleInlineSave = async (record: FieldServiceRecord, colId: string, newVal: string) => {
+    setEditingCell(null);
+    if (String((record as any)[colId] || '') === newVal) return;
+    try {
+      await updateFieldServiceRecord(record.id, { [colId]: newVal });
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao salvar célula.");
+    }
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    const pwd = prompt("Digite a senha de administrador para excluir este registro:");
+    if (pwd === null) return;
+    
+    const isAdminValid = internalUsers.some(u => u.role === "Administrador" && u.password === pwd) || pwd === "admin" || pwd === "admin123" || pwd === "comanins123";
+
+    if (isAdminValid) {
+      if (confirm("Tem certeza que deseja excluir?")) {
+        try {
+          await deleteFieldServiceRecord(id);
+        } catch (e) {
+          console.error(e);
+          alert("Erro ao excluir.");
+        }
+      }
+    } else {
+      alert("Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.");
+    }
+  };
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState<Partial<FieldServiceRecord>>({});
   
@@ -77,12 +130,16 @@ export default function FieldService() {
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const unsubscribeUsers = syncPortalUsers((users) => setInternalUsers(users));
+    const unsubscribeInst = syncInstruments((data) => setInstruments(data));
     const unsubscribe = syncFieldServiceRecords((data) => {
       setRecords(data);
       setIsLoading(false);
     });
     return () => {
       unsubscribe.then(unsub => unsub());
+      unsubscribeUsers.then(u => u());
+      unsubscribeInst.then(u => u());
     };
   }, []);
 
@@ -91,11 +148,10 @@ export default function FieldService() {
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([{
       'Certificado': '',
-      'Cliente': '',
+      'Data de Intervenção': '',
       'Tag': '',
       'Equipamento': '',
       'Localização': '',
-      'Data de Intervenção': '',
       'Técnico': '',
       'Área': '',
       'Range': '',
@@ -106,7 +162,8 @@ export default function FieldService() {
       'Ordem de Serviço': '',
       'Tipo de Serviço': '',
       'Observação': '',
-      'Unidade': ''
+      'Unidade': '',
+      'Cliente': ''
     }]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Modelo");
@@ -190,11 +247,10 @@ export default function FieldService() {
     }
     const ws = XLSX.utils.json_to_sheet(sortedRecords.map(r => ({
       'Certificado': r.certificate,
-      'Cliente': r.cliente || '',
+      'Data de Intervenção': r.interventionDate,
       'Tag': r.tag,
       'Equipamento': r.equipamento,
       'Localização': r.localizacao,
-      'Data de Intervenção': r.interventionDate,
       'Técnico': r.technician,
       'Área': r.area,
       'Range': r.range,
@@ -205,7 +261,8 @@ export default function FieldService() {
       'Ordem de Serviço': r.ordemServico,
       'Tipo de Serviço': r.tipoServico,
       'Observação': r.observacao,
-      'Unidade': r.unidade
+      'Unidade': r.unidade,
+      'Cliente': r.cliente || ''
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ServicoCampo");
@@ -214,7 +271,11 @@ export default function FieldService() {
 
   const handleClearAll = async () => {
     const pwd = prompt("Digite a senha de administrador para limpar todos os dados:");
-    if (pwd === "comanins123" || pwd === "admin123" || pwd === "admin") {
+    if (pwd === null) return;
+    
+    const isAdminValid = internalUsers.some(u => u.role === "Administrador" && u.password === pwd) || pwd === "admin" || pwd === "admin123" || pwd === "comanins123";
+
+    if (isAdminValid) {
       if (confirm("Tem certeza absoluta? Isso apagará TODOS os registros!")) {
         setIsLoading(true);
         try {
@@ -226,8 +287,8 @@ export default function FieldService() {
         }
         setIsLoading(false);
       }
-    } else if (pwd !== null) {
-      alert("Senha incorreta!");
+    } else {
+      alert("Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.");
     }
   };
 
@@ -329,7 +390,7 @@ export default function FieldService() {
   };
 
   const sortedRecords = useMemo(() => {
-    const filtered = records.filter(r => {
+    let filtered = records.filter(r => {
       return Object.entries(filters).every(([k, v]) => {
         if (!v) return true;
         const recordVal = String((r as any)[k] || '').toLowerCase();
@@ -337,10 +398,29 @@ export default function FieldService() {
       });
     });
 
-    return filtered.sort((a, b) => 
-      parseDateForSort(b.interventionDate) - parseDateForSort(a.interventionDate)
-    );
-  }, [records, filters]);
+    if (sortConfig !== null) {
+      filtered.sort((a, b) => {
+        if (sortConfig.key === 'interventionDate') {
+          const dateA = parseDateForSort(a.interventionDate);
+          const dateB = parseDateForSort(b.interventionDate);
+          if (dateA < dateB) return sortConfig.direction === 'asc' ? -1 : 1;
+          if (dateA > dateB) return sortConfig.direction === 'asc' ? 1 : -1;
+          return 0;
+        }
+
+        const valA = String((a as any)[sortConfig.key] || '').toLowerCase();
+        const valB = String((b as any)[sortConfig.key] || '').toLowerCase();
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else {
+      // Default Sort (date descending)
+      filtered.sort((a, b) => parseDateForSort(b.interventionDate) - parseDateForSort(a.interventionDate));
+    }
+
+    return filtered;
+  }, [records, filters, sortConfig]);
 
   const totalPages = Math.ceil(sortedRecords.length / itemsPerPage);
   const paginatedRecords = useMemo(() => {
@@ -492,7 +572,18 @@ export default function FieldService() {
               <tr>
                 {COLUMNS.filter(c => visibleColumns[c.id]).map(col => (
                   <th key={col.id} className="px-4 py-3" style={{ minWidth: col.minW }}>
-                    {col.label}
+                    <div 
+                      className="flex items-center gap-1 cursor-pointer hover:text-royal-blue select-none"
+                      onClick={() => handleSort(col.id)}
+                      title="Clique para ordenar"
+                    >
+                      {col.label}
+                      {sortConfig?.key === col.id ? (
+                        sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3 text-royal-blue" /> : <ChevronDown className="w-3 h-3 text-royal-blue" />
+                      ) : (
+                        <ChevronsUpDown className="w-3 h-3 opacity-30 hover:opacity-100" />
+                      )}
+                    </div>
                     <input 
                       type="text" 
                       value={filters[col.id] || ''} 
@@ -502,34 +593,75 @@ export default function FieldService() {
                     />
                   </th>
                 ))}
+                <th className="px-4 py-3 min-w-[80px]">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan={17} className="text-center py-12 text-slate-500">Carregando registros...</td></tr>
+                <tr><td colSpan={18} className="text-center py-12 text-slate-500">Carregando registros...</td></tr>
               ) : paginatedRecords.length === 0 ? (
-                <tr><td colSpan={17} className="text-center py-12 text-slate-500">Nenhum registro encontrado.</td></tr>
+                <tr><td colSpan={18} className="text-center py-12 text-slate-500">Nenhum registro encontrado.</td></tr>
               ) : (
+                
                 paginatedRecords.map(record => (
                   <tr key={record.id} className="hover:bg-slate-50 transition-colors">
                     {COLUMNS.filter(c => visibleColumns[c.id]).map(col => {
                       const value = (record as any)[col.id];
                       
-                      // Highlight Certificate and make Tag clickable
-                      if (col.id === 'certificate') {
-                        return <td key={col.id} className="px-4 py-3 font-semibold text-slate-800 whitespace-nowrap">{value || '-'}</td>;
-                      }
-                      if (col.id === 'tag') {
-                        return <td key={col.id} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer text-royal-blue hover:underline" onClick={() => { setFormData(record); setShowAddModal(true); }}>{value || '-'}</td>;
-                      }
-                      
-                      // Truncate long observation
-                      if (col.id === 'observacao') {
-                        return <td key={col.id} className="px-4 py-3 max-w-[200px] truncate" title={value}>{value || '-'}</td>;
+                      const isEditing = editingCell?.rowId === record.id && editingCell?.colId === col.id;
+                      if (isEditing) {
+                        return (
+                          <td key={col.id} className="px-4 py-2">
+                            <input 
+                              autoFocus
+                              defaultValue={value}
+                              onBlur={e => handleInlineSave(record, col.id, e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                              className="w-full px-2 py-1 text-sm border border-royal-blue rounded outline-none shadow-sm"
+                            />
+                          </td>
+                        );
                       }
 
-                      return <td key={col.id} className="px-4 py-3 whitespace-nowrap">{value || '-'}</td>;
+                      // Special renderers (clickable for edit)
+                      if (col.id === 'certificate' || col.id === 'tag') {
+                        return <td key={col.id} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer hover:bg-blue-50 transition-colors" onClick={() => setEditingCell({rowId: record.id, colId: col.id})} title="Clique para editar">{value || '-'}</td>;
+                      }
+                      
+                      if (col.id === 'observacao') {
+                        return <td key={col.id} className="px-4 py-3 max-w-[200px] truncate cursor-pointer hover:bg-slate-100 transition-colors" title="Clique para editar" onClick={() => setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
+                      }
+
+                      return <td key={col.id} className="px-4 py-3 whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors" title="Clique para editar" onClick={() => setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
                     })}
+                    <td className="px-4 py-3 whitespace-nowrap text-right">
+                      {(() => {
+                        const extractNum = (s) => String(s || '').replace(/\D/g, '');
+                        const recNum = extractNum(record.certificate);
+                        const matchingInst = instruments.find(i => {
+                          const instNum = extractNum(i.certificateNumber);
+                          return instNum && recNum && instNum === recNum;
+                        });
+                        if (matchingInst && onPrintCertificate) {
+                          return (
+                            <button 
+                              onClick={() => onPrintCertificate(matchingInst.id, record.tag || '', record.equipamento || '')} 
+                              className="text-emerald-500 hover:text-emerald-600 mr-3" 
+                              title="Imprimir Certificado (Calibração)"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          );
+                        }
+                        return null;
+                      })()}
+                      <button onClick={() => { setFormData(record); setShowAddModal(true); }} className="text-slate-400 hover:text-royal-blue mr-3" title="Editar Formulário">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500" title="Excluir">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
