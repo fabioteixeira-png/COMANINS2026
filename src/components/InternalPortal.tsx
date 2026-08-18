@@ -670,6 +670,22 @@ export default function InternalPortal({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const setActiveTab = (t: any) => {
+    if (currentUser && !isUserAdmin) {
+      const hasPendingPayslip = payslips.some(p => 
+        p.employeeId === currentUser.id && 
+        !p.visualized && 
+        Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
+      );
+      if (hasPendingPayslip && (t !== "colaboradores" || rhSubTab !== "contra_cheques" || activePayslipTab !== "meus")) {
+        alert("Acesso Bloqueado: Você possui documentação pessoal aguardando visualização há mais de 11 dias. Por favor, visualize os documentos pendentes para liberar o portal.");
+        setRawActiveTab("colaboradores");
+        setRhSubTab("contra_cheques");
+        setActivePayslipTab("meus");
+        setIsMobileMenuOpen(false);
+        return;
+      }
+    }
+    
     setRawActiveTab(t);
     setIsMobileMenuOpen(false);
   };
@@ -691,6 +707,23 @@ export default function InternalPortal({
   useEffect(() => {
     if (!currentUser || isUserAdmin) return;
     
+    // Check pending 11 days payslips first
+    const hasPendingPayslip = payslips.some(p => 
+      p.employeeId === currentUser.id && 
+      !p.visualized && 
+      Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
+    );
+
+    if (hasPendingPayslip) {
+       const isAllowed = activeTab === "colaboradores" && rhSubTab === "contra_cheques" && activePayslipTab === "meus";
+       if (!isAllowed) {
+         setRawActiveTab("colaboradores");
+         setRhSubTab("contra_cheques");
+         setActivePayslipTab("meus");
+       }
+       return; // Stop checking after hours if they are locked by payslips
+    }
+
     if (checkIsAfterHours() && !afterHoursBypass) {
       const isAllowed = activeTab === "colaboradores" && rhSubTab === "contra_cheques";
       
@@ -704,7 +737,34 @@ export default function InternalPortal({
         setShowAfterHoursModal(true);
       }
     }
-  }, [activeTab, rhSubTab, currentUser, isUserAdmin, afterHoursBypass]);
+  }, [activeTab, rhSubTab, activePayslipTab, payslips, currentUser, isUserAdmin, afterHoursBypass]);
+
+  // Background check for email notifications
+  useEffect(() => {
+    if (!payslips.length) return;
+    
+    payslips.forEach(async (p) => {
+      if (p.visualized) return;
+      
+      const diffTime = Date.now() - new Date(p.createdAt).getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays >= 10 && !p.emailSent10Days) {
+         // simulate send email to fabio
+         console.log(`[EMAIL ENVIADO para fabio.teixeira@comanins.com.br]: O colaborador ${p.employeeName} não visualizou a documentação pessoal após 10 dias.`);
+         try {
+           await updatePayslipDoc(p.id, { emailSent10Days: true, emailSent7Days: true });
+         } catch(e) {}
+      } else if (diffDays >= 7 && !p.emailSent7Days) {
+         // simulate send email to employee
+         console.log(`[EMAIL ENVIADO para ${p.employeeName}]: Sua "Documentação Pessoal" está aguardando visualização.`);
+         try {
+           await updatePayslipDoc(p.id, { emailSent7Days: true });
+         } catch (e) {}
+      }
+    });
+  }, [payslips]);
+
   const [selectedPayslip, setSelectedPayslip] = useState<Payslip | null>(null);
   const [showPayslipModal, setShowPayslipModal] = useState<boolean>(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string>("");
@@ -14762,6 +14822,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               }}
               activeRhTab={rhSubTab}
               setActiveRhTab={(tab) => {
+                if (currentUser && !isUserAdmin) {
+                  const hasPendingPayslip = payslips.some(p => 
+                    p.employeeId === currentUser.id && 
+                    !p.visualized && 
+                    Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
+                  );
+                  if (hasPendingPayslip && (tab !== "contra_cheques" || activePayslipTab !== "meus")) {
+                    alert("Acesso Bloqueado: Você possui documentação pessoal aguardando visualização há mais de 11 dias. Por favor, visualize os documentos pendentes para liberar o portal.");
+                    setRhSubTab("contra_cheques");
+                    setActivePayslipTab("meus");
+                    return;
+                  }
+                }
                 setRhSubTab(tab);
                 setActiveTab("colaboradores");
               }}
@@ -16176,7 +16249,20 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 currentUser?.role === "Financeiro") && (
                 <div className="flex space-x-2">
                   <button
-                    onClick={() => setRhSubTab("cadastro")}
+                    onClick={() => {
+                      if (currentUser && !isUserAdmin) {
+                        const hasPendingPayslip = payslips.some(p => 
+                          p.employeeId === currentUser.id && 
+                          !p.visualized && 
+                          Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
+                        );
+                        if (hasPendingPayslip) {
+                          alert("Acesso Bloqueado: Você possui documentação pessoal aguardando visualização há mais de 11 dias. Por favor, visualize os documentos pendentes para liberar o portal.");
+                          return;
+                        }
+                      }
+                      setRhSubTab("cadastro");
+                    }}
                     className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm cursor-pointer"
                   >
                     <ArrowLeft className="h-4 w-4" />
@@ -16229,6 +16315,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             ) ||
               activePayslipTab === "meus") && (
               <div className="space-y-6">
+                {payslips.some(p => p.employeeId === currentUser?.id && !p.visualized && Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11) && (
+                  <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-r-lg flex items-start space-x-3 shadow-sm">
+                    <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-sm font-bold text-rose-800">Acesso Restrito: Documentação Pendente</h4>
+                      <p className="text-sm text-rose-700 mt-1">
+                        Você possui documentação pessoal (como contra-cheques, espelhos de ponto, etc.) que está aguardando visualização há mais de 11 dias. 
+                        <strong>O seu acesso às demais áreas do portal foi temporariamente bloqueado.</strong><br/>
+                        Para liberar o seu acesso, por favor visualize todos os documentos pendentes abaixo (clicando no botão "Visualizar Documento").
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {!lgpdConsentChecked ? (
                   <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm text-center space-y-6">
                     <div className="w-16 h-16 bg-blue-50 text-royal-blue rounded-full flex items-center justify-center mx-auto">

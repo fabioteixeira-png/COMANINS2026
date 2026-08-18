@@ -368,6 +368,8 @@ export interface Payslip {
   lgpdConsentDate?: string;
   visualized: boolean;
   visualizedAt?: string;
+  emailSent7Days?: boolean;
+  emailSent10Days?: boolean;
   visualizedIp?: string;
   visualizedUserAgent?: string;
 }
