@@ -31,6 +31,8 @@ import {
   ReferenceLine 
 } from 'recharts';
 import { Client, Instrument, CalibrationReport, RncReport } from '../types';
+
+import { syncFieldServiceRecords, FieldServiceRecord } from '../lib/firebase';
 import { PrivacyPolicyModal } from './LGPDPrivacy';
 import { getReportAuthKey } from '../utils/authKey';
 import { syncClientIntakes, SavedIntake, syncRncReports } from '../lib/firebase';
@@ -72,6 +74,20 @@ interface ClientPortalProps {
 
 export default function ClientPortal({ client, instruments, reports, customLogo, onLogout }: ClientPortalProps) {
   const [clientIntakes, setClientIntakes] = useState<SavedIntake[]>([]);
+
+  const [fieldServiceRecords, setFieldServiceRecords] = useState<FieldServiceRecord[]>([]);
+
+  useEffect(() => {
+    if (client?.isFieldService) {
+      const unsub = syncFieldServiceRecords((records) => {
+        setFieldServiceRecords(records);
+      });
+      return () => {
+        unsub.then(u => u());
+      }
+    }
+  }, [client?.isFieldService]);
+
   
   useEffect(() => {
     if (client?.id) {
@@ -120,6 +136,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
   const [selectedReport, setSelectedReport] = useState<CalibrationReport | null>(null);
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
+  const [fsTag, setFsTag] = useState<string>("");
+  const [fsEquip, setFsEquip] = useState<string>("");
   const [rncReports, setRncReports] = useState<RncReport[]>([]);
   const [selectedRncReport, setSelectedRncReport] = useState<RncReport | null>(null);
   const [showRncViewModal, setShowRncViewModal] = useState<boolean>(false);
@@ -290,7 +308,106 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
       </header>
 
       {/* Main Content Area */}
+      
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 print:hidden">
+        {client.isFieldService ? (
+          <>
+            <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-md relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5">
+                <Building className="w-40 h-40 text-royal-blue" />
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <span className="px-2.5 py-0.5 bg-blue-50 text-royal-blue text-[10px] font-bold rounded uppercase tracking-wider font-mono border border-blue-100">
+                    Acesso Serviço de Campo
+                  </span>
+                  <span className="text-xs text-slate-500 font-mono">• {client.city}</span>
+                </div>
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-display font-extrabold text-slate-900">{client.name}</h1>
+                  <p className="text-slate-600 text-xs mt-1 max-w-2xl leading-relaxed">
+                    Bem-vindo ao portal de Serviço de Campo. Abaixo estão listados os certificados disponíveis vinculados aos serviços realizados.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <h3 className="font-bold text-slate-900">Certificados Disponíveis</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                      <th className="p-4 font-semibold">Certificado</th>
+                      <th className="p-4 font-semibold">TAG</th>
+                      <th className="p-4 font-semibold">Equipamento</th>
+                      <th className="p-4 font-semibold text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(() => {
+                      const extractNum = (s: string) => String(s || '').replace(/\D/g, '');
+                      const correlatedRecords = fieldServiceRecords.map(fsRecord => {
+                        const recNum = extractNum(fsRecord.certificate);
+                        const inst = instruments.find(i => extractNum(i.certificateNumber) === recNum);
+                        if (inst) {
+                           return {
+                             fsRecord,
+                             inst
+                           };
+                        }
+                        return null;
+                      }).filter(Boolean);
+
+                      if (correlatedRecords.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={4} className="p-8 text-center text-slate-500">
+                              Nenhum certificado disponível no momento.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return correlatedRecords.map(({ fsRecord, inst }: any, idx: number) => {
+                        const report = reports.find(r => r.instrumentId === inst.id);
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50/50">
+                            <td className="p-4 font-mono font-medium">{fsRecord.certificate || inst.certificateNumber}</td>
+                            <td className="p-4">{fsRecord.tag || inst.tag || '-'}</td>
+                            <td className="p-4">{fsRecord.equipamento || '-'}</td>
+                            <td className="p-4 text-right">
+                              <button 
+                                onClick={() => {
+                                  if (report) {
+                                    setSelectedReport(report);
+                                    setSelectedInstrument(inst);
+                                    setFsTag(fsRecord.tag || '');
+                                    setFsEquip(fsRecord.equipamento || '');
+                                  } else {
+                                    alert('Certificado oficial ainda não emitido para este instrumento.');
+                                  }
+                                }}
+                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 ml-auto"
+                              >
+                                <Printer className="w-4 h-4" />
+                                <span>Imprimir</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+
         {/* Welcome and client info card */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-md relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-5">
@@ -508,6 +625,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
             </table>
           </div>
         </div>
+                </>
+        )}
       </main>
 
       {/* RNC Modal */}
@@ -537,6 +656,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                     setShowRncViewModal(false);
                     setSelectedRncReport(null);
                     setSelectedInstrument(null);
+            setFsTag("");
+            setFsEquip("");
                   }}
                   className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
                 >
@@ -694,6 +815,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
           onClick={() => {
             setSelectedReport(null);
             setSelectedInstrument(null);
+            setFsTag("");
+            setFsEquip("");
           }}
           className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-6 md:p-8 flex justify-center items-start print:static print:block print:overflow-visible print:p-0 print:bg-white print:text-black print:backdrop-blur-none"
         >
@@ -720,6 +843,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                   onClick={() => {
                     setSelectedReport(null);
                     setSelectedInstrument(null);
+            setFsTag("");
+            setFsEquip("");
                   }}
                   className="p-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-all flex items-center text-xs font-bold gap-1 shadow-sm border border-slate-700 cursor-pointer"
                   title="Fechar Certificado"
@@ -885,7 +1010,8 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                       <p className="font-bold text-sm uppercase mb-1">2. Instrumento Calibrado:</p>
                       <div className="pl-4 grid grid-cols-2 gap-1">
                         <p><span className="font-bold">Descrição:</span> {inst?.description}</p>
-                        <p><span className="font-bold">Tag Cliente:</span> {inst?.tag || '—'}</p>
+                        <p><span className="font-bold">TAG do Cliente:</span> {fsTag || inst?.tag || '—'}</p>
+                        {fsEquip && <p><span className="font-bold">Equipamento:</span> {fsEquip}</p>}
                         <p><span className="font-bold">Marca:</span> {inst?.brand || 'Não Consta'}</p>
                         <p><span className="font-bold">Modelo:</span> {inst?.model || 'Não Consta'}</p>
                         <p><span className="font-bold">Nº Série:</span> {inst?.serialNumber || 'NAO CONSTA'}</p>

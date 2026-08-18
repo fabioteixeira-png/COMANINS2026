@@ -744,6 +744,7 @@ export default function InternalPortal({
   const [chatInput, setChatInput] = useState<any>("");
   const [clientCity, setClientCity] = useState<any>("");
   const [clientCnpj, setClientCnpj] = useState<any>("");
+  const [clientIsFieldService, setClientIsFieldService] = useState<boolean>(false);
   const [clientEmail, setClientEmail] = useState<any>("");
   const [clientName, setClientName] = useState<any>("");
   const [clientPassword, setClientPassword] = useState<any>("");
@@ -2500,6 +2501,7 @@ Status atual: ${e.status}.`,
     setEditingClient(c);
     setClientName(c.name || (c as any).razaoSocial || "");
     setClientCnpj(c.cnpj || "");
+    setClientIsFieldService(c.isFieldService || false);
     setClientEmail(c.email || "");
     setClientPhone(c.phone || "");
     setClientCity(c.city || "");
@@ -2561,6 +2563,7 @@ Status atual: ${e.status}.`,
 
       setClientName("");
       setClientCnpj("");
+      setClientIsFieldService(false);
       setClientEmail("");
       setClientPhone("");
       setClientCity("");
@@ -6057,6 +6060,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     setEditingClient(null);
                     setClientName("");
                     setClientCnpj("");
+      setClientIsFieldService(false);
                     setClientEmail("");
                     setClientPhone("");
                     setClientCity("");
@@ -6066,6 +6070,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       setEditingClient(null);
                       setClientName("");
                       setClientCnpj("");
+      setClientIsFieldService(false);
                       setClientEmail("");
                       setClientPhone("");
                       setClientCity("");
@@ -6184,6 +6189,20 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     />
                   </div>
 
+                  <div className="flex items-center space-x-2 mt-4 col-span-1 sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      id="isFieldService"
+                      checked={clientIsFieldService}
+                      onChange={(e) => setClientIsFieldService(e.target.checked)}
+                      className="w-4 h-4 text-royal-blue bg-slate-50 border-slate-300 rounded focus:ring-royal-blue focus:ring-2"
+                    />
+                    <label htmlFor="isFieldService" className="text-slate-700 font-medium cursor-pointer">
+                      Acesso Restrito: Mostrar apenas Certificados do Serviço de Campo
+                    </label>
+                  </div>
+
+
                   <div className="col-span-full flex items-end space-x-2 mt-2">
                     <button
                       type="submit"
@@ -6200,6 +6219,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         setEditingClient(null);
                         setClientName("");
                         setClientCnpj("");
+      setClientIsFieldService(false);
                         setClientEmail("");
                         setClientPhone("");
                         setClientCity("");

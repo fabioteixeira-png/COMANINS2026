@@ -12,6 +12,7 @@ export interface Client {
   phone: string;
   city: string;
   password?: string;
+  isFieldService?: boolean;
 }
 
 export interface Instrument {
