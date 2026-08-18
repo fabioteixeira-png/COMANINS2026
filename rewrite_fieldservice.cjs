@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+const fs = require('fs');
+
+const content = `import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { 
@@ -17,7 +19,7 @@ const parseDateForSort = (dString: string) => {
   }
   const parts = String(dString).split('/');
   if (parts.length === 3) {
-    return new Date(`${parts[2]}-${parts[1]}-${parts[0]}T00:00:00`).getTime();
+    return new Date(\`\${parts[2]}-\${parts[1]}-\${parts[0]}T00:00:00\`).getTime();
   }
   return new Date(dString).getTime() || 0;
 };
@@ -86,7 +88,7 @@ export default function FieldService() {
     };
   }, []);
 
-  const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([{
@@ -171,7 +173,7 @@ export default function FieldService() {
           await bulkAddFieldServiceRecords(newRecordsToImport);
         }
         
-        alert(`Importação concluída!\n${newRecordsToImport.length} novos registros adicionados.\n${duplicates} ignorados (certificado já existente).`);
+        alert(\`Importação concluída!\\n\${newRecordsToImport.length} novos registros adicionados.\\n\${duplicates} ignorados (certificado já existente).\`);
       } catch (error) {
         console.error("Error reading excel:", error);
         alert("Erro ao importar planilha.");
@@ -590,3 +592,7 @@ export default function FieldService() {
     </div>
   );
 }
+`
+
+fs.writeFileSync('src/components/FieldService.tsx', content);
+console.log('Successfully refactored FieldService to support dynamic columns.');

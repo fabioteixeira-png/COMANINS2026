@@ -1173,6 +1173,7 @@ Required JSON format:
   "ordemServico": "String - Ordem de serviço / OS",
   "tipoServico": "String - Tipo de serviço",
   "observacao": "String - Observação",
+  "cliente": "String - Cliente",
   "unidade": "String - Unidade (local)"
 }
 `;

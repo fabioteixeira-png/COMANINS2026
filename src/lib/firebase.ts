@@ -2084,6 +2084,7 @@ export async function syncClientIntakes(clientId: string, callback: (intakes: Sa
 
 export interface FieldServiceRecord {
   id: string;
+  cliente: string;
   tag: string;
   equipamento: string;
   localizacao: string;
