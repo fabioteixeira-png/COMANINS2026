@@ -25,6 +25,7 @@ const parseDateForSort = (dString: string) => {
 
 const COLUMNS = [
   { id: 'certificate', label: 'Certificado', minW: '120px' },
+  { id: 'dataCalibracao', label: 'Data Calibração', minW: '120px' },
   { id: 'interventionDate', label: 'Data Intervenção', minW: '120px' },
   { id: 'tag', label: 'Tag', minW: '120px' },
   { id: 'equipamento', label: 'Equipamento', minW: '150px' },
@@ -148,6 +149,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([{
       'Certificado': '',
+      'Data Calibração': '',
       'Data de Intervenção': '',
       'Tag': '',
       'Equipamento': '',
@@ -249,6 +251,18 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
     }
     const ws = XLSX.utils.json_to_sheet(sortedRecords.map(r => ({
       'Certificado': r.certificate,
+      'Data Calibração': (() => {
+        if (!r.certificate) return '-';
+        const correlatedInst = instruments.find(i => i.certificateNumber === r.certificate || (i.coma && i.coma === r.certificate));
+        if (correlatedInst && correlatedInst.lastCalibrationDate) {
+          const dateParts = correlatedInst.lastCalibrationDate.split('-');
+          if (dateParts.length === 3) {
+            return `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+          }
+          return correlatedInst.lastCalibrationDate;
+        }
+        return '-';
+      })(),
       'Data de Intervenção': r.interventionDate,
       'Tag': r.tag,
       'Equipamento': r.equipamento,
@@ -603,10 +617,29 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
                 paginatedRecords.map(record => (
                   <tr key={record.id} className="hover:bg-slate-50 transition-colors">
                     {COLUMNS.filter(c => visibleColumns[c.id]).map(col => {
-                      const value = (record as any)[col.id];
+                      let value = (record as any)[col.id];
+                      
+                      if (col.id === 'dataCalibracao') {
+                        if (record.certificate) {
+                          const correlatedInst = instruments.find(i => i.certificateNumber === record.certificate || (i.coma && i.coma === record.certificate));
+                          if (correlatedInst && correlatedInst.lastCalibrationDate) {
+                            // format date to DD/MM/YYYY
+                            const dateParts = correlatedInst.lastCalibrationDate.split('-');
+                            if (dateParts.length === 3) {
+                              value = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+                            } else {
+                              value = correlatedInst.lastCalibrationDate;
+                            }
+                          } else {
+                            value = '-';
+                          }
+                        } else {
+                          value = '-';
+                        }
+                      }
                       
                       const isEditing = editingCell?.rowId === record.id && editingCell?.colId === col.id;
-                      if (isEditing) {
+                      if (isEditing && col.id !== 'dataCalibracao') {
                         return (
                           <td key={col.id} className="px-4 py-2">
                             <input 
@@ -681,7 +714,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
             
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {COLUMNS.filter(c => c.id !== 'observacao').map(col => (
+                {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao').map(col => (
                   <div key={col.id}>
                     <label className="block text-xs font-bold text-slate-700 mb-1">{col.label}</label>
                     <input 
