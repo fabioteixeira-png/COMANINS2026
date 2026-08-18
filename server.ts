@@ -212,6 +212,7 @@ let ai: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
   if (ai) return ai;
   const key = process.env.GEMINI_API_KEY;
+
   if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") {
     return null;
   }
