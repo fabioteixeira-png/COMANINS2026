@@ -156,6 +156,8 @@ export interface CalibrationReport {
   maxDeadband?: number;
   approved: boolean;
   observations: string;
+  temperature?: number;
+  humidity?: number;
   curveCount?: number;
   referenceStandardIds?: string[];
   referenceStandards?: ReferenceStandard[];

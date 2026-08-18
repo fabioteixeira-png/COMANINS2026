@@ -65,7 +65,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     safeFetch("/api/send-email", {
       method: "POST",
       body: JSON.stringify({
-        to: "financeiro@comanins.com.br",
+        to: "financeiro@comanins.com.br, fabio.teixeira@comanins.com.br, isidro.teixeira@comanins.com.br, solange.teixeira@comanins.com.br, manutencao@comanins.com.br",
         subject: `Novo Chamado: ${ticket.title}`,
         html: `
           <h2>Novo Chamado Administrativo/Financeiro</h2>
@@ -126,7 +126,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
       safeFetch("/api/send-email", {
         method: "POST",
         body: JSON.stringify({
-          to: "financeiro@comanins.com.br",
+          to: "financeiro@comanins.com.br, fabio.teixeira@comanins.com.br, isidro.teixeira@comanins.com.br, solange.teixeira@comanins.com.br, manutencao@comanins.com.br",
           subject: `Nova interação no chamado: ${updatedTicket.title}`,
           html: `
             <h2>Nova mensagem do colaborador</h2>
@@ -479,7 +479,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
             <form onSubmit={handleCreateTicket} className="p-6 overflow-y-auto space-y-4">
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900 flex items-center gap-2">
                 <Mail className="h-4 w-4 text-blue-600 shrink-0" />
-                <span>Os chamados de comunicação interna são encaminhados para <strong>financeiro@comanins.com.br</strong>.</span>
+                <span>Os chamados de comunicação interna são encaminhados para <strong>financeiro, fabio, isidro, solange e manutenção (@comanins.com.br)</strong>.</span>
               </div>
 
               <div>
