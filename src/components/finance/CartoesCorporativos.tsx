@@ -26,7 +26,7 @@ interface CardPurchase {
 }
 
 export default function CartoesCorporativos() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [cards, setCards] = useState<CorporateCard[]>(() => {
     return isSimulacao ? [

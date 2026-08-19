@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Users, FileText, Landmark, Clock, Percent } from 'lucide-react';
 
 export default function CustosPessoalContrato() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [personnelCosts] = useState(() => {
     return isSimulacao ? [

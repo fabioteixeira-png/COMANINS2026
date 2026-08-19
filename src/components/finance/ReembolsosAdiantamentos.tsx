@@ -16,7 +16,7 @@ interface RequestItem {
 }
 
 export default function ReembolsosAdiantamentos() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [requests, setRequests] = useState<RequestItem[]>(() => {
     return isSimulacao ? [

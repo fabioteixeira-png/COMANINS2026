@@ -15,7 +15,7 @@ interface AuditLog {
 }
 
 export default function AuditoriaAlteracoes() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [logs] = useState<AuditLog[]>(() => {
     return isSimulacao ? [

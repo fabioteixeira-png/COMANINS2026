@@ -45,7 +45,7 @@ export default function DashboardFinanceiro() {
     return true;
   });
 
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   // KPI Calculations according to Page 7 definitions
   const saldoBancario = isSimulacao 

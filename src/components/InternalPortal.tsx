@@ -5292,7 +5292,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   ]);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="h-screen sm:h-[100dvh] bg-slate-50 flex overflow-hidden">
       {/* Birthday Modal */}
       {showBirthdayModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
@@ -5536,7 +5536,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </button>
         </nav>
       </aside>
-      <div className="flex-1 min-w-0 p-3 sm:p-6 md:p-8 h-screen overflow-y-auto w-full">
+      <div className="flex-1 min-w-0 p-3 sm:p-6 md:p-8 overflow-y-auto w-full h-full">
         {/* Top Navigation Header with Notification Bell */}
         <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">

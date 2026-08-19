@@ -16,7 +16,7 @@ interface Loan {
 }
 
 export default function EmprestimosFinanciamentos() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [loans, setLoans] = useState<Loan[]>(() => {
     return isSimulacao ? [

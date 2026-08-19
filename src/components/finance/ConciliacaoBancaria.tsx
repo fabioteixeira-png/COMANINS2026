@@ -22,7 +22,7 @@ export default function ConciliacaoBancaria() {
   const [selectedAccount, setSelectedAccount] = useState('Itaú Sede');
   const [imported, setImported] = useState(false);
   
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   // Bank statement list
   const [extratoItems, setExtratoItems] = useState<ExtratoItem[]>(() => {

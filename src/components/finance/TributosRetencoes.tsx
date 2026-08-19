@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { DollarSign, Percent, Calendar, FileText, CheckCircle } from 'lucide-react';
 
 export default function TributosRetencoes() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [taxes] = useState(() => {
     return isSimulacao ? [

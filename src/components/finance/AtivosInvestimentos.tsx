@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, Settings, AlertCircle, TrendingDown } from 'lucide-react';
 
 export default function AtivosInvestimentos() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [assets] = useState(() => {
     return isSimulacao ? [

@@ -15,7 +15,7 @@ export default function RelatoriosFinanceiros() {
     return () => unsub();
   }, []);
 
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   // Math values for reports according to page 18-19 specification ratios
   const dreData = isSimulacao ? {

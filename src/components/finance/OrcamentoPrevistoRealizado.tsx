@@ -15,7 +15,7 @@ interface BudgetItem {
 }
 
 export default function OrcamentoPrevistoRealizado() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>(() => {
     return isSimulacao ? [

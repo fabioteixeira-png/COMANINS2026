@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Bell, AlertCircle, Clock, CheckCircle2, ShieldAlert } from 'lucide-react';
 
 export default function AlertasNotificacoes() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [alerts] = useState(() => {
     return isSimulacao ? [

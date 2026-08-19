@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Percent, Award, AlertCircle, Plus, Trash2 } from 'lucide-react';
 
 export default function RateioCustos() {
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   const [rules, setRules] = useState(() => {
     return isSimulacao ? [

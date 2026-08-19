@@ -26,7 +26,7 @@ export default function FluxoCaixa() {
     };
   }, []);
 
-  const isSimulacao = (localStorage.getItem('finance_op_mode') || 'homologado') === 'simulacao';
+  const isSimulacao = false;
 
   // Projections
   const currentBalance = isSimulacao 
