@@ -321,7 +321,7 @@ export default function EmployeeManagement({
       }
       
       try {
-        await addEmployeeAsoDoc({
+        const savedAso = await addEmployeeAsoDoc({
           employeeId: empId,
           employeeName: formData.name || selectedUser?.name || 'Desconhecido',
           ...newAsoItem
@@ -332,10 +332,11 @@ export default function EmployeeManagement({
         // Update validity date in formData just for display/logic sync
         setFormData((prev) => {
           const currentList = prev.asoContracts || [];
-          const updatedList = [...currentList, newAsoItem];
+          const updatedList = [...currentList, savedAso];
           updatedList.sort((a, b) => new Date(a.validityDate).getTime() - new Date(b.validityDate).getTime());
           return {
             ...prev,
+            asoContracts: updatedList,
             asoValidity: updatedList[0]?.validityDate || prev.asoValidity
           };
         });
@@ -409,15 +410,14 @@ export default function EmployeeManagement({
     try {
       if (asoId.startsWith('easo_')) {
         await deleteEmployeeAsoDoc(asoId);
-      } else {
-        // Fallback for legacy ASOs stored in formData
-        const updatedList = (formData.asoContracts || []).filter((item: any) => item.id !== asoId);
-        setFormData((prev: any) => ({
-          ...prev,
-          asoContracts: updatedList,
-          asoValidity: updatedList[0]?.validityDate || ''
-        }));
       }
+      // Always remove from local formData as well, whether it's legacy or newly added to local state
+      const updatedList = (formData.asoContracts || []).filter((item: any) => item.id !== asoId);
+      setFormData((prev: any) => ({
+        ...prev,
+        asoContracts: updatedList,
+        asoValidity: updatedList.length > 0 ? (updatedList[0]?.validityDate || '') : ''
+      }));
     } catch (err) {
       console.error("Erro ao remover ASO:", err);
       alert("Erro ao remover ASO.");
@@ -2868,15 +2868,33 @@ export default function EmployeeManagement({
 
                                 <div className="flex items-center space-x-1 shrink-0">
                                   {docItem.url && (
-                                    <a
-                                      href={docItem.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="p-1.5 text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
-                                      title="Visualizar / Baixar Documento"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </a>
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          window.open(docItem.url, '_blank');
+                                        }}
+                                        className="p-1.5 text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
+                                        title="Visualizar Documento"
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const link = document.createElement('a');
+                                          link.href = docItem.url;
+                                          link.download = docItem.name || 'documento';
+                                          document.body.appendChild(link);
+                                          link.click();
+                                          document.body.removeChild(link);
+                                        }}
+                                        className="p-1.5 text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
+                                        title="Baixar Documento"
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </button>
+                                    </>
                                   )}
                                   <button
                                     type="button"
