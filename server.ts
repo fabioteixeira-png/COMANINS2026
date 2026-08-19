@@ -436,7 +436,7 @@ Atenciosamente,
 COMANINS Metrology Suite`;
 
         // Destinatários solicitados
-        const recipients = "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, manutencao@comanins.com.br";
+        const recipients = "isidro.teixeira@comanins.com.br, comercial@comanins.com.br, manutencao@comanins.com.br, fabio.teixeira@comanins.com.br";
 
         const info = await transporter.sendMail({
           from: `"COMANINS Notificações" <${SMTP_USER}>`,

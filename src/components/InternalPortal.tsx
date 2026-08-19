@@ -1203,6 +1203,7 @@ export default function InternalPortal({
       | "inventory"
       | "training"
       | "employee_training"
+      | "employee_aso"
       | "message"
       | "audit_log"
       | "payslip"
@@ -1328,6 +1329,8 @@ export default function InternalPortal({
           await deleteTrainingDoc(deleteTarget.id);
         } else if (deleteTarget.type === "employee_training") {
           await deleteEmployeeTrainingDoc(deleteTarget.id);
+        } else if (deleteTarget.type === "employee_aso") {
+          await import("../lib/firebase").then(m => m.deleteEmployeeAsoDoc(deleteTarget.id));
         } else if (deleteTarget.type === "audit_log") {
           await deleteCalibrationAuditLogDoc(deleteTarget.id);
         } else if (deleteTarget.type === "payslip") {
