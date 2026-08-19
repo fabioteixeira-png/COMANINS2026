@@ -2878,8 +2878,27 @@ export default function EmployeeManagement({
                                     <>
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          window.open(docItem.url, '_blank');
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          if (docItem.url?.startsWith("data:")) {
+                                            try {
+                                              const byteString = atob(docItem.url.split(",")[1]);
+                                              const mimeString = docItem.url.split(",")[0].split(":")[1].split(";")[0];
+                                              const ab = new ArrayBuffer(byteString.length);
+                                              const ia = new Uint8Array(ab);
+                                              for (let i = 0; i < byteString.length; i++) {
+                                                ia[i] = byteString.charCodeAt(i);
+                                              }
+                                              const blob = new Blob([ab], { type: mimeString });
+                                              const blobUrl = URL.createObjectURL(blob);
+                                              window.open(blobUrl, "_blank");
+                                            } catch (err) {
+                                              console.error("Erro ao abrir documento", err);
+                                              alert("Erro ao abrir o documento.");
+                                            }
+                                          } else {
+                                            window.open(docItem.url, "_blank");
+                                          }
                                         }}
                                         className="p-1.5 text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
                                         title="Visualizar Documento"
@@ -3203,7 +3222,25 @@ export default function EmployeeManagement({
                                         type="button"
                                         onClick={(e) => {
                                           e.preventDefault();
-                                          window.open(rec.certificateUrl, '_blank');
+                                          if (rec.certificateUrl?.startsWith("data:")) {
+                                            try {
+                                              const byteString = atob(rec.certificateUrl.split(",")[1]);
+                                              const mimeString = rec.certificateUrl.split(",")[0].split(":")[1].split(";")[0];
+                                              const ab = new ArrayBuffer(byteString.length);
+                                              const ia = new Uint8Array(ab);
+                                              for (let i = 0; i < byteString.length; i++) {
+                                                ia[i] = byteString.charCodeAt(i);
+                                              }
+                                              const blob = new Blob([ab], { type: mimeString });
+                                              const blobUrl = URL.createObjectURL(blob);
+                                              window.open(blobUrl, "_blank");
+                                            } catch (err) {
+                                              console.error("Erro ao abrir certificado", err);
+                                              alert("Erro ao abrir certificado.");
+                                            }
+                                          } else {
+                                            window.open(rec.certificateUrl, "_blank");
+                                          }
                                         }}
                                         className="bg-royal-blue/10 hover:bg-royal-blue/20 text-royal-blue px-2 py-0.5 rounded font-bold text-[9px] inline-flex items-center gap-1 print:hidden"
                                       >

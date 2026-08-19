@@ -1,68 +1,141 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/components/FieldService.tsx', 'utf8');
+let content = fs.readFileSync('src/components/FieldService.tsx', 'utf-8');
 
-// 1. Update normalizeKey
-code = code.replace(
-  "const normalizeKey = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, '');",
-  "const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');"
+const dateMaskFunc = `
+  const dateMask = (value) => {
+    if (!value) return '';
+    return value
+      .replace(/\\D/g, "")
+      .replace(/(\\d{2})(\\d)/, "$1/$2")
+      .replace(/(\\d{2})(\\d)/, "$1/$2")
+      .replace(/(\\d{4})\\d+?$/, "$1");
+  };
+`;
+
+// Insert dateMask before handleSaveRecord
+content = content.replace(
+  /const handleSaveRecord = async \(\) => {/g,
+  dateMaskFunc + '\n  const handleSaveRecord = async () => {'
 );
 
-// 2. Add cliente to filters
-code = code.replace(
-  "certificate: '', tag: '', equipamento: '', localizacao: '',",
-  "certificate: '', cliente: '', tag: '', equipamento: '', localizacao: '',"
-);
+const oldSave = `  const handleSaveRecord = async () => {
+    const isDuplicate = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
+    if (isDuplicate) {
+      alert("Erro: Este Certificado já está registrado na planilha!");
+      return;
+    }`;
 
-// 3. Add cliente to template download
-code = code.replace(
-  "'Certificado': '',",
-  "'Certificado': '',\n      'Cliente': '',"
-);
+const newSave = `  const handleSaveRecord = async () => {
+    const duplicateCert = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
+    const duplicateTag = formData.tag && formData.tag.trim() !== '' && records.some(r => r.tag === formData.tag && r.id !== formData.id);
+    if (duplicateCert) {
+      alert("Erro: Este Certificado já está registrado na planilha!");
+      return;
+    }
+    if (duplicateTag) {
+      alert("Erro: Esta TAG já está registrada na planilha!");
+      return;
+    }`;
 
-// 4. Add cliente extraction
-code = code.replace(
-  "tag: String(normalizedRow['tag'] || ''),",
-  "cliente: String(normalizedRow['cliente'] || ''),\n            tag: String(normalizedRow['tag'] || ''),"
-);
+content = content.replace(oldSave, newSave);
 
-// 5. Add cliente to export excel
-code = code.replace(
-  "'Certificado': r.certificate,",
-  "'Certificado': r.certificate,\n      'Cliente': r.cliente || '',"
-);
+const oldInlineEdit = `                      if (editingCell?.rowId === record.id && editingCell?.colId === col.id) {
+                        return (
+                          <td key={col.id} className="px-4 py-3 whitespace-nowrap min-w-[120px]">
+                            <input
+                              type="text"
+                              autoFocus
+                              defaultValue={value}
+                              onBlur={(e) => handleInlineEdit(record.id, col.id, e.target.value, value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleInlineEdit(record.id, col.id, e.currentTarget.value, value);
+                                if (e.key === 'Escape') setEditingCell(null);
+                              }}
+                              className="w-full px-2 py-1 text-sm border border-royal-blue rounded outline-none shadow-sm"
+                            />
+                          </td>
+                        );
+                      }`;
 
-// 6. Add cliente to AI processing
-code = code.replace(
-  "tag: data.tag || '',",
-  "cliente: data.cliente || '',\n        tag: data.tag || '',"
-);
+const newInlineEdit = `                      if (editingCell?.rowId === record.id && editingCell?.colId === col.id) {
+                        return (
+                          <td key={col.id} className="px-4 py-3 whitespace-nowrap min-w-[120px]">
+                            <input
+                              type="text"
+                              autoFocus
+                              defaultValue={value}
+                              onChange={(e) => {
+                                if (col.id === 'interventionDate') {
+                                  e.target.value = dateMask(e.target.value);
+                                }
+                              }}
+                              onBlur={(e) => handleInlineEdit(record.id, col.id, e.target.value, value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleInlineEdit(record.id, col.id, e.currentTarget.value, value);
+                                if (e.key === 'Escape') setEditingCell(null);
+                              }}
+                              className="w-full px-2 py-1 text-sm border border-royal-blue rounded outline-none shadow-sm"
+                            />
+                          </td>
+                        );
+                      }`;
 
-// 7. Table Header
-const thCertificado = `<th className="px-4 py-3 min-w-[120px]">
-                  Certificado
-                  <input type="text" value={filters.certificate} onChange={e=>handleFilterChange('certificate', e.target.value)} className="w-full mt-1 px-2 py-1 text-xs border rounded font-normal" placeholder="Filtrar..." />
-                </th>`;
-const thCliente = `<th className="px-4 py-3 min-w-[150px]">
-                  Cliente
-                  <input type="text" value={filters.cliente} onChange={e=>handleFilterChange('cliente', e.target.value)} className="w-full mt-1 px-2 py-1 text-xs border rounded font-normal" placeholder="Filtrar..." />
-                </th>`;
-code = code.replace(thCertificado, thCertificado + '\n                ' + thCliente);
+content = content.replace(oldInlineEdit, newInlineEdit);
 
-// 8. Table Body
-const tdCertificado = `<td className="px-4 py-3 font-semibold text-slate-800 whitespace-nowrap">{record.certificate}</td>`;
-const tdCliente = `<td className="px-4 py-3 whitespace-nowrap">{record.cliente || '-'}</td>`;
-code = code.replace(tdCertificado, tdCertificado + '\n                    ' + tdCliente);
+const oldModalInput = `                    <input 
+                       type="text"
+                       value={(formData as any)[col.id] || ''}
+                       onChange={e => setFormData({...formData, [col.id]: e.target.value})}
+                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none" 
+                     />`;
 
-// 9. Add Cliente to Form Modal
-const formCertificado = `<div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Certificado *</label>
-                  <input type="text" value={formData.certificate || ''} onChange={e => setFormData({...formData, certificate: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none" placeholder="Ex: CERT-001" />
-                </div>`;
-const formCliente = `<div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Cliente</label>
-                  <input type="text" value={formData.cliente || ''} onChange={e => setFormData({...formData, cliente: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none" placeholder="Nome do cliente..." />
-                </div>`;
-code = code.replace(formCertificado, formCertificado + '\n                ' + formCliente);
+const newModalInput = `                    <input 
+                       type="text"
+                       value={(formData as any)[col.id] || ''}
+                       onChange={e => {
+                         let val = e.target.value;
+                         if (col.id === 'interventionDate') val = dateMask(val);
+                         setFormData({...formData, [col.id]: val});
+                       }}
+                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none" 
+                     />`;
 
-fs.writeFileSync('src/components/FieldService.tsx', code);
-console.log('patched FieldService.tsx');
+content = content.replace(oldModalInput, newModalInput);
+
+
+// Wait, we also need to enforce duplicate check in handleInlineEdit
+const oldHandleInlineEdit = `  const handleInlineEdit = async (id: string, field: string, newValue: string, oldValue: string) => {
+    if (newValue === oldValue) {
+      setEditingCell(null);
+      return;
+    }`;
+
+const newHandleInlineEdit = `  const handleInlineEdit = async (id: string, field: string, newValue: string, oldValue: string) => {
+    if (newValue === oldValue) {
+      setEditingCell(null);
+      return;
+    }
+    
+    if (field === 'certificate' && newValue.trim() !== '') {
+      const isDup = records.some(r => r.certificate === newValue && r.id !== id);
+      if (isDup) {
+        alert("Erro: Este Certificado já está registrado na planilha!");
+        setEditingCell(null);
+        return;
+      }
+    }
+
+    if (field === 'tag' && newValue.trim() !== '') {
+      const isDup = records.some(r => r.tag === newValue && r.id !== id);
+      if (isDup) {
+        alert("Erro: Esta TAG já está registrada na planilha!");
+        setEditingCell(null);
+        return;
+      }
+    }
+`;
+
+content = content.replace(oldHandleInlineEdit, newHandleInlineEdit);
+
+fs.writeFileSync('src/components/FieldService.tsx', content);
+console.log("Patched FieldService.tsx");

@@ -8,6 +8,7 @@ import {
   addFieldServiceRecord, 
   updateFieldServiceRecord, 
   bulkAddFieldServiceRecords,
+  bulkUpsertFieldServiceRecords,
   clearAllFieldServiceRecords, deleteFieldServiceRecord, syncPortalUsers, PortalUser, syncInstruments 
 } from '../lib/firebase';
 
@@ -93,6 +94,23 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   const handleInlineSave = async (record: FieldServiceRecord, colId: string, newVal: string) => {
     setEditingCell(null);
     if (String((record as any)[colId] || '') === newVal) return;
+    
+    if (colId === 'certificate' && newVal.trim() !== '') {
+      const isDup = records.some(r => r.certificate === newVal && r.id !== record.id);
+      if (isDup) {
+        alert("Erro: Este Certificado já está registrado na planilha!");
+        return;
+      }
+    }
+
+    if (colId === 'tag' && newVal.trim() !== '') {
+      const isDup = records.some(r => r.tag === newVal && r.id !== record.id);
+      if (isDup) {
+        alert("Erro: Esta TAG já está registrada na planilha!");
+        return;
+      }
+    }
+
     try {
       await updateFieldServiceRecord(record.id, { [colId]: newVal });
     } catch (e) {
@@ -186,9 +204,16 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws, { raw: false });
         
-        let duplicates = 0;
+        let addedCount = 0;
+        let updatedCount = 0;
+        let skippedCount = 0;
+
         const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
-        const existingCerts = new Set(records.map(r => r.certificate));
+        const recordsToUpdate: {id: string, data: Partial<FieldServiceRecord>}[] = [];
+
+        // Track what we process in this batch to avoid duplicates within the Excel file itself
+        const processedCerts = new Set();
+        const processedTags = new Set();
 
         for (const row of data as any[]) {
           const normalizedRow = Object.keys(row).reduce((acc, key) => {
@@ -199,21 +224,33 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
           const cert = normalizedRow['certificado'] || normalizedRow['cert'] || '';
           const strCert = String(cert).trim();
           
-          if (strCert !== '' && existingCerts.has(strCert)) {
-            duplicates++;
+          const tagRaw = normalizedRow['tag'] || '';
+          const strTag = String(tagRaw).trim();
+
+          // Excel rows must have either a cert or a tag to be useful
+          if (strCert === '' && strTag === '') {
             continue;
           }
-          if (strCert !== '') {
-            existingCerts.add(strCert);
+
+          // If the Excel itself has duplicates, we just skip the subsequent ones
+          if ((strCert !== '' && processedCerts.has(strCert)) || (strTag !== '' && processedTags.has(strTag))) {
+            skippedCount++;
+            continue;
           }
 
-          newRecordsToImport.push({
+          if (strCert !== '') processedCerts.add(strCert);
+          if (strTag !== '') processedTags.add(strTag);
+
+          const interventionDateRaw = String(normalizedRow['data'] || normalizedRow['date'] || normalizedRow['datadeintervencao'] || normalizedRow['dataintervencao'] || normalizedRow['datadeinterveno'] || normalizedRow['datadeint'] || '');
+          const formattedInterventionDate = dateMask(interventionDateRaw);
+
+          const parsedRecord = {
             cliente: String(normalizedRow['cliente'] || ''),
-            tag: String(normalizedRow['tag'] || ''),
+            tag: strTag,
             equipamento: String(normalizedRow['equipamento'] || normalizedRow['descrio'] || ''),
             localizacao: String(normalizedRow['localizacao'] || normalizedRow['localizao'] || normalizedRow['local'] || normalizedRow['serie'] || normalizedRow['srie'] || ''),
-            certificate: String(cert),
-            interventionDate: String(normalizedRow['data'] || normalizedRow['date'] || normalizedRow['datadeintervencao'] || normalizedRow['dataintervencao'] || normalizedRow['datadeinterveno'] || normalizedRow['datadeint'] || ''),
+            certificate: strCert,
+            interventionDate: formattedInterventionDate,
             technician: String(normalizedRow['tecnico'] || normalizedRow['tcnico'] || normalizedRow['technician'] || ''),
             area: String(normalizedRow['area'] || normalizedRow['rea'] || ''),
             range: String(normalizedRow['range'] || normalizedRow['faixa'] || ''),
@@ -225,14 +262,43 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
             tipoServico: String(normalizedRow['tipodeservico'] || normalizedRow['tiposervico'] || ''),
             observacao: String(normalizedRow['observacao'] || normalizedRow['observao'] || normalizedRow['notas'] || ''),
             unidade: String(normalizedRow['unidade'] || normalizedRow['und'] || '')
-          });
+          };
+
+          // Find existing match
+          let existingMatch = null;
+          if (strCert !== '') {
+            existingMatch = records.find(r => r.certificate === strCert);
+          } else if (strTag !== '') {
+            existingMatch = records.find(r => r.tag === strTag);
+          }
+
+          if (existingMatch) {
+            // Check if there are differences
+            let hasDifferences = false;
+            for (const key of Object.keys(parsedRecord)) {
+              if ((parsedRecord as any)[key] !== (existingMatch as any)[key]) {
+                hasDifferences = true;
+                break;
+              }
+            }
+
+            if (hasDifferences) {
+              recordsToUpdate.push({ id: existingMatch.id, data: parsedRecord });
+              updatedCount++;
+            } else {
+              skippedCount++;
+            }
+          } else {
+            newRecordsToImport.push(parsedRecord);
+            addedCount++;
+          }
         }
         
-        if (newRecordsToImport.length > 0) {
-          await bulkAddFieldServiceRecords(newRecordsToImport);
+        if (newRecordsToImport.length > 0 || recordsToUpdate.length > 0) {
+          await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
         }
         
-        alert(`Importação concluída!\n${newRecordsToImport.length} novos registros adicionados.\n${duplicates} ignorados (certificado já existente).`);
+        alert(`Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} ignorados (já estavam idênticos ou duplicados no arquivo).`);
       } catch (error) {
         console.error("Error reading excel:", error);
         alert("Erro ao importar planilha.");
@@ -370,10 +436,25 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
     }
   };
 
+  
+  const dateMask = (value) => {
+    if (!value) return '';
+    return value
+      .replace(/\D/g, "")
+      .replace(/(\d{2})(\d)/, "$1/$2")
+      .replace(/(\d{2})(\d)/, "$1/$2")
+      .replace(/(\d{4})\d+?$/, "$1");
+  };
+
   const handleSaveRecord = async () => {
-    const isDuplicate = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
-    if (isDuplicate) {
+    const duplicateCert = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
+    const duplicateTag = formData.tag && formData.tag.trim() !== '' && records.some(r => r.tag === formData.tag && r.id !== formData.id);
+    if (duplicateCert) {
       alert("Erro: Este Certificado já está registrado na planilha!");
+      return;
+    }
+    if (duplicateTag) {
+      alert("Erro: Esta TAG já está registrada na planilha!");
       return;
     }
 

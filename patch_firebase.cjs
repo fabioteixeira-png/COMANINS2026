@@ -1,53 +1,34 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/lib/firebase.ts', 'utf8');
+let content = fs.readFileSync('src/lib/firebase.ts', 'utf-8');
 
-const interfaceDef = `
-export interface FieldServiceRecord {
-  id: string;
-  tag: string;
-  description: string;
-  serialNumber: string;
-  certificate: string;
-  interventionDate: string;
-  technician: string;
-  status: string;
-  notes: string;
-}
-
-export async function syncFieldServiceRecords(callback: (records: FieldServiceRecord[]) => void) {
+const newFunc = `
+export async function bulkUpsertFieldServiceRecords(updates: {id: string, data: Partial<FieldServiceRecord>}[], adds: Omit<FieldServiceRecord, 'id'>[]): Promise<void> {
   const colRef = collection(db, 'fieldServiceRecords');
-  return onSnapshot(colRef, (snapshot) => {
-    const list: FieldServiceRecord[] = [];
-    snapshot.forEach(doc => {
-      list.push({ id: doc.id, ...doc.data() } as FieldServiceRecord);
-    });
-    callback(list);
-  }, (err) => {
-    console.error("Error syncing field service records:", err);
-  });
-}
+  const allOps = [];
+  
+  updates.forEach(u => allOps.push({ type: 'update', ...u }));
+  adds.forEach(a => allOps.push({ type: 'add', data: a }));
 
-export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {
-  const colRef = collection(db, 'fieldServiceRecords');
-  const docRef = await addDoc(colRef, data);
-  return { id: docRef.id, ...data };
-}
+  const chunks = [];
+  for (let i = 0; i < allOps.length; i += 500) {
+    chunks.push(allOps.slice(i, i + 500));
+  }
 
-export async function updateFieldServiceRecord(id: string, data: Partial<FieldServiceRecord>): Promise<void> {
-  const docRef = doc(db, 'fieldServiceRecords', id);
-  await updateDoc(docRef, data);
-}
-
-export async function deleteFieldServiceRecord(id: string): Promise<void> {
-  const docRef = doc(db, 'fieldServiceRecords', id);
-  await deleteDoc(docRef);
+  for (const chunk of chunks) {
+    const batch = writeBatch(db);
+    for (const op of chunk) {
+      if (op.type === 'update') {
+        const docRef = doc(db, 'fieldServiceRecords', op.id);
+        batch.update(docRef, op.data);
+      } else {
+        const docRef = doc(colRef);
+        batch.set(docRef, op.data);
+      }
+    }
+    await batch.commit();
+  }
 }
 `;
 
-if (!code.includes('export interface FieldServiceRecord')) {
-  code += interfaceDef;
-  fs.writeFileSync('src/lib/firebase.ts', code);
-  console.log('Firebase functions added.');
-} else {
-  console.log('Firebase functions already exist.');
-}
+content = content + newFunc;
+fs.writeFileSync('src/lib/firebase.ts', content);
