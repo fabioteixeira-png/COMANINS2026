@@ -157,6 +157,7 @@ import {
 import FirebaseUsagePanel from "./FirebaseUsagePanel";
 import NotificationBellPopover from "./NotificationBellPopover";
 import IntakeLabelPrintModal from "./IntakeLabelPrintModal";
+import HealthProgramManagement from "./HealthProgramManagement";
 import {
   ResponsiveContainer,
   LineChart,
@@ -5499,6 +5500,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <TrendingUp className="h-4 w-4 text-slate-500" />
                 <span>Financeiro</span>
               </button>
+              <button
+                onClick={() => setActiveTab("programas_saude")}
+                className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+                  activeTab === "programas_saude"
+                    ? "bg-blue-50 text-royal-blue font-bold"
+                    : "text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <ShieldCheck className="h-4 w-4 text-slate-500" />
+                <span>Programa de Saúde (PGR/PCMSO)</span>
+              </button>
             </>
           )}
 
@@ -5579,6 +5591,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 ? "Gestão de Colaboradores (RH)"
                 : activeTab === "financeiro"
                 ? "Gestão Financeira & Contratos"
+                : activeTab === "programas_saude"
+                ? "Programas de Saúde e Segurança (PGR / PCMSO / LTCAT)"
                 : activeTab === "auditoria"
                 ? "Auditoria & Registro Metrológico"
                 : activeTab === "configuracoes"
@@ -11958,9 +11972,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </div>
         )}
 
-        {/* TAB: FINANCEIRO */}
+        {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
         {activeTab === "field_service" && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
         {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
+        {activeTab === "programas_saude" && <HealthProgramManagement currentUser={currentUser as any} />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
 
         {/* TAB: CONSUMO FIREBASE */}

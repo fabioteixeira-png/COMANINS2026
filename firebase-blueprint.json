@@ -130,6 +130,27 @@
         "visualizedUserAgent": { "type": "string" }
       },
       "required": ["employeeId", "month", "liquidSalary"]
+    },
+    "healthProgramDocs": {
+      "title": "Documentos de Programa de Saúde e Segurança (SST)",
+      "description": "Documentos como PGR, PCMSO, LTCAT, PPP com controle de validade e notificações",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "docType": { "type": "string" },
+        "issueDate": { "type": "string" },
+        "expirationDate": { "type": "string" },
+        "responsibleCompany": { "type": "string" },
+        "responsibleTechnical": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "docType", "issueDate", "expirationDate"]
     }
   }
 }

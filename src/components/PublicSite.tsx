@@ -386,7 +386,7 @@ export default function PublicSite({ onNavigateToPortal, onSubmitContact, custom
                         {/* Stat 2 */}
                         <div className="space-y-1">
                           <span className="text-[10px] text-blue-400 font-mono tracking-widest uppercase font-bold">Instrumentos Atendidos</span>
-                          <div className="text-2xl font-extrabold text-white">+23.000 Calibrados</div>
+                          <div className="text-2xl font-extrabold text-white">+223.000 Calibrados</div>
                           <p className="text-xs text-slate-400 leading-relaxed">
                             Capacidade de calibração mensal de mais de 1000 instrumentos.
                           </p>

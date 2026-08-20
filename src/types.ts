@@ -424,3 +424,23 @@ export interface AccessAuditLog {
   details: string;
   authorizedBy?: string;
 }
+
+export type HealthProgramDocType = 'PGR' | 'PCMSO' | 'LTCAT' | 'PPP' | 'AET' | 'APR' | 'DIR' | 'Outro';
+
+export interface HealthProgramDocument {
+  id: string;
+  title: string;              // e.g. "PGR 2026 - Programa de Gerenciamento de Riscos"
+  docType: HealthProgramDocType;
+  issueDate: string;          // YYYY-MM-DD
+  expirationDate: string;     // YYYY-MM-DD
+  responsibleCompany?: string; // e.g. "SST Consultoria & Engenharia"
+  responsibleTechnical?: string; // e.g. "Eng. Responsável - CREA/MTE"
+  fileUrl?: string;           // Base64 data or external link
+  fileName?: string;
+  fileType?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+}
+

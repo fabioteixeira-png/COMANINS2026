@@ -20,7 +20,7 @@ import {
   QueryDocumentSnapshot
 , writeBatch } from "firebase/firestore";
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Client, Instrument, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog } from '../types';
+import { Client, Instrument, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument } from '../types';
 import { generateAuthKey } from '../utils/authKey';
 import { trackFirebaseOp } from './firebaseTelemetry';
 
@@ -2267,3 +2267,33 @@ export async function bulkUpsertFieldServiceRecords(updates: {id: string, data: 
     await batch.commit();
   }
 }
+
+export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocument[]) => void) {
+  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+  if (cached.length > 0) callback(cached);
+  const q = query(collection(db, 'health_program_docs'), limit(100));
+  return onSnapshot(q, async (snapshot) => {
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument));
+    setLocalCache('health_program_docs', list);
+    callback(list);
+  }, (err) => {
+    handleQuotaOrError(err);
+    callback(getLocalCache<HealthProgramDocument[]>('health_program_docs', []));
+  });
+}
+
+export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'>): Promise<HealthProgramDocument> {
+  const newId = 'hpdoc_' + Date.now();
+  const docData: HealthProgramDocument = { ...data, id: newId };
+  await setDoc(doc(db, 'health_program_docs', newId), docData);
+  return docData;
+}
+
+export async function updateHealthProgramDoc(id: string, updates: Partial<HealthProgramDocument>): Promise<void> {
+  await updateDoc(doc(db, 'health_program_docs', id), updates);
+}
+
+export async function deleteHealthProgramDoc(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'health_program_docs', id));
+}
+

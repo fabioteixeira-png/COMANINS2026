@@ -358,7 +358,31 @@ async function runDailyNotifications() {
       }
     });
 
-    if (upcomingBdays.length > 0 || upcomingTrainings.length > 0 || upcomingASO.length > 0 || upcomingStandards.length > 0) {
+    // 5. Verificar Programas de Saúde (PGR, PCMSO, LTCAT, etc.) - 30 dias antes ou vencidos
+    const upcomingHealthDocs = [];
+    try {
+      const hpSnapshot = await getDocs(collection(firestoreDb, 'health_program_docs'));
+      hpSnapshot.forEach(doc => {
+        const hp = doc.data();
+        if (hp.expirationDate) {
+          const [year, month, day] = hp.expirationDate.split('-');
+          const expDateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+          const days = diffInDays(expDateObj);
+          if (days <= 30) {
+            upcomingHealthDocs.push({
+              title: hp.title || 'Programa de Saúde',
+              docType: hp.docType || 'Documento',
+              days,
+              expirationDate: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`
+            });
+          }
+        }
+      });
+    } catch (hpErr) {
+      console.error("Erro ao verificar documentos de programas de saúde:", hpErr);
+    }
+
+    if (upcomingBdays.length > 0 || upcomingTrainings.length > 0 || upcomingASO.length > 0 || upcomingStandards.length > 0 || upcomingHealthDocs.length > 0) {
       const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
       
       if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
@@ -428,6 +452,20 @@ Aqui está o resumo diário de notificações e alertas do painel COMANINS:
           htmlBody += `</ul>`;
         }
 
+        if (upcomingHealthDocs.length > 0) {
+          htmlBody += `<h3>🛡️ Programas de Saúde (PGR, PCMSO, LTCAT) Vencendo em até 30 dias ou Vencidos</h3><ul>`;
+          textBody += `
+--- PROGRAMAS DE SAÚDE (PGR, PCMSO) VENCENDO EM ATÉ 30 DIAS OU VENCIDOS ---
+`;
+          upcomingHealthDocs.forEach(h => {
+            const statusLabel = h.days < 0 ? `VENCIDO HÁ ${Math.abs(h.days)} DIAS` : h.days === 0 ? 'VENCE HOJE' : `Vence em ${h.days} dias`;
+            htmlBody += `<li><b>[${h.docType}] ${h.title}</b> - ${statusLabel} (Validade: ${h.expirationDate})</li>`;
+            textBody += `- [${h.docType}] ${h.title} - ${statusLabel} (Validade: ${h.expirationDate})
+`;
+          });
+          htmlBody += `</ul>`;
+        }
+
         htmlBody += `<br/><p>Acesse o portal para mais detalhes ou para regularizar as pendências.</p><p>Atenciosamente,<br/>COMANINS Metrology Suite</p>`;
         textBody += `
 Acesse o portal para mais detalhes.
@@ -436,7 +474,7 @@ Atenciosamente,
 COMANINS Metrology Suite`;
 
         // Destinatários solicitados
-        const recipients = "isidro.teixeira@comanins.com.br, comercial@comanins.com.br, manutencao@comanins.com.br, fabio.teixeira@comanins.com.br";
+        const recipients = "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br";
 
         const info = await transporter.sendMail({
           from: `"COMANINS Notificações" <${SMTP_USER}>`,
@@ -459,6 +497,106 @@ COMANINS Metrology Suite`;
 }
 
 cron.schedule('0 8 * * *', runDailyNotifications);
+
+app.post("/api/send-health-program-alert", async (req, res) => {
+  const { docs } = req.body;
+  const HEALTH_RECIPIENTS = "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br";
+
+  const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
+
+  let htmlDocsList = "";
+  let textDocsList = "";
+
+  if (Array.isArray(docs) && docs.length > 0) {
+    htmlDocsList = docs.map((d: any) => `
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px; font-weight: bold; color: #1e293b;">${d.title} (${d.docType})</td>
+        <td style="padding: 10px; color: #64748b;">${d.issueDate ? new Date(d.issueDate + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
+        <td style="padding: 10px; font-weight: bold; color: ${d.daysRemaining < 0 ? '#dc2626' : '#d97706'};">${d.expirationDate ? new Date(d.expirationDate + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
+        <td style="padding: 10px;">
+          <span style="background-color: ${d.daysRemaining < 0 ? '#fef2f2' : '#fffbe2'}; color: ${d.daysRemaining < 0 ? '#991b1b' : '#854d0e'}; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">
+            ${d.daysRemaining < 0 ? `Vencido há ${Math.abs(d.daysRemaining)} dias` : d.daysRemaining === 0 ? 'Vence Hoje' : `Vence em ${d.daysRemaining} dias`}
+          </span>
+        </td>
+      </tr>
+    `).join('');
+
+    textDocsList = docs.map((d: any) => `- ${d.title} (${d.docType}) | Validade: ${d.expirationDate} | Status: ${d.daysRemaining < 0 ? 'VENCIDO' : 'A VENCER'}`).join('\n');
+  } else {
+    htmlDocsList = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #64748b;">Nenhum documento com vencimento próximo.</td></tr>`;
+  }
+
+  const htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+      <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+        <h2 style="color: #1e40af; margin: 0; font-size: 20px;">🛡️ Alerta de Validade: Programas de Saúde e Segurança (SST)</h2>
+        <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Sistema de Controle de Documentos Regulatórios</p>
+      </div>
+
+      <p>Atenção Gestão e Comercial,</p>
+      <p>Este é um alerta referente ao controle de validade dos documentos de <b>Programa de Saúde e Segurança do Trabalho (PGR, PCMSO, LTCAT, etc.)</b> da empresa.</p>
+
+      <div style="margin: 20px 0; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+          <thead>
+            <tr style="background-color: #f1f5f9; color: #334155;">
+              <th style="padding: 10px;">Documento</th>
+              <th style="padding: 10px;">Emissão</th>
+              <th style="padding: 10px;">Validade</th>
+              <th style="padding: 10px;">Situação</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${htmlDocsList}
+          </tbody>
+        </table>
+      </div>
+
+      <p style="font-size: 13px; color: #475569; background-color: #f8fafc; padding: 12px; border-radius: 6px; border-left: 4px solid #2563eb;">
+        <b>Destinatários Notificados:</b><br/>
+        comercial@comanins.com.br<br/>
+        fabio.teixeira@comanins.com.br<br/>
+        financeiro@comanins.com.br<br/>
+        manutencao@comanins.com.br<br/>
+        isidro.teixeira@comanins.com.br
+      </p>
+
+      <br/>
+      <p style="font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+        Notificação automática gerada pelo sistema COMANINS Metrology Suite.
+      </p>
+    </div>
+  `;
+
+  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: SMTP_USER,
+          pass: SMTP_PASS
+        }
+      });
+
+      await transporter.sendMail({
+        from: `"COMANINS Segurança e Saúde" <${SMTP_USER}>`,
+        to: HEALTH_RECIPIENTS,
+        subject: `[ALERTA COMANINS] Controle de Validade - Programas de Saúde (PGR/PCMSO)`,
+        html: htmlBody,
+        text: `Alerta COMANINS - Programas de Saúde:\n\n${textDocsList}\n\nDestinatários: ${HEALTH_RECIPIENTS}`
+      });
+
+      return res.json({ success: true, emailSent: true, recipients: HEALTH_RECIPIENTS });
+    } catch (err: any) {
+      console.error("[HEALTH ALERT] Erro ao enviar e-mail via SMTP:", err);
+      return res.json({ success: false, error: err.message, emailSent: false });
+    }
+  } else {
+    console.log("[HEALTH ALERT] SMTP não configurado. Notificação enviada em modo de teste para:", HEALTH_RECIPIENTS);
+    return res.json({ success: true, emailSent: false, smtpNotConfigured: true, recipients: HEALTH_RECIPIENTS });
+  }
+});
+
 
 app.post("/api/test-notifications", async (req, res) => {
   await runDailyNotifications();
