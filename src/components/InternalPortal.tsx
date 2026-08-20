@@ -14,6 +14,7 @@ import {
   syncDropdownOptions,
   saveDropdownOptions,
   DEFAULT_DROPDOWN_OPTIONS,
+  ensureArray,
   syncIntakes,
   saveIntakeDoc,
   updateIntakePhotosDoc,
@@ -4210,12 +4211,12 @@ Status atual: ${e.status}.`,
         typeSpec: detectedTypeForNew,
         mpe: Number(instMpe) || 1.0,
         rangeMin:
-          instRangeMin !== "" && !isNaN(Number(instRangeMin))
-            ? Number(instRangeMin)
+          instRangeMin !== "" && !isNaN(Number(String(instRangeMin).replace(",", ".")))
+            ? Number(String(instRangeMin).replace(",", "."))
             : 0,
         rangeMax:
-          instRangeMax !== "" && !isNaN(Number(instRangeMax))
-            ? Number(instRangeMax)
+          instRangeMax !== "" && !isNaN(Number(String(instRangeMax).replace(",", ".")))
+            ? Number(String(instRangeMax).replace(",", "."))
             : 0,
         unit: instUnit,
         unitNegative:
@@ -4227,14 +4228,14 @@ Status atual: ${e.status}.`,
         ...(instRangeMin2 !== "" &&
         instRangeMin2 !== null &&
         instRangeMin2 !== undefined &&
-        !isNaN(Number(instRangeMin2))
-          ? { rangeMin2: Number(instRangeMin2) }
+        !isNaN(Number(String(instRangeMin2).replace(",", ".")))
+          ? { rangeMin2: Number(String(instRangeMin2).replace(",", ".")) }
           : {}),
         ...(instRangeMax2 !== "" &&
         instRangeMax2 !== null &&
         instRangeMax2 !== undefined &&
-        !isNaN(Number(instRangeMax2))
-          ? { rangeMax2: Number(instRangeMax2) }
+        !isNaN(Number(String(instRangeMax2).replace(",", ".")))
+          ? { rangeMax2: Number(String(instRangeMax2).replace(",", ".")) }
           : {}),
         ...(instUnit2 ? { unit2: instUnit2 } : {}),
 
@@ -4355,11 +4356,7 @@ Status atual: ${e.status}.`,
   const handleSaveDropdowns = async () => {
     if (!editingDropdownKey) return;
     const key = editingDropdownKey as keyof DropdownOptions;
-    const values = editingDropdownValues
-      .split("\
-")
-      .map((v: string) => v.trim())
-      .filter((v: string) => v.length > 0);
+    const values = ensureArray(editingDropdownValues);
 
     const newOptions = { ...dropdownOptions, [key]: values };
     setDropdownOptions(newOptions);
@@ -5243,11 +5240,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   const [editingExamTypesStr, setEditingExamTypesStr] = useState("");
 
   const handleSaveRoles = async () => {
-    const values = editingRolesStr
-      .split("\
-")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    const values = ensureArray(editingRolesStr);
     const newOptions = { ...dropdownOptions, cargos: values };
     setDropdownOptions(newOptions);
     await saveDropdownOptions(newOptions);
@@ -5255,11 +5248,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   };
 
   const handleSaveExamTypes = async () => {
-    const values = editingExamTypesStr
-      .split("\
-")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    const values = ensureArray(editingExamTypesStr);
     const newOptions = { ...dropdownOptions, tiposExame: values };
     setDropdownOptions(newOptions);
     await saveDropdownOptions(newOptions);
@@ -6828,8 +6817,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </label>
                         <div className="flex items-center space-x-2">
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Min"
                             value={instRangeMin}
                             onChange={(e) => setInstRangeMin(e.target.value)}
@@ -6839,8 +6827,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             /
                           </span>
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Max"
                             value={instRangeMax}
                             onChange={(e) => setInstRangeMax(e.target.value)}
@@ -6916,8 +6903,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </label>
                         <div className="flex items-center space-x-2">
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Min"
                             value={instRangeMin2}
                             onChange={(e) => setInstRangeMin2(e.target.value)}
@@ -6927,8 +6913,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             /
                           </span>
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Max"
                             value={instRangeMax2}
                             onChange={(e) => setInstRangeMax2(e.target.value)}
@@ -8267,16 +8252,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   </select>
                                 </td>
                                 <td className="p-2">
-                                  <select
-                                    value={row.escala}
+                                  <input
+                                    type="text"
+                                    list="intake-escala-list"
+                                    value={row.escala || ""}
                                     onChange={(e) => {
                                       const newRows = [...intakeRows];
                                       newRows[index].escala = e.target.value;
                                       setIntakeRows(newRows);
                                     }}
+                                    placeholder="Digite a escala (ex: 0 a 100)"
                                     className="w-full bg-white border border-slate-300 rounded px-2 py-2 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                                  >
-                                    <option value="">Selecione...</option>
+                                  />
+                                  <datalist id="intake-escala-list">
                                     {[
                                       "0 a 1",
                                       "0 a 2.5",
@@ -8301,52 +8289,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                       "-1 a 15",
                                       "-1 a 24",
                                       "0 a 50",
-                                      "0 a 100",
                                       "0 a 150",
                                       "0 a 200",
                                       "0 a 300",
                                       "0 a 500",
                                     ].map((opt: string, i: number) => (
-                                      <option key={i} value={opt}>
-                                        {opt}
-                                      </option>
+                                      <option key={i} value={opt} />
                                     ))}
-                                    {row.escala &&
-                                      ![
-                                        "0 a 1",
-                                        "0 a 2.5",
-                                        "0 a 4",
-                                        "0 a 6",
-                                        "0 a 10",
-                                        "0 a 16",
-                                        "0 a 25",
-                                        "0 a 40",
-                                        "0 a 60",
-                                        "0 a 100",
-                                        "0 a 160",
-                                        "0 a 250",
-                                        "0 a 400",
-                                        "0 a 600",
-                                        "0 a 1000",
-                                        "-1 a 0",
-                                        "-1 a 1.5",
-                                        "-1 a 3",
-                                        "-1 a 5",
-                                        "-1 a 9",
-                                        "-1 a 15",
-                                        "-1 a 24",
-                                        "0 a 50",
-                                        "0 a 100",
-                                        "0 a 150",
-                                        "0 a 200",
-                                        "0 a 300",
-                                        "0 a 500",
-                                      ].includes(row.escala) && (
-                                        <option value={row.escala}>
-                                          {row.escala}
-                                        </option>
-                                      )}
-                                  </select>
+                                  </datalist>
                                 </td>
                                 <td className="p-2">
                                   <select
@@ -13113,7 +13063,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       ...dropdownOptions,
                     }).map(([key, values]) => {
                       const typedKey = key as keyof DropdownOptions;
-                      const typedValues = values as string[];
+                      const typedValues = ensureArray(values);
                       const isEditing = editingDropdownKey === typedKey;
 
                       const labels: Record<keyof DropdownOptions, string> = {
@@ -13144,8 +13094,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 onClick={() => {
                                   setEditingDropdownKey(typedKey);
                                   setEditingDropdownValues(
-                                    typedValues.join("\
-"),
+                                    typedValues.join("\n"),
                                   );
                                 }}
                                 className="text-royal-blue hover:underline text-xs font-semibold"
@@ -18654,8 +18603,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     clientId: editingInstrumentData.clientId || "",
                     category: editingInstrumentData.category || "pressure",
                     typeSpec: detectedTypeOnEdit,
-                    rangeMin: Number(editingInstrumentData.rangeMin) || 0,
-                    rangeMax: Number(editingInstrumentData.rangeMax) || 0,
+                    rangeMin: Number(String(editingInstrumentData.rangeMin).replace(",", ".")) || 0,
+                    rangeMax: Number(String(editingInstrumentData.rangeMax).replace(",", ".")) || 0,
                     unit: editingInstrumentData.unit || "bar",
                     unitNegative:
                       editingInstrumentData.unitNegative ||
@@ -18668,15 +18617,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       editingInstrumentData.rangeMin2 !== undefined &&
                       editingInstrumentData.rangeMin2 !== "" &&
                       editingInstrumentData.rangeMin2 !== null &&
-                      !isNaN(Number(editingInstrumentData.rangeMin2))
-                        ? Number(editingInstrumentData.rangeMin2)
+                      !isNaN(Number(String(editingInstrumentData.rangeMin2).replace(",", ".")))
+                        ? Number(String(editingInstrumentData.rangeMin2).replace(",", "."))
                         : undefined,
                     rangeMax2:
                       editingInstrumentData.rangeMax2 !== undefined &&
                       editingInstrumentData.rangeMax2 !== "" &&
                       editingInstrumentData.rangeMax2 !== null &&
-                      !isNaN(Number(editingInstrumentData.rangeMax2))
-                        ? Number(editingInstrumentData.rangeMax2)
+                      !isNaN(Number(String(editingInstrumentData.rangeMax2).replace(",", ".")))
+                        ? Number(String(editingInstrumentData.rangeMax2).replace(",", "."))
                         : undefined,
                     unit2: editingInstrumentData.unit2 || "",
                     accuracyClass: editingInstrumentData.accuracyClass || "A1",
@@ -18929,8 +18878,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </label>
                         <div className="flex items-center space-x-2">
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Min"
                             value={editingInstrumentData.rangeMin ?? ""}
                             onChange={(e) =>
@@ -18945,8 +18893,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             /
                           </span>
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Max"
                             value={editingInstrumentData.rangeMax ?? ""}
                             onChange={(e) =>
@@ -19038,8 +18985,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </label>
                         <div className="flex items-center space-x-2">
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Min"
                             value={editingInstrumentData.rangeMin2 ?? ""}
                             onChange={(e) =>
@@ -19054,8 +19000,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             /
                           </span>
                           <input
-                            type="number"
-                            step="any"
+                            type="text"
                             placeholder="Max"
                             value={editingInstrumentData.rangeMax2 ?? ""}
                             onChange={(e) =>

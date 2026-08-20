@@ -1031,11 +1031,82 @@ export const DEFAULT_DROPDOWN_OPTIONS: DropdownOptions = {
   cargos: ["Administrador", "Técnico de Laboratório", "Técnico de Instrumentação", "Financeiro", "Recursos Humanos (RH)", "Comercial"]
 };
 
+export function ensureArray(val: any): string[] {
+  if (!val) return [];
+  
+  let rawItems: string[] = [];
+  if (Array.isArray(val)) {
+    if (val.length > 1 && val.every((item) => typeof item === 'string' && item.length === 1)) {
+      rawItems = [val.join('')];
+    } else {
+      let singleCharBuffer = "";
+      for (const item of val) {
+        if (typeof item === 'string') {
+          if (item.length === 1) {
+            singleCharBuffer += item;
+          } else {
+            if (singleCharBuffer) {
+              rawItems.push(singleCharBuffer);
+              singleCharBuffer = "";
+            }
+            rawItems.push(item);
+          }
+        } else if (item) {
+          rawItems.push(String(item));
+        }
+      }
+      if (singleCharBuffer) {
+        rawItems.push(singleCharBuffer);
+      }
+    }
+  } else if (typeof val === 'string') {
+    rawItems = [val];
+  } else {
+    rawItems = [String(val)];
+  }
+
+  const result: string[] = [];
+  for (const item of rawItems) {
+    if (!item) continue;
+    const parts = item
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    result.push(...parts);
+  }
+
+  return Array.from(new Set(result));
+}
+
+export function normalizeDropdownOptions(raw: any): DropdownOptions {
+  const result: any = { ...DEFAULT_DROPDOWN_OPTIONS };
+  if (!raw || typeof raw !== 'object') return result;
+
+  for (const key of Object.keys(DEFAULT_DROPDOWN_OPTIONS) as (keyof DropdownOptions)[]) {
+    if (raw[key] !== undefined) {
+      const cleaned = ensureArray(raw[key]);
+      if (cleaned.length > 0) {
+        result[key] = Array.from(new Set(cleaned));
+      }
+    }
+  }
+  return result;
+}
+
 export function syncDropdownOptions(callback: (options: DropdownOptions) => void) {
   const docRef = doc(db, 'systemSettings', 'dropdownOptions');
   return onSnapshot(docRef, (snapshot) => {
     if (snapshot.exists()) {
-      callback({ ...DEFAULT_DROPDOWN_OPTIONS, ...snapshot.data() as DropdownOptions });
+      const rawData = snapshot.data();
+      const normalized = normalizeDropdownOptions(rawData);
+      callback(normalized);
+      const needsRepair = Object.keys(normalized).some((key) => {
+        const k = key as keyof DropdownOptions;
+        return !Array.isArray(rawData[k]) || JSON.stringify(rawData[k]) !== JSON.stringify(normalized[k]);
+      });
+      if (needsRepair) {
+        saveDropdownOptions(normalized).catch(() => {});
+      }
     } else {
       callback(DEFAULT_DROPDOWN_OPTIONS);
     }
@@ -1048,7 +1119,8 @@ export function syncDropdownOptions(callback: (options: DropdownOptions) => void
 export async function saveDropdownOptions(options: DropdownOptions): Promise<void> {
   try {
     const docRef = doc(db, 'systemSettings', 'dropdownOptions');
-    await setDoc(docRef, options);
+    const normalized = normalizeDropdownOptions(options);
+    await setDoc(docRef, normalized);
   } catch (err) {
     console.error('Error saving dropdownOptions config:', err);
   }
