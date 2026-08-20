@@ -1,9 +1,209 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Search, MessageSquare, Paperclip, Send, CheckCircle, Clock, FileText, User, X, Mail, Trash2, ArrowLeft } from "lucide-react";
+import { Plus, Search, MessageSquare, Paperclip, Send, CheckCircle, Clock, FileText, User, X, Mail, Trash2, ArrowLeft, Download, Eye, Image as ImageIcon } from "lucide-react";
 import { InternalTicket, TicketMessage } from "../types";
 import { syncInternalTickets, saveInternalTicket, deleteInternalTicket, PortalUser } from "../lib/firebase";
 import { compressImageToWebResolution } from "../lib/imageCompressor";
 import { safeFetch } from "../utils/apiClient";
+
+export interface ParsedAttachment {
+  name: string;
+  url: string;
+  type: string;
+  isImage: boolean;
+  isPdf: boolean;
+}
+
+export function parseAttachment(att: string, index: number): ParsedAttachment {
+  if (!att) {
+    return { name: `Anexo_${index + 1}`, url: '', type: '', isImage: false, isPdf: false };
+  }
+
+  if (att.trim().startsWith('{')) {
+    try {
+      const obj = JSON.parse(att);
+      const url = obj.url || '';
+      const name = obj.name || `Anexo_${index + 1}`;
+      const type = obj.type || '';
+      const isImage = type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(name) || url.startsWith('data:image/');
+      const isPdf = type === 'application/pdf' || /\.pdf$/i.test(name) || url.startsWith('data:application/pdf');
+      return { name, url, type, isImage, isPdf };
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const isImage = att.startsWith('data:image/') || /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(att);
+  const isPdf = att.startsWith('data:application/pdf') || /\.pdf$/i.test(att);
+
+  return {
+    name: `Anexo_${index + 1}.${isImage ? 'png' : isPdf ? 'pdf' : 'bin'}`,
+    url: att,
+    type: isImage ? 'image/png' : isPdf ? 'application/pdf' : 'application/octet-stream',
+    isImage,
+    isPdf
+  };
+}
+
+export function handleDownloadAttachment(att: ParsedAttachment) {
+  if (!att.url) return;
+  if (att.url.startsWith('data:')) {
+    try {
+      const arr = att.url.split(',');
+      const mimeMatch = arr[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : (att.type || 'application/octet-stream');
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const blob = new Blob([u8arr], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = att.name || 'anexo';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    } catch (err) {
+      console.error("Erro no download de data URL:", err);
+      window.open(att.url, '_blank');
+    }
+  } else {
+    const a = document.createElement('a');
+    a.href = att.url;
+    a.download = att.name || 'anexo';
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+}
+
+export function handleViewAttachment(att: ParsedAttachment, onOpenPreviewModal?: (att: ParsedAttachment) => void) {
+  if (!att.url) return;
+  if (onOpenPreviewModal) {
+    onOpenPreviewModal(att);
+    return;
+  }
+  if (att.url.startsWith('data:')) {
+    try {
+      const arr = att.url.split(',');
+      const mimeMatch = arr[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : (att.type || 'application/octet-stream');
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const blob = new Blob([u8arr], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+    } catch (err) {
+      console.error("Erro ao abrir visualização:", err);
+      window.open(att.url, '_blank');
+    }
+  } else {
+    window.open(att.url, '_blank');
+  }
+}
+
+function AttachmentCard({ attRaw, index, isMe = false, onOpenPreview }: { attRaw: string; index: number; isMe?: boolean; onOpenPreview: (att: ParsedAttachment) => void }) {
+  const att = parseAttachment(attRaw, index);
+
+  return (
+    <div className={`group flex flex-col p-2.5 rounded-xl border transition-all shadow-sm ${
+      isMe 
+        ? 'bg-blue-900/60 border-blue-400/40 text-white hover:bg-blue-900/80' 
+        : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 hover:border-slate-300'
+    } w-full sm:w-[220px]`}>
+      
+      {/* Thumbnail for images */}
+      {att.isImage && (
+        <div 
+          onClick={() => onOpenPreview(att)}
+          className="w-full h-28 mb-2 rounded-lg overflow-hidden bg-slate-900/10 cursor-pointer relative group/img flex items-center justify-center border border-black/10"
+        >
+          <img src={att.url} alt={att.name} className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-200" />
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center space-x-1.5 text-white font-semibold text-xs">
+            <Eye className="h-4 w-4" />
+            <span>Visualizar</span>
+          </div>
+        </div>
+      )}
+
+      {/* Header with Name and Icon */}
+      <div className="flex items-center space-x-2 overflow-hidden mb-2">
+        {att.isImage ? (
+          <ImageIcon className={`h-4 w-4 shrink-0 ${isMe ? 'text-blue-200' : 'text-blue-600'}`} />
+        ) : att.isPdf ? (
+          <FileText className={`h-4 w-4 shrink-0 ${isMe ? 'text-rose-200' : 'text-rose-600'}`} />
+        ) : (
+          <Paperclip className={`h-4 w-4 shrink-0 ${isMe ? 'text-slate-200' : 'text-slate-600'}`} />
+        )}
+        <span className="text-xs font-semibold truncate" title={att.name}>
+          {att.name}
+        </span>
+      </div>
+
+      {/* Action Buttons: Visualizar and Baixar */}
+      <div className="flex items-center space-x-1.5 mt-auto pt-2 border-t border-current/10">
+        <button
+          type="button"
+          onClick={() => handleViewAttachment(att, onOpenPreview)}
+          className={`flex-1 flex items-center justify-center space-x-1 py-1 px-2 rounded-lg text-[11px] font-bold transition ${
+            isMe
+              ? 'bg-white/10 hover:bg-white/20 text-white'
+              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+          }`}
+          title="Visualizar arquivo em tela cheia"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          <span>Ver</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleDownloadAttachment(att)}
+          className={`flex-1 flex items-center justify-center space-x-1 py-1 px-2 rounded-lg text-[11px] font-bold transition ${
+            isMe
+              ? 'bg-blue-400/20 hover:bg-blue-400/30 text-blue-100'
+              : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200'
+          }`}
+          title="Baixar arquivo no seu dispositivo"
+        >
+          <Download className="h-3.5 w-3.5" />
+          <span>Baixar</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InputAttachmentBadge({ attRaw, index, onRemove }: { attRaw: string; index: number; onRemove: () => void }) {
+  const att = parseAttachment(attRaw, index);
+
+  return (
+    <div className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs font-semibold text-blue-900 shadow-sm">
+      {att.isImage ? (
+        <ImageIcon className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+      ) : (
+        <FileText className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+      )}
+      <span className="truncate max-w-[180px]" title={att.name}>{att.name}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-1 p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
+        title="Remover anexo"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
 
 export default function InternalCommunication({ currentUser }: { currentUser: PortalUser | null }) {
   const [tickets, setTickets] = useState<InternalTicket[]>([]);
@@ -18,6 +218,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
   const [selectedTicket, setSelectedTicket] = useState<InternalTicket | null>(null);
   const [messageText, setMessageText] = useState("");
   const [messageAttachments, setMessageAttachments] = useState<string[]>([]);
+  const [previewAttachment, setPreviewAttachment] = useState<ParsedAttachment | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const isUserAdmin = currentUser?.permissionLevel === "Administrador" || currentUser?.role === "Administrador" || currentUser?.role === "Admin" || currentUser?.role === "admin" || currentUser?.role === "Diretoria" || currentUser?.role === "master";
@@ -45,11 +246,16 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     e.preventDefault();
     if (!newTitle.trim() || !newDescription.trim() || !currentUser) return;
     
+    const resolvedEmail = 
+      (currentUser as any).workEmail || 
+      (currentUser as any).personalEmail || 
+      (currentUser.username && currentUser.username.includes('@') ? currentUser.username : `${currentUser.username}@comanins.com.br`);
+
     const ticket: InternalTicket = {
       id: "ticket_" + Date.now().toString() + "_" + Math.random().toString(36).substring(2, 9),
       creatorId: currentUser.username || currentUser.name,
       creatorName: currentUser.name || currentUser.username,
-      creatorEmail: currentUser.username, // username is email
+      creatorEmail: resolvedEmail,
       title: newTitle,
       description: newDescription,
       status: "aberto",
@@ -65,14 +271,40 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     safeFetch("/api/send-email", {
       method: "POST",
       body: JSON.stringify({
-        to: "financeiro@comanins.com.br, fabio.teixeira@comanins.com.br, isidro.teixeira@comanins.com.br, solange.teixeira@comanins.com.br, manutencao@comanins.com.br",
-        subject: `Novo Chamado: ${ticket.title}`,
+        to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
+        subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
         html: `
-          <h2>Novo Chamado Administrativo/Financeiro</h2>
-          <p><strong>Colaborador:</strong> ${ticket.creatorName}</p>
-          <p><strong>Título:</strong> ${ticket.title}</p>
-          <p><strong>Descrição:</strong> ${ticket.description}</p>
-          <p>Acesse o portal para responder.</p>
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+            <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+              <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
+              <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+            </div>
+
+            <p>Um novo chamado foi aberto no portal:</p>
+            <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
+
+            <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+              <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">
+                ${ticket.title}
+              </p>
+              <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">
+                ${ticket.description}
+              </p>
+              ${ticket.attachments && ticket.attachments.length > 0 ? `
+                <p style="margin: 10px 0 0 0; font-size: 12px; color: #2563eb; font-weight: bold;">
+                  📎 ${ticket.attachments.length} arquivo(s) anexado(s).
+                </p>
+              ` : ''}
+            </div>
+
+            <p style="font-size: 13px; color: #475569;">
+              Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder a esta solicitação.
+            </p>
+            <br/>
+            <p style="font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+              Notificação automática gerada pelo sistema COMANINS Metrology Suite.
+            </p>
+          </div>
         `
       })
     }).then(res => console.log("Email response:", res)).catch(console.error);
@@ -105,35 +337,89 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     } as InternalTicket;
     
     await saveInternalTicket(updatedTicket);
+    setSelectedTicket(updatedTicket);
     
     if (isFinanceOrAdmin) {
-      // Notify creator
+      // Resolve recipient email address for creator
+      let recipientEmail = updatedTicket.creatorEmail;
+      if (!recipientEmail || !recipientEmail.includes('@')) {
+        const cId = updatedTicket.creatorId || updatedTicket.creatorName;
+        recipientEmail = cId && cId.includes('@') ? cId : `${cId}@comanins.com.br`;
+      }
+
+      // Notify creator (colaborador)
       safeFetch("/api/send-email", {
         method: "POST",
         body: JSON.stringify({
-          to: updatedTicket.creatorEmail,
-          subject: `Resposta no seu chamado: ${updatedTicket.title}`,
+          to: recipientEmail,
+          subject: `[COMANINS] Resposta ao Chamado: ${updatedTicket.title}`,
           html: `
-            <h2>Seu chamado foi respondido</h2>
-            <p><strong>Título:</strong> ${updatedTicket.title}</p>
-            <p><strong>Mensagem:</strong> ${newMessage.text}</p>
-            <p>Acesse o portal para visualizar e continuar o atendimento.</p>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+              <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+                <h2 style="color: #1e40af; margin: 0; font-size: 18px;">💬 Seu Chamado foi Respondido</h2>
+                <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+              </div>
+
+              <p>Olá, <b>${updatedTicket.creatorName}</b>!</p>
+              <p>A equipe do Portal COMANINS respondeu ao seu chamado <b>"${updatedTicket.title}"</b>:</p>
+
+              <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+                <p style="margin: 0 0 6px 0; font-size: 12px; color: #64748b; font-weight: bold;">
+                  Resposta de ${newMessage.senderName}:
+                </p>
+                <p style="margin: 0; font-size: 14px; color: #1e293b; white-space: pre-wrap;">
+                  ${newMessage.text || '(Novo arquivo anexado na resposta)'}
+                </p>
+                ${newMessage.attachments && newMessage.attachments.length > 0 ? `
+                  <p style="margin: 10px 0 0 0; font-size: 12px; color: #2563eb; font-weight: bold;">
+                    📎 ${newMessage.attachments.length} arquivo(s) anexado(s) à resposta.
+                  </p>
+                ` : ''}
+              </div>
+
+              <p style="font-size: 13px; color: #475569;">
+                Acesse o Portal COMANINS na aba <b>Comunicação Interna</b> para visualizar a resposta completa, baixar anexos ou responder.
+              </p>
+
+              <br/>
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+                Notificação automática gerada pelo sistema COMANINS Metrology Suite.
+              </p>
+            </div>
           `
         })
       }).then(res => console.log("Email response:", res)).catch(console.error);
     } else {
-      // Notify financeiro
+      // Notify administrative team
       safeFetch("/api/send-email", {
         method: "POST",
         body: JSON.stringify({
-          to: "financeiro@comanins.com.br, fabio.teixeira@comanins.com.br, isidro.teixeira@comanins.com.br, solange.teixeira@comanins.com.br, manutencao@comanins.com.br",
-          subject: `Nova interação no chamado: ${updatedTicket.title}`,
+          to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
+          subject: `[INTERAÇÃO EM CHAMADO] ${updatedTicket.title} - ${updatedTicket.creatorName}`,
           html: `
-            <h2>Nova mensagem do colaborador</h2>
-            <p><strong>Colaborador:</strong> ${updatedTicket.creatorName}</p>
-            <p><strong>Título:</strong> ${updatedTicket.title}</p>
-            <p><strong>Mensagem:</strong> ${newMessage.text}</p>
-            <p>Acesse o portal para responder.</p>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+              <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+                <h2 style="color: #1e40af; margin: 0; font-size: 18px;">💬 Nova Interação no Chamado</h2>
+                <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+              </div>
+
+              <p>O colaborador <b>${updatedTicket.creatorName}</b> enviou uma nova mensagem no chamado <b>"${updatedTicket.title}"</b>:</p>
+
+              <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+                <p style="margin: 0; font-size: 14px; color: #1e293b; white-space: pre-wrap;">
+                  ${newMessage.text || '(Novo anexo enviado)'}
+                </p>
+                ${newMessage.attachments && newMessage.attachments.length > 0 ? `
+                  <p style="margin: 10px 0 0 0; font-size: 12px; color: #2563eb; font-weight: bold;">
+                    📎 ${newMessage.attachments.length} arquivo(s) anexado(s).
+                  </p>
+                ` : ''}
+              </div>
+
+              <p style="font-size: 13px; color: #475569;">
+                Acesse o Portal COMANINS na aba <b>Comunicação Interna</b> para responder.
+              </p>
+            </div>
           `
         })
       }).then(res => console.log("Email response:", res)).catch(console.error);
@@ -172,22 +458,28 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     if (!e.target.files?.length) return;
     const files = Array.from(e.target.files) as File[];
     try {
-      const b64s = await Promise.all(
+      const items = await Promise.all(
         files.map(async (f) => {
           const isImage = f.type.startsWith("image/") || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || "");
+          let b64 = "";
           if (isImage) {
-            return await compressImageToWebResolution(f);
+            b64 = await compressImageToWebResolution(f);
           } else {
-            return new Promise<string>((resolve, reject) => {
+            b64 = await new Promise<string>((resolve, reject) => {
               const r = new FileReader();
               r.onload = () => resolve(r.result as string);
               r.onerror = reject;
               r.readAsDataURL(f);
             });
           }
+          return JSON.stringify({
+            name: f.name,
+            type: f.type || (isImage ? 'image/jpeg' : 'application/octet-stream'),
+            url: b64
+          });
         })
       );
-      setter([...currentList, ...b64s]);
+      setter([...currentList, ...items]);
     } catch (err) {
       console.error(err);
       alert("Erro ao anexar arquivo.");
@@ -366,38 +658,50 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                   {selectedTicket.description}
                 </div>
                 {selectedTicket.attachments && selectedTicket.attachments.length > 0 && (
-                  <div className="mt-4 pl-10 flex flex-wrap gap-2">
-                    {selectedTicket.attachments.map((att, i) => (
-                      <a key={i} href={att} target="_blank" rel="noreferrer" className="flex items-center space-x-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium text-slate-700 transition-colors">
-                        <FileText className="h-3 w-3" />
-                        <span>Anexo {i + 1}</span>
-                      </a>
-                    ))}
+                  <div className="mt-4 pl-10">
+                    <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Arquivos Anexados ({selectedTicket.attachments.length}):</p>
+                    <div className="flex flex-wrap gap-2.5">
+                      {selectedTicket.attachments.map((attRaw, i) => (
+                        <AttachmentCard
+                          key={i}
+                          attRaw={attRaw}
+                          index={i}
+                          isMe={false}
+                          onOpenPreview={(parsed) => setPreviewAttachment(parsed)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
               
               {/* Messages */}
               {selectedTicket.messages.map(msg => {
-                const isMe = msg.senderId === currentUser?.id;
+                const isMe = msg.senderId === currentUser?.id || msg.senderId === currentUser?.username;
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-xl p-4 shadow-sm ${isMe ? 'bg-royal-blue text-white' : 'bg-white border border-slate-200'}`}>
+                    <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-4 shadow-sm ${isMe ? 'bg-royal-blue text-white' : 'bg-white border border-slate-200'}`}>
                       <div className="flex items-center space-x-2 mb-2">
-                        <div className="text-xs font-bold opacity-80">{msg.senderName}</div>
-                        <div className="text-[10px] opacity-60">{new Date(msg.createdAt).toLocaleString()}</div>
+                        <div className="text-xs font-bold opacity-90">{msg.senderName}</div>
+                        <div className="text-[10px] opacity-65">{new Date(msg.createdAt).toLocaleString('pt-BR')}</div>
                       </div>
-                      <div className={`text-sm whitespace-pre-wrap ${isMe ? 'text-blue-50' : 'text-slate-700'}`}>
+                      <div className={`text-sm whitespace-pre-wrap leading-relaxed ${isMe ? 'text-blue-50' : 'text-slate-700'}`}>
                         {msg.text}
                       </div>
                       {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {msg.attachments.map((att, i) => (
-                            <a key={i} href={att} target="_blank" rel="noreferrer" className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${isMe ? 'bg-blue-800/50 hover:bg-blue-800 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
-                              <FileText className="h-3 w-3" />
-                              <span>Anexo {i + 1}</span>
-                            </a>
-                          ))}
+                        <div className="mt-3 pt-2 border-t border-current/10">
+                          <p className={`text-[11px] font-bold mb-2 uppercase tracking-wider ${isMe ? 'text-blue-200' : 'text-slate-500'}`}>Anexos ({msg.attachments.length}):</p>
+                          <div className="flex flex-wrap gap-2">
+                            {msg.attachments.map((attRaw, i) => (
+                              <AttachmentCard
+                                key={i}
+                                attRaw={attRaw}
+                                index={i}
+                                isMe={isMe}
+                                onOpenPreview={(parsed) => setPreviewAttachment(parsed)}
+                              />
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -411,16 +715,18 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
             {selectedTicket.status !== 'finalizado' ? (
               <div className="p-4 border-t border-slate-200 bg-white">
                 {messageAttachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {messageAttachments.map((att, i) => (
-                      <div key={i} className="flex items-center space-x-1 px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-medium text-slate-700">
-                        <FileText className="h-3 w-3" />
-                        <span>Anexo {i + 1}</span>
-                        <button type="button" onClick={() => setMessageAttachments(prev => prev.filter((_, idx) => idx !== i))} className="ml-2 text-rose-500 hover:text-rose-700">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
+                  <div className="mb-3">
+                    <p className="text-xs font-bold text-slate-600 mb-1.5">Anexos prontos para enviar ({messageAttachments.length}):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {messageAttachments.map((attRaw, i) => (
+                        <InputAttachmentBadge
+                          key={i}
+                          attRaw={attRaw}
+                          index={i}
+                          onRemove={() => setMessageAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
                 <form onSubmit={handleSendMessage} className="flex items-end space-x-2">
@@ -433,7 +739,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                       rows={2}
                     />
                     <div className="absolute right-2 bottom-2">
-                      <label className="p-2 cursor-pointer text-slate-400 hover:text-royal-blue transition-colors flex items-center justify-center rounded-lg hover:bg-slate-100">
+                      <label className="p-2 cursor-pointer text-slate-400 hover:text-royal-blue transition-colors flex items-center justify-center rounded-lg hover:bg-slate-100" title="Anexar arquivos (PDF, imagens, documentos)">
                         <Paperclip className="h-5 w-5" />
                         <input type="file" accept="image/*,.heic,.heif,application/pdf,.doc,.docx" multiple className="hidden" onChange={(e) => handleAttachmentUpload(e, setMessageAttachments, messageAttachments)} />
                       </label>
@@ -522,16 +828,18 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                 </div>
                 
                 {newAttachments.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {newAttachments.map((att, i) => (
-                      <div key={i} className="flex items-center space-x-1 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-medium text-slate-700">
-                        <FileText className="h-3 w-3" />
-                        <span>Anexo {i + 1}</span>
-                        <button type="button" onClick={() => setNewAttachments(prev => prev.filter((_, idx) => idx !== i))} className="ml-2 text-rose-500 hover:text-rose-700">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
+                  <div className="mt-3">
+                    <p className="text-xs font-bold text-slate-600 mb-1.5">Anexos selecionados ({newAttachments.length}):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {newAttachments.map((attRaw, i) => (
+                        <InputAttachmentBadge
+                          key={i}
+                          attRaw={attRaw}
+                          index={i}
+                          onRemove={() => setNewAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -553,6 +861,82 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
               >
                 <Send className="h-4 w-4" />
                 <span>Abrir Chamado</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview Attachment Modal */}
+      {previewAttachment && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+              <div className="flex items-center space-x-2 truncate pr-4">
+                {previewAttachment.isImage ? (
+                  <ImageIcon className="h-5 w-5 text-blue-400 shrink-0" />
+                ) : (
+                  <FileText className="h-5 w-5 text-blue-400 shrink-0" />
+                )}
+                <span className="font-bold text-sm truncate">{previewAttachment.name}</span>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadAttachment(previewAttachment)}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Baixar Arquivo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewAttachment(null)}
+                  className="text-slate-400 hover:text-white p-1 text-xl font-bold ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 flex items-center justify-center bg-slate-100 min-h-[300px]">
+              {previewAttachment.isImage ? (
+                <img
+                  src={previewAttachment.url}
+                  alt={previewAttachment.name}
+                  className="max-h-[70vh] max-w-full object-contain rounded-lg shadow-md border border-slate-200"
+                />
+              ) : previewAttachment.isPdf ? (
+                <iframe
+                  src={previewAttachment.url}
+                  className="w-full h-[70vh] rounded-lg border border-slate-200 shadow-inner"
+                  title={previewAttachment.name}
+                />
+              ) : (
+                <div className="text-center p-8 space-y-4">
+                  <FileText className="h-16 w-16 text-slate-400 mx-auto" />
+                  <p className="text-sm font-semibold text-slate-700">{previewAttachment.name}</p>
+                  <p className="text-xs text-slate-500">Este formato de arquivo não pode ser pré-visualizado diretamente no navegador.</p>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadAttachment(previewAttachment)}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg inline-flex items-center space-x-2 shadow"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Baixar para o dispositivo</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
+              <span className="truncate max-w-md">{previewAttachment.name}</span>
+              <button
+                type="button"
+                onClick={() => setPreviewAttachment(null)}
+                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-lg transition"
+              >
+                Fechar
               </button>
             </div>
           </div>
