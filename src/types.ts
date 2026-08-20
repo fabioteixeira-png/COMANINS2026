@@ -256,6 +256,7 @@ export interface InventoryItem {
   unit2?: string;
   accuracyClass?: string;
   location: string;
+  attachments?: string[];
 }
 
 export interface InventoryTransaction {
@@ -267,6 +268,7 @@ export interface InventoryTransaction {
   reason: string;
   responsible: string;
   employeeId?: string;
+  attachments?: string[];
 }
 
 export interface ExamTypeItem {

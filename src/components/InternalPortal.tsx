@@ -5222,6 +5222,70 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   const [intakeSuccessMessage, setIntakeSuccessMessage] = useState<string>("");
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
   const [inventoryTransactions, setInventoryTransactions] = useState<any[]>([]);
+  const [itemAttachments, setItemAttachments] = useState<string[]>([]);
+  const [transactionAttachments, setTransactionAttachments] = useState<string[]>([]);
+
+  const openStockAttachment = (attRaw: string) => {
+    if (!attRaw) return;
+    if (attRaw.startsWith('data:image')) {
+      setFullscreenPhoto(attRaw);
+    } else if (attRaw.includes('||data:')) {
+      const parts = attRaw.split('||');
+      const name = parts[0];
+      const dataUrl = parts[1];
+      if (dataUrl.startsWith('data:image')) {
+        setFullscreenPhoto(dataUrl);
+      } else {
+        const win = window.open();
+        if (win) {
+          win.document.write(`<title>${name}</title><iframe src="${dataUrl}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+        }
+      }
+    } else {
+      window.open(attRaw, '_blank');
+    }
+  };
+
+  const handleInventoryFileChange = async (e: React.ChangeEvent<HTMLInputElement>, isTransaction = false) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newAttachments: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 10 * 1024 * 1024) {
+        alert(`O arquivo ${file.name} excede o limite de 10MB.`);
+        continue;
+      }
+
+      try {
+        if (file.type.startsWith('image/')) {
+          const compressed = await compressImageToWebResolution(file, 1200, 1200, 0.7);
+          newAttachments.push(compressed);
+        } else {
+          const reader = new FileReader();
+          const base64Promise = new Promise<string>((resolve) => {
+            reader.onload = (evt) => {
+              const base64 = evt.target?.result as string;
+              resolve(`${file.name}||${base64}`);
+            };
+            reader.readAsDataURL(file);
+          });
+          const res = await base64Promise;
+          newAttachments.push(res);
+        }
+      } catch (err) {
+        console.error("Erro ao processar arquivo de estoque:", err);
+      }
+    }
+
+    if (isTransaction) {
+      setTransactionAttachments((prev) => [...prev, ...newAttachments]);
+    } else {
+      setItemAttachments((prev) => [...prev, ...newAttachments]);
+    }
+    e.target.value = "";
+  };
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [logoPreview, setLogoPreview] = useState<string>("");
   const [logoSuccessMsg, setLogoSuccessMsg] = useState<string>("");
@@ -15258,6 +15322,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <button
                   onClick={() => {
                     setEditingInventoryItem(null);
+                    setItemAttachments([]);
                     setShowInventoryItemForm(true);
                   }}
                   className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
@@ -15267,6 +15332,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </button>
                 <button
                   onClick={() => {
+                    setTransactionAttachments([]);
                     setShowInventoryTransactionForm(true);
                   }}
                   className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
@@ -15368,6 +15434,26 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                       {item.location}
                                     </span>
                                   </div>
+                                  {item.attachments && item.attachments.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                      {item.attachments.map((attRaw: string, attIdx: number) => {
+                                        let name = `Anexo ${attIdx + 1}`;
+                                        if (attRaw.includes("||data:")) name = attRaw.split("||")[0];
+                                        return (
+                                          <button
+                                            key={attIdx}
+                                            type="button"
+                                            onClick={() => openStockAttachment(attRaw)}
+                                            className="inline-flex items-center space-x-1 text-[11px] bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer"
+                                            title="Clique para visualizar/baixar arquivo"
+                                          >
+                                            <Paperclip className="h-3 w-3" />
+                                            <span className="truncate max-w-[120px]">{name}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center space-x-6">
@@ -15385,6 +15471,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   <button
                                     onClick={() => {
                                       setEditingInventoryItem(item);
+                                      setItemAttachments(item.attachments || []);
                                       setShowInventoryItemForm(true);
                                     }}
                                     className="p-2 text-slate-400 hover:text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
@@ -15478,6 +15565,26 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 {tx.quantity} {item?.unit}
                               </div>
                             </div>
+                            {tx.attachments && tx.attachments.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2 pt-1 border-t border-slate-100">
+                                {tx.attachments.map((attRaw: string, attIdx: number) => {
+                                  let name = `Comprovante ${attIdx + 1}`;
+                                  if (attRaw.includes("||data:")) name = attRaw.split("||")[0];
+                                  return (
+                                    <button
+                                      key={attIdx}
+                                      type="button"
+                                      onClick={() => openStockAttachment(attRaw)}
+                                      className="inline-flex items-center space-x-1 text-[10px] bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer"
+                                      title="Clique para visualizar/baixar"
+                                    >
+                                      <Paperclip className="h-2.5 w-2.5 text-slate-500" />
+                                      <span className="truncate max-w-[100px]">{name}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -17224,6 +17331,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   minQuantity: Number(formData.get("minQuantity")),
                   unit: formData.get("unit") as string,
                   location: formData.get("location") as string,
+                  attachments: itemAttachments,
                 };
 
                 if (editingInventoryItem) {
@@ -17338,6 +17446,44 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Anexar Arquivos / Fotos / Notas Fiscais
+                </label>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.txt"
+                  onChange={(e) => handleInventoryFileChange(e, false)}
+                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-royal-blue hover:file:bg-blue-100"
+                />
+                {itemAttachments.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs font-semibold text-slate-600">
+                      {itemAttachments.length} arquivo(s) anexado(s):
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {itemAttachments.map((att, idx) => {
+                        let name = `Arquivo ${idx + 1}`;
+                        if (att.includes("||data:")) name = att.split("||")[0];
+                        return (
+                          <div key={idx} className="flex items-center space-x-1 bg-slate-100 border border-slate-200 px-2 py-1 rounded text-xs">
+                            <Paperclip className="h-3 w-3 text-slate-500" />
+                            <span className="truncate max-w-[120px]">{name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setItemAttachments(prev => prev.filter((_, i) => i !== idx))}
+                              className="text-red-500 hover:text-red-700 ml-1 font-bold"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"
@@ -17381,6 +17527,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   reason: formData.get("reason") as string,
                   responsible: currentUser?.name || "Desconhecido",
                   employeeId: formData.get("employeeId") as string,
+                  attachments: transactionAttachments,
                 };
 
                 const item = inventoryItems.find((i) => i.id === itemId);
@@ -17479,6 +17626,44 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   Utilize para registrar entrega de EPIs ou Uniformes para um
                   funcionário.
                 </p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Anexar Comprovante / Assinatura / Recibo
+                </label>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.txt"
+                  onChange={(e) => handleInventoryFileChange(e, true)}
+                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-royal-blue hover:file:bg-blue-100"
+                />
+                {transactionAttachments.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs font-semibold text-slate-600">
+                      {transactionAttachments.length} arquivo(s) anexado(s):
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {transactionAttachments.map((att, idx) => {
+                        let name = `Comprovante ${idx + 1}`;
+                        if (att.includes("||data:")) name = att.split("||")[0];
+                        return (
+                          <div key={idx} className="flex items-center space-x-1 bg-slate-100 border border-slate-200 px-2 py-1 rounded text-xs">
+                            <Paperclip className="h-3 w-3 text-slate-500" />
+                            <span className="truncate max-w-[120px]">{name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setTransactionAttachments(prev => prev.filter((_, i) => i !== idx))}
+                              className="text-red-500 hover:text-red-700 ml-1 font-bold"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
                 <button

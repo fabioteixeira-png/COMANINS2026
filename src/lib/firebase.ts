@@ -1564,7 +1564,7 @@ export async function saveSitePhotosConfig(list: any[]): Promise<void> {
 export const syncInventoryItems = (callback: (items: InventoryItem[]) => void) => {
   const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'inventoryItems'), limit(25));
+  const q = query(collection(db, 'inventoryItems'), limit(500));
   return onSnapshot(q, (snapshot) => {
     const items: InventoryItem[] = [];
     snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() } as InventoryItem));
@@ -1578,23 +1578,33 @@ export const syncInventoryItems = (callback: (items: InventoryItem[]) => void) =
 
 export const addInventoryItemDoc = async (item: Omit<InventoryItem, 'id'>) => {
   const newRef = doc(collection(db, 'inventoryItems'));
+  const newItem = { id: newRef.id, ...item } as InventoryItem;
   await setDoc(newRef, item);
+  const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
+  const updated = [newItem, ...cached.filter(i => i.id !== newRef.id)];
+  setLocalCache('inventoryItems', updated);
 };
 
 export const updateInventoryItemDoc = async (id: string, updates: Partial<InventoryItem>) => {
   const docRef = doc(db, 'inventoryItems', id);
   await updateDoc(docRef, updates);
+  const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
+  const updated = cached.map(i => i.id === id ? { ...i, ...updates } : i);
+  setLocalCache('inventoryItems', updated);
 };
 
 export const deleteInventoryItemDoc = async (id: string) => {
   await deleteDoc(doc(db, 'inventoryItems', id));
+  const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
+  const updated = cached.filter(i => i.id !== id);
+  setLocalCache('inventoryItems', updated);
 };
 
 // Inventory Transactions
 export const syncInventoryTransactions = (callback: (transactions: InventoryTransaction[]) => void) => {
   const cached = getLocalCache<InventoryTransaction[]>('inventoryTransactions', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'inventoryTransactions'), orderBy('date', 'desc'), limit(25));
+  const q = query(collection(db, 'inventoryTransactions'), orderBy('date', 'desc'), limit(500));
   return onSnapshot(q, (snapshot) => {
     const transactions: InventoryTransaction[] = [];
     snapshot.forEach(doc => transactions.push({ id: doc.id, ...doc.data() } as InventoryTransaction));
@@ -1608,7 +1618,11 @@ export const syncInventoryTransactions = (callback: (transactions: InventoryTran
 
 export const addInventoryTransactionDoc = async (transaction: Omit<InventoryTransaction, 'id'>) => {
   const newRef = doc(collection(db, 'inventoryTransactions'));
+  const newTx = { id: newRef.id, ...transaction } as InventoryTransaction;
   await setDoc(newRef, transaction);
+  const cached = getLocalCache<InventoryTransaction[]>('inventoryTransactions', []);
+  const updated = [newTx, ...cached.filter(t => t.id !== newRef.id)];
+  setLocalCache('inventoryTransactions', updated);
 };
 
 // Reference Standards (Padrões de Referência)
