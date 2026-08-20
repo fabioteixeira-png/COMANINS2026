@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Instrument } from '../types';
@@ -380,12 +381,17 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
     
     setIsProcessingImage(true);
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = error => reject(error);
-      });
+      let base64 = "";
+      try {
+        base64 = await compressImageToWebResolution(file, 1200, 1200, 0.7);
+      } catch {
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = error => reject(error);
+        });
+      }
 
       const response = await fetch('/api/parse-field-service-image', {
         method: 'POST',
@@ -531,7 +537,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
         <div className="flex flex-wrap gap-2">
           {/* Hidden inputs */}
           <input type="file" accept=".xlsx,.xls,.csv" ref={excelInputRef} className="hidden" onChange={handleExcelImport} />
-          <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
+          <input type="file" accept="image/*,.heic,.heif" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
           
           <button 
             onClick={handleDownloadTemplate}

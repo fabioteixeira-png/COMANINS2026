@@ -174,7 +174,8 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
     try {
       const b64s = await Promise.all(
         files.map(async (f) => {
-          if (f.type.startsWith("image/")) {
+          const isImage = f.type.startsWith("image/") || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || "");
+          if (isImage) {
             return await compressImageToWebResolution(f);
           } else {
             return new Promise<string>((resolve, reject) => {
@@ -434,7 +435,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                     <div className="absolute right-2 bottom-2">
                       <label className="p-2 cursor-pointer text-slate-400 hover:text-royal-blue transition-colors flex items-center justify-center rounded-lg hover:bg-slate-100">
                         <Paperclip className="h-5 w-5" />
-                        <input type="file" multiple className="hidden" onChange={(e) => handleAttachmentUpload(e, setMessageAttachments, messageAttachments)} />
+                        <input type="file" accept="image/*,.heic,.heif,application/pdf,.doc,.docx" multiple className="hidden" onChange={(e) => handleAttachmentUpload(e, setMessageAttachments, messageAttachments)} />
                       </label>
                     </div>
                   </div>
@@ -513,7 +514,7 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                     <div className="flex text-sm text-slate-600 justify-center">
                       <label className="relative cursor-pointer bg-white rounded-md font-medium text-royal-blue hover:text-royal-dark focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-royal-blue">
                         <span>Anexar arquivos</span>
-                        <input type="file" multiple className="sr-only" onChange={(e) => handleAttachmentUpload(e, setNewAttachments, newAttachments)} />
+                        <input type="file" accept="image/*,.heic,.heif,application/pdf,.doc,.docx" multiple className="sr-only" onChange={(e) => handleAttachmentUpload(e, setNewAttachments, newAttachments)} />
                       </label>
                     </div>
                     <p className="text-xs text-slate-500">Imagens ou Documentos</p>

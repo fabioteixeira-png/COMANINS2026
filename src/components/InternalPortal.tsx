@@ -4026,7 +4026,10 @@ Status atual: ${e.status}.`,
       setIsUploadingInstPhoto(true);
       const compressedList = await compressMultipleImages(e.target.files);
       const photoDataUrl = compressedList[0];
-      if (!photoDataUrl) return;
+      if (!photoDataUrl) {
+        alert("Nenhuma foto válida foi processada. Tente selecionar novamente no seu dispositivo.");
+        return;
+      }
 
       const fieldToUpdate =
         photoModalType === "registration"
@@ -4061,9 +4064,9 @@ Status atual: ${e.status}.`,
           ? { ...prev, [fieldToUpdate]: photoDataUrl, status: finalStatus }
           : null,
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error uploading instrument photo:", err);
-      alert("Erro ao carregar imagem. Tente novamente.");
+      alert("Erro ao salvar foto do instrumento: " + (err?.message || "Tente novamente."));
     } finally {
       setIsUploadingInstPhoto(false);
       e.target.value = "";
@@ -12454,11 +12457,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <label className="cursor-pointer bg-slate-50 hover:bg-slate-100 border border-slate-300 border-dashed rounded-xl p-3 text-center transition-colors flex items-center justify-center space-x-2 text-slate-600 font-medium">
                           <Upload className="h-4 w-4 text-royal-blue" />
                           <span>
-                            Clique para carregar arquivo (PNG, JPG, SVG)
+                            Clique para carregar arquivo (PNG, JPG, SVG, HEIC)
                           </span>
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/*,.heic,.heif"
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
@@ -12619,7 +12622,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             </span>
                             <input
                               type="file"
-                              accept="image/*"
+                              accept="image/*,.heic,.heif"
                               onChange={handleLogoUpload}
                               className="hidden"
                             />
@@ -12791,7 +12794,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           Carregar Novo Arquivo
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/*,.heic,.heif"
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
@@ -18143,12 +18146,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <span>
                       {isUploadingDevolution
                         ? "Processando..."
-                        : "Selecionar Foto"}
+                        : "Selecionar Foto (Celular ou Computador)"}
                     </span>
                     <input
                       type="file"
-                      accept="image/*"
-                      capture="environment"
+                      accept="image/*,.heic,.heif"
                       onChange={handleUploadDevolutionPhoto}
                       className="hidden"
                       disabled={isUploadingDevolution}
@@ -18504,7 +18506,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             </span>
                             <input
                               type="file"
-                              accept="image/*"
+                              accept="image/*,.heic,.heif"
                               disabled={isUploadingInstPhoto}
                               onChange={handleUploadInstrumentPhoto}
                               className="hidden"
@@ -18554,11 +18556,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <span>
                           {isUploadingInstPhoto
                             ? "Otimizando e Salvando..."
-                            : "Selecionar Foto do Computador"}
+                            : "Selecionar Foto (Celular ou Computador)"}
                         </span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/*,.heic,.heif"
                           disabled={isUploadingInstPhoto}
                           onChange={handleUploadInstrumentPhoto}
                           className="hidden"

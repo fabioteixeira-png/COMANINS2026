@@ -137,7 +137,8 @@ export default function EmployeeManagement({
 
       let fileDataUrl = newNrCertificateUrl;
       if (newNrCertificateFile) {
-        if (newNrCertificateFile.type.startsWith('image/')) {
+        const isImage = newNrCertificateFile.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(newNrCertificateFile.name || '');
+        if (isImage) {
           fileDataUrl = await compressImageToWebResolution(newNrCertificateFile, 1200, 1200, 0.7);
         } else {
           if (newNrCertificateFile.size > 500 * 1024) {
@@ -357,7 +358,8 @@ export default function EmployeeManagement({
     };
 
     if (newAsoDocFile) {
-      if (newAsoDocFile.type.startsWith('image/')) {
+      const isImage = newAsoDocFile.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(newAsoDocFile.name || '');
+      if (isImage) {
         try {
           const compressed = await compressImageToWebResolution(newAsoDocFile, 1200, 1200, 0.7);
           processAdd(compressed);
@@ -1155,10 +1157,10 @@ export default function EmployeeManagement({
                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                         <label className="cursor-pointer bg-royal-blue hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors shadow-sm shrink-0">
                           <Upload className="h-3.5 w-3.5" />
-                          <span>Anexar Foto do Computador</span>
+                          <span>Anexar Foto (Celular ou Computador)</span>
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/*,.heic,.heif"
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
@@ -1895,10 +1897,10 @@ export default function EmployeeManagement({
                           </div>
 
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Anexo ASO (Digitalizado)</label>
+                            <label className="block font-semibold text-slate-700 mb-1">Anexo ASO (Digitalizado / Foto)</label>
                             <input
                               type="file"
-                              accept="image/*,application/pdf"
+                              accept="image/*,.heic,.heif,application/pdf"
                               onChange={(e) => setNewAsoDocFile(e.target.files ? e.target.files[0] : null)}
                               className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-royal-blue hover:file:bg-blue-200 cursor-pointer"
                             />
@@ -2193,7 +2195,7 @@ export default function EmployeeManagement({
                               <Upload className="h-4 w-4 text-amber-700 shrink-0 ml-1" />
                               <input
                                 type="file"
-                                accept=".pdf,image/*"
+                                accept=".pdf,image/*,.heic,.heif"
                                 className="hidden"
                                 onChange={(e) => {
                                   if (e.target.files && e.target.files[0]) {
@@ -2751,14 +2753,15 @@ export default function EmployeeManagement({
                               <Upload className="h-4 w-4 text-royal-blue shrink-0 ml-1" />
                               <input
                                 type="file"
-                                accept=".pdf,image/*,.doc,.docx"
+                                accept=".pdf,image/*,.heic,.heif,.doc,.docx"
                                 className="hidden"
                                 multiple
                                 onChange={(e) => {
                                   const files = Array.from(e.target.files || []) as File[];
                                   if (files.length > 0) {
                                     const validFiles = files.filter(f => {
-                                      if (f.size > 1000 * 1024) {
+                                      const isImage = f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || '');
+                                      if (!isImage && f.size > 1000 * 1024) {
                                         alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo ' + f.name + ' ultrapassa 1MB e será ignorado.');
                                         return false;
                                       }
@@ -2807,7 +2810,8 @@ export default function EmployeeManagement({
                                 for (let i = 0; i < newDocFiles.length; i++) {
                                   const f = newDocFiles[i];
                                   let fileUrl = "";
-                                  if (f.type.startsWith('image/')) {
+                                  const isImage = f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || '');
+                                  if (isImage) {
                                     fileUrl = await compressImageToWebResolution(f, 1200, 1200, 0.7);
                                   } else {
                                     fileUrl = await new Promise((resolve) => {
