@@ -78,6 +78,8 @@ import {
   syncRncReports,
   saveRncReportDoc,
   deleteRncDoc,
+  getEmployeeDocuments,
+  EmployeeDocument,
 } from "../lib/firebase";
 import {
   compressMultipleImages,
@@ -105,6 +107,7 @@ import {
   HelpCircle,
   Tag,
   FileText,
+  Paperclip,
   Calendar,
   UserPlus,
   Settings,
@@ -703,6 +706,23 @@ export default function InternalPortal({
     "meus" | "gerenciar"
   >("meus");
   const [payslipMonthFilter, setPayslipMonthFilter] = useState<string>("all");
+  const [myEmployeeDocs, setMyEmployeeDocs] = useState<EmployeeDocument[]>([]);
+  const [isLoadingMyDocs, setIsLoadingMyDocs] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (currentUser && (currentUser.id || currentUser.username)) {
+      setIsLoadingMyDocs(true);
+      getEmployeeDocuments(currentUser.id || '', currentUser.username, (currentUser as any).cpf)
+        .then(docs => {
+          setMyEmployeeDocs(docs);
+          setIsLoadingMyDocs(false);
+        })
+        .catch(err => {
+          console.error("Erro ao buscar meus documentos do colaborador:", err);
+          setIsLoadingMyDocs(false);
+        });
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser || isUserAdmin) return;
@@ -1882,7 +1902,7 @@ Status atual: ${statusText}.`,
     });
 
     // Exames pendentes/vencidos/agendados
-    medicalExams.forEach((e) => {
+    medicalExams.forEach((e: any) => {
       if (
         e.status === "Vencido" ||
         e.status === "Pendente" ||
@@ -1893,7 +1913,7 @@ Status atual: ${statusText}.`,
           id: `exam_${e.id}`,
           type: "exam",
           icon: Activity,
-          title: `Exame ${e.status}: ${e.employeeName}`,
+          title: `Exame ${e.status}: ${e.employeeName || 'Colaborador'}`,
           description: `Tipo: ${e.examType}
 Status atual: ${e.status}.`,
           color: isExpired
@@ -3912,25 +3932,31 @@ Status atual: ${e.status}.`,
     try {
       setIsUploadingPhotos(true);
       const compressedPhotos = await compressMultipleImages(e.target.files);
+      if (compressedPhotos.length === 0) {
+        alert("Nenhuma foto válida foi processada. Tente selecionar novamente no seu dispositivo.");
+        return;
+      }
       const existingPhotos = selectedIntakeForPhotos.photos || [];
       const updatedPhotos = [...existingPhotos, ...compressedPhotos];
 
-      await updateIntakePhotosDoc(selectedIntakeForPhotos.id, updatedPhotos);
+      if (selectedIntakeForPhotos.id) {
+        await updateIntakePhotosDoc(selectedIntakeForPhotos.id, updatedPhotos);
+      }
 
-      setSelectedIntakeForPhotos({
-        ...selectedIntakeForPhotos,
-        photos: updatedPhotos,
-      });
+      setSelectedIntakeForPhotos((prev: any) =>
+        prev ? { ...prev, photos: updatedPhotos } : null
+      );
 
       setSavedIntakes((prev) =>
         prev.map((item) =>
-          item.id === selectedIntakeForPhotos.id
+          item.id === selectedIntakeForPhotos.id || item.numEntrada === selectedIntakeForPhotos.numEntrada
             ? { ...item, photos: updatedPhotos }
             : item,
         ),
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error uploading intake photos:", err);
+      alert("Erro ao salvar foto no banco de dados: " + (err?.message || "Ocorreu um erro no carregamento. Tente novamente."));
     } finally {
       setIsUploadingPhotos(false);
       e.target.value = "";
@@ -16495,9 +16521,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           {payslips
                             .filter(
                               (p) =>
-                                p.employeeName?.toLowerCase() ===
-                                  currentUser?.name?.toLowerCase() ||
-                                p.employeeCpf === currentUser?.username,
+                                (currentUser?.id && p.employeeId === currentUser.id) ||
+                                (currentUser?.username && p.employeeCpf === currentUser.username) ||
+                                ((currentUser as any)?.cpf && p.employeeCpf === (currentUser as any).cpf) ||
+                                (currentUser?.name && p.employeeName?.toLowerCase().trim() === currentUser.name.toLowerCase().trim())
                             )
                             .map((p) => (
                               <tr
@@ -16549,22 +16576,88 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             ))}
                           {payslips.filter(
                             (p) =>
-                              p.employeeName?.toLowerCase() ===
-                                currentUser?.name?.toLowerCase() ||
-                              p.employeeCpf === currentUser?.username,
+                              (currentUser?.id && p.employeeId === currentUser.id) ||
+                              (currentUser?.username && p.employeeCpf === currentUser.username) ||
+                              ((currentUser as any)?.cpf && p.employeeCpf === (currentUser as any).cpf) ||
+                              (currentUser?.name && p.employeeName?.toLowerCase().trim() === currentUser.name.toLowerCase().trim())
                           ).length === 0 && (
                             <tr>
                               <td
-                                colSpan={6}
-                                className="px-6 py-10 text-center text-slate-400"
+                                colSpan={7}
+                                className="px-6 py-8 text-center text-slate-400 italic text-xs"
                               >
-                                Nenhum documento disponível em seu perfil
-                                até o momento.
+                                Nenhum holerite / contra-cheque publicado para o seu perfil no momento.
                               </td>
                             </tr>
                           )}
                         </tbody>
                       </table>
+                    </div>
+
+                    {/* DEMAIS DOCUMENTOS ANEXADOS DO COLABORADOR */}
+                    <div className="p-6 border-t border-slate-200 bg-slate-50/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm flex items-center space-x-2">
+                            <Paperclip className="h-4 w-4 text-royal-blue" />
+                            <span>Documentos Pessoais & Anexos Cadastrais</span>
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            Cópias de RG, CNH, ASO, Comprovante de Residência, Contratos e Certificados.
+                          </p>
+                        </div>
+                        <span className="bg-blue-100 text-royal-blue font-bold px-2.5 py-1 rounded-full text-xs">
+                          {myEmployeeDocs.length} arquivo(s)
+                        </span>
+                      </div>
+
+                      {isLoadingMyDocs ? (
+                        <div className="p-6 text-center text-slate-400 text-xs italic">
+                          Carregando seus documentos anexados...
+                        </div>
+                      ) : myEmployeeDocs.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 italic text-xs border border-dashed border-slate-200 rounded-xl bg-white">
+                          Nenhum documento pessoal anexado ao seu perfil. O setor de RH pode incluir seus arquivos no cadastro geral.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {myEmployeeDocs.map((doc) => (
+                            <div key={doc.id} className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-sm flex flex-col justify-between hover:border-blue-300 transition-all">
+                              <div>
+                                <div className="flex items-start justify-between gap-2 mb-2">
+                                  <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded text-[10px] uppercase tracking-wide">
+                                    {doc.type || "Documento"}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    {doc.date || ""}
+                                  </span>
+                                </div>
+                                <h5 className="font-bold text-slate-800 text-xs line-clamp-2 mb-1" title={doc.name}>
+                                  {doc.name}
+                                </h5>
+                              </div>
+                              <div className="pt-3 border-t border-slate-100 mt-2 flex items-center justify-between">
+                                <span className="text-[11px] text-slate-400 font-mono">
+                                  Anexo Digital
+                                </span>
+                                {doc.url ? (
+                                  <a
+                                    href={doc.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="bg-royal-blue hover:bg-blue-700 text-white font-bold px-3 py-1 rounded-lg text-xs transition-colors flex items-center space-x-1"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                    <span>Visualizar</span>
+                                  </a>
+                                ) : (
+                                  <span className="text-slate-400 text-xs italic">Indisponível</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -17844,7 +17937,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   setAfterHoursBypass(true);
                   setShowAfterHoursModal(false);
                   setRawActiveTab(afterHoursTargetTab);
-                  if (afterHoursTargetSubTab) setRhSubTab(afterHoursTargetSubTab);
+                  if (afterHoursTargetSubTab) setRhSubTab(afterHoursTargetSubTab as any);
                   setAfterHoursJustification("");
                   setAfterHoursPassword("");
                 } catch (err) {
@@ -18140,12 +18233,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </div>
                 <div>
                   <h4 className="font-bold text-slate-800 text-sm">
-                    Carregar Fotos do Computador
+                    Carregar Fotos (Celular ou Computador)
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                    Ao carregar, as imagens são automaticamente otimizadas
-                    (resolução web) antes do salvamento na base de dados para
-                    garantir alta nitidez com tamanho leve.
+                    Ao carregar, as fotos da câmera ou galeria são automaticamente compactadas e otimizadas em alta resolução para salvamento rápido na base de dados.
                   </p>
                 </div>
 
@@ -18154,11 +18245,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <span>
                     {isUploadingPhotos
                       ? "Otimizando e Salvando..."
-                      : "Selecionar Fotos do Computador"}
+                      : "Selecionar Fotos do Dispositivo"}
                   </span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/*,.heic,.heif"
                     multiple
                     disabled={isUploadingPhotos}
                     onChange={handleUploadPhotos}
@@ -18225,7 +18316,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       Nenhuma foto salva para esta entrada de material.
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      Clique em "Selecionar Fotos do Computador" acima para
+                      Clique em "Selecionar Fotos do Dispositivo" acima para
                       adicionar as fotos dos instrumentos/equipamentos.
                     </p>
                   </div>

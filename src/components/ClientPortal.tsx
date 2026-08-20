@@ -94,7 +94,11 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
       const unsub = syncClientIntakes(client.id, (list) => {
         setClientIntakes(list);
       });
-      return () => unsub.then(fn => fn());
+      return () => {
+        unsub.then((fn) => {
+          if (fn) fn();
+        });
+      };
     }
   }, [client?.id]);
 
@@ -887,7 +891,7 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
               let maxRepeatability = 0;
               let maxAbsError = 0;
               let span = Math.abs((inst?.rangeMax || 0) - (inst?.rangeMin || 0)) || 1;
-              const mpeVal = (selectedReport?.mpe !== undefined && selectedReport?.mpe !== null && (selectedReport as any)?.mpe !== '') 
+              const mpeVal = ((selectedReport as any)?.mpe !== undefined && (selectedReport as any)?.mpe !== null && (selectedReport as any)?.mpe !== '') 
                 ? Number((selectedReport as any).mpe) 
                 : (inst?.mpe !== undefined && inst?.mpe !== null && (inst?.mpe as any) !== '') 
                   ? Number(inst.mpe) 

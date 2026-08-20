@@ -378,24 +378,31 @@ export async function addEmployeeDocument(docData: Omit<EmployeeDocument, 'id'>)
   return { id: docRef.id, ...docData };
 }
 
-export async function getEmployeeDocuments(userId: string, username?: string): Promise<EmployeeDocument[]> {
+export async function getEmployeeDocuments(userId: string, username?: string, cpf?: string): Promise<EmployeeDocument[]> {
   if (!db) return [];
   try {
-    const q1 = query(collection(db, 'employeeDocuments'), where('userId', '==', userId));
-    const snapshot1 = await getDocs(q1);
     const docs: EmployeeDocument[] = [];
-    snapshot1.forEach(doc => {
-      docs.push({ id: doc.id, ...doc.data() } as EmployeeDocument);
-    });
-
-    if (username && username !== userId) {
-      const q2 = query(collection(db, 'employeeDocuments'), where('userId', '==', username));
-      const snapshot2 = await getDocs(q2);
-      snapshot2.forEach(doc => {
-        if (!docs.some(d => d.id === doc.id)) {
-          docs.push({ id: doc.id, ...doc.data() } as EmployeeDocument);
+    const addUniqueDocs = (snapshot: any) => {
+      snapshot.forEach((docSnap: any) => {
+        if (!docs.some(d => d.id === docSnap.id)) {
+          docs.push({ id: docSnap.id, ...docSnap.data() } as EmployeeDocument);
         }
       });
+    };
+
+    const keysToSearch = new Set<string>();
+    if (userId) keysToSearch.add(userId);
+    if (username) keysToSearch.add(username);
+    if (cpf) keysToSearch.add(cpf);
+
+    for (const key of keysToSearch) {
+      const qUser = query(collection(db, 'employeeDocuments'), where('userId', '==', key));
+      const snapUser = await getDocs(qUser);
+      addUniqueDocs(snapUser);
+
+      const qEmp = query(collection(db, 'employeeDocuments'), where('employeeId', '==', key));
+      const snapEmp = await getDocs(qEmp);
+      addUniqueDocs(snapEmp);
     }
 
     return docs;
@@ -1118,6 +1125,18 @@ export async function deleteIntakeDoc(id: string): Promise<void> {
 export async function syncPortalUsers(callback: (users: PortalUser[]) => void) {
   const colRef = collection(db, 'portalUsers');
   const seedRef = doc(db, 'systemSettings', 'portalUsersSeeded');
+
+  // Deliver cached data immediately if present
+  const savedCache = localStorage.getItem('comanins_portal_users_cache');
+  if (savedCache) {
+    try {
+      const parsed = JSON.parse(savedCache);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        callback(parsed);
+      }
+    } catch (e) {}
+  }
+
   return onSnapshot(colRef, async (snapshot) => {
     if (snapshot.empty) {
       try {

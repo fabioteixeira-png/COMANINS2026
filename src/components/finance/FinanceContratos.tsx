@@ -196,7 +196,7 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                       <Edit className="h-4 w-4" />
                     </button>
                     <button 
-                      onClick={() => handleDelete(item.id)} 
+                      onClick={() => handleDelete(item)} 
                       className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
                       title="Excluir Contrato"
                     >

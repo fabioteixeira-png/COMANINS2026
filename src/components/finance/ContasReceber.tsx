@@ -251,7 +251,7 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                       </button>
                     )}
                     <button onClick={() => handleOpenForm(item)} className="p-1 text-slate-400 hover:text-royal-blue"><Edit className="h-4 w-4" /></button>
-                    <button onClick={() => handleDelete(item.id)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </td>
               </tr>
