@@ -1629,7 +1629,7 @@ export const addInventoryTransactionDoc = async (transaction: Omit<InventoryTran
 export function syncReferenceStandards(callback: (standards: ReferenceStandard[]) => void) {
   const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'referenceStandards'), limit(25));
+  const q = query(collection(db, 'referenceStandards'), limit(500));
   return onSnapshot(q, (snapshot) => {
     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ReferenceStandard));
     setLocalCache('referenceStandards', list);
@@ -1644,15 +1644,28 @@ export async function addReferenceStandardDoc(data: Omit<ReferenceStandard, 'id'
   const newId = 'std_' + Date.now();
   const item: ReferenceStandard = { ...data, id: newId };
   await setDoc(doc(db, 'referenceStandards', newId), item);
+  
+  const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
+  const updated = [item, ...cached.filter(s => s.id !== newId)];
+  setLocalCache('referenceStandards', updated);
+  
   return item;
 }
 
 export async function updateReferenceStandardDoc(id: string, updates: Partial<ReferenceStandard>): Promise<void> {
   await updateDoc(doc(db, 'referenceStandards', id), updates);
+  
+  const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
+  const updated = cached.map(s => s.id === id ? { ...s, ...updates } : s);
+  setLocalCache('referenceStandards', updated);
 }
 
 export async function deleteReferenceStandardDoc(id: string): Promise<void> {
   await deleteDoc(doc(db, 'referenceStandards', id));
+  
+  const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
+  const updated = cached.filter(s => s.id !== id);
+  setLocalCache('referenceStandards', updated);
 }
 
 export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void) {
