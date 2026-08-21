@@ -140,9 +140,9 @@ export default function LoginScreen({
       const tokenResult = await userCredential.user.getIdTokenResult();
       const needsChange = tokenResult.claims.passwordChangeRequired === true || 
                           userDoc?.passwordChangeRequired === true || 
-                          userDoc?.passwordChangeRequired === "true" || 
+                          String(userDoc?.passwordChangeRequired) === "true" || 
                           userDoc?.mustChangePassword === true || 
-                          userDoc?.mustChangePassword === "true" || 
+                          String(userDoc?.mustChangePassword) === "true" || 
                           (userDoc && userDoc.passwordChangeRequired !== false);
       
       if (needsChange) {

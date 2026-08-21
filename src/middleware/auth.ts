@@ -11,6 +11,10 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction
 ) => {
+  if (!adminAuth) {
+    return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized: Missing token' });

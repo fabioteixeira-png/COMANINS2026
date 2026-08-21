@@ -37,6 +37,9 @@ const isAdministratorProfile = (profile: any): boolean => {
 };
 
 const findPortalUserForAuth = async (decoded: any) => {
+  if (!firestoreDb) {
+    throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  }
   const usersRef = firestoreDb.collection('portalUsers');
 
   const byUid = await usersRef.where('authUid', '==', decoded.uid).limit(1).get();
@@ -277,6 +280,10 @@ function getGeminiClient(): GoogleGenAI | null {
 
 async function runDailyNotifications() {
   try {
+    if (!firestoreDb) {
+      console.warn('[Firebase Admin] Rotina diária ignorada: Admin SDK indisponível neste ambiente.');
+      return;
+    }
     console.log("Executando verificação diária de notificações e alertas...");
     
     const today = new Date();
@@ -671,6 +678,9 @@ app.post("/api/generate-birthday-message", async (req, res) => {
 
 app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => {
   try {
+    if (!adminAuth || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
     const requesterProfile = await findPortalUserForAuth(req.user);
     if (!requesterProfile || !isAdministratorProfile(requesterProfile)) {
       return res.status(403).json({ error: 'FORBIDDEN' });
@@ -708,6 +718,9 @@ app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => 
 
 app.post("/api/auth/verify-admin", requireAuth, async (req: AuthRequest, res) => {
   try {
+    if (!adminAuth || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
     const username = String(req.body?.username || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
 
@@ -752,7 +765,7 @@ app.post("/api/auth/verify-admin", requireAuth, async (req: AuthRequest, res) =>
       return res.json({ valid: false });
     }
 
-    return res.json({ valid: true, username: adminProfile.username || username });
+    return res.json({ valid: true, username: (adminProfile as any).username || username });
   } catch (error) {
     console.error('Verify admin error:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });

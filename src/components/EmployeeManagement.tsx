@@ -712,7 +712,7 @@ export default function EmployeeManagement({
         role: formData.role || 'Técnico de Laboratório',
         permissionLevel: (formData as any).permissionLevel || 'Padrão',
         register: formData.register || `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
-        password: formData.password || 'comanins2026',
+        password: formData.password?.trim() || undefined,
         mustChangePassword: true,
         auditLogs: logs
       };
