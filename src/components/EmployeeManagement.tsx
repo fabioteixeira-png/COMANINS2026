@@ -12,6 +12,7 @@ import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrain
   deleteEmployeeAsoDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
+import { verifyAdminCredentials } from '../utils/authApi';
 
 interface EmployeeManagementProps {
   currentUser: { name: string; username: string; role: string; register: string; permissionLevel?: string } | null;
@@ -391,14 +392,14 @@ export default function EmployeeManagement({
     const pwd = window.prompt("Digite sua senha de administrador para confirmar a exclusão deste ASO:");
     if (pwd === null) return;
     
-    const res = await fetch('/api/auth/verify-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: currentUser?.username, password: pwd.trim() })
-    });
-    const data = await res.json();
-    if (!data.valid) {
-      alert("Senha incorreta.");
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || '', pwd);
+      if (!valid) {
+        alert("Credencial administrativa inválida.");
+        return;
+      }
+    } catch (error: any) {
+      alert(error?.message || "Não foi possível validar a autorização administrativa.");
       return;
     }
 

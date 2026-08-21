@@ -1,0 +1,286 @@
+diff -ruN '--exclude=dist' '--exclude=node_modules' comanins_code_review/server.ts comanins_step1a/server.ts
+--- comanins_code_review/server.ts	2026-08-21 19:50:26.000000000 +0000
++++ comanins_step1a/server.ts	2026-08-21 20:14:54.096627847 +0000
+@@ -12,134 +12,17 @@
+ import { getOrCreateUser } from './src/db/users.ts';
+ import cron from 'node-cron';
+ import nodemailer from 'nodemailer';
+-import { initializeApp, getApps, cert } from 'firebase-admin/app';
+-import { getFirestore } from 'firebase-admin/firestore';
++import { adminDb } from './src/lib/firebase-admin.ts';
+ const firebaseConfig = JSON.parse(
+   fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8')
+ );
+ 
+-let firebaseAdminApp;
+-if (!getApps().length) {
+-  const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
+-  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+-  const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+-
+-  const missingVars = [];
+-  if (!projectId) missingVars.push('FIREBASE_ADMIN_PROJECT_ID');
+-  if (!clientEmail) missingVars.push('FIREBASE_ADMIN_CLIENT_EMAIL');
+-  if (!privateKey) missingVars.push('FIREBASE_ADMIN_PRIVATE_KEY');
+-
+-  if (missingVars.length === 0) {
+-    try {
+-      firebaseAdminApp = initializeApp({
+-        credential: cert({
+-          projectId: projectId,
+-          clientEmail: clientEmail,
+-          privateKey: privateKey.replace(/\\n/g, '\n'),
+-        }),
+-        projectId: firebaseConfig.projectId
+-      });
+-      console.log('✅ Firebase Admin SDK inicializado com variáveis de ambiente dedicadas.');
+-    } catch (e) {
+-      console.error('❌ Erro ao inicializar Firebase Admin SDK com as credenciais fornecidas:', e);
+-      firebaseAdminApp = initializeApp({ projectId: firebaseConfig.projectId });
+-    }
+-  } else {
+-    console.warn(`⚠️ AVISO: As seguintes variáveis de ambiente estão ausentes: ${missingVars.join(', ')}`);
+-    console.warn('⚠️ O Firebase Admin SDK usará credenciais padrão da máquina, o que causará erros de PERMISSION_DENIED no Firestore.');
+-    firebaseAdminApp = initializeApp({ projectId: firebaseConfig.projectId });
+-  }
+-} else {
+-  firebaseAdminApp = getApps()[0];
+-}
+-const firestoreDb = getFirestore(firebaseAdminApp, firebaseConfig.firestoreDatabaseId || undefined);
+-
++const firestoreDb = adminDb;
+ 
+ 
+ const app = express();
+ 
+-// TEMPORARY SEED ROUTE FOR LEGACY USERS
+-
+-// TEMPORARY ROUTE TO FORCE PASSWORD CHANGE
+-app.get("/api/admin/force-password-change", async (req, res) => {
+-  try {
+-    const usersRef = firestoreDb.collection("portalUsers");
+-    const usersSnap = await usersRef.get();
+-    let batch = firestoreDb.batch();
+-    let count = 0;
+-    
+-    usersSnap.forEach(doc => {
+-        batch.update(doc.ref, { passwordChangeRequired: true, mustChangePassword: true });
+-        count++;
+-    });
+-    if (count > 0) await batch.commit();
+-
+-    const clientsRef = firestoreDb.collection("clients");
+-    const clientsSnap = await clientsRef.get();
+-    let clientBatch = firestoreDb.batch();
+-    let clientCount = 0;
+-    
+-    clientsSnap.forEach(doc => {
+-        clientBatch.update(doc.ref, { passwordChangeRequired: true, mustChangePassword: true });
+-        clientCount++;
+-    });
+-    if (clientCount > 0) await clientBatch.commit();
+-    
+-    res.json({ success: true, message: `Forced password change for ${count} portalUsers and ${clientCount} clients.` });
+-  } catch (err: any) {
+-    console.error(err);
+-    res.status(500).json({ error: err.message });
+-  }
+-});
+-
+-app.get("/api/admin/seed-legacy-users", async (req, res) => {
+-  try {
+-    const users = [
+-      { username: "andrea.santos", name: "Andrea Santos" },
+-      { username: "aristeu.neto", name: "Aristeu Neto" },
+-      { username: "cassiel.pereira", name: "Cassiel Pereira" },
+-      { username: "diego.bouth", name: "Diego Bouth" },
+-      { username: "eliseu.sales", name: "Eliseu Sales" },
+-      { username: "emanuelle.carvalho", name: "Emanuelle Carvalho" },
+-      { username: "fabio.teixeira", name: "Fabio Teixeira" },
+-      { username: "felype.teixeira", name: "Felype Teixeira" },
+-      { username: "gabriela.reis", name: "Gabriela Reis" },
+-      { username: "gilson.soares", name: "Gilson Soares" },
+-      { username: "kaue.pompeu", name: "Kaue Pompeu" },
+-      { username: "patricia.santos", name: "Patricia Santos" },
+-      { username: "vanilson.santos", name: "Vanilson Santos" },
+-      { username: "vinicius.pinto", name: "Vinicius Pinto" },
+-      { username: "isidro.teixeira", name: "Isidro Teixeira" },
+-      { username: "solange.teixeira", name: "Solange Teixeira" },
+-      { username: "rose.teixeira", name: "Rose Teixeira" },
+-      { username: "ryan.conceicao", name: "Ryan Conceicao" }
+-    ];
+-    
+-    const usersRef = firestoreDb.collection("portalUsers");
+-    let added = 0;
+-    
+-    for (const u of users) {
+-      const snap = await usersRef.where("username", "==", u.username).get();
+-      if (snap.empty) {
+-        await usersRef.add({
+-          username: u.username,
+-          name: u.name,
+-          password: "comanins2026",
+-          mustChangePassword: true,
+-          role: "Técnico de Laboratório",
+-          permissionLevel: "Padrão",
+-          register: `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
+-          status: 'Ativo'
+-        });
+-        added++;
+-      }
+-    }
+-    
+-    res.json({ success: true, message: `Foram adicionados ${added} usuários legados com sucesso. A senha padrão para todos é 'comanins2026'.` });
+-  } catch (err: any) {
+-    res.status(500).json({ error: err.message });
+-  }
+-});
++// Temporary migration/admin seed routes removed after Firebase Auth rollout.
+ 
+ 
+ const PORT = 3000;
+@@ -744,23 +627,6 @@
+ 
+ 
+ 
+-app.post("/api/auth/clear-password-change", async (req, res) => {
+-  try {
+-    const { id, type } = req.body;
+-    const { updateDoc, doc } = await import('firebase/firestore');
+-    
+-    if (type === 'client') {
+-      const docRef = firestoreDb.collection("clients").doc(id);
+-      await docRef.update({ passwordChangeRequired: false });
+-    } else if (type === 'internal') {
+-      const docRef = firestoreDb.collection("portalUsers").doc(id);
+-      await docRef.update({ passwordChangeRequired: false });
+-    }
+-    res.json({ success: true });
+-  } catch(e) {
+-    res.status(500).json({ error: e.message });
+-  }
+-});
+ 
+ 
+ app.post("/api/auth/create-user", async (req, res) => {
+diff -ruN '--exclude=dist' '--exclude=node_modules' comanins_code_review/src/App.tsx comanins_step1a/src/App.tsx
+--- comanins_code_review/src/App.tsx	2026-08-21 19:50:26.000000000 +0000
++++ comanins_step1a/src/App.tsx	2026-08-21 20:14:55.385659067 +0000
+@@ -1,5 +1,6 @@
+ import React, { Component, useState, useEffect } from 'react';
+ import { deleteField } from 'firebase/firestore';
++import { signOut } from 'firebase/auth';
+ import PublicSite from './components/PublicSite';
+ import InternalPortal from './components/InternalPortal';
+ import ClientPortal from './components/ClientPortal';
+@@ -36,7 +37,8 @@
+   addPortalUserDoc,
+   updatePortalUserDoc,
+   deletePortalUserDoc,
+-  PortalUser
++  PortalUser,
++  auth
+ } from './lib/firebase';
+ 
+ export default function App() {
+@@ -397,9 +399,13 @@
+             instruments={instruments}
+             reports={reports}
+             customLogo={activeLogo}
+-            onLogout={() => {
+-              setCurrentClient(null);
+-              setViewMode('public');
++            onLogout={async () => {
++              try {
++                await signOut(auth);
++              } finally {
++                setCurrentClient(null);
++                setViewMode('public');
++              }
+             }}
+           />
+         ) : (
+@@ -410,9 +416,13 @@
+             onAddInternalUser={handleAddInternalUser}
+             onUpdateInternalUser={handleUpdateInternalUser}
+             onDeleteInternalUser={handleDeleteInternalUser}
+-            onLogout={() => {
+-              setCurrentInternalUser(null);
+-              setViewMode('public');
++            onLogout={async () => {
++              try {
++                await signOut(auth);
++              } finally {
++                setCurrentInternalUser(null);
++                setViewMode('public');
++              }
+             }}
+             clients={clients}
+             instruments={instruments}
+diff -ruN '--exclude=dist' '--exclude=node_modules' comanins_code_review/src/lib/firebase-admin.ts comanins_step1a/src/lib/firebase-admin.ts
+--- comanins_code_review/src/lib/firebase-admin.ts	2026-08-21 19:50:26.000000000 +0000
++++ comanins_step1a/src/lib/firebase-admin.ts	2026-08-21 20:14:52.921094459 +0000
+@@ -1,13 +1,40 @@
+-import { initializeApp, getApps } from 'firebase-admin/app';
++import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
+ import { getAuth } from 'firebase-admin/auth';
++import { getFirestore } from 'firebase-admin/firestore';
+ import fs from 'fs';
+ import path from 'path';
+-const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+ 
+-if (!getApps().length) {
+-  initializeApp({
+-    projectId: firebaseConfig.projectId,
+-  });
++const firebaseConfig = JSON.parse(
++  fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8')
++);
++
++const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID?.trim();
++const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL?.trim();
++const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n');
++
++const missingVars = [
++  !projectId ? 'FIREBASE_ADMIN_PROJECT_ID' : null,
++  !clientEmail ? 'FIREBASE_ADMIN_CLIENT_EMAIL' : null,
++  !privateKey ? 'FIREBASE_ADMIN_PRIVATE_KEY' : null,
++].filter(Boolean) as string[];
++
++if (missingVars.length > 0) {
++  throw new Error(
++    `[Firebase Admin] Variáveis de ambiente ausentes: ${missingVars.join(', ')}`
++  );
+ }
+ 
+-export const adminAuth = getAuth();
++const adminApp: App = getApps()[0] ?? initializeApp({
++  credential: cert({
++    projectId: projectId!,
++    clientEmail: clientEmail!,
++    privateKey: privateKey!,
++  }),
++  projectId: projectId!,
++});
++
++export const adminAuth = getAuth(adminApp);
++export const adminDb = getFirestore(
++  adminApp,
++  firebaseConfig.firestoreDatabaseId || '(default)'
++);
+diff -ruN '--exclude=dist' '--exclude=node_modules' comanins_code_review/storage.rules comanins_step1a/storage.rules
+--- comanins_code_review/storage.rules	2026-08-21 19:50:26.000000000 +0000
++++ comanins_step1a/storage.rules	2026-08-21 20:14:55.594185147 +0000
+@@ -1,10 +1,9 @@
+ rules_version = '2';
+ service firebase.storage {
+   match /b/{bucket}/o {
+-    // NOTE: App uses custom frontend login (no Firebase Auth).
+-    // To restrict signature uploads to specific users, migrate to Firebase Authentication.
+     match /{allPaths=**} {
+-      allow read, write: if true;
++      allow read: if true;
++      allow write: if request.auth != null;
+     }
+   }
+ }

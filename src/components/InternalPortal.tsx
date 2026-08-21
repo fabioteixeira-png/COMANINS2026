@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 import { safeFetch } from "../utils/apiClient";
+import { verifyAdminCredentials } from "../utils/authApi";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
 import {
@@ -689,6 +690,7 @@ export default function InternalPortal({
   const [showAfterHoursModal, setShowAfterHoursModal] = useState(false);
   const [afterHoursTargetTab, setAfterHoursTargetTab] = useState("");
   const [afterHoursTargetSubTab, setAfterHoursTargetSubTab] = useState("");
+  const [afterHoursAdminUsername, setAfterHoursAdminUsername] = useState("");
   const [afterHoursPassword, setAfterHoursPassword] = useState("");
   const [afterHoursJustification, setAfterHoursJustification] = useState("");
   const [afterHoursBypass, setAfterHoursBypass] = useState(false);
@@ -1309,15 +1311,14 @@ export default function InternalPortal({
     setAdminPasswordError("");
     const typedPassword = adminPasswordInput.trim();
 
-    const res = await fetch('/api/auth/verify-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: currentUser?.username, password: typedPassword })
-    });
-    const data = await res.json();
-    
-    if (!data.valid) {
-      setAdminPasswordError("Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.");
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || '', typedPassword);
+      if (!valid) {
+        setAdminPasswordError("Credencial administrativa inválida.");
+        return;
+      }
+    } catch (error: any) {
+      setAdminPasswordError(error?.message || "Não foi possível validar a autorização administrativa.");
       return;
     }
 
@@ -1403,14 +1404,14 @@ export default function InternalPortal({
 
   const handleResetDatabase = async () => {
     setMaintenanceError("");
-    const res = await fetch('/api/auth/verify-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: currentUser?.username, password: maintenancePassword })
-    });
-    const data = await res.json();
-    if (!data.valid) {
-      setMaintenanceError("Senha incorreta! Apenas administradores autorizados possuem permissão para limpar o banco de dados.");
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || '', maintenancePassword);
+      if (!valid) {
+        setMaintenanceError("Credencial administrativa inválida.");
+        return;
+      }
+    } catch (error: any) {
+      setMaintenanceError(error?.message || "Não foi possível validar a autorização administrativa.");
       return;
     }
 
@@ -1439,14 +1440,14 @@ export default function InternalPortal({
       return;
     }
     
-    const res = await fetch('/api/auth/verify-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: currentUser?.username, password: typedPassword })
-    });
-    const data = await res.json();
-    if (!data.valid) {
-      alert("Senha incorreta! Apenas administradores autorizados possuem permissão para limpar o banco de dados.");
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || '', typedPassword);
+      if (!valid) {
+        alert("Credencial administrativa inválida.");
+        return;
+      }
+    } catch (error: any) {
+      alert(error?.message || "Não foi possível validar a autorização administrativa.");
       return;
     }
 
@@ -3213,14 +3214,14 @@ Status atual: ${e.status}.`,
       return;
     }
 
-    const res = await fetch('/api/auth/verify-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: currentUser?.username, password: backupRestorePassword })
-    });
-    const data = await res.json();
-    if (!data.valid) {
-      setBackupRestoreError("Senha do Administrador incorreta. Ação não autorizada.");
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || '', backupRestorePassword);
+      if (!valid) {
+        setBackupRestoreError("Credencial administrativa inválida. Ação não autorizada.");
+        return;
+      }
+    } catch (error: any) {
+      setBackupRestoreError(error?.message || "Não foi possível validar a autorização administrativa.");
       return;
     }
 
@@ -18142,22 +18143,26 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   alert("Por favor, preencha a justificativa de trabalho.");
                   return;
                 }
+                if (!afterHoursAdminUsername.trim()) {
+                  alert("Por favor, digite o usuário do administrador.");
+                  return;
+                }
                 if (!afterHoursPassword) {
                   alert("Por favor, digite a senha do administrador.");
                   return;
                 }
-                
-                const res = await fetch('/api/auth/verify-admin', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ username: currentUser?.username, password: afterHoursPassword })
-                });
-                const data = await res.json();
-                if (!data.valid) {
-                  alert("Senha de administrador incorreta.");
+
+                try {
+                  const valid = await verifyAdminCredentials(afterHoursAdminUsername, afterHoursPassword);
+                  if (!valid) {
+                    alert("Credencial administrativa inválida.");
+                    return;
+                  }
+                } catch (error: any) {
+                  alert(error?.message || "Não foi possível validar a autorização administrativa.");
                   return;
                 }
-                const adminUser = { name: "Administrador Autorizado" };
+                const adminUser = { name: afterHoursAdminUsername.trim() };
 
                 try {
                   await addAccessAuditLog({
@@ -18172,6 +18177,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   setRawActiveTab(afterHoursTargetTab);
                   if (afterHoursTargetSubTab) setRhSubTab(afterHoursTargetSubTab as any);
                   setAfterHoursJustification("");
+                  setAfterHoursAdminUsername("");
                   setAfterHoursPassword("");
                 } catch (err) {
                   console.error(err);
@@ -18190,10 +18196,23 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 />
               </div>
               <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Usuário do Administrador</label>
+                <input
+                  type="text"
+                  required
+                  autoComplete="username"
+                  value={afterHoursAdminUsername}
+                  onChange={(e) => setAfterHoursAdminUsername(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-rose-500"
+                  placeholder="Ex: master"
+                />
+              </div>
+              <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Senha do Administrador</label>
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={afterHoursPassword}
                   onChange={(e) => setAfterHoursPassword(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-rose-500"

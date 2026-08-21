@@ -10,8 +10,9 @@ import {
   updateFieldServiceRecord, 
   bulkAddFieldServiceRecords,
   bulkUpsertFieldServiceRecords,
-  clearAllFieldServiceRecords, deleteFieldServiceRecord, syncPortalUsers, PortalUser, syncInstruments 
+  clearAllFieldServiceRecords, deleteFieldServiceRecord, syncInstruments
 } from '../lib/firebase';
+import { verifyAdminCredentials } from '../utils/authApi';
 
 const parseDateForSort = (dString: string) => {
   if (!dString) return 0;
@@ -52,7 +53,6 @@ interface FieldServiceProps {
 }
 export default function FieldService({ onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
-  const [internalUsers, setInternalUsers] = useState<PortalUser[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -121,22 +121,23 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleDeleteRecord = async (id: string) => {
-    const pwd = prompt("Digite a senha de administrador para excluir este registro:");
+    const adminUsername = prompt("Digite o usuário do administrador:");
+    if (adminUsername === null) return;
+    const pwd = prompt("Digite a senha do administrador para excluir este registro:");
     if (pwd === null) return;
-    
-    const isAdminValid = internalUsers.some(u => u.role === "Administrador" && u.password === pwd) || pwd === "admin" || pwd === "admin123" || pwd === "comanins123";
 
-    if (isAdminValid) {
-      if (confirm("Tem certeza que deseja excluir?")) {
-        try {
-          await deleteFieldServiceRecord(id);
-        } catch (e) {
-          console.error(e);
-          alert("Erro ao excluir.");
-        }
+    try {
+      const isAdminValid = await verifyAdminCredentials(adminUsername, pwd);
+      if (!isAdminValid) {
+        alert("Credencial administrativa inválida.");
+        return;
       }
-    } else {
-      alert("Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.");
+      if (confirm("Tem certeza que deseja excluir?")) {
+        await deleteFieldServiceRecord(id);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Erro ao validar autorização administrativa.");
     }
   };
 
@@ -150,7 +151,6 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const unsubscribeUsers = syncPortalUsers((users) => setInternalUsers(users));
     const unsubscribeInst = syncInstruments((data) => setInstruments(data));
     const unsubscribe = syncFieldServiceRecords((data) => {
       setRecords(data);
@@ -158,7 +158,6 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
     });
     return () => {
       unsubscribe.then(unsub => unsub());
-      unsubscribeUsers.then(u => u());
       unsubscribeInst.then(u => u());
     };
   }, []);
@@ -353,12 +352,17 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleClearAll = async () => {
-    const pwd = prompt("Digite a senha de administrador para limpar todos os dados:");
+    const adminUsername = prompt("Digite o usuário do administrador:");
+    if (adminUsername === null) return;
+    const pwd = prompt("Digite a senha do administrador para limpar todos os dados:");
     if (pwd === null) return;
-    
-    const isAdminValid = internalUsers.some(u => u.role === "Administrador" && u.password === pwd) || pwd === "admin" || pwd === "admin123" || pwd === "comanins123";
 
-    if (isAdminValid) {
+    try {
+      const isAdminValid = await verifyAdminCredentials(adminUsername, pwd);
+      if (!isAdminValid) {
+        alert("Credencial administrativa inválida.");
+        return;
+      }
       if (confirm("Tem certeza absoluta? Isso apagará TODOS os registros!")) {
         setIsLoading(true);
         try {
@@ -367,11 +371,13 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
         } catch (e) {
           console.error(e);
           alert("Erro ao limpar dados.");
+        } finally {
+          setIsLoading(false);
         }
-        setIsLoading(false);
       }
-    } else {
-      alert("Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.");
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Erro ao validar autorização administrativa.");
     }
   };
 

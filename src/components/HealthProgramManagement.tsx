@@ -29,6 +29,7 @@ import {
   updateHealthProgramDoc, 
   deleteHealthProgramDoc 
 } from '../lib/firebase';
+import { verifyAdminCredentials } from '../utils/authApi';
 
 interface HealthProgramManagementProps {
   currentUser?: {
@@ -350,19 +351,14 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       return;
     }
 
-    const currentUserDoc = internalUsers?.find((u: any) => u.username === currentUser?.username);
-    let isValid = false;
-
-    if (currentUserDoc && currentUserDoc.password === pwd) {
-      isValid = true;
-    } else if (currentUser?.password && currentUser.password === pwd) {
-      isValid = true;
-    } else if (pwd === "admin" || pwd === "admin123" || pwd === "comanins123" || pwd === "123456") {
-      isValid = true;
-    }
-
-    if (!isValid) {
-      setDeleteError("Senha de login incorreta. A exclusão foi cancelada.");
+    try {
+      const isValid = await verifyAdminCredentials(currentUser?.username || '', pwd);
+      if (!isValid) {
+        setDeleteError("Credencial administrativa inválida. A exclusão foi cancelada.");
+        return;
+      }
+    } catch (error: any) {
+      setDeleteError(error?.message || "Não foi possível validar a autorização administrativa.");
       return;
     }
 

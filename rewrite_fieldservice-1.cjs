@@ -1,0 +1,598 @@
+const fs = require('fs');
+
+const content = `import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { 
+  FieldServiceRecord, 
+  syncFieldServiceRecords, 
+  addFieldServiceRecord, 
+  updateFieldServiceRecord, 
+  bulkAddFieldServiceRecords,
+  clearAllFieldServiceRecords 
+} from '../lib/firebase';
+
+const parseDateForSort = (dString: string) => {
+  if (!dString) return 0;
+  if (typeof dString === 'number') {
+     return new Date(Math.round((dString - 25569) * 86400 * 1000)).getTime();
+  }
+  const parts = String(dString).split('/');
+  if (parts.length === 3) {
+    return new Date(\`\${parts[2]}-\${parts[1]}-\${parts[0]}T00:00:00\`).getTime();
+  }
+  return new Date(dString).getTime() || 0;
+};
+
+const COLUMNS = [
+  { id: 'certificate', label: 'Certificado', minW: '120px' },
+  { id: 'cliente', label: 'Cliente', minW: '150px' },
+  { id: 'tag', label: 'Tag', minW: '120px' },
+  { id: 'equipamento', label: 'Equipamento', minW: '150px' },
+  { id: 'localizacao', label: 'Localização', minW: '150px' },
+  { id: 'interventionDate', label: 'Data Intervenção', minW: '120px' },
+  { id: 'technician', label: 'Técnico', minW: '120px' },
+  { id: 'area', label: 'Área', minW: '120px' },
+  { id: 'range', label: 'Range', minW: '120px' },
+  { id: 'operacao', label: 'Operação', minW: '120px' },
+  { id: 'unidadeMedida', label: 'UM', minW: '100px' },
+  { id: 'categoria', label: 'Categoria', minW: '120px' },
+  { id: 'emissaoPdf', label: 'Emissão PDF', minW: '100px' },
+  { id: 'ordemServico', label: 'OS', minW: '100px' },
+  { id: 'tipoServico', label: 'Tipo Serv.', minW: '120px' },
+  { id: 'observacao', label: 'Observação', minW: '150px' },
+  { id: 'unidade', label: 'Unidade', minW: '120px' },
+] as const;
+
+export default function FieldService() {
+  const [records, setRecords] = useState<FieldServiceRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(100);
+  
+  // Filter states
+  const [filters, setFilters] = useState<Record<string, string>>({
+    certificate: '', cliente: '', tag: '', equipamento: '', localizacao: '',
+    interventionDate: '', technician: '', area: '', range: '',
+    operacao: '', unidadeMedida: '', categoria: '', emissaoPdf: '',
+    ordemServico: '', tipoServico: '', observacao: '', unidade: ''
+  });
+  
+  // Column Visibility State
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
+    certificate: true, cliente: true, tag: true, equipamento: true,
+    localizacao: false, interventionDate: true, technician: true, area: false,
+    range: false, operacao: false, unidadeMedida: false, categoria: false,
+    emissaoPdf: false, ordemServico: true, tipoServico: true, observacao: false, unidade: false
+  });
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [formData, setFormData] = useState<Partial<FieldServiceRecord>>({});
+  
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const unsubscribe = syncFieldServiceRecords((data) => {
+      setRecords(data);
+      setIsLoading(false);
+    });
+    return () => {
+      unsubscribe.then(unsub => unsub());
+    };
+  }, []);
+
+  const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const handleDownloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([{
+      'Certificado': '',
+      'Cliente': '',
+      'Tag': '',
+      'Equipamento': '',
+      'Localização': '',
+      'Data de Intervenção': '',
+      'Técnico': '',
+      'Área': '',
+      'Range': '',
+      'Operação': '',
+      'Unidade de Medida': '',
+      'Categoria': '',
+      'Emissão PDF': '',
+      'Ordem de Serviço': '',
+      'Tipo de Serviço': '',
+      'Observação': '',
+      'Unidade': ''
+    }]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Modelo");
+    XLSX.writeFile(wb, "Modelo_Importacao_Servico_Campo.xlsx");
+  };
+
+  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { raw: false });
+        
+        let duplicates = 0;
+        const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
+        const existingCerts = new Set(records.map(r => r.certificate));
+
+        for (const row of data as any[]) {
+          const normalizedRow = Object.keys(row).reduce((acc, key) => {
+             acc[normalizeKey(key)] = row[key];
+             return acc;
+          }, {} as Record<string, any>);
+
+          const cert = normalizedRow['certificado'] || normalizedRow['cert'] || '';
+          if (!cert) continue; 
+          
+          if (existingCerts.has(String(cert))) {
+            duplicates++;
+            continue;
+          }
+          existingCerts.add(String(cert));
+
+          newRecordsToImport.push({
+            cliente: String(normalizedRow['cliente'] || ''),
+            tag: String(normalizedRow['tag'] || ''),
+            equipamento: String(normalizedRow['equipamento'] || normalizedRow['descrio'] || ''),
+            localizacao: String(normalizedRow['localizacao'] || normalizedRow['localizao'] || normalizedRow['local'] || normalizedRow['serie'] || normalizedRow['srie'] || ''),
+            certificate: String(cert),
+            interventionDate: String(normalizedRow['data'] || normalizedRow['date'] || normalizedRow['datadeintervencao'] || normalizedRow['dataintervencao'] || normalizedRow['datadeinterveno'] || normalizedRow['datadeint'] || ''),
+            technician: String(normalizedRow['tecnico'] || normalizedRow['tcnico'] || normalizedRow['technician'] || ''),
+            area: String(normalizedRow['area'] || normalizedRow['rea'] || ''),
+            range: String(normalizedRow['range'] || normalizedRow['faixa'] || ''),
+            operacao: String(normalizedRow['operacao'] || normalizedRow['operao'] || ''),
+            unidadeMedida: String(normalizedRow['unidadedemedida'] || normalizedRow['um'] || ''),
+            categoria: String(normalizedRow['categoria'] || ''),
+            emissaoPdf: String(normalizedRow['emissaopdf'] || normalizedRow['emissopdf'] || ''),
+            ordemServico: String(normalizedRow['ordemdeservico'] || normalizedRow['os'] || normalizedRow['ordemservico'] || ''),
+            tipoServico: String(normalizedRow['tipodeservico'] || normalizedRow['tiposervico'] || ''),
+            observacao: String(normalizedRow['observacao'] || normalizedRow['observao'] || normalizedRow['notas'] || ''),
+            unidade: String(normalizedRow['unidade'] || normalizedRow['und'] || '')
+          });
+        }
+        
+        if (newRecordsToImport.length > 0) {
+          await bulkAddFieldServiceRecords(newRecordsToImport);
+        }
+        
+        alert(\`Importação concluída!\\n\${newRecordsToImport.length} novos registros adicionados.\\n\${duplicates} ignorados (certificado já existente).\`);
+      } catch (error) {
+        console.error("Error reading excel:", error);
+        alert("Erro ao importar planilha.");
+      } finally {
+        setIsImporting(false);
+        if (excelInputRef.current) excelInputRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleExportExcel = () => {
+    if (records.length === 0) {
+      alert("Nenhum registro para exportar.");
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(sortedRecords.map(r => ({
+      'Certificado': r.certificate,
+      'Cliente': r.cliente || '',
+      'Tag': r.tag,
+      'Equipamento': r.equipamento,
+      'Localização': r.localizacao,
+      'Data de Intervenção': r.interventionDate,
+      'Técnico': r.technician,
+      'Área': r.area,
+      'Range': r.range,
+      'Operação': r.operacao,
+      'Unidade de Medida': r.unidadeMedida,
+      'Categoria': r.categoria,
+      'Emissão PDF': r.emissaoPdf,
+      'Ordem de Serviço': r.ordemServico,
+      'Tipo de Serviço': r.tipoServico,
+      'Observação': r.observacao,
+      'Unidade': r.unidade
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "ServicoCampo");
+    XLSX.writeFile(wb, "Servico_de_Campo_Export.xlsx");
+  };
+
+  const handleClearAll = async () => {
+    const pwd = prompt("Digite a senha de administrador para limpar todos os dados:");
+    if (pwd === "comanins123" || pwd === "admin123" || pwd === "admin") {
+      if (confirm("Tem certeza absoluta? Isso apagará TODOS os registros!")) {
+        setIsLoading(true);
+        try {
+          await clearAllFieldServiceRecords();
+          alert("Dados limpos com sucesso.");
+        } catch (e) {
+          console.error(e);
+          alert("Erro ao limpar dados.");
+        }
+        setIsLoading(false);
+      }
+    } else if (pwd !== null) {
+      alert("Senha incorreta!");
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsProcessingImage(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+      });
+
+      const response = await fetch('/api/parse-field-service-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64 })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Erro ao processar imagem.");
+      }
+
+      const data = await response.json();
+      
+      setFormData({
+        cliente: data.cliente || '',
+        tag: data.tag || '',
+        equipamento: data.equipamento || '',
+        localizacao: data.localizacao || '',
+        certificate: data.certificate || '',
+        interventionDate: data.interventionDate || '',
+        technician: data.technician || '',
+        area: data.area || '',
+        range: data.range || '',
+        operacao: data.operacao || '',
+        unidadeMedida: data.unidadeMedida || '',
+        categoria: data.categoria || '',
+        emissaoPdf: data.emissaoPdf || '',
+        ordemServico: data.ordemServico || '',
+        tipoServico: data.tipoServico || '',
+        observacao: data.observacao || '',
+        unidade: data.unidade || ''
+      });
+      setShowAddModal(true);
+      
+      if (data.certificate && records.some(r => r.certificate === data.certificate)) {
+        alert("Atenção: A IA identificou um certificado que já existe na planilha.");
+      } else {
+        alert("Imagem processada! Verifique os dados extraídos antes de salvar.");
+      }
+
+    } catch (error: any) {
+      console.error(error);
+      alert("Falha na extração de dados: " + error.message);
+    } finally {
+      setIsProcessingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveRecord = async () => {
+    if (!formData.certificate) {
+      alert("O campo Certificado é obrigatório.");
+      return;
+    }
+
+    const isDuplicate = records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
+    if (isDuplicate) {
+      alert("Erro: Este Certificado já está registrado na planilha!");
+      return;
+    }
+
+    try {
+      if (formData.id) {
+        await updateFieldServiceRecord(formData.id, formData);
+      } else {
+        await addFieldServiceRecord(formData as any);
+      }
+      setShowAddModal(false);
+      setFormData({});
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao salvar registro.");
+    }
+  };
+
+  const handleFilterChange = (field: string, val: string) => {
+    setFilters(prev => ({...prev, [field]: val}));
+    setCurrentPage(1); // reset to page 1 on filter
+  };
+
+  const toggleColumn = (id: string) => {
+    setVisibleColumns(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const sortedRecords = useMemo(() => {
+    const filtered = records.filter(r => {
+      return Object.entries(filters).every(([k, v]) => {
+        if (!v) return true;
+        const recordVal = String((r as any)[k] || '').toLowerCase();
+        return recordVal.includes(String(v).toLowerCase());
+      });
+    });
+
+    return filtered.sort((a, b) => 
+      parseDateForSort(b.interventionDate) - parseDateForSort(a.interventionDate)
+    );
+  }, [records, filters]);
+
+  const totalPages = Math.ceil(sortedRecords.length / itemsPerPage);
+  const paginatedRecords = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return sortedRecords.slice(start, start + itemsPerPage);
+  }, [sortedRecords, currentPage, itemsPerPage]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">Serviço de Campo</h2>
+          <p className="text-sm text-slate-500">Gerencie registros, importe em lote e utilize filtros completos.</p>
+        </div>
+        
+        <div className="flex flex-wrap gap-2">
+          {/* Hidden inputs */}
+          <input type="file" accept=".xlsx,.xls,.csv" ref={excelInputRef} className="hidden" onChange={handleExcelImport} />
+          <input type="file" accept="image/*" capture="environment" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
+          
+          <button 
+            onClick={handleDownloadTemplate}
+            className="flex items-center space-x-2 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg transition-colors text-sm"
+          >
+            <FileDown className="h-4 w-4" />
+            <span>Modelo Planilha</span>
+          </button>
+
+          <button 
+            onClick={() => excelInputRef.current?.click()}
+            disabled={isImporting}
+            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
+          >
+            {isImporting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+            <span>{isImporting ? 'Importando...' : 'Importar Planilha'}</span>
+          </button>
+          
+          <button 
+            onClick={handleExportExcel}
+            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
+          >
+            <Download className="h-4 w-4" />
+            <span>Exportar Excel</span>
+          </button>
+
+          <button 
+            onClick={handleClearAll}
+            className="flex items-center space-x-2 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 font-semibold rounded-lg transition-colors text-sm"
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>Limpar Todos</span>
+          </button>
+
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessingImage}
+            className="flex items-center space-x-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
+          >
+            {isProcessingImage ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+            <span>{isProcessingImage ? 'Analisando...' : 'Anexar Foto (IA)'}</span>
+          </button>
+
+          <button 
+            onClick={() => { setFormData({}); setShowAddModal(true); }}
+            className="flex items-center space-x-2 px-3 py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-sm"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Novo Registro</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-visible relative">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center text-sm font-semibold text-slate-700">
+              Filtros por coluna abaixo <span className="ml-2 text-xs font-normal text-slate-500">({sortedRecords.length} de {records.length})</span>
+            </div>
+            
+            {/* Column Visibility Menu */}
+            <div className="relative">
+              <button 
+                onClick={() => setShowColumnMenu(!showColumnMenu)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                <Columns className="h-4 w-4" />
+                Colunas
+              </button>
+              
+              {showColumnMenu && (
+                <div className="absolute top-full left-0 mt-2 w-56 bg-white border border-slate-200 rounded-lg shadow-xl z-20 py-2 max-h-80 overflow-y-auto">
+                  <div className="px-3 pb-2 mb-2 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Visibilidade</span>
+                  </div>
+                  {COLUMNS.map(col => (
+                    <label key={col.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={visibleColumns[col.id]}
+                        onChange={() => toggleColumn(col.id)}
+                        className="rounded text-royal-blue focus:ring-royal-blue"
+                      />
+                      <span className="text-sm text-slate-700">{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4">
+             <div className="flex items-center gap-2 text-sm text-slate-600">
+               <span>Página:</span>
+               <select 
+                 value={itemsPerPage} 
+                 onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                 className="border-slate-300 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-royal-blue"
+               >
+                 <option value={50}>50</option>
+                 <option value={100}>100</option>
+                 <option value={500}>500</option>
+                 <option value={1000}>1000</option>
+               </select>
+             </div>
+             
+             <div className="flex items-center gap-2">
+               <button 
+                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                 disabled={currentPage === 1}
+                 className="p-1 rounded hover:bg-slate-200 disabled:opacity-50"
+               >
+                 <ChevronLeft className="h-5 w-5 text-slate-600" />
+               </button>
+               <span className="text-sm font-semibold text-slate-700">Página {currentPage} de {totalPages || 1}</span>
+               <button 
+                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                 disabled={currentPage === totalPages || totalPages === 0}
+                 className="p-1 rounded hover:bg-slate-200 disabled:opacity-50"
+               >
+                 <ChevronRight className="h-5 w-5 text-slate-600" />
+               </button>
+             </div>
+          </div>
+        </div>
+        
+        <div className="overflow-x-auto min-h-[400px]">
+          <table className="w-full text-left text-sm text-slate-600">
+            <thead className="bg-slate-50 text-slate-700 text-xs uppercase font-bold border-b border-slate-200">
+              <tr>
+                {COLUMNS.filter(c => visibleColumns[c.id]).map(col => (
+                  <th key={col.id} className="px-4 py-3" style={{ minWidth: col.minW }}>
+                    {col.label}
+                    <input 
+                      type="text" 
+                      value={filters[col.id] || ''} 
+                      onChange={e => handleFilterChange(col.id, e.target.value)} 
+                      className="w-full mt-2 px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-normal outline-none focus:border-royal-blue" 
+                      placeholder="Filtrar..." 
+                    />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {isLoading ? (
+                <tr><td colSpan={17} className="text-center py-12 text-slate-500">Carregando registros...</td></tr>
+              ) : paginatedRecords.length === 0 ? (
+                <tr><td colSpan={17} className="text-center py-12 text-slate-500">Nenhum registro encontrado.</td></tr>
+              ) : (
+                paginatedRecords.map(record => (
+                  <tr key={record.id} className="hover:bg-slate-50 transition-colors">
+                    {COLUMNS.filter(c => visibleColumns[c.id]).map(col => {
+                      const value = (record as any)[col.id];
+                      
+                      // Highlight Certificate and make Tag clickable
+                      if (col.id === 'certificate') {
+                        return <td key={col.id} className="px-4 py-3 font-semibold text-slate-800 whitespace-nowrap">{value || '-'}</td>;
+                      }
+                      if (col.id === 'tag') {
+                        return <td key={col.id} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer text-royal-blue hover:underline" onClick={() => { setFormData(record); setShowAddModal(true); }}>{value || '-'}</td>;
+                      }
+                      
+                      // Truncate long observation
+                      if (col.id === 'observacao') {
+                        return <td key={col.id} className="px-4 py-3 max-w-[200px] truncate" title={value}>{value || '-'}</td>;
+                      }
+
+                      return <td key={col.id} className="px-4 py-3 whitespace-nowrap">{value || '-'}</td>;
+                    })}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-lg text-slate-800">
+                {formData.id ? 'Editar Registro' : 'Novo Registro de Campo'}
+              </h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {COLUMNS.filter(c => c.id !== 'observacao').map(col => (
+                  <div key={col.id}>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{col.label} {col.id === 'certificate' ? '*' : ''}</label>
+                    <input 
+                      type="text" 
+                      value={(formData as any)[col.id] || ''} 
+                      onChange={e => setFormData({...formData, [col.id]: e.target.value})} 
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none" 
+                    />
+                  </div>
+                ))}
+                
+                <div className="sm:col-span-3">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Observação</label>
+                  <textarea 
+                    value={formData.observacao || ''} 
+                    onChange={e => setFormData({...formData, observacao: e.target.value})} 
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none min-h-[80px]" 
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
+              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition-colors text-sm">
+                Cancelar
+              </button>
+              <button onClick={handleSaveRecord} className="px-4 py-2 bg-royal-blue text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm shadow-sm">
+                <Save className="h-4 w-4" />
+                Salvar Registro
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+`
+
+fs.writeFileSync('src/components/FieldService.tsx', content);
+console.log('Successfully refactored FieldService to support dynamic columns.');

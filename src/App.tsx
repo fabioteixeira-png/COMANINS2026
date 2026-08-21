@@ -1,5 +1,7 @@
 import React, { Component, useState, useEffect } from 'react';
 import { deleteField } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
+import { authJsonFetch } from './utils/authApi';
 import PublicSite from './components/PublicSite';
 import InternalPortal from './components/InternalPortal';
 import ClientPortal from './components/ClientPortal';
@@ -36,7 +38,8 @@ import {
   addPortalUserDoc,
   updatePortalUserDoc,
   deletePortalUserDoc,
-  PortalUser
+  PortalUser,
+  auth
 } from './lib/firebase';
 
 export default function App() {
@@ -266,11 +269,15 @@ export default function App() {
   const handleAddInternalUser = async (newUser: { name: string; username: string; role: string; permissionLevel?: string; register: string; password?: string }) => {
     try {
       const email = `${newUser.username.toLowerCase()}@comanins.internal`;
-      const tempPass = newUser.password || 'Mudar123456!';
+      const generatedTempPass = (() => {
+        const bytes = new Uint32Array(4);
+        crypto.getRandomValues(bytes);
+        return `Tmp#${Array.from(bytes).map(v => v.toString(36)).join('')}Aa1!`;
+      })();
+      const tempPass = newUser.password || generatedTempPass;
       
-      const res = await fetch('/api/auth/create-user', {
+      const res = await authJsonFetch('/api/auth/create-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: tempPass })
       });
       const data = await res.json();
@@ -290,6 +297,12 @@ export default function App() {
       delete cleanUser.password;
 
       await addPortalUserDoc(cleanUser);
+      if (!newUser.password) {
+        alert(`Usuário criado com senha temporária individual:
+${tempPass}
+
+Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
+      }
     } catch (err: any) {
       console.error('Error adding internal user to Firestore:', err);
       alert('Erro ao cadastrar usuário: ' + err.message);
@@ -397,9 +410,13 @@ export default function App() {
             instruments={instruments}
             reports={reports}
             customLogo={activeLogo}
-            onLogout={() => {
-              setCurrentClient(null);
-              setViewMode('public');
+            onLogout={async () => {
+              try {
+                await signOut(auth);
+              } finally {
+                setCurrentClient(null);
+                setViewMode('public');
+              }
             }}
           />
         ) : (
@@ -410,9 +427,13 @@ export default function App() {
             onAddInternalUser={handleAddInternalUser}
             onUpdateInternalUser={handleUpdateInternalUser}
             onDeleteInternalUser={handleDeleteInternalUser}
-            onLogout={() => {
-              setCurrentInternalUser(null);
-              setViewMode('public');
+            onLogout={async () => {
+              try {
+                await signOut(auth);
+              } finally {
+                setCurrentInternalUser(null);
+                setViewMode('public');
+              }
             }}
             clients={clients}
             instruments={instruments}

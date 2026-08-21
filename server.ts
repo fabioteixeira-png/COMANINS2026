@@ -12,134 +12,57 @@ import { users } from './src/db/schema.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { adminAuth, adminDb } from './src/lib/firebase-admin.ts';
+import { initializeApp as initClientApp } from 'firebase/app';
+import { getFirestore as getClientFirestore, collection as getClientCollection, getDocs as getClientDocs } from 'firebase/firestore';
+
 const firebaseConfig = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8')
 );
 
-let firebaseAdminApp;
-if (!getApps().length) {
-  const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+const clientApp = initClientApp(firebaseConfig);
+const clientDb = getClientFirestore(clientApp);
 
-  const missingVars = [];
-  if (!projectId) missingVars.push('FIREBASE_ADMIN_PROJECT_ID');
-  if (!clientEmail) missingVars.push('FIREBASE_ADMIN_CLIENT_EMAIL');
-  if (!privateKey) missingVars.push('FIREBASE_ADMIN_PRIVATE_KEY');
+const firestoreDb = adminDb;
 
-  if (missingVars.length === 0) {
-    try {
-      firebaseAdminApp = initializeApp({
-        credential: cert({
-          projectId: projectId,
-          clientEmail: clientEmail,
-          privateKey: privateKey.replace(/\\n/g, '\n'),
-        }),
-        projectId: firebaseConfig.projectId
-      });
-      console.log('✅ Firebase Admin SDK inicializado com variáveis de ambiente dedicadas.');
-    } catch (e) {
-      console.error('❌ Erro ao inicializar Firebase Admin SDK com as credenciais fornecidas:', e);
-      firebaseAdminApp = initializeApp({ projectId: firebaseConfig.projectId });
-    }
-  } else {
-    console.warn(`⚠️ AVISO: As seguintes variáveis de ambiente estão ausentes: ${missingVars.join(', ')}`);
-    console.warn('⚠️ O Firebase Admin SDK usará credenciais padrão da máquina, o que causará erros de PERMISSION_DENIED no Firestore.');
-    firebaseAdminApp = initializeApp({ projectId: firebaseConfig.projectId });
+const normalizeAccessValue = (value: unknown) => String(value || '').trim().toLowerCase();
+
+const isAdministratorProfile = (profile: any): boolean => {
+  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
+  if (permissionLevel) {
+    return permissionLevel === 'administrador';
   }
-} else {
-  firebaseAdminApp = getApps()[0];
-}
-const firestoreDb = getFirestore(firebaseAdminApp, firebaseConfig.firestoreDatabaseId || undefined);
+  const role = normalizeAccessValue(profile?.role);
+  return ['administrador', 'admin', 'master', 'diretor', 'diretoria'].includes(role);
+};
 
+const findPortalUserForAuth = async (decoded: any) => {
+  const usersRef = firestoreDb.collection('portalUsers');
+
+  const byUid = await usersRef.where('authUid', '==', decoded.uid).limit(1).get();
+  if (!byUid.empty) {
+    const doc = byUid.docs[0];
+    return { id: doc.id, ...doc.data() };
+  }
+
+  const email = String(decoded.email || '').trim().toLowerCase();
+  const username = email.endsWith('@comanins.internal')
+    ? email.slice(0, -'@comanins.internal'.length)
+    : email.split('@')[0];
+
+  if (!username) return null;
+
+  const snapshot = await usersRef.get();
+  const match = snapshot.docs.find((doc) =>
+    String(doc.data()?.username || '').trim().toLowerCase() === username
+  );
+  return match ? { id: match.id, ...match.data() } : null;
+};
 
 
 const app = express();
 
-// TEMPORARY SEED ROUTE FOR LEGACY USERS
-
-// TEMPORARY ROUTE TO FORCE PASSWORD CHANGE
-app.get("/api/admin/force-password-change", async (req, res) => {
-  try {
-    const usersRef = firestoreDb.collection("portalUsers");
-    const usersSnap = await usersRef.get();
-    let batch = firestoreDb.batch();
-    let count = 0;
-    
-    usersSnap.forEach(doc => {
-        batch.update(doc.ref, { passwordChangeRequired: true, mustChangePassword: true });
-        count++;
-    });
-    if (count > 0) await batch.commit();
-
-    const clientsRef = firestoreDb.collection("clients");
-    const clientsSnap = await clientsRef.get();
-    let clientBatch = firestoreDb.batch();
-    let clientCount = 0;
-    
-    clientsSnap.forEach(doc => {
-        clientBatch.update(doc.ref, { passwordChangeRequired: true, mustChangePassword: true });
-        clientCount++;
-    });
-    if (clientCount > 0) await clientBatch.commit();
-    
-    res.json({ success: true, message: `Forced password change for ${count} portalUsers and ${clientCount} clients.` });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/admin/seed-legacy-users", async (req, res) => {
-  try {
-    const users = [
-      { username: "andrea.santos", name: "Andrea Santos" },
-      { username: "aristeu.neto", name: "Aristeu Neto" },
-      { username: "cassiel.pereira", name: "Cassiel Pereira" },
-      { username: "diego.bouth", name: "Diego Bouth" },
-      { username: "eliseu.sales", name: "Eliseu Sales" },
-      { username: "emanuelle.carvalho", name: "Emanuelle Carvalho" },
-      { username: "fabio.teixeira", name: "Fabio Teixeira" },
-      { username: "felype.teixeira", name: "Felype Teixeira" },
-      { username: "gabriela.reis", name: "Gabriela Reis" },
-      { username: "gilson.soares", name: "Gilson Soares" },
-      { username: "kaue.pompeu", name: "Kaue Pompeu" },
-      { username: "patricia.santos", name: "Patricia Santos" },
-      { username: "vanilson.santos", name: "Vanilson Santos" },
-      { username: "vinicius.pinto", name: "Vinicius Pinto" },
-      { username: "isidro.teixeira", name: "Isidro Teixeira" },
-      { username: "solange.teixeira", name: "Solange Teixeira" },
-      { username: "rose.teixeira", name: "Rose Teixeira" },
-      { username: "ryan.conceicao", name: "Ryan Conceicao" }
-    ];
-    
-    const usersRef = firestoreDb.collection("portalUsers");
-    let added = 0;
-    
-    for (const u of users) {
-      const snap = await usersRef.where("username", "==", u.username).get();
-      if (snap.empty) {
-        await usersRef.add({
-          username: u.username,
-          name: u.name,
-          password: "comanins2026",
-          mustChangePassword: true,
-          role: "Técnico de Laboratório",
-          permissionLevel: "Padrão",
-          register: `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
-          status: 'Ativo'
-        });
-        added++;
-      }
-    }
-    
-    res.json({ success: true, message: `Foram adicionados ${added} usuários legados com sucesso. A senha padrão para todos é 'comanins2026'.` });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Temporary migration/admin seed routes removed after Firebase Auth rollout.
 
 
 const PORT = 3000;
@@ -744,99 +667,95 @@ app.post("/api/generate-birthday-message", async (req, res) => {
 
 
 
-app.post("/api/auth/clear-password-change", async (req, res) => {
+
+
+app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => {
   try {
-    const { id, type } = req.body;
-    const { updateDoc, doc } = await import('firebase/firestore');
-    
-    if (type === 'client') {
-      const docRef = firestoreDb.collection("clients").doc(id);
-      await docRef.update({ passwordChangeRequired: false });
-    } else if (type === 'internal') {
-      const docRef = firestoreDb.collection("portalUsers").doc(id);
-      await docRef.update({ passwordChangeRequired: false });
+    const requesterProfile = await findPortalUserForAuth(req.user);
+    if (!requesterProfile || !isAdministratorProfile(requesterProfile)) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
     }
-    res.json({ success: true });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
 
-app.post("/api/auth/create-user", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    // Call Firebase Auth REST API to create user
-    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    if (!email.endsWith('@comanins.internal')) {
+      return res.status(400).json({ error: 'INVALID_INTERNAL_EMAIL' });
+    }
+    if (password.length < 10) {
+      return res.status(400).json({ error: 'WEAK_TEMP_PASSWORD' });
+    }
+
+    try {
+      const created = await adminAuth.createUser({
         email,
         password,
-        returnSecureToken: false
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok) {
-      return res.status(400).json({ error: data.error.message || 'Erro ao criar usuário no Auth' });
-    }
-    
-    res.json({ success: true, uid: data.localId });
-  } catch (error) {
-    console.error("Create user error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-
-app.post("/api/auth/verify-admin", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    
-    // First, try Firebase Auth
-    const email = `${username.toLowerCase()}@comanins.internal`;
-    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        password,
-        returnSecureToken: false
-      })
-    });
-    const data = await response.json();
-    
-    if (response.ok) {
-      return res.json({ valid: true });
-    }
-    
-    // Fallback to legacy check
-    if (!firebaseConfig.firestoreDatabaseId) {
-      firebaseConfig.firestoreDatabaseId = '(default)';
-    }
-    const usersRef = firestoreDb.collection("portalUsers");
-    const snapshot = await usersRef.get();
-    let valid = false;
-    snapshot.forEach(doc => {
-      const u = doc.data();
-      if ((u.username === username || u.role === 'Administrador') && u.password === password) {
-        valid = true;
+        emailVerified: false,
+        disabled: false,
+      });
+      return res.json({ success: true, uid: created.uid });
+    } catch (error: any) {
+      if (error?.code === 'auth/email-already-exists') {
+        return res.status(400).json({ error: 'EMAIL_EXISTS' });
       }
-    });
-    
-    if (valid) {
-       return res.json({ valid: true });
+      throw error;
     }
-    
-
-    
-    res.json({ valid: false });
   } catch (error) {
-    console.error("Verify admin error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error('Create user error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post("/api/auth/verify-admin", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const username = String(req.body?.username || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+
+    if (!username || !password) {
+      return res.json({ valid: false });
+    }
+
+    const email = username.includes('@')
+      ? username
+      : `${username}@comanins.internal`;
+
+    if (!email.endsWith('@comanins.internal')) {
+      return res.json({ valid: false });
+    }
+
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true }),
+      },
+    );
+
+    if (!response.ok) {
+      return res.json({ valid: false });
+    }
+
+    const data: any = await response.json();
+    if (!data?.idToken) {
+      return res.json({ valid: false });
+    }
+
+    const decodedAdmin = await adminAuth.verifyIdToken(data.idToken);
+    const requestedEmail = String(decodedAdmin.email || '').trim().toLowerCase();
+    if (requestedEmail !== email) {
+      return res.json({ valid: false });
+    }
+
+    const adminProfile = await findPortalUserForAuth(decodedAdmin);
+    if (!adminProfile || !isAdministratorProfile(adminProfile)) {
+      return res.json({ valid: false });
+    }
+
+    return res.json({ valid: true, username: adminProfile.username || username });
+  } catch (error) {
+    console.error('Verify admin error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });
 
@@ -845,8 +764,8 @@ app.post("/api/auth/legacy-login", async (req, res) => {
     const { username, cnpj, password, type } = req.body;
     
     if (type === 'internal') {
-      const usersRef = firestoreDb.collection("portalUsers");
-      const snap = await usersRef.get();
+      const usersRef = getClientCollection(clientDb, "portalUsers");
+      const snap = await getClientDocs(usersRef);
       const user = snap.docs.find(d => {
         const u = d.data();
         return (u.username || '').toLowerCase() === username.toLowerCase();
@@ -856,13 +775,13 @@ app.post("/api/auth/legacy-login", async (req, res) => {
       
       const userData = user.data();
       if (userData.password === password) {
-        return res.json({ valid: true, id: user.id });
+        return res.json({ valid: true, user: { id: user.id, ...userData } });
       }
       return res.json({ valid: false });
       
     } else if (type === 'client') {
-      const clientsRef = firestoreDb.collection("clients");
-      const snap = await clientsRef.get();
+      const clientsRef = getClientCollection(clientDb, "clients");
+      const snap = await getClientDocs(clientsRef);
       const cleanCnpj = cnpj.replace(/\D/g, '');
       const client = snap.docs.find(d => {
         const c = d.data();
@@ -873,7 +792,7 @@ app.post("/api/auth/legacy-login", async (req, res) => {
       
       const clientData = client.data();
       if (clientData.password === password) {
-        return res.json({ valid: true, id: client.id });
+        return res.json({ valid: true, user: { id: client.id, ...clientData } });
       }
       return res.json({ valid: false });
     }
