@@ -2,44 +2,25 @@ import fs from 'fs';
 let code = fs.readFileSync('src/components/LoginScreen.tsx', 'utf-8');
 
 code = code.replace(
-  `          const data = await res.json();
-          if (data.valid) {
-            const userDoc = internalUsers.find(u => u.username.toLowerCase() === cleanUser);`,
-  `          const data = await res.json();
-          if (res.ok && data.valid) {
-            let userDoc = internalUsers.find(u => u.username.toLowerCase() === cleanUser);`
-);
-
-code = code.replace(
-  `          } else {
-            setErrorMsg('Usuário ou senha interna incorretos. Por favor, verifique suas credenciais.');
-          }`,
-  `          } else if (res.ok && !data.valid) {
-            setErrorMsg('Usuário ou senha interna incorretos. Por favor, verifique suas credenciais.');
-          } else {
-            setErrorMsg('Não foi possível validar sua conta antiga para migração. Tente novamente ou contate o administrador.');
-          }`
-);
-
-// Do the same for Client login
-code = code.replace(
-  `          const data = await res.json();
-          if (data.valid) {
-            const clientDoc = clients.find(c => c.cnpj?.replace(/\\D/g, '') === cleanCnpj);`,
-  `          const data = await res.json();
-          if (res.ok && data.valid) {
-            let clientDoc = clients.find(c => c.cnpj?.replace(/\\D/g, '') === cleanCnpj);`
-);
-
-code = code.replace(
-  `          } else {
-            setErrorMsg('CNPJ ou senha incorretos. Por favor, verifique suas credenciais.');
-          }`,
-  `          } else if (res.ok && !data.valid) {
-            setErrorMsg('CNPJ ou senha incorretos. Por favor, verifique suas credenciais.');
-          } else {
-            setErrorMsg('Não foi possível validar sua conta antiga para migração. Tente novamente ou contate o administrador.');
-          }`
+  `      let userDoc = internalUsers.find(u => u.username.toLowerCase() === cleanUser);
+      if (!userDoc) {
+        // Fallback to fetch from API or rely on the userCredential token claims if API is not available
+        // For security, if we cannot find the userDoc locally, we can proceed with tokenResult claims.
+      }`,
+  `      let userDoc = internalUsers.find(u => u.username.toLowerCase() === cleanUser);
+      if (!userDoc) {
+        // Now that we are authenticated, we can safely query Firestore directly.
+        try {
+          const usersRef = collection(db, "portalUsers");
+          const q = query(usersRef, where("username", "==", cleanUser));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            userDoc = { id: snap.docs[0].id, ...snap.docs[0].data() } as any;
+          }
+        } catch(e) {
+          console.error("Error fetching userDoc after auth:", e);
+        }
+      }`
 );
 
 fs.writeFileSync('src/components/LoginScreen.tsx', code);
