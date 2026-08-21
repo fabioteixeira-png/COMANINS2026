@@ -3,7 +3,6 @@ import path from "path";
 import dotenv from "dotenv";
 dotenv.config();
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth } from './src/middleware/auth.ts';
 import type { AuthRequest } from './src/middleware/auth.ts';
@@ -16,12 +15,17 @@ import { adminAuth, adminDb } from './src/lib/firebase-admin.ts';
 import { initializeApp as initClientApp } from 'firebase/app';
 import { getFirestore as getClientFirestore, collection as getClientCollection, getDocs as getClientDocs } from 'firebase/firestore';
 
-const firebaseConfig = JSON.parse(
-  fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8')
-);
+let firebaseConfig: any = {};
+try {
+  firebaseConfig = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8')
+  );
+} catch (e) {
+  console.warn("⚠️ Arquivo firebase-applet-config.json não encontrado ou inválido.");
+}
 
-const clientApp = initClientApp(firebaseConfig);
-const clientDb = getClientFirestore(clientApp);
+const clientApp = firebaseConfig.projectId ? initClientApp(firebaseConfig) : null;
+const clientDb = clientApp ? getClientFirestore(clientApp) : null;
 
 const firestoreDb = adminDb;
 
@@ -67,8 +71,7 @@ const app = express();
 
 // Temporary migration/admin seed routes removed after Firebase Auth rollout.
 
-
-const PORT = 3000;
+const PORT = process.env.K_SERVICE && process.env.K_SERVICE.startsWith('ais-') ? 3000 : (Number(process.env.PORT) || 3000);
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -1552,11 +1555,16 @@ Required JSON format:
   });
 
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (err) {
+      console.warn("⚠️ Vite não encontrado. Pulando HMR/Middleware de desenvolvimento.");
+    }
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));

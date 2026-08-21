@@ -4,9 +4,14 @@ import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
 
-const firebaseConfig = JSON.parse(
-  fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8')
-);
+let firebaseConfig: any = {};
+try {
+  firebaseConfig = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8')
+  );
+} catch (e) {
+  console.warn("⚠️ Arquivo firebase-applet-config.json não encontrado ou inválido no firebase-admin.");
+}
 
 const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID?.trim();
 const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL?.trim();
