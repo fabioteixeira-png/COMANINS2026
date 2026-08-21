@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
+dotenv.config();
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -11,18 +12,49 @@ import { users } from './src/db/schema.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 const firebaseConfig = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8')
 );
 
-const firebaseApp = initializeApp(firebaseConfig);
-const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId || undefined);
+let firebaseAdminApp;
+if (!getApps().length) {
+  const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+
+  const missingVars = [];
+  if (!projectId) missingVars.push('FIREBASE_ADMIN_PROJECT_ID');
+  if (!clientEmail) missingVars.push('FIREBASE_ADMIN_CLIENT_EMAIL');
+  if (!privateKey) missingVars.push('FIREBASE_ADMIN_PRIVATE_KEY');
+
+  if (missingVars.length === 0) {
+    try {
+      firebaseAdminApp = initializeApp({
+        credential: cert({
+          projectId: projectId,
+          clientEmail: clientEmail,
+          privateKey: privateKey.replace(/\\n/g, '\n'),
+        }),
+        projectId: firebaseConfig.projectId
+      });
+      console.log('✅ Firebase Admin SDK inicializado com variáveis de ambiente dedicadas.');
+    } catch (e) {
+      console.error('❌ Erro ao inicializar Firebase Admin SDK com as credenciais fornecidas:', e);
+      firebaseAdminApp = initializeApp({ projectId: firebaseConfig.projectId });
+    }
+  } else {
+    console.warn(`⚠️ AVISO: As seguintes variáveis de ambiente estão ausentes: ${missingVars.join(', ')}`);
+    console.warn('⚠️ O Firebase Admin SDK usará credenciais padrão da máquina, o que causará erros de PERMISSION_DENIED no Firestore.');
+    firebaseAdminApp = initializeApp({ projectId: firebaseConfig.projectId });
+  }
+} else {
+  firebaseAdminApp = getApps()[0];
+}
+const firestoreDb = getFirestore(firebaseAdminApp, firebaseConfig.firestoreDatabaseId || undefined);
 
 
-// Load env variables
-dotenv.config();
 
 const app = express();
 const PORT = 3000;
@@ -254,7 +286,7 @@ async function runDailyNotifications() {
     const upcomingBdays = [];
     
     // A. Buscar de employeeBirthdays
-    const bdaySnapshot = await getDocs(collection(firestoreDb, 'employeeBirthdays'));
+    const bdaySnapshot = await firestoreDb.collection('employeeBirthdays').get();
     bdaySnapshot.forEach(doc => {
       const b = doc.data();
       if (!b.day || !b.month) return;
@@ -269,7 +301,7 @@ async function runDailyNotifications() {
     });
 
     // B. Buscar de portalUsers (birthDate: YYYY-MM-DD)
-    const usersSnapshot = await getDocs(collection(firestoreDb, 'portalUsers'));
+    const usersSnapshot = await firestoreDb.collection('portalUsers').get();
     const internalUsers = [];
     usersSnapshot.forEach(doc => {
       const u = { id: doc.id, ...doc.data() } as any;
@@ -292,11 +324,11 @@ async function runDailyNotifications() {
 
     // 2. Verificar Treinamentos (EXATAMENTE 10 dias antes)
     const upcomingTrainings = [];
-    const trSnapshot = await getDocs(collection(firestoreDb, 'trainings'));
+    const trSnapshot = await firestoreDb.collection('trainings').get();
     const trainings = [];
     trSnapshot.forEach(doc => trainings.push({ id: doc.id, ...doc.data() }));
     
-    const empTrSnapshot = await getDocs(collection(firestoreDb, 'employeeTrainings'));
+    const empTrSnapshot = await firestoreDb.collection('employeeTrainings').get();
     empTrSnapshot.forEach(doc => {
       const record = doc.data();
       const user = internalUsers.find(u => u.id === record.employeeId);
@@ -321,7 +353,7 @@ async function runDailyNotifications() {
 
     // 3. Verificar ASO (EXATAMENTE 10 dias antes)
     const upcomingASO = [];
-    const asoSnapshot = await getDocs(collection(firestoreDb, 'medical_exams'));
+    const asoSnapshot = await firestoreDb.collection('medical_exams').get();
     asoSnapshot.forEach(doc => {
       const aso = doc.data();
       if (aso.nextExamDate) {
@@ -341,7 +373,7 @@ async function runDailyNotifications() {
 
     // 4. Verificar Padrões (EXATAMENTE 10 dias antes)
     const upcomingStandards = [];
-    const stSnapshot = await getDocs(collection(firestoreDb, 'referenceStandards'));
+    const stSnapshot = await firestoreDb.collection('referenceStandards').get();
     stSnapshot.forEach(doc => {
       const std = doc.data();
       if (std.expirationDate) {
@@ -361,7 +393,7 @@ async function runDailyNotifications() {
     // 5. Verificar Programas de Saúde (PGR, PCMSO, LTCAT, etc.) - 30 dias antes ou vencidos
     const upcomingHealthDocs = [];
     try {
-      const hpSnapshot = await getDocs(collection(firestoreDb, 'health_program_docs'));
+      const hpSnapshot = await firestoreDb.collection('health_program_docs').get();
       hpSnapshot.forEach(doc => {
         const hp = doc.data();
         if (hp.expirationDate) {
@@ -622,6 +654,155 @@ app.post("/api/generate-birthday-message", async (req, res) => {
   } catch (error) {
     console.error("Erro ao gerar mensagem de aniversário:", error);
     return res.json({ message: `Feliz Aniversário, ${name}! A equipe COMANINS deseja a você um dia incrível!` });
+  }
+});
+
+
+
+app.post("/api/auth/clear-password-change", async (req, res) => {
+  try {
+    const { id, type } = req.body;
+    const { updateDoc, doc } = await import('firebase/firestore');
+    
+    if (type === 'client') {
+      const docRef = firestoreDb.collection("clients").doc(id);
+      await docRef.update({ passwordChangeRequired: false });
+    } else if (type === 'internal') {
+      const docRef = firestoreDb.collection("portalUsers").doc(id);
+      await docRef.update({ passwordChangeRequired: false });
+    }
+    res.json({ success: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+app.post("/api/auth/create-user", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Call Firebase Auth REST API to create user
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        returnSecureToken: false
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(400).json({ error: data.error.message || 'Erro ao criar usuário no Auth' });
+    }
+    
+    res.json({ success: true, uid: data.localId });
+  } catch (error) {
+    console.error("Create user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+app.post("/api/auth/verify-admin", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // First, try Firebase Auth
+    const email = `${username.toLowerCase()}@comanins.internal`;
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        returnSecureToken: false
+      })
+    });
+    const data = await response.json();
+    
+    if (response.ok) {
+      return res.json({ valid: true });
+    }
+    
+    // Fallback to legacy check
+    if (!firebaseConfig.firestoreDatabaseId) {
+      firebaseConfig.firestoreDatabaseId = '(default)';
+    }
+    const usersRef = firestoreDb.collection("portalUsers");
+    const snapshot = await usersRef.get();
+    let valid = false;
+    snapshot.forEach(doc => {
+      const u = doc.data();
+      if ((u.username === username || u.role === 'Administrador') && u.password === password) {
+        valid = true;
+      }
+    });
+    
+    if (valid) {
+       return res.json({ valid: true });
+    }
+    
+
+    
+    res.json({ valid: false });
+  } catch (error) {
+    console.error("Verify admin error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/auth/legacy-login", async (req, res) => {
+  try {
+    const { username, cnpj, password, type } = req.body;
+    
+    if (type === 'internal') {
+      const usersRef = firestoreDb.collection("portalUsers");
+      const snap = await usersRef.get();
+      const user = snap.docs.find(d => {
+        const u = d.data();
+        return (u.username || '').toLowerCase() === username.toLowerCase();
+      });
+      
+      if (!user) return res.json({ valid: false });
+      
+      const userData = user.data();
+      if (userData.password === password) {
+        return res.json({ valid: true, id: user.id });
+      }
+      return res.json({ valid: false });
+      
+    } else if (type === 'client') {
+      const clientsRef = firestoreDb.collection("clients");
+      const snap = await clientsRef.get();
+      const cleanCnpj = cnpj.replace(/\D/g, '');
+      const client = snap.docs.find(d => {
+        const c = d.data();
+        return (c.cnpj || '').replace(/\D/g, '') === cleanCnpj;
+      });
+      
+      if (!client) return res.json({ valid: false });
+      
+      const clientData = client.data();
+      if (clientData.password === password) {
+        return res.json({ valid: true, id: client.id });
+      }
+      return res.json({ valid: false });
+    }
+    
+    res.json({ valid: false });
+  } catch (error: any) {
+    console.error("Legacy login error:", error);
+    if (error.code === 7 || (error.message && error.message.includes('PERMISSION_DENIED'))) {
+        console.error("\n\n[ERRO CRÍTICO DE PERMISSÃO]");
+        console.error("O servidor Node.js não possui permissão para ler o banco de dados.");
+        console.error("Você precisa configurar as variáveis de ambiente: FIREBASE_ADMIN_PROJECT_ID, FIREBASE_ADMIN_CLIENT_EMAIL e FIREBASE_ADMIN_PRIVATE_KEY");
+        console.error("com o JSON da conta de serviço (Service Account) do Firebase.\n\n");
+    }
+    res.status(500).json({ error: "Erro de servidor ao validar credencial antiga." });
   }
 });
 

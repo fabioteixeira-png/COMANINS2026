@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   getFirestore,
   where,
@@ -20,16 +21,21 @@ import {
   QueryDocumentSnapshot
 , writeBatch } from "firebase/firestore";
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Client, Instrument, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument } from '../types';
+import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument } from '../types';
 import { generateAuthKey } from '../utils/authKey';
 import { trackFirebaseOp } from './firebaseTelemetry';
 
+import { getAuth } from 'firebase/auth';
+
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const auth = getAuth(app);
 
 export const db = firebaseConfig.firestoreDatabaseId
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
+
+export const storage = getStorage(app);
 
 export enum OperationType {
   CREATE = 'create',
@@ -276,6 +282,9 @@ export interface PortalUser {
   register: string;
   password?: string;
   mustChangePassword?: boolean;
+  signaturePath?: string;
+  signatureVersion?: number;
+  signatureDate?: string;
 
   // 1. Dados pessoais
   socialName?: string;
@@ -789,6 +798,10 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
 export async function saveCalibrationDoc(data: {
   instrumentId: string;
   technicianName: string;
+  technicianId?: string;
+  signatureVersion?: number;
+  signaturePath?: string;
+  emitterUser?: string;
   accuracyClass?: string;
   mpe?: number;
   points: any[];
@@ -797,6 +810,17 @@ export async function saveCalibrationDoc(data: {
   certNumber?: string;
   referenceStandardIds?: string[];
   referenceStandards?: ReferenceStandard[];
+  temperature?: number;
+  humidity?: number;
+  instrumentType?: InstrumentType;
+  metrologicalNorm?: string;
+  sensorType?: string;
+  outputSignal?: string;
+  setPoint?: number;
+  contactType?: string;
+  transmitterPoints?: any[];
+  switchPoints?: any[];
+  approved?: boolean;
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
@@ -885,13 +909,27 @@ export async function saveCalibrationDoc(data: {
     authKey: generatedAuthKey,
     instrumentId: data.instrumentId,
     technicianName: data.technicianName || 'Técnico Responsável',
+    technicianId: data.technicianId,
+    signatureVersion: data.signatureVersion,
+    signaturePath: data.signaturePath,
+    emitterUser: data.emitterUser,
     date: new Date().toISOString().split('T')[0],
     points: processedPoints,
     maxError,
     maxRelativeError,
     maxHysteresis,
-    approved,
+    approved: data.approved !== undefined ? data.approved : approved,
     observations: data.observations || '',
+    temperature: data.temperature !== undefined ? data.temperature : undefined,
+    humidity: data.humidity !== undefined ? data.humidity : undefined,
+    instrumentType: data.instrumentType,
+    metrologicalNorm: data.metrologicalNorm,
+    sensorType: data.sensorType,
+    outputSignal: data.outputSignal,
+    setPoint: data.setPoint,
+    contactType: data.contactType,
+    transmitterPoints: data.transmitterPoints,
+    switchPoints: data.switchPoints,
     curveCount: data.curveCount || 5,
     referenceStandardIds: data.referenceStandardIds || [],
     referenceStandards: data.referenceStandards || []
@@ -904,7 +942,9 @@ export async function saveCalibrationDoc(data: {
     ...activeInst,
     status: 'Aguardando Emissão de Certificado',
     lastCalibrationDate: report.date,
-    nextCalibrationDate: nextCal.toISOString().split('T')[0]
+    nextCalibrationDate: nextCal.toISOString().split('T')[0],
+    ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
+    ...(data.humidity !== undefined ? { humidity: data.humidity } : {})
   };
 
   await Promise.all([
@@ -914,7 +954,9 @@ export async function saveCalibrationDoc(data: {
       lastCalibrationDate: report.date,
       nextCalibrationDate: updatedInst.nextCalibrationDate,
       ...(data.accuracyClass !== undefined ? { accuracyClass: data.accuracyClass } : {}),
-      ...(data.mpe !== undefined ? { mpe: data.mpe } : {})
+      ...(data.mpe !== undefined ? { mpe: data.mpe } : {}),
+      ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
+      ...(data.humidity !== undefined ? { humidity: data.humidity } : {})
     })
   ]);
 
@@ -936,7 +978,11 @@ export async function syncMessages(callback: (messages: ContactMessage[]) => voi
       callback(list);
     }
   }, (err) => {
-    console.error('Firestore syncMessages error:', err);
+    if (err && err.code === 'permission-denied') {
+      console.warn('Firestore sync permission denied (expected if not logged in).');
+    } else {
+      console.error('Firestore sync error:', err);
+    }
   });
 }
 
@@ -1299,6 +1345,15 @@ export async function updatePortalUserDoc(id: string, updates: Partial<PortalUse
   } catch (e) {}
 }
 
+export async function uploadSignatureImage(file: File, userId: string, version: number): Promise<string> {
+  const fileExtension = file.name.split('.').pop() || 'png';
+  const filePath = `signatures/${userId}/signature_v${version}.${fileExtension}`;
+  const storageRef = ref(storage, filePath);
+  
+  await uploadBytes(storageRef, file);
+  return await getDownloadURL(storageRef);
+}
+
 export async function deletePortalUserDoc(idOrUsername: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'portalUsers', idOrUsername));
@@ -1437,7 +1492,11 @@ export async function syncCustomLogo(callback: (logoUrl: string) => void) {
       callback('');
     }
   }, (err) => {
-    console.error('Firestore syncCustomLogo error:', err);
+    if (err && err.code === 'permission-denied') {
+      console.warn('Firestore sync permission denied (expected if not logged in).');
+    } else {
+      console.error('Firestore sync error:', err);
+    }
     callback('');
   });
 }
@@ -1460,7 +1519,11 @@ export async function syncHeaderLogo(callback: (logoUrl: string) => void) {
       callback('');
     }
   }, (err) => {
-    console.error('Firestore syncHeaderLogo error:', err);
+    if (err && err.code === 'permission-denied') {
+      console.warn('Firestore sync permission denied (expected if not logged in).');
+    } else {
+      console.error('Firestore sync error:', err);
+    }
     callback('');
   });
 }
@@ -1481,7 +1544,11 @@ export async function syncCompanySettings(callback: (data: any) => void) {
       callback(snapshot.data());
     }
   }, (err) => {
-    console.error('Firestore syncCompanySettings error:', err);
+    if (err && err.code === 'permission-denied') {
+      console.warn('Firestore sync permission denied (expected if not logged in).');
+    } else {
+      console.error('Firestore sync error:', err);
+    }
   });
 }
 
@@ -1517,7 +1584,11 @@ export async function syncSitePhotosConfig(callback: (photos: any[]) => void) {
       });
     }
   }, (err) => {
-    console.error('Firestore syncSitePhotosConfig error:', err);
+    if (err && err.code === 'permission-denied') {
+      console.warn('Firestore sync permission denied (expected if not logged in).');
+    } else {
+      console.error('Firestore sync error:', err);
+    }
   });
 }
 
@@ -2313,14 +2384,27 @@ export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'
   const newId = 'hpdoc_' + Date.now();
   const docData: HealthProgramDocument = { ...data, id: newId };
   await setDoc(doc(db, 'health_program_docs', newId), docData);
+
+  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+  const updated = [docData, ...cached.filter(d => d.id !== newId)];
+  setLocalCache('health_program_docs', updated);
+
   return docData;
 }
 
 export async function updateHealthProgramDoc(id: string, updates: Partial<HealthProgramDocument>): Promise<void> {
   await updateDoc(doc(db, 'health_program_docs', id), updates);
+
+  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+  const updated = cached.map(d => d.id === id ? { ...d, ...updates } : d);
+  setLocalCache('health_program_docs', updated);
 }
 
 export async function deleteHealthProgramDoc(id: string): Promise<void> {
   await deleteDoc(doc(db, 'health_program_docs', id));
+
+  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+  const updated = cached.filter(d => d.id !== id);
+  setLocalCache('health_program_docs', updated);
 }
 

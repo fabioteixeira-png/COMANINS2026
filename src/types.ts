@@ -5,6 +5,7 @@ export type InstrumentType = 'manometro' | 'termometro' | 'transmissor' | 'press
 export type CalibrationStatus = 'Aguardando Triagem' | 'Aguardando Calibração' | 'Em Calibração' | 'Calibrado' | 'Aguardando Emissão de Certificado' | 'Entregue' | 'Não Conforme' | 'Disponível para Retirada' | 'RNC';
 
 export interface Client {
+  passwordChangeRequired?: boolean;
   id: string;
   name: string;
   cnpj: string;
@@ -67,6 +68,8 @@ export interface Instrument {
   rncReason?: string;
   rncAiAnalysis?: string;
   rncTechnician?: string;
+  temperature?: number;
+  humidity?: number;
 }
 
 export interface RncReport {
@@ -140,6 +143,10 @@ export interface CalibrationReport {
   id: string;
   instrumentId: string;
   technicianName: string;
+  technicianId?: string;
+  signatureVersion?: number;
+  signaturePath?: string;
+  emitterUser?: string;
   date: string;
   instrumentType?: InstrumentType;
   metrologicalNorm?: string;

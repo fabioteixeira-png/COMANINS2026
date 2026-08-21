@@ -1078,11 +1078,25 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <p className="font-bold text-center">Temperatura Ambiente</p>
-                            <p className="text-center">20ºC ± 5ºC</p>
+                            <p className="text-center">
+                              {selectedReport?.temperature !== undefined && selectedReport?.temperature !== null && (selectedReport?.temperature as any) !== ""
+                                ? `${selectedReport.temperature}ºC`
+                                : (inst as any)?.temperature !== undefined && (inst as any)?.temperature !== null && (inst as any)?.temperature !== ""
+                                ? `${(inst as any).temperature}ºC`
+                                : '20ºC'}{' '}
+                              (± 5ºC)
+                            </p>
                           </div>
                           <div>
                             <p className="font-bold text-center">Umidade Relativa do Ar</p>
-                            <p className="text-center">50% ± 10%</p>
+                            <p className="text-center">
+                              {selectedReport?.humidity !== undefined && selectedReport?.humidity !== null && (selectedReport?.humidity as any) !== ""
+                                ? `${selectedReport.humidity}%`
+                                : (inst as any)?.humidity !== undefined && (inst as any)?.humidity !== null && (inst as any)?.humidity !== ""
+                                ? `${(inst as any).humidity}%`
+                                : '50%'}{' '}
+                              (± 20%)
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -1165,11 +1179,24 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
                     </div>
 
                     <div className="mt-16 grid grid-cols-2 gap-8 px-12">
-                      <div className="text-center border-t border-slate-400 pt-2">
-                        <p className="font-bold">Técnico Executante</p>
+                      <div className="flex flex-col items-center justify-end text-center pt-2">
+                        {selectedReport?.signaturePath ? (
+                          <img src={selectedReport.signaturePath} alt="Assinatura do Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" />
+                        ) : (
+                          <div className="h-16 w-full flex items-center justify-center text-xs text-slate-400 italic mb-2">Assinatura Pendente</div>
+                        )}
+                        <div className="w-full border-t border-slate-400 pt-2">
+                          <p className="font-bold">{selectedReport?.technicianName || 'Técnico Executante'}</p>
+                          <p className="text-xs text-slate-600">Técnico de Laboratório</p>
+                        </div>
                       </div>
-                      <div className="text-center border-t border-slate-400 pt-2">
-                        <p className="font-bold">Responsável Técnico</p>
+                      <div className="flex flex-col items-center justify-end text-center pt-2">
+                        <img src="/assinatura_rt.png" alt="Assinatura do Responsável Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                        <div className="w-full border-t border-slate-400 pt-2">
+                          <p className="font-bold">Fabio Henrique de Sena Teixeira</p>
+                          <p className="text-xs text-slate-600">Responsável Técnico</p>
+                          <p className="text-xs text-slate-600">CFT-80333478568/BA</p>
+                        </div>
                       </div>
                     </div>
                     

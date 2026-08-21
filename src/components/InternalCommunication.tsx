@@ -110,7 +110,7 @@ export function handleViewAttachment(att: ParsedAttachment, onOpenPreviewModal?:
   }
 }
 
-function AttachmentCard({ attRaw, index, isMe = false, onOpenPreview }: { attRaw: string; index: number; isMe?: boolean; onOpenPreview: (att: ParsedAttachment) => void }) {
+function AttachmentCard({ attRaw, index, isMe = false, onOpenPreview }: { key?: any; attRaw: string; index: number; isMe?: boolean; onOpenPreview: (att: ParsedAttachment) => void }) {
   const att = parseAttachment(attRaw, index);
 
   return (
@@ -182,7 +182,7 @@ function AttachmentCard({ attRaw, index, isMe = false, onOpenPreview }: { attRaw
   );
 }
 
-function InputAttachmentBadge({ attRaw, index, onRemove }: { attRaw: string; index: number; onRemove: () => void }) {
+function InputAttachmentBadge({ attRaw, index, onRemove }: { key?: any; attRaw: string; index: number; onRemove: () => void }) {
   const att = parseAttachment(attRaw, index);
 
   return (

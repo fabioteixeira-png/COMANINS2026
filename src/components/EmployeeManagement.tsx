@@ -391,20 +391,13 @@ export default function EmployeeManagement({
     const pwd = window.prompt("Digite sua senha de administrador para confirmar a exclusão deste ASO:");
     if (pwd === null) return;
     
-    let isAdminValid = false;
-    const currentUserDoc = internalUsers.find(u => u.username === currentUser?.username);
-    if (currentUserDoc && currentUserDoc.password === pwd.trim()) isAdminValid = true;
-    
-    if (!isAdminValid) {
-        const adminUser = internalUsers.find(u => u.role === 'Administrador' && u.password === pwd.trim());
-        if (adminUser) isAdminValid = true;
-    }
-    
-    if (!isAdminValid) {
-        if (pwd.trim() === '123456' || pwd.trim() === 'admin123' || pwd.trim() === 'admin' || pwd.trim() === 'comanins2026') isAdminValid = true;
-    }
-    
-    if (!isAdminValid) {
+    const res = await fetch('/api/auth/verify-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser?.username, password: pwd.trim() })
+    });
+    const data = await res.json();
+    if (!data.valid) {
       alert("Senha incorreta.");
       return;
     }

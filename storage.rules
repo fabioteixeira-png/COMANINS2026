@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // NOTE: App uses custom frontend login (no Firebase Auth).
+    // To restrict signature uploads to specific users, migrate to Firebase Authentication.
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import ComaninsLogo from './ComaninsLogo';
 import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge } from 'lucide-react';
 import { Client } from '../types';
+import { auth } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updatePassword, getIdToken } from 'firebase/auth';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { maskCpfCnpj } from '../utils/masks';
 
 export interface InternalUser {
@@ -12,7 +16,11 @@ export interface InternalUser {
   register: string;
   password?: string;
   mustChangePassword?: boolean;
+  passwordChangeRequired?: boolean;
   permissionLevel?: string;
+  signaturePath?: string;
+  signatureVersion?: number;
+  signatureDate?: string;
 }
 
 interface LoginScreenProps {
@@ -50,6 +58,10 @@ export default function LoginScreen({
 
   // Password Change on First Access states
   const [pendingChangeUser, setPendingChangeUser] = useState<InternalUser | null>(null);
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
+  const [pendingUserEmail, setPendingUserEmail] = useState('');
+  const [legacyAuthSuccess, setLegacyAuthSuccess] = useState(false);
+  const [activeTabType, setActiveTabType] = useState<'internal'|'client'>('internal');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPass, setShowNewPass] = useState(false);
@@ -69,185 +81,210 @@ export default function LoginScreen({
   }, [initialTab]);
 
   // Handle Internal login
-  const handleInternalSubmit = (e: React.FormEvent) => {
+  
+  const handleInternalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-
     const cleanUser = username.trim().toLowerCase();
     const cleanPass = internalPassword.trim();
-
-    // 1. Search in internalUsers list dynamically
-    let foundUser = internalUsers.find(u => {
-      const dbUser = u.username.trim().toLowerCase();
-      const matchUser = dbUser === cleanUser || 
-                        (cleanUser === 'admin' && (dbUser === 'admin' || u.role === 'Administrador'));
-      if (!matchUser) return false;
-
-      const userPass = (u.password || '').trim();
-      return (
-        userPass === cleanPass ||
-        cleanPass === 'comanins2026' ||
-        cleanPass === '123456' ||
-        cleanPass === 'admin' ||
-        cleanPass === 'admin123'
-      );
-    });
-
-    // 2. Default fallback for system administrator
-    const isAdminUserAlias = cleanUser === 'admin' || 
-                             cleanUser === 'felype' || 
-                             cleanUser === 'felype teixeira' || 
-                             cleanUser === 'comanins' ||
-                             cleanUser === 'felypehsteixeira@gmail.com';
     
-    const isValidAdminPass = cleanPass === 'comanins2026' || 
-                             cleanPass === '123456' || 
-                             cleanPass === 'admin' || 
-                             cleanPass === 'admin123';
+    const email = `${cleanUser}@comanins.internal`;
 
-    if (!foundUser && isAdminUserAlias && isValidAdminPass) {
-      foundUser = {
-        name: 'Felype Teixeira',
-        username: 'admin',
-        role: 'Administrador',
-        register: 'CFT-BA 123456'
-      };
-    }
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, cleanPass);
+      let userDoc = internalUsers.find(u => u.username.toLowerCase() === cleanUser);
+      if (!userDoc) {
+        // Query Firestore directly as cache might be empty if logged out
 
-    if (foundUser) {
-      // Force admin role for the owner
-      if (isAdminUserAlias) {
-        foundUser.role = 'Administrador';
-        foundUser.permissionLevel = 'Administrador';
       }
-
-      // Check if this user needs a password change on first login
-      const userStoredPass = (foundUser.password || '').trim();
-      const isDefaultPass = cleanPass === 'comanins2026' || cleanPass === '123456' || cleanPass === 'Change123!';
-      const isUserUsingDefaultPass = userStoredPass === 'comanins2026' || userStoredPass === '123456' || userStoredPass === 'Change123!' || !userStoredPass;
-
-      const isFirstLogin = (foundUser.mustChangePassword === true || (foundUser.mustChangePassword !== false && (isDefaultPass || isUserUsingDefaultPass))) &&
-                           foundUser.username !== 'admin';
-
-      if (isFirstLogin) {
-        setPendingChangeUser(foundUser);
-        setNewPassword('');
-        setConfirmPassword('');
-        setPassChangeError('');
+      
+      const tokenResult = await userCredential.user.getIdTokenResult();
+      const needsChange = tokenResult.claims.passwordChangeRequired === true || userDoc.passwordChangeRequired === true || userDoc.mustChangePassword === true;
+      
+      if (needsChange) {
+        setPendingChangeUser(userDoc);
+        setPasswordChangeRequired(true);
+        setPendingUserEmail(email);
+        setActiveTabType('internal');
         return;
       }
 
-      onLoginSuccessInternal(foundUser);
-    } else {
-      setErrorMsg('Usuário ou senha interna incorretos. Por favor, verifique suas credenciais.');
+      onLoginSuccessInternal(userDoc);
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        try {
+          const res = await fetch('/api/auth/legacy-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: cleanUser, password: cleanPass, type: 'internal' })
+          });
+          const data = await res.json();
+          if (res.ok && data.valid) {
+            let userDoc = data.user;
+            if (userDoc) {
+              setPendingChangeUser(userDoc);
+              setPasswordChangeRequired(true);
+              setPendingUserEmail(email);
+              setLegacyAuthSuccess(true);
+              setActiveTabType('internal');
+            } else {
+              setErrorMsg('Usuário não encontrado na base.');
+            }
+          } else if (res.ok && !data.valid) {
+            setErrorMsg('Usuário ou senha interna incorretos. Por favor, verifique suas credenciais.');
+          } else {
+            setErrorMsg('Não foi possível validar sua conta antiga para migração. Tente novamente ou contate o administrador.');
+          }
+        } catch (serverErr) {
+          setErrorMsg('Erro ao conectar ao servidor para validação de legado.');
+        }
+      } else {
+        setErrorMsg('Erro de autenticação: ' + err.message);
+      }
     }
   };
 
-  // Handle saving new password on first access
+  const handleClientSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    const cleanCnpj = cnpj.replace(/\D/g, '');
+    const cleanPass = clientPassword.trim();
+    
+    const email = `${cleanCnpj}@comanins.client`;
+
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, cleanPass);
+      let clientDoc = clients.find(c => c.cnpj?.replace(/\D/g, '') === cleanCnpj);
+      if (!clientDoc) {
+        // Fallback to fetch from DB just in case cache is empty
+
+      }
+      
+      const tokenResult = await userCredential.user.getIdTokenResult();
+      const needsChange = tokenResult.claims.passwordChangeRequired === true || clientDoc.passwordChangeRequired === true;
+      
+      if (needsChange) {
+        setPendingChangeUser(clientDoc as any);
+        setPasswordChangeRequired(true);
+        setPendingUserEmail(email);
+        setActiveTabType('client');
+        return;
+      }
+
+      onLoginSuccessClient(clientDoc);
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        try {
+          const res = await fetch('/api/auth/legacy-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cnpj: cleanCnpj, password: cleanPass, type: 'client' })
+          });
+          const data = await res.json();
+          if (res.ok && data.valid) {
+            let clientDoc = data.user;
+            if (clientDoc) {
+              setPendingChangeUser(clientDoc as any);
+              setPasswordChangeRequired(true);
+              setPendingUserEmail(email);
+              setLegacyAuthSuccess(true);
+              setActiveTabType('client');
+            } else {
+              setErrorMsg('Cliente não encontrado na base.');
+            }
+          } else if (res.ok && !data.valid) {
+            setErrorMsg('CNPJ ou senha incorretos.');
+          } else {
+            setErrorMsg('Não foi possível validar sua conta antiga para migração. Tente novamente ou contate o administrador.');
+          }
+        } catch (serverErr) {
+          setErrorMsg('Erro ao conectar ao servidor.');
+        }
+      } else {
+        setErrorMsg('Erro de autenticação: ' + err.message);
+      }
+    }
+  };
+
   const handleSaveNewPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPassChangeError('');
 
-    const cleanNewPass = newPassword.trim();
-    const cleanConfirm = confirmPassword.trim();
-
-    if (!cleanNewPass) {
-      setPassChangeError('Por favor, informe sua nova senha pessoal.');
+    if (newPassword !== confirmPassword) {
+      setPassChangeError('As senhas não coincidem. Digite novamente.');
       return;
     }
 
-    if (cleanNewPass.length < 6) {
-      setPassChangeError('A nova senha pessoal deve possuir no mínimo 6 caracteres.');
+    if (newPassword.length < 10) {
+      setPassChangeError('A nova senha deve ter no mínimo 10 caracteres.');
+      return;
+    }
+    
+    if (!/[A-Z]/.test(newPassword)) {
+      setPassChangeError('A nova senha deve ter pelo menos uma letra maiúscula.');
+      return;
+    }
+    if (!/[a-z]/.test(newPassword)) {
+      setPassChangeError('A nova senha deve ter pelo menos uma letra minúscula.');
+      return;
+    }
+    if (!/[0-9]/.test(newPassword)) {
+      setPassChangeError('A nova senha deve ter pelo menos um número.');
+      return;
+    }
+    if (!/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+      setPassChangeError('A nova senha deve ter pelo menos um caractere especial.');
       return;
     }
 
-    if (cleanNewPass === 'comanins2026' || cleanNewPass === '123456' || cleanNewPass === 'Change123!') {
-      setPassChangeError('A nova senha não pode ser igual à senha padrão/temporária.');
-      return;
-    }
-
-    if (cleanNewPass !== cleanConfirm) {
-      setPassChangeError('A confirmação da nova senha não coincide com a senha informada.');
+    const currentTypedPass = activeTabType === 'internal' ? internalPassword.trim() : clientPassword.trim();
+    if (newPassword === currentTypedPass) {
+      setPassChangeError('A nova senha não pode ser igual à senha atual.');
       return;
     }
 
     setIsSavingPass(true);
     try {
-      const updatedUser: InternalUser = {
-        ...pendingChangeUser!,
-        password: cleanNewPass,
-        mustChangePassword: false
-      };
-
-      if (pendingChangeUser?.id && onUpdateInternalUser) {
-        await onUpdateInternalUser(pendingChangeUser.id, {
-          password: cleanNewPass,
-          mustChangePassword: false
+      if (legacyAuthSuccess) {
+        await createUserWithEmailAndPassword(auth, pendingUserEmail, newPassword);
+      } else {
+        if (auth.currentUser) {
+          await updatePassword(auth.currentUser, newPassword);
+        } else {
+           throw new Error("Usuário não está autenticado para trocar a senha.");
+        }
+      }
+      
+      if (activeTabType === 'internal' && onUpdateInternalUser && pendingChangeUser?.id) {
+        await onUpdateInternalUser(pendingChangeUser.id, { passwordChangeRequired: false, mustChangePassword: false });
+        if (auth.currentUser) {
+          await auth.currentUser.getIdToken(true);
+        }
+        onLoginSuccessInternal(pendingChangeUser);
+      } else if (activeTabType === 'client' && pendingChangeUser?.id) {
+        await fetch('/api/auth/clear-password-change', {
+           method: 'POST',
+           headers: {'Content-Type': 'application/json'},
+           body: JSON.stringify({ id: pendingChangeUser.id, type: 'client' })
         });
+        if (auth.currentUser) {
+          await auth.currentUser.getIdToken(true);
+        }
+        onLoginSuccessClient(pendingChangeUser as unknown as Client);
       }
 
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+         setPassChangeError('Esta conta já foi migrada. Por favor, faça login usando sua NOVA senha.');
+      } else {
+         setPassChangeError('Erro ao atualizar senha no Firebase: ' + err.message);
+      }
+    } finally {
       setIsSavingPass(false);
-      setPendingChangeUser(null);
-      onLoginSuccessInternal(updatedUser);
-    } catch (err) {
-      console.error('Error updating password:', err);
-      setIsSavingPass(false);
-      setPassChangeError('Ocorreu um erro ao atualizar sua senha. Por favor, tente novamente.');
     }
   };
 
-  // Helper to strip non-digits for CNPJ comparison
-  const cleanNumber = (val: string) => val.replace(/\D/g, '');
-
-  // Handle Client login
-  const handleClientSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-
-    const cleanCnpjInput = cleanNumber(cnpj);
-    const cleanPassInput = clientPassword.trim();
-
-    if (!cleanCnpjInput || !cleanPassInput) {
-      setErrorMsg('Por favor, preencha o CNPJ e a senha.');
-      return;
-    }
-
-    // Find client in active clients list
-    const foundClient = clients.find(c => {
-      const clientCnpjClean = cleanNumber(c.cnpj);
-      return clientCnpjClean === cleanCnpjInput;
-    });
-
-    if (!foundClient) {
-      setErrorMsg('CNPJ não cadastrado no banco de dados da COMANINS.');
-      return;
-    }
-
-    // Validate client password (default to "123456" if not set)
-    const clientPassDb = (foundClient.password || '123456').trim();
-
-    if (cleanPassInput === clientPassDb || cleanPassInput === '123456' || cleanPassInput === 'comanins') {
-      onLoginSuccessClient(foundClient);
-    } else {
-      setErrorMsg('Senha incorreta para esta empresa. Use a senha padrão "123456" para testar.');
-    }
-  };
-
-  // Quick auto-fill for testing to ease user evaluation
-  const handleAutofill = (type: 'internal_admin' | 'client1' | 'client2') => {
-    if (type === 'internal_admin') {
-      setUsername('admin');
-      setInternalPassword('comanins2026');
-    } else if (type === 'client1') {
-      setCnpj('33.000.167/0001-56'); // Petrobras
-      setClientPassword('123456');
-    } else if (type === 'client2') {
-      setCnpj('07.526.557/0001-89'); // Ambev
-      setClientPassword('123456');
-    }
-  };
-
-  if (pendingChangeUser) {
+  if (pendingChangeUser && passwordChangeRequired) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-royal-blue to-royal-dark flex flex-col justify-center items-center px-4 relative overflow-hidden font-sans py-12">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl pointer-events-none"></div>
@@ -258,14 +295,14 @@ export default function LoginScreen({
             <ComaninsLogo size={200} src={customLogo} className="mb-1 max-h-20" />
             <div className="py-1.5 px-3 bg-amber-50 text-amber-700 rounded-2xl border border-amber-200/80 inline-flex items-center space-x-2">
               <Key className="h-4 w-4 text-amber-600" />
-              <span className="text-[11px] font-bold font-mono uppercase tracking-wider">Primeiro Acesso - Alteração de Senha</span>
+              <span className="text-[11px] font-bold font-mono uppercase tracking-wider">Atualização de Segurança</span>
             </div>
           </div>
 
           <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-xs space-y-1.5 text-slate-700">
             <p className="font-bold text-slate-900 text-sm">Olá, {pendingChangeUser.name}!</p>
             <p className="text-slate-600 leading-relaxed">
-              Identificamos que este é o seu primeiro acesso utilizando a <strong>senha padrão/temporária</strong>. Para a segurança do seu usuário e em conformidade com as diretrizes da COMANINS, por favor cadastre sua <strong>senha pessoal</strong>.
+              Identificamos que este é o seu primeiro acesso após a atualização do portal COMANINS. Como medida de segurança, por favor cadastre uma nova <strong>senha pessoal</strong> (com no mínimo 10 caracteres contendo: letra maiúscula, letra minúscula, número e caractere especial).
             </p>
           </div>
 

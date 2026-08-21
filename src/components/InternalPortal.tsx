@@ -152,7 +152,8 @@ import {
   UserCheck,
   FileSpreadsheet,
   ArrowLeft,
-  Menu
+  Menu,
+  PenTool
 } from "lucide-react";
 import FirebaseUsagePanel from "./FirebaseUsagePanel";
 import NotificationBellPopover from "./NotificationBellPopover";
@@ -197,6 +198,7 @@ import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
 import FieldService from "./FieldService";
 import FinanceManagement from "./FinanceManagement";
+import MySignature from "./MySignature";
 import InternalCommunication from "./InternalCommunication";
 import { generateAuthKey, getReportAuthKey } from "../utils/authKey";
 
@@ -563,6 +565,8 @@ interface InternalPortalProps {
     permissionLevel?: string;
     birthDate?: string;
     id?: string;
+    signaturePath?: string;
+    signatureVersion?: number;
   } | null;
   internalUsers: any[];
   onAddInternalUser: (newUser: any) => void;
@@ -607,6 +611,22 @@ export default function InternalPortal({
 
   const [showBirthdayModal, setShowBirthdayModal] = React.useState(false);
   const [birthdayMessage, setBirthdayMessage] = React.useState("");
+
+  const [showSignatureAlert, setShowSignatureAlert] = React.useState(false);
+
+  React.useEffect(() => {
+    if (
+      currentUser && 
+      (currentUser.role === 'Técnico de Laboratório' || currentUser.role === 'Técnico de Instrumentação') && 
+      !currentUser.signaturePath
+    ) {
+      const hasSeen = sessionStorage.getItem(`sig_alert_${currentUser.id}`);
+      if (!hasSeen) {
+        setShowSignatureAlert(true);
+        sessionStorage.setItem(`sig_alert_${currentUser.id}`, "true");
+      }
+    }
+  }, [currentUser]);
 
   React.useEffect(() => {
     if (currentUser?.birthDate) {
@@ -1289,42 +1309,15 @@ export default function InternalPortal({
     setAdminPasswordError("");
     const typedPassword = adminPasswordInput.trim();
 
-    let isAdminValid = false;
-    if (currentUser && currentUser.role === "Administrador") {
-      const currentUserDoc = internalUsers.find(
-        (u) => u.username === currentUser.username,
-      );
-      if (
-        currentUserDoc &&
-        currentUserDoc.password &&
-        currentUserDoc.password === typedPassword
-      ) {
-        isAdminValid = true;
-      }
-    }
-    if (!isAdminValid && internalUsers) {
-      const adminUser = internalUsers.find(
-        (u) => u.role === "Administrador" && u.password === typedPassword,
-      );
-      if (adminUser) {
-        isAdminValid = true;
-      }
-    }
-    if (!isAdminValid) {
-      if (
-        typedPassword === "123456" ||
-        typedPassword === "admin123" ||
-        typedPassword === "admin" ||
-        typedPassword === "comanins2026"
-      ) {
-        isAdminValid = true;
-      }
-    }
-
-    if (!isAdminValid) {
-      setAdminPasswordError(
-        "Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.",
-      );
+    const res = await fetch('/api/auth/verify-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser?.username, password: typedPassword })
+    });
+    const data = await res.json();
+    
+    if (!data.valid) {
+      setAdminPasswordError("Senha incorreta! Apenas o Administrador do Sistema possui permissão para excluir registros.");
       return;
     }
 
@@ -1337,14 +1330,14 @@ export default function InternalPortal({
         } else if (deleteTarget.type === "client") {
           if (onDeleteClient) await onDeleteClient(deleteTarget.id);
         } else if (deleteTarget.type === "user") {
-          if (onDeleteInternalUser) await onDeleteInternalUser(deleteTarget.id); // id here is username
+          if (onDeleteInternalUser) await onDeleteInternalUser(deleteTarget.id);
         } else if (deleteTarget.type === "standard") {
           await deleteReferenceStandardDoc(deleteTarget.id);
         } else if (deleteTarget.type === "birthday") {
           await deleteEmployeeBirthdayDoc(deleteTarget.id);
         } else if (deleteTarget.type === "intake") {
           await deleteIntakeDoc(deleteTarget.id);
-          setShowIntakeModal(false);
+          
         } else if (deleteTarget.type === "inventory") {
           await deleteInventoryItemDoc(deleteTarget.id);
         } else if (deleteTarget.type === "training") {
@@ -1352,199 +1345,112 @@ export default function InternalPortal({
         } else if (deleteTarget.type === "employee_training") {
           await deleteEmployeeTrainingDoc(deleteTarget.id);
         } else if (deleteTarget.type === "employee_aso") {
-          await import("../lib/firebase").then(m => m.deleteEmployeeAsoDoc(deleteTarget.id));
+          const { deleteEmployeeAsoDoc } = await import('../lib/firebase');
+          await deleteEmployeeAsoDoc(deleteTarget.id);
         } else if (deleteTarget.type === "audit_log") {
           await deleteCalibrationAuditLogDoc(deleteTarget.id);
         } else if (deleteTarget.type === "payslip") {
           await deletePayslipDoc(deleteTarget.id);
-          setPayslips((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+          setPayslips(prev => prev.filter(r => r.id !== deleteTarget.id));
         } else if (deleteTarget.type === "exam") {
           await deleteMedicalExamDoc(deleteTarget.id);
         } else if (deleteTarget.type === "exam_type") {
-          const updated = examTypesCatalog.filter((t) => t.id !== deleteTarget.id);
-          await saveExamTypes(updated);
-        } else if (deleteTarget.type === "intake_photo") {
-          const [intakeId, idxStr] = deleteTarget.id.split("::");
-          const photoIndex = parseInt(idxStr, 10);
+          const newCatalog = examTypesCatalog.filter(r => r.id !== deleteTarget.id);
+          await saveExamTypes(newCatalog);
+        } else if (deleteTarget.type === "intake_photo" as any) {
+          const [intakeId, indexStr] = deleteTarget.id.split("::");
+          const index = parseInt(indexStr, 10);
           if (selectedIntakeForPhotos && selectedIntakeForPhotos.id === intakeId) {
-            const existingPhotos = selectedIntakeForPhotos.photos || [];
-            const updatedPhotos = existingPhotos.filter((_, idx) => idx !== photoIndex);
-            await updateIntakePhotosDoc(intakeId, updatedPhotos);
-            setSavedIntakes((prev) =>
-              prev.map((intake) =>
-                intake.id === intakeId
-                  ? { ...intake, photos: updatedPhotos }
-                  : intake,
-              ),
-            );
-            setSelectedIntakeForPhotos((prev) =>
-              prev ? { ...prev, photos: updatedPhotos } : null,
-            );
+            const newPhotos = (selectedIntakeForPhotos.photos || []).filter((_: any, i: number) => i !== index);
+            await updateIntakePhotosDoc(intakeId, newPhotos);
+            setSavedIntakes(prev => prev.map(item => item.id === intakeId ? { ...item, photos: newPhotos } : item));
+            setSelectedIntakeForPhotos(prev => prev ? { ...prev, photos: newPhotos } : null);
           }
-        } else if (deleteTarget.type === "inst_photo_reg") {
+        } else if (deleteTarget.type === "inst_photo_reg" as any) {
           await updateInstrumentDoc(deleteTarget.id, { photoRegistration: "" });
-          setPhotoModalInstrument((prev) => prev && prev.id === deleteTarget.id ? { ...prev, photoRegistration: "" } : prev);
-        } else if (deleteTarget.type === "inst_photo_calib") {
+          
+        } else if (deleteTarget.type === "inst_photo_calib" as any) {
           await updateInstrumentDoc(deleteTarget.id, { photoCalibrated: "" });
-          setPhotoModalInstrument((prev) => prev && prev.id === deleteTarget.id ? { ...prev, photoCalibrated: "" } : prev);
+          
         } else if (deleteTarget.type === "finance_transaction") {
-          await import("../lib/firebase").then(m => m.deleteFinanceTransaction(deleteTarget.id));
+          const fb = await import('../lib/firebase');
+          await fb.deleteFinanceTransaction(deleteTarget.id);
         } else if (deleteTarget.type === "finance_contract") {
-          await import("../lib/firebase").then(m => m.deleteFinanceContract(deleteTarget.id));
+          const fb = await import('../lib/firebase');
+          await fb.deleteFinanceContract(deleteTarget.id);
         } else if (deleteTarget.type === "finance_measurement") {
-          await import("../lib/firebase").then(m => m.deleteFinanceMeasurement(deleteTarget.id));
+          const fb = await import('../lib/firebase');
+          await fb.deleteFinanceMeasurement(deleteTarget.id);
         } else if (deleteTarget.type === "finance_bank") {
-          await import("../lib/firebase").then(m => m.deleteFinanceDoc('financeBankAccounts', deleteTarget.id));
+          const fb = await import('../lib/firebase');
+          await fb.deleteFinanceDoc('financeBankAccounts', deleteTarget.id);
         } else if (deleteTarget.type === "finance_category") {
-          await import("../lib/firebase").then(m => m.deleteFinanceDoc('financeCategories', deleteTarget.id));
-        } else if (deleteTarget.type === "intake_devolution") {
+          const fb = await import('../lib/firebase');
+          await fb.deleteFinanceDoc('financeCategories', deleteTarget.id);
+        } else if (deleteTarget.type === "intake_devolution" as any) {
           await updateIntakeDevolutionPhoto(deleteTarget.id, "");
-          setSelectedIntakeForDevolution((prev) => prev && prev.id === deleteTarget.id ? { ...prev, photoDevolution: "" } : prev);
-          setSavedIntakes((prev) =>
-            prev.map((item) =>
-              item.id === deleteTarget.id
-                ? { ...item, photoDevolution: "" }
-                : item,
-            ),
-          );
+          setSelectedIntakeForPhotos(prev => prev && prev.id === deleteTarget.id ? { ...prev, photoDevolution: "" } : prev);
+          setSavedIntakes(prev => prev.map(i => i.id === deleteTarget.id ? { ...i, photoDevolution: "" } : i));
         }
       }
-
       setShowAdminDeleteModal(false);
-      setDeleteTarget(null);
+      setDeleteTarget({ type: "client", id: "", name: "" } as any);
       alert("✓ Registro excluído com sucesso pelo Administrador do Sistema.");
     } catch (err: any) {
-      setAdminPasswordError(
-        "Erro ao efetuar exclusão: " + (err.message || err),
-      );
+      setAdminPasswordError("Erro ao efetuar exclusão: " + (err.message || err.toString()));
     }
   };
 
   const handleResetDatabase = async () => {
     setMaintenanceError("");
-    const typedPassword = maintenancePassword.trim();
-    if (!typedPassword) {
-      setMaintenanceError("A senha do administrador é obrigatória.");
+    const res = await fetch('/api/auth/verify-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser?.username, password: maintenancePassword })
+    });
+    const data = await res.json();
+    if (!data.valid) {
+      setMaintenanceError("Senha incorreta! Apenas administradores autorizados possuem permissão para limpar o banco de dados.");
       return;
     }
 
-    let isAdminValid = false;
-    if (currentUser && currentUser.role === "Administrador") {
-      const currentUserDoc = internalUsers.find(
-        (u) => u.username === currentUser.username,
-      );
-      if (
-        currentUserDoc &&
-        currentUserDoc.password &&
-        currentUserDoc.password === typedPassword
-      ) {
-        isAdminValid = true;
+    if (window.confirm("ATENÇÃO: Você tem certeza que deseja EXCLUIR TODO O BANCO DE DADOS e restaurar as configurações originais? Esta ação é irreversível.")) {
+      setIsResetting(true);
+      try {
+        await clearAndResetDatabase();
+        alert("✓ Banco de dados redefinido com sucesso para os valores padrões!");
+        setMaintenancePassword("");
+      } catch (err: any) {
+        console.error("Error resetting database:", err);
+        setMaintenanceError("Falha ao redefinir banco de dados: " + (err.message || err.toString()));
+      } finally {
+        setIsResetting(false);
       }
-    }
-    if (!isAdminValid && internalUsers) {
-      const adminUser = internalUsers.find(
-        (u) => u.role === "Administrador" && u.password === typedPassword,
-      );
-      if (adminUser) {
-        isAdminValid = true;
-      }
-    }
-    if (!isAdminValid) {
-      if (
-        typedPassword === "123456" ||
-        typedPassword === "admin123" ||
-        typedPassword === "admin" ||
-        typedPassword === "comanins2026"
-      ) {
-        isAdminValid = true;
-      }
-    }
-
-    if (!isAdminValid) {
-      setMaintenanceError(
-        "Senha incorreta! Apenas administradores autorizados possuem permissão para limpar o banco de dados.",
-      );
-      return;
-    }
-
-    if (
-      !window.confirm(
-        "ATENÇÃO: Você tem certeza que deseja EXCLUIR TODO O BANCO DE DADOS e restaurar as configurações originais? Esta ação é irreversível.",
-      )
-    ) {
-      return;
-    }
-
-    setIsResetting(true);
-    try {
-      await clearAndResetDatabase();
-      alert("✓ Banco de dados redefinido com sucesso para os valores padrões!");
-      setMaintenancePassword("");
-    } catch (err: any) {
-      console.error("Error resetting database:", err);
-      setMaintenanceError(
-        "Falha ao redefinir banco de dados: " + (err.message || err.toString()),
-      );
-    } finally {
-      setIsResetting(false);
     }
   };
 
-  const handleResetIndividual = async (type: string, name: string) => {
+  const handleResetIndividual = async (collectionName: string, name: string) => {
     setMaintenanceError("");
-    const promptPassword = window.prompt(
-      `Para confirmar a exclusão e redefinição do módulo "${name}", digite a senha de administrador:`,
-    );
-    if (promptPassword === null) {
-      return; // cancelled
-    }
+    const promptPassword = window.prompt(`Para confirmar a exclusão e redefinição do módulo "${name}", digite a senha de administrador:`);
+    if (promptPassword === null) return;
     const typedPassword = promptPassword.trim();
     if (!typedPassword) {
       alert("A senha do administrador é obrigatória.");
       return;
     }
-
-    let isAdminValid = false;
-    if (currentUser && currentUser.role === "Administrador") {
-      const currentUserDoc = internalUsers.find(
-        (u) => u.username === currentUser.username,
-      );
-      if (
-        currentUserDoc &&
-        currentUserDoc.password &&
-        currentUserDoc.password === typedPassword
-      ) {
-        isAdminValid = true;
-      }
-    }
-    if (!isAdminValid && internalUsers) {
-      const adminUser = internalUsers.find(
-        (u) => u.role === "Administrador" && u.password === typedPassword,
-      );
-      if (adminUser) {
-        isAdminValid = true;
-      }
-    }
-    if (!isAdminValid) {
-      if (
-        typedPassword === "123456" ||
-        typedPassword === "admin123" ||
-        typedPassword === "admin" ||
-        typedPassword === "comanins2026"
-      ) {
-        isAdminValid = true;
-      }
-    }
-
-    if (!isAdminValid) {
-      alert(
-        "Senha incorreta! Apenas administradores autorizados possuem permissão para limpar o banco de dados.",
-      );
+    
+    const res = await fetch('/api/auth/verify-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser?.username, password: typedPassword })
+    });
+    const data = await res.json();
+    if (!data.valid) {
+      alert("Senha incorreta! Apenas administradores autorizados possuem permissão para limpar o banco de dados.");
       return;
     }
 
-    if (
-      !window.confirm(
+    if (!window.confirm(
         `ATENÇÃO: Você tem certeza que deseja EXCLUIR e restaurar o módulo "${name}"? Os dados atuais cadastrados nele serão perdidos.`,
       )
     ) {
@@ -1553,7 +1459,7 @@ export default function InternalPortal({
 
     setIsResetting(true);
     try {
-      await resetIndividualCollection(type);
+      await resetIndividualCollection(collectionName);
       alert(
         `✓ Módulo "${name}" redefinido com sucesso para os valores padrões!`,
       );
@@ -1678,14 +1584,57 @@ export default function InternalPortal({
   const [auditSearchTerm, setAuditSearchTerm] = useState("");
   const [auditFilterTech, setAuditFilterTech] = useState("");
   const [auditFilterPeriod, setAuditFilterPeriod] = useState("todos");
+  const [nowTicker, setNowTicker] = useState<number>(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTicker(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.name && !benchTechnician && (currentUser.role === 'Técnico de Laboratório' || currentUser.role === 'Técnico de Instrumentação')) {
+      setBenchTechnician(currentUser.name);
+    }
+  }, [currentUser, benchTechnician]);
+
+  const formatElapsedTime = (startTimeIso: string, nowMs: number) => {
+    if (!startTimeIso) return "00:00:00";
+    const startMs = new Date(startTimeIso).getTime();
+    if (isNaN(startMs)) return "00:00:00";
+    const diffSec = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+    const h = Math.floor(diffSec / 3600);
+    const m = Math.floor((diffSec % 3600) / 60);
+    const s = diffSec % 60;
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
 
   const recordCalibrationStart = (instId: string) => {
     if (!instId) return;
     const nowIso = new Date().toISOString();
     const techName =
-      benchTechnician || currentUser?.name || "Técnico Responsável";
+      benchTechnician || currentUser?.name || currentUser?.username || "Técnico Responsável";
     setCalibrationStartTimes((prev) => {
-      if (prev[instId]) return prev; // Keep existing start time if already active
+      if (prev[instId]) {
+        if (
+          (prev[instId].technicianName === "Técnico Responsável" || !prev[instId].technicianName) &&
+          techName !== "Técnico Responsável"
+        ) {
+          const updated = {
+            ...prev,
+            [instId]: { ...prev[instId], technicianName: techName },
+          };
+          try {
+            localStorage.setItem(
+              "comanins_calibration_start_times",
+              JSON.stringify(updated),
+            );
+          } catch (e) {}
+          return updated;
+        }
+        return prev;
+      }
       const updated = {
         ...prev,
         [instId]: { startTime: nowIso, technicianName: techName },
@@ -3264,21 +3213,14 @@ Status atual: ${e.status}.`,
       return;
     }
 
-    let isAdminValid =
-      currentUser?.role === "Administrador" &&
-      backupRestorePassword === "admin123";
-    if (!isAdminValid && internalUsers) {
-      const adminUser = internalUsers.find(
-        (u) =>
-          u.role === "Administrador" && u.password === backupRestorePassword,
-      );
-      if (adminUser) isAdminValid = true;
-    }
-
-    if (!isAdminValid) {
-      setBackupRestoreError(
-        "Senha do Administrador incorreta. Ação não autorizada.",
-      );
+    const res = await fetch('/api/auth/verify-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser?.username, password: backupRestorePassword })
+    });
+    const data = await res.json();
+    if (!data.valid) {
+      setBackupRestoreError("Senha do Administrador incorreta. Ação não autorizada.");
       return;
     }
 
@@ -4827,9 +4769,20 @@ Status atual: ${e.status}.`,
 
         const normInfo = METROLOGICAL_NORMS_INFO[selectedInstrumentType];
 
+        const techUser = internalUsers.find(u => u.name === benchTechnician);
+        if (!techUser || !techUser.signaturePath) {
+          setBenchSubmitting(false);
+          alert(`AVISO: Não foi possível emitir o certificado. O técnico "${benchTechnician}" não possui assinatura digital cadastrada. Peça para ele acessar "Minha Assinatura" e cadastrar antes de emitir.`);
+          return;
+        }
+
         await onSaveCalibration({
           instrumentId: selectedInstId,
           technicianName: benchTechnician,
+          technicianId: techUser.id,
+          signatureVersion: techUser.signatureVersion,
+          signaturePath: techUser.signaturePath,
+          emitterUser: currentUser?.name || 'Sistema',
           instrumentType: selectedInstrumentType,
           metrologicalNorm: normInfo ? normInfo.code : "ABNT NBR 14105-1",
           sensorType: benchSensorType,
@@ -4842,6 +4795,8 @@ Status atual: ${e.status}.`,
           transmitterPoints: benchTransmitterPoints,
           switchPoints: benchSwitchPoints,
           observations: benchObs,
+          temperature: benchTemperature as number,
+          humidity: benchHumidity as number,
           curveCount: benchPointCount,
           certNumber: generatedCertNumber,
           authKey: generateAuthKey(),
@@ -5058,6 +5013,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           transmitterPoints: benchTransmitterPoints,
           switchPoints: benchSwitchPoints,
           observations: `RNC EMITIDO (${rncNumber}): ${rncReason}`,
+          temperature: benchTemperature !== "" ? Number(benchTemperature) : undefined,
+          humidity: benchHumidity !== "" ? Number(benchHumidity) : undefined,
           curveCount: benchPointCount,
           referenceStandardIds: [
             benchStandardA,
@@ -5376,6 +5333,41 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
   return (
     <div className="h-screen sm:h-[100dvh] bg-slate-50 flex overflow-hidden">
+      {/* Signature Alert Modal */}
+      {showSignatureAlert && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl relative overflow-hidden animate-in fade-in zoom-in duration-300">
+            <div className="absolute top-0 left-0 w-full h-2 bg-amber-400"></div>
+            <div className="text-center space-y-4">
+              <div className="mx-auto w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mb-4">
+                <PenTool className="h-10 w-10 text-amber-500" />
+              </div>
+              <h2 className="text-2xl font-display font-extrabold text-slate-900">
+                Assinatura Pendente
+              </h2>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Você ainda não cadastrou sua assinatura digital. Ela é <b>obrigatória</b> para a emissão de certificados de calibração.
+              </p>
+              <button
+                onClick={() => {
+                  setShowSignatureAlert(false);
+                  setActiveTab("minha_assinatura");
+                }}
+                className="mt-6 w-full bg-royal-blue hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors"
+              >
+                Cadastrar Agora
+              </button>
+              <button
+                onClick={() => setShowSignatureAlert(false)}
+                className="mt-2 w-full bg-transparent hover:bg-slate-100 text-slate-500 font-semibold py-3 rounded-xl transition-colors"
+              >
+                Lembrar depois
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Birthday Modal */}
       {showBirthdayModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
@@ -5459,6 +5451,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               Laboratório
             </span>
           </div>
+          {(currentUser?.role === 'Técnico de Laboratório' || currentUser?.role === 'Técnico de Instrumentação' || currentUser?.role === 'Administrador' || currentUser?.role === 'admin' || currentUser?.role === 'Admin') && (
+            <button
+              onClick={() => setActiveTab("minha_assinatura")}
+              className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+                activeTab === "minha_assinatura"
+                  ? "bg-blue-50 text-royal-blue font-bold"
+                  : "text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <PenTool className="h-4 w-4 text-slate-500" />
+              <span>Minha Assinatura</span>
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("instruments")}
             className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
@@ -6708,13 +6713,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     </select>
                     {instNumeroDaEntrada &&
                       (() => {
-                        const selectedIntake = savedIntakes.find(
+                        const selectedIntakeForPhotos = savedIntakes.find(
                           (s) =>
                             (s.numEntrada || "").trim().toLowerCase() ===
                             instNumeroDaEntrada.trim().toLowerCase(),
                         );
-                        if (!selectedIntake) return null;
-                        const totalAllowed = (selectedIntake.rows || []).reduce(
+                        if (!selectedIntakeForPhotos) return null;
+                        const totalAllowed = (selectedIntakeForPhotos.rows || []).reduce(
                           (acc: number, r: any) => acc + (Number(r.quant) || 0),
                           0,
                         );
@@ -9126,18 +9131,30 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       <select
                         required
                         value={benchTechnician}
-                        onChange={(e) => setBenchTechnician(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBenchTechnician(val);
+                          if (selectedInstId && val) {
+                            setCalibrationStartTimes((prev) => ({
+                              ...prev,
+                              [selectedInstId]: {
+                                ...(prev[selectedInstId] || { startTime: new Date().toISOString() }),
+                                technicianName: val
+                              }
+                            }));
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue font-semibold text-xs"
                       >
                         <option value="">Selecione o Técnico...</option>
                         {internalUsers
-                          .filter((u) => {
-                            const r = (u.role || "")
-                              .normalize("NFD")
-                              .replace(/[\u0300-\u036f]/g, "")
-                              .toLowerCase();
-                            return r.includes("tecnico de laboratorio");
-                          })
+                          .filter(
+                            (u) =>
+                              u.role === "Técnico de Laboratório" ||
+                              u.role === "Técnico de Instrumentação" ||
+                              u.role === "Administrador" ||
+                              u.role === "admin"
+                          )
                           .map((u) => (
                             <option key={u.id} value={u.name}>
                               {u.name}
@@ -9145,6 +9162,25 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           ))}
                       </select>
                     </div>
+
+                    {/* Banner de Cronômetro de Calibração Ativa em Bancada */}
+                    {selectedInstId && calibrationStartTimes[selectedInstId] && (
+                      <div className="sm:col-span-2 bg-slate-900 text-white p-3.5 rounded-xl border border-slate-800 flex items-center justify-between shadow-sm">
+                        <div className="flex items-center space-x-3">
+                          <Clock className="h-5 w-5 text-emerald-400 animate-spin" />
+                          <div>
+                            <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Cronômetro de Calibração Ativa</p>
+                            <p className="text-xs font-medium text-slate-200">
+                              Técnico: <span className="text-emerald-300 font-bold">{calibrationStartTimes[selectedInstId].technicianName || benchTechnician || currentUser?.name}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono text-base font-black px-3.5 py-1.5 rounded-lg tracking-widest shadow-inner flex items-center gap-1.5">
+                          <span>⏱️</span>
+                          <span>{formatElapsedTime(calibrationStartTimes[selectedInstId].startTime, nowTicker)}</span>
+                        </div>
+                      </div>
+                    )}
                     
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -10859,12 +10895,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           ? formatDateTime(startObj.startTime)
                           : "Recentemente";
                         const techName =
-                          startObj?.technicianName || "Técnico Responsável";
+                          startObj?.technicianName || benchTechnician || currentUser?.name || "Técnico Responsável";
+                        const elapsed = startObj?.startTime 
+                          ? formatElapsedTime(startObj.startTime, nowTicker) 
+                          : "00:00:00";
 
                         return (
                           <div
                             key={inst.id}
-                            className="bg-white p-3.5 rounded-xl border border-amber-200/80 shadow-xs flex flex-col justify-between space-y-2"
+                            className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm flex flex-col justify-between space-y-3"
                           >
                             <div className="flex items-start justify-between">
                               <div>
@@ -10875,19 +10914,30 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   {inst.description}
                                 </p>
                               </div>
-                              <span className="px-2 py-0.5 bg-amber-100 text-amber-800 font-bold text-[10px] rounded-md border border-amber-300">
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold text-[10px] rounded-md border border-amber-300 shrink-0">
                                 Em bancada
                               </span>
                             </div>
 
+                            {/* Live Timer Counter */}
+                            <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-300/80 flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+                                <Clock className="h-3.5 w-3.5 text-amber-600 animate-spin" />
+                                Tempo decorrido:
+                              </span>
+                              <span className="font-mono font-black text-xs text-amber-950 bg-white px-2 py-0.5 rounded border border-amber-300 shadow-2xs">
+                                ⏱️ {elapsed}
+                              </span>
+                            </div>
+
                             <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                              <span className="text-slate-600 font-medium flex items-center gap-1">
-                                <UserCheck className="h-3 w-3 text-amber-600" />
+                              <span className="text-slate-700 font-bold flex items-center gap-1">
+                                <UserCheck className="h-3.5 w-3.5 text-amber-600" />
                                 {techName}
                               </span>
                               <span
                                 className="text-slate-500 font-mono text-[10px]"
-                                title="Hora que iniciou"
+                                title="Hora de início"
                               >
                                 Início: {startTimeFormatted}
                               </span>
@@ -11684,13 +11734,25 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   <p className="font-bold text-center">
                                     Temperatura Ambiente
                                   </p>
-                                  <p className="text-center">{report?.temperature ? `${report.temperature}ºC` : '20ºC'} (± 5ºC)</p>
+                                  <p className="text-center">
+                                    {report?.temperature !== undefined && report?.temperature !== null && (report?.temperature as any) !== ""
+                                      ? `${report.temperature}ºC`
+                                      : (inst as any)?.temperature !== undefined && (inst as any)?.temperature !== null && (inst as any)?.temperature !== ""
+                                      ? `${(inst as any).temperature}ºC`
+                                      : '20ºC'} (± 5ºC)
+                                  </p>
                                 </div>
                                 <div>
                                   <p className="font-bold text-center">
                                     Umidade Relativa do Ar
                                   </p>
-                                  <p className="text-center">{report?.humidity ? `${report.humidity}%` : '50%'} (± 20%)</p>
+                                  <p className="text-center">
+                                    {report?.humidity !== undefined && report?.humidity !== null && (report?.humidity as any) !== ""
+                                      ? `${report.humidity}%`
+                                      : (inst as any)?.humidity !== undefined && (inst as any)?.humidity !== null && (inst as any)?.humidity !== ""
+                                      ? `${(inst as any).humidity}%`
+                                      : '50%'} (± 20%)
+                                  </p>
                                 </div>
                               </div>
                             </div>
@@ -11896,11 +11958,24 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           </div>
 
                           <div className="mt-16 grid grid-cols-2 gap-8 px-12">
-                            <div className="text-center border-t border-slate-400 pt-2">
-                              <p className="font-bold">Técnico Executante</p>
+                            <div className="flex flex-col items-center justify-end text-center pt-2">
+                              {report?.signaturePath ? (
+                                <img src={report.signaturePath} alt="Assinatura do Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" />
+                              ) : (
+                                <div className="h-16 w-full flex items-center justify-center text-xs text-slate-400 italic mb-2">Assinatura Pendente</div>
+                              )}
+                              <div className="w-full border-t border-slate-400 pt-2">
+                                <p className="font-bold">{report?.technicianName || 'Técnico Executante'}</p>
+                                <p className="text-xs text-slate-600">Técnico de Laboratório</p>
+                              </div>
                             </div>
-                            <div className="text-center border-t border-slate-400 pt-2">
-                              <p className="font-bold">Responsável Técnico</p>
+                            <div className="flex flex-col items-center justify-end text-center pt-2">
+                              <img src="/assinatura_rt.png" alt="Assinatura do Responsável Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                              <div className="w-full border-t border-slate-400 pt-2">
+                                <p className="font-bold">Fabio Henrique de Sena Teixeira</p>
+                                <p className="text-xs text-slate-600">Responsável Técnico</p>
+                                <p className="text-xs text-slate-600">CFT-80333478568/BA</p>
+                              </div>
                             </div>
                           </div>
 
@@ -12039,8 +12114,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
         {activeTab === "field_service" && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
         {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
-        {activeTab === "programas_saude" && <HealthProgramManagement currentUser={currentUser as any} />}
+        {activeTab === "programas_saude" && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
+        {activeTab === "minha_assinatura" && <MySignature currentUser={currentUser as any} onUpdateUser={onUpdateInternalUser || (() => {})} />}
 
         {/* TAB: CONSUMO FIREBASE */}
         {activeTab === "consumo_firebase" && (
@@ -18071,12 +18147,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   return;
                 }
                 
-                const adminUser = internalUsers.find(u => (u.role === "Administrador" || u.role === "admin" || u.role === "master" || u.permissionLevel === "Administrador") && u.password === afterHoursPassword);
-                
-                if (!adminUser) {
+                const res = await fetch('/api/auth/verify-admin', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ username: currentUser?.username, password: afterHoursPassword })
+                });
+                const data = await res.json();
+                if (!data.valid) {
                   alert("Senha de administrador incorreta.");
                   return;
                 }
+                const adminUser = { name: "Administrador Autorizado" };
 
                 try {
                   await addAccessAuditLog({
