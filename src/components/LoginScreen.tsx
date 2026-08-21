@@ -99,6 +99,7 @@ export default function LoginScreen({
       if (!userDoc) {
         // Now that we are authenticated, we can safely query Firestore directly.
         try {
+          await new Promise(r => setTimeout(r, 800)); // Wait for Auth token to propagate to Firestore
           const usersRef = collection(db, "portalUsers");
           const q = query(usersRef, where("username", "==", cleanUser));
           const snap = await getDocs(q);
@@ -111,7 +112,11 @@ export default function LoginScreen({
       }
       
       const tokenResult = await userCredential.user.getIdTokenResult();
-      const needsChange = tokenResult.claims.passwordChangeRequired === true || userDoc?.passwordChangeRequired === true || userDoc?.mustChangePassword === true;
+      const needsChange = tokenResult.claims.passwordChangeRequired === true || 
+                          userDoc?.passwordChangeRequired === true || 
+                          userDoc?.passwordChangeRequired === "true" || 
+                          userDoc?.mustChangePassword === true || 
+                          userDoc?.mustChangePassword === "true";
       
       if (needsChange) {
         setPendingChangeUser(userDoc);
@@ -124,8 +129,8 @@ export default function LoginScreen({
       if (userDoc) {
         onLoginSuccessInternal(userDoc);
       } else {
-        // Try to construct a minimal userDoc so the app doesn't crash, but ideally they exist in internalUsers.
-        onLoginSuccessInternal({ id: userCredential.user.uid, username: cleanUser, name: cleanUser, role: 'Técnico de Laboratório', register: '---' });
+        setErrorMsg('Usuário autenticado, mas cadastro não encontrado no banco de dados (portalUsers). Contate o administrador para vincular a conta.');
+        return;
       }
     } catch (err: any) {
       if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
@@ -593,6 +598,9 @@ export default function LoginScreen({
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
+              </div>
+              <div className="flex justify-end mt-1">
+                <button type="button" onClick={() => setShowForgotPassword(true)} className="text-[10px] text-royal-blue hover:underline font-semibold">Esqueceu a senha?</button>
               </div>
             </div>
 
