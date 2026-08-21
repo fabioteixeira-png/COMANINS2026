@@ -3,8 +3,8 @@ import ComaninsLogo from './ComaninsLogo';
 import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge } from 'lucide-react';
 import { Client } from '../types';
 import { auth } from '../lib/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updatePassword, getIdToken } from 'firebase/auth';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword, getIdToken } from 'firebase/auth';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { maskCpfCnpj } from '../utils/masks';
 
@@ -85,6 +85,32 @@ export default function LoginScreen({
 
   // Handle Internal login
   
+  
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setResetSuccess(false);
+    
+    if (!resetEmail) {
+      setErrorMsg('Por favor, informe seu e-mail para recuperação.');
+      return;
+    }
+    
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      setResetSuccess(true);
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/user-not-found') {
+         setResetSuccess(true);
+      } else if (err.code === 'auth/invalid-email') {
+         setErrorMsg('E-mail inválido.');
+      } else {
+         setErrorMsg('Erro ao tentar redefinir a senha. Verifique o e-mail ou contate o suporte.');
+      }
+    }
+  };
+
   const handleInternalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -116,7 +142,8 @@ export default function LoginScreen({
                           userDoc?.passwordChangeRequired === true || 
                           userDoc?.passwordChangeRequired === "true" || 
                           userDoc?.mustChangePassword === true || 
-                          userDoc?.mustChangePassword === "true";
+                          userDoc?.mustChangePassword === "true" || 
+                          (userDoc && userDoc.passwordChangeRequired !== false);
       
       if (needsChange) {
         setPendingChangeUser(userDoc);
@@ -189,7 +216,7 @@ export default function LoginScreen({
       }
       
       const tokenResult = await userCredential.user.getIdTokenResult();
-      const needsChange = tokenResult.claims.passwordChangeRequired === true || clientDoc.passwordChangeRequired === true;
+      const needsChange = tokenResult.claims.passwordChangeRequired === true || clientDoc?.passwordChangeRequired === true || (clientDoc && clientDoc.passwordChangeRequired !== false);
       
       if (needsChange) {
         setPendingChangeUser(clientDoc as any);
@@ -296,11 +323,7 @@ export default function LoginScreen({
         }
         onLoginSuccessInternal(pendingChangeUser);
       } else if (activeTabType === 'client' && pendingChangeUser?.id) {
-        await fetch('/api/auth/clear-password-change', {
-           method: 'POST',
-           headers: {'Content-Type': 'application/json'},
-           body: JSON.stringify({ id: pendingChangeUser.id, type: 'client' })
-        });
+        await updateDoc(doc(db, 'clients', pendingChangeUser.id), { passwordChangeRequired: false, mustChangePassword: false });
         if (auth.currentUser) {
           await auth.currentUser.getIdToken(true);
         }
