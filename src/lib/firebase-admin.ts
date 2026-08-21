@@ -15,35 +15,69 @@ try {
 
 const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID?.trim();
 const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL?.trim();
-const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n');
+const privateKeyBase64 = process.env.FIREBASE_ADMIN_PRIVATE_KEY_B64?.trim();
+
+const decodePrivateKey = (value?: string): string | undefined => {
+  if (!value) return undefined;
+
+  try {
+    const decoded = Buffer.from(value.replace(/\s+/g, ''), 'base64')
+      .toString('utf8')
+      .trim();
+
+    if (
+      !decoded.startsWith('-----BEGIN PRIVATE KEY-----') ||
+      !decoded.endsWith('-----END PRIVATE KEY-----')
+    ) {
+      return undefined;
+    }
+
+    return decoded;
+  } catch {
+    return undefined;
+  }
+};
+
+const privateKey = decodePrivateKey(privateKeyBase64);
 
 const missingAdminEnv = [
   ['FIREBASE_ADMIN_PROJECT_ID', projectId],
   ['FIREBASE_ADMIN_CLIENT_EMAIL', clientEmail],
-  ['FIREBASE_ADMIN_PRIVATE_KEY', privateKey],
+  ['FIREBASE_ADMIN_PRIVATE_KEY_B64', privateKeyBase64],
 ].filter(([, value]) => !value).map(([name]) => name);
-
-export const firebaseAdminConfigured = missingAdminEnv.length === 0;
 
 let adminApp: App | null = null;
 
-if (firebaseAdminConfigured) {
-  adminApp = getApps()[0] ?? initializeApp({
-    credential: cert({
+if (missingAdminEnv.length === 0 && privateKey) {
+  try {
+    adminApp = getApps()[0] ?? initializeApp({
+      credential: cert({
+        projectId: projectId!,
+        clientEmail: clientEmail!,
+        privateKey,
+      }),
       projectId: projectId!,
-      clientEmail: clientEmail!,
-      privateKey: privateKey!,
-    }),
-    projectId: projectId!,
-  });
-} else {
+    });
+  } catch {
+    // Never let a malformed secret take the public site offline. Protected
+    // administrative routes will fail closed because adminAuth/adminDb stay null.
+    console.error(
+      '[Firebase Admin] Falha ao inicializar credencial. Verifique FIREBASE_ADMIN_PRIVATE_KEY_B64.'
+    );
+  }
+} else if (missingAdminEnv.length > 0) {
   // Development/preview may not receive Hostinger secrets. Keep the server up,
   // but DO NOT create a projectId-only Admin app or fall back to ADC.
   console.warn(
     `[Firebase Admin] Indisponível neste ambiente. Variáveis ausentes: ${missingAdminEnv.join(', ')}`
   );
+} else {
+  console.error(
+    '[Firebase Admin] FIREBASE_ADMIN_PRIVATE_KEY_B64 presente, mas o conteúdo decodificado não é uma chave PEM válida.'
+  );
 }
 
+export const firebaseAdminConfigured = adminApp !== null;
 export const adminAuth: Auth | null = adminApp ? getAuth(adminApp) : null;
 export const adminDb: Firestore | null = adminApp
   ? getFirestore(adminApp, firebaseConfig.firestoreDatabaseId || '(default)')
