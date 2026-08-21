@@ -118,6 +118,12 @@ export default function LoginScreen({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: cleanUser, password: cleanPass, type: 'internal' })
           });
+          
+          if (!res.ok) {
+            setErrorMsg('Não foi possível conectar ao servidor para validar a credencial antiga. Tente novamente ou contate o administrador.');
+            return;
+          }
+          
           const data = await res.json();
           if (res.ok && data.valid) {
             let userDoc = data.user;
@@ -180,6 +186,12 @@ export default function LoginScreen({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ cnpj: cleanCnpj, password: cleanPass, type: 'client' })
           });
+          
+          if (!res.ok) {
+            setErrorMsg('Não foi possível conectar ao servidor para validar a credencial antiga. Tente novamente ou contate o administrador.');
+            return;
+          }
+          
           const data = await res.json();
           if (res.ok && data.valid) {
             let clientDoc = data.user;
