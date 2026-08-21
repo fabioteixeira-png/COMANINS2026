@@ -1,1 +1,1 @@
-setTimeout(() => console.log('waited'), 5000);
+setTimeout(() => console.log('waited'), 3000);

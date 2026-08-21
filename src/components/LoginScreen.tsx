@@ -55,6 +55,9 @@ export default function LoginScreen({
   // UI states
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   // Password Change on First Access states
   const [pendingChangeUser, setPendingChangeUser] = useState<InternalUser | null>(null);
@@ -453,8 +456,50 @@ export default function LoginScreen({
           </div>
         )}
 
+        
+        {showForgotPassword && (
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <h3 className="text-sm font-bold text-slate-800 text-center mb-2">Recuperação de Senha</h3>
+            <p className="text-xs text-slate-600 text-center mb-4">
+              Digite seu e-mail cadastrado. Se ele existir em nossa base, enviaremos um link para redefinir a senha.
+            </p>
+            {resetSuccess ? (
+               <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg text-xs text-center">
+                 E-mail de recuperação enviado! Verifique sua caixa de entrada (e pasta de spam).
+               </div>
+            ) : (
+               <div className="space-y-1.5">
+                 <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">Seu E-mail</label>
+                 <input 
+                   type="email"
+                   required
+                   value={resetEmail}
+                   onChange={(e) => setResetEmail(e.target.value)}
+                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-royal-blue"
+                   placeholder="Ex: seu.email@empresa.com"
+                 />
+               </div>
+            )}
+            {!resetSuccess && (
+               <button 
+                 type="submit"
+                 className="w-full py-3 bg-royal-blue hover:bg-royal-light text-white font-bold text-xs rounded-xl uppercase tracking-wider transition-colors shadow-lg mt-2"
+               >
+                 Enviar Link de Recuperação
+               </button>
+            )}
+            <button 
+              type="button"
+              onClick={() => { setShowForgotPassword(false); setResetSuccess(false); setErrorMsg(''); }}
+              className="w-full py-3 bg-white text-slate-600 font-bold text-xs rounded-xl uppercase tracking-wider transition-colors border border-slate-200 mt-2 hover:bg-slate-50"
+            >
+              Voltar ao Login
+            </button>
+          </form>
+        )}
+
         {/* CLIENT LOGIN FORM */}
-        {activeTab === 'client' && (
+        {activeTab === 'client' && !showForgotPassword && (
           <form onSubmit={handleClientSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">CNPJ da Empresa</label>
@@ -487,6 +532,9 @@ export default function LoginScreen({
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              <div className="flex justify-end mt-1">
+                <button type="button" onClick={() => setShowForgotPassword(true)} className="text-[10px] text-royal-blue hover:underline font-semibold">Esqueceu a senha?</button>
+              </div>
             </div>
 
             <button 
@@ -499,7 +547,7 @@ export default function LoginScreen({
         )}
 
         {/* INTERNAL LABORATORY LOGIN FORM */}
-        {activeTab === 'internal' && (
+        {activeTab === 'internal' && !showForgotPassword && (
           <form onSubmit={handleInternalSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">Usuário Técnico</label>
