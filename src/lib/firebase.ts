@@ -282,6 +282,9 @@ export interface PortalUser {
   register: string;
   password?: string;
   mustChangePassword?: boolean;
+  passwordChangeRequired?: boolean;
+  authUid?: string;
+  authEmail?: string;
   signaturePath?: string;
   signatureVersion?: number;
   signatureDate?: string;

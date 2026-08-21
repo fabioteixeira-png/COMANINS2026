@@ -63,7 +63,67 @@ const findPortalUserForAuth = async (decoded: any) => {
   const match = snapshot.docs.find((doc) =>
     String(doc.data()?.username || '').trim().toLowerCase() === username
   );
-  return match ? { id: match.id, ...match.data() } : null;
+
+  if (!match) return null;
+
+  const data = match.data();
+  const existingAuthUid = String(data?.authUid || '').trim();
+  if (existingAuthUid && existingAuthUid !== decoded.uid) {
+    throw new Error('AUTH_UID_CONFLICT');
+  }
+
+  return { id: match.id, ...data };
+};
+
+const buildInternalClaims = (profile: any) => {
+  const claims: Record<string, string | boolean> = {
+    accountType: 'internal',
+    portalUserId: String(profile.id),
+    passwordChangeRequired:
+      profile?.passwordChangeRequired !== false || profile?.mustChangePassword === true,
+  };
+
+  if (profile?.role) claims.role = String(profile.role);
+  if (profile?.permissionLevel) claims.permissionLevel = String(profile.permissionLevel);
+
+  return claims;
+};
+
+const sanitizePortalUserForClient = (profile: any) => {
+  if (!profile) return profile;
+  const { password, ...safeProfile } = profile;
+  return safeProfile;
+};
+
+const syncInternalAuthProfile = async (decoded: any) => {
+  if (!adminAuth || !firestoreDb) {
+    throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  }
+
+  const email = String(decoded.email || '').trim().toLowerCase();
+  if (!email.endsWith('@comanins.internal')) {
+    throw new Error('NOT_INTERNAL_ACCOUNT');
+  }
+
+  const profile: any = await findPortalUserForAuth(decoded);
+  if (!profile) return null;
+
+  const updates: Record<string, string> = {};
+  if (profile.authUid !== decoded.uid) updates.authUid = decoded.uid;
+  if (profile.authEmail !== email) updates.authEmail = email;
+
+  if (Object.keys(updates).length > 0) {
+    await firestoreDb.collection('portalUsers').doc(profile.id).update(updates);
+  }
+
+  const mergedProfile = { ...profile, ...updates };
+  const authUser = await adminAuth.getUser(decoded.uid);
+  await adminAuth.setCustomUserClaims(decoded.uid, {
+    ...(authUser.customClaims || {}),
+    ...buildInternalClaims(mergedProfile),
+  });
+
+  return mergedProfile;
 };
 
 
@@ -683,6 +743,34 @@ app.post("/api/generate-birthday-message", async (req, res) => {
 
 
 
+app.post("/api/auth/sync-internal-profile", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !adminAuth || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+
+    const profile = await syncInternalAuthProfile(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'PORTAL_USER_NOT_FOUND' });
+    }
+
+    return res.json({
+      success: true,
+      user: sanitizePortalUserForClient(profile),
+      claims: buildInternalClaims(profile),
+    });
+  } catch (error: any) {
+    if (error?.message === 'AUTH_UID_CONFLICT') {
+      return res.status(409).json({ error: 'AUTH_UID_CONFLICT' });
+    }
+    if (error?.message === 'NOT_INTERNAL_ACCOUNT') {
+      return res.status(403).json({ error: 'NOT_INTERNAL_ACCOUNT' });
+    }
+    console.error('Sync internal profile error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => {
   try {
     if (!adminAuth || !firestoreDb) {
@@ -695,6 +783,8 @@ app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => 
 
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
+    const role = String(req.body?.role || '').trim();
+    const permissionLevel = String(req.body?.permissionLevel || '').trim();
 
     if (!email.endsWith('@comanins.internal')) {
       return res.status(400).json({ error: 'INVALID_INTERNAL_EMAIL' });
@@ -703,6 +793,13 @@ app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => 
       return res.status(400).json({ error: 'WEAK_TEMP_PASSWORD' });
     }
 
+    const initialClaims: Record<string, string | boolean> = {
+      accountType: 'internal',
+      passwordChangeRequired: true,
+    };
+    if (role) initialClaims.role = role;
+    if (permissionLevel) initialClaims.permissionLevel = permissionLevel;
+
     try {
       const created = await adminAuth.createUser({
         email,
@@ -710,10 +807,12 @@ app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => 
         emailVerified: false,
         disabled: false,
       });
-      return res.json({ success: true, uid: created.uid });
+      await adminAuth.setCustomUserClaims(created.uid, initialClaims);
+      return res.json({ success: true, uid: created.uid, alreadyExists: false });
     } catch (error: any) {
       if (error?.code === 'auth/email-already-exists') {
-        return res.status(400).json({ error: 'EMAIL_EXISTS' });
+        const existing = await adminAuth.getUserByEmail(email);
+        return res.json({ success: true, uid: existing.uid, alreadyExists: true });
       }
       throw error;
     }

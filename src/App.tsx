@@ -278,12 +278,34 @@ export default function App() {
       
       const res = await authJsonFetch('/api/auth/create-user', {
         method: 'POST',
-        body: JSON.stringify({ email, password: tempPass })
+        body: JSON.stringify({
+          email,
+          password: tempPass,
+          role: newUser.role,
+          permissionLevel: newUser.permissionLevel,
+        })
       });
       const data = await res.json();
       
-      if (!res.ok && !data.error?.includes('EMAIL_EXISTS')) {
+      if (!res.ok || !data?.uid) {
         throw new Error(data.error || 'Erro ao criar conta no Firebase Auth');
+      }
+
+      const existingPortalUser = internalUsers.find(
+        (user) => user.username.trim().toLowerCase() === newUser.username.trim().toLowerCase()
+      );
+      if (existingPortalUser) {
+        if (existingPortalUser.authUid && existingPortalUser.authUid !== data.uid) {
+          throw new Error('Este username já está vinculado a outra conta Firebase.');
+        }
+
+        await updatePortalUserDoc(existingPortalUser.id, {
+          authUid: data.uid,
+          authEmail: email,
+        });
+
+        alert('Este usuário já existia no portal. A conta Firebase foi vinculada ao cadastro existente sem criar duplicidade.');
+        return;
       }
 
       const cleanUser = Object.entries(newUser).reduce((acc, [key, value]) => {
@@ -294,10 +316,14 @@ export default function App() {
       }, {} as any);
       
       cleanUser.passwordChangeRequired = true;
+      cleanUser.authUid = data.uid;
+      cleanUser.authEmail = email;
       delete cleanUser.password;
 
       await addPortalUserDoc(cleanUser);
-      if (!newUser.password) {
+      if (data.alreadyExists) {
+        alert('A conta Firebase já existia. O cadastro foi vinculado sem alterar a senha atual dessa conta.');
+      } else if (!newUser.password) {
         alert(`Usuário criado com senha temporária individual:
 ${tempPass}
 

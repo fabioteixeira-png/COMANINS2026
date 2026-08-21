@@ -4,9 +4,10 @@ import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge 
 import { Client } from '../types';
 import { auth } from '../lib/firebase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword, getIdToken } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { maskCpfCnpj } from '../utils/masks';
+import { authJsonFetch } from '../utils/authApi';
 
 export interface InternalUser {
   id?: string;
@@ -17,6 +18,8 @@ export interface InternalUser {
   password?: string;
   mustChangePassword?: boolean;
   passwordChangeRequired?: boolean;
+  authUid?: string;
+  authEmail?: string;
   permissionLevel?: string;
   signaturePath?: string;
   signatureVersion?: number;
@@ -121,23 +124,27 @@ export default function LoginScreen({
 
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, cleanPass);
-      let userDoc = internalUsers.find(u => u.username.toLowerCase() === cleanUser);
-      if (!userDoc) {
-        // Now that we are authenticated, we can safely query Firestore directly.
-        try {
-          await new Promise(r => setTimeout(r, 800)); // Wait for Auth token to propagate to Firestore
-          const usersRef = collection(db, "portalUsers");
-          const q = query(usersRef, where("username", "==", cleanUser));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            userDoc = { id: snap.docs[0].id, ...snap.docs[0].data() } as any;
-          }
-        } catch(e) {
-          console.error("Error fetching userDoc after auth:", e);
+
+      const syncResponse = await authJsonFetch('/api/auth/sync-internal-profile', {
+        method: 'POST',
+      });
+      const syncData = await syncResponse.json();
+
+      if (!syncResponse.ok || !syncData?.user) {
+        if (syncResponse.status === 409) {
+          setErrorMsg('Esta conta Firebase está vinculada a outro cadastro. Contate o administrador.');
+        } else if (syncResponse.status === 404) {
+          setErrorMsg('Usuário autenticado, mas cadastro não encontrado em portalUsers.');
+        } else {
+          setErrorMsg('Não foi possível sincronizar o cadastro interno. Contate o administrador.');
         }
+        await auth.signOut();
+        return;
       }
-      
-      const tokenResult = await userCredential.user.getIdTokenResult();
+
+      const userDoc = syncData.user as InternalUser;
+      await userCredential.user.getIdToken(true);
+      const tokenResult = await userCredential.user.getIdTokenResult(true);
       const needsChange = tokenResult.claims.passwordChangeRequired === true || 
                           userDoc?.passwordChangeRequired === true || 
                           String(userDoc?.passwordChangeRequired) === "true" || 
@@ -318,10 +325,19 @@ export default function LoginScreen({
       
       if (activeTabType === 'internal' && onUpdateInternalUser && pendingChangeUser?.id) {
         await onUpdateInternalUser(pendingChangeUser.id, { passwordChangeRequired: false, mustChangePassword: false });
+
+        const syncResponse = await authJsonFetch('/api/auth/sync-internal-profile', {
+          method: 'POST',
+        });
+        const syncData = await syncResponse.json();
+        if (!syncResponse.ok || !syncData?.user) {
+          throw new Error('Senha atualizada, mas não foi possível sincronizar o perfil de segurança.');
+        }
+
         if (auth.currentUser) {
           await auth.currentUser.getIdToken(true);
         }
-        onLoginSuccessInternal(pendingChangeUser);
+        onLoginSuccessInternal(syncData.user as InternalUser);
       } else if (activeTabType === 'client' && pendingChangeUser?.id) {
         await updateDoc(doc(db, 'clients', pendingChangeUser.id), { passwordChangeRequired: false, mustChangePassword: false });
         if (auth.currentUser) {
