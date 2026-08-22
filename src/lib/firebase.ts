@@ -709,7 +709,8 @@ export async function syncInstruments(callback: (instruments: Instrument[]) => v
         const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
         onData(list);
       }, onError);
-    }
+    },
+    { persistCache: false }
   );
   return shared(callback);
 }
@@ -801,7 +802,8 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
         const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
         onData(list);
       }, onError);
-    }
+    },
+    { persistCache: false }
   );
   return shared(callback);
 }

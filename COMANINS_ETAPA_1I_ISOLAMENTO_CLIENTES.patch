@@ -1,0 +1,482 @@
+diff --git a/firestore.rules b/firestore.rules
+index 255fec1..5e8e1fa 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -69,15 +69,15 @@ service cloud.firestore {
+     }
+     match /systemSettings/{document=**} {
+       allow read: if true;
+-      allow write: if request.auth != null;
++      allow write: if isInternalAccount();
+     }
+     match /sitePhotos/{document=**} {
+       allow read: if true;
+-      allow write: if request.auth != null;
++      allow write: if isInternalAccount();
+     }
+     match /contactMessages/{document=**} {
+       allow create: if true;
+-      allow read, update, delete: if request.auth != null;
++      allow read, update, delete: if isInternalAccount();
+     }
+     match /portalUsers/{document=**} {
+       // Etapa 1D: remove leitura pública.
+@@ -140,6 +140,27 @@ service cloud.firestore {
+       );
+     }
+ 
++    // Dados operacionais exibidos no Portal do Cliente.
++    // Clientes não consultam estas coleções diretamente: os dados passam por
++    // /api/client-portal/data, que usa o UID autenticado para localizar o cliente
++    // e filtra os registros no servidor. Isso evita que regras virem apenas
++    // filtros visuais e impede consulta cruzada entre clientes.
++    match /instruments/{document=**} {
++      allow read, write: if isInternalAccount();
++    }
++    match /calibrationReports/{document=**} {
++      allow read, write: if isInternalAccount();
++    }
++    match /savedIntakes/{document=**} {
++      allow read, write: if isInternalAccount();
++    }
++    match /rncReports/{document=**} {
++      allow read, write: if isInternalAccount();
++    }
++    match /fieldServiceRecords/{document=**} {
++      allow read, write: if isInternalAccount();
++    }
++
+     // Financeiro: acesso somente para Financeiro e Administradores.
+     match /financeTransactions/{document=**} {
+       allow read, write: if canManageFinance();
+@@ -157,11 +178,11 @@ service cloud.firestore {
+       allow read, write: if canManageFinance();
+     }
+ 
+-    // Catch-all temporário para as coleções ainda não segmentadas.
+-    // Coleções sensíveis acima ficam explicitamente excluídas para que as
+-    // permissões específicas não sejam anuladas por esta regra genérica.
++    // Catch-all para módulos internos ainda não segmentados por função.
++    // Contas de cliente não recebem acesso genérico a nenhuma coleção: o Portal
++    // do Cliente consome somente os dados filtrados pelo servidor autenticado.
+     match /{collection}/{document=**} {
+-      allow read, write: if request.auth != null &&
++      allow read, write: if isInternalAccount() &&
+         collection != 'portalUsers' &&
+         collection != 'clients' &&
+         collection != 'clientPortalCredentials' &&
+@@ -174,7 +195,12 @@ service cloud.firestore {
+         collection != 'financeContracts' &&
+         collection != 'financeMeasurements' &&
+         collection != 'financeBankAccounts' &&
+-        collection != 'financeCategories';
++        collection != 'financeCategories' &&
++        collection != 'instruments' &&
++        collection != 'calibrationReports' &&
++        collection != 'savedIntakes' &&
++        collection != 'rncReports' &&
++        collection != 'fieldServiceRecords';
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/server.ts b/server.ts
+index 117dade..e6339f6 100644
+--- a/server.ts
++++ b/server.ts
+@@ -1140,6 +1140,92 @@ app.post('/api/auth/sync-client-profile', requireAuth, async (req: AuthRequest,
+   }
+ });
+ 
++app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) => {
++  try {
++    if (!firestoreDb) {
++      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
++    }
++
++    const email = String(req.user?.email || '').trim().toLowerCase();
++    if (!email.endsWith('@comanins.client')) {
++      return res.status(403).json({ error: 'NOT_CLIENT_ACCOUNT' });
++    }
++
++    const profile: any = await findClientForAuth(req.user);
++    if (!profile) {
++      return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
++    }
++
++    if (profile.authUid && String(profile.authUid) !== String(req.user?.uid || '')) {
++      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
++    }
++
++    const clientId = String(profile.id);
++    const instrumentsSnap = await firestoreDb
++      .collection('instruments')
++      .where('clientId', '==', clientId)
++      .get();
++
++    const instruments = instrumentsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
++    const instrumentIdSet = new Set(instruments.map((item: any) => String(item.id)).filter(Boolean));
++
++    // Legacy calibration/RNC documents do not consistently contain clientId.
++    // Read them server-side and filter by the already authorized instrument set;
++    // none of the unfiltered documents are ever returned to the browser.
++    const [reportsSnap, rncSnap, intakesSnap] = await Promise.all([
++      firestoreDb.collection('calibrationReports').get(),
++      firestoreDb.collection('rncReports').get(),
++      firestoreDb.collection('savedIntakes').where('clientId', '==', clientId).get(),
++    ]);
++
++    const reports = reportsSnap.docs
++      .map((doc) => ({ id: doc.id, ...doc.data() }))
++      .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
++
++    const rncReports = rncSnap.docs
++      .map((doc) => ({ id: doc.id, ...doc.data() }))
++      .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
++
++    const clientIntakes = intakesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
++
++    let fieldServiceRecords: any[] = [];
++    if (profile?.isFieldService === true) {
++      const certificateKeys = new Set(
++        instruments
++          .map((item: any) => String(item?.certificateNumber || '').replace(/\D/g, ''))
++          .filter(Boolean),
++      );
++
++      if (certificateKeys.size > 0) {
++        const fieldServiceSnap = await firestoreDb.collection('fieldServiceRecords').get();
++        fieldServiceRecords = fieldServiceSnap.docs
++          .map((doc) => ({ id: doc.id, ...doc.data() }))
++          .filter((item: any) => {
++            const certificateKey = String(item?.certificate || '').replace(/\D/g, '');
++            return Boolean(certificateKey) && certificateKeys.has(certificateKey);
++          });
++      }
++    }
++
++    res.set('Cache-Control', 'no-store');
++    return res.json({
++      success: true,
++      clientId,
++      instruments,
++      reports,
++      clientIntakes,
++      rncReports,
++      fieldServiceRecords,
++    });
++  } catch (error: any) {
++    if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
++      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
++    }
++    console.error('Client portal data error:', error);
++    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
++  }
++});
++
+ app.post('/api/auth/complete-client-password-change', requireAuth, async (_req: AuthRequest, res) => {
+   return res.status(410).json({ error: 'CLIENT_PASSWORD_CHANGE_DISABLED' });
+ });
+diff --git a/src/App.tsx b/src/App.tsx
+index 517e415..58683b1 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -7,7 +7,7 @@ import InternalPortal from './components/InternalPortal';
+ import ClientPortal from './components/ClientPortal';
+ import LoginScreen from './components/LoginScreen';
+ import {
+- Client, Instrument, CalibrationReport, ContactMessage } from './types';
++ Client, Instrument, CalibrationReport, ContactMessage, RncReport } from './types';
+ import {
+  RefreshCw, Database } from 'lucide-react';
+ import {
+@@ -41,6 +41,7 @@ import {
+   PortalUser,
+   auth
+ } from './lib/firebase';
++import type { SavedIntake, FieldServiceRecord } from './lib/firebase';
+ 
+ export default function App() {
+   const [viewMode, setViewMode] = useState<'public' | 'login' | 'portal' | 'client'>('public');
+@@ -52,6 +53,9 @@ export default function App() {
+   const [instruments, setInstruments] = useState<Instrument[]>([]);
+   const [reports, setReports] = useState<CalibrationReport[]>([]);
+   const [messages, setMessages] = useState<ContactMessage[]>([]);
++  const [clientIntakes, setClientIntakes] = useState<SavedIntake[]>([]);
++  const [clientRncReports, setClientRncReports] = useState<RncReport[]>([]);
++  const [clientFieldServiceRecords, setClientFieldServiceRecords] = useState<FieldServiceRecord[]>([]);
+   const [internalUsers, setInternalUsers] = useState<PortalUser[]>([]);
+ 
+   const [currentInternalUser, setCurrentInternalUser] = useState<{
+@@ -93,17 +97,14 @@ export default function App() {
+     return () => window.removeEventListener('firestore-quota-exceeded', handleQuota);
+   }, []);
+ 
+-  // Subscribe to real-time Firestore collections
++  // Public site only subscribes to public presentation data. Operational
++  // collections are started only after the corresponding account is authenticated.
+   useEffect(() => {
+     let unsubs: (() => void)[] = [];
+ 
+-    const initFirebaseSync = async () => {
++    const initPublicFirebaseSync = async () => {
+       setIsLoading(true);
+       try {
+-        const u2 = await syncInstruments(setInstruments);
+-        const u3 = await syncReports(setReports);
+-        const u4 = await syncMessages(setMessages);
+-
+         const u6 = await syncCustomLogo(setCustomLogo);
+         const u7 = await syncHeaderLogo(setHeaderLogo);
+         const u8 = await syncSitePhotosConfig((photos) => {
+@@ -111,22 +112,106 @@ export default function App() {
+             setSitePhotos(photos);
+           }
+         });
+-        unsubs = [u2, u3, u4, u6, u7, u8];
++        unsubs = [u6, u7, u8];
+       } catch (err) {
+-        console.error('Error initializing Firestore sync:', err);
+-
++        console.error('Error initializing public Firestore sync:', err);
+       } finally {
+         setIsLoading(false);
+       }
+     };
+ 
+-    initFirebaseSync();
++    initPublicFirebaseSync();
+ 
+     return () => {
+       unsubs.forEach(unsub => unsub && unsub());
+     };
+   }, []);
+ 
++  // Internal users keep the existing real-time Firestore subscriptions. Client
++  // users receive only their own operational data from the authenticated server
++  // endpoint, never from a global Firestore listener.
++  useEffect(() => {
++    let cancelled = false;
++    let unsubs: (() => void)[] = [];
++
++    const clearClientPortalData = () => {
++      setClientIntakes([]);
++      setClientRncReports([]);
++      setClientFieldServiceRecords([]);
++    };
++
++    const startAuthenticatedDataSync = async () => {
++      if (viewMode === 'portal' && currentInternalUser) {
++        clearClientPortalData();
++        try {
++          const u2 = await syncInstruments(setInstruments);
++          const u3 = await syncReports(setReports);
++          const u4 = await syncMessages(setMessages);
++          if (cancelled) {
++            u2?.();
++            u3?.();
++            u4?.();
++            return;
++          }
++          unsubs = [u2, u3, u4];
++        } catch (err) {
++          console.error('Error initializing internal operational sync:', err);
++        }
++        return;
++      }
++
++      if (viewMode === 'client' && currentClient) {
++        setInstruments([]);
++        setReports([]);
++        setMessages([]);
++        clearClientPortalData();
++        try {
++          // Remove technical caches from older versions so a client session can
++          // never inherit a previous internal user's locally persisted dataset.
++          try {
++            localStorage.removeItem('comanins_cache_instruments');
++            localStorage.removeItem('comanins_cache_calibrationReports');
++            localStorage.removeItem('comanins_cache_savedIntakes');
++            localStorage.removeItem('comanins_cache_rncReports');
++          } catch (e) {}
++
++          const response = await authJsonFetch('/api/client-portal/data');
++          const data = await response.json();
++          if (!response.ok || data?.success !== true) {
++            throw new Error(data?.error || 'CLIENT_PORTAL_DATA_UNAVAILABLE');
++          }
++          if (cancelled) return;
++
++          setInstruments(Array.isArray(data.instruments) ? data.instruments : []);
++          setReports(Array.isArray(data.reports) ? data.reports : []);
++          setClientIntakes(Array.isArray(data.clientIntakes) ? data.clientIntakes : []);
++          setClientRncReports(Array.isArray(data.rncReports) ? data.rncReports : []);
++          setClientFieldServiceRecords(Array.isArray(data.fieldServiceRecords) ? data.fieldServiceRecords : []);
++        } catch (err) {
++          console.error('Error loading isolated client portal data:', err);
++          if (!cancelled) {
++            setInstruments([]);
++            setReports([]);
++            clearClientPortalData();
++          }
++        }
++        return;
++      }
++
++      setInstruments([]);
++      setReports([]);
++      setMessages([]);
++      clearClientPortalData();
++    };
++
++    startAuthenticatedDataSync();
++
++    return () => {
++      cancelled = true;
++      unsubs.forEach((unsub) => unsub && unsub());
++    };
++  }, [viewMode, currentInternalUser, currentClient]);
++
+   // Client master data must not be downloaded on the public site or login screen.
+   // It is only required by authenticated internal users; client users receive only
+   // their own profile from /api/auth/sync-client-profile.
+@@ -502,12 +587,20 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
+             client={currentClient}
+             instruments={instruments}
+             reports={reports}
++            clientIntakes={clientIntakes}
++            rncReports={clientRncReports}
++            fieldServiceRecords={clientFieldServiceRecords}
+             customLogo={activeLogo}
+             onLogout={async () => {
+               try {
+                 await signOut(auth);
+               } finally {
+                 setCurrentClient(null);
++                setClientIntakes([]);
++                setClientRncReports([]);
++                setClientFieldServiceRecords([]);
++                setInstruments([]);
++                setReports([]);
+                 setViewMode('public');
+               }
+             }}
+diff --git a/src/components/ClientPortal.tsx b/src/components/ClientPortal.tsx
+index da5acb3..b2f7a75 100644
+--- a/src/components/ClientPortal.tsx
++++ b/src/components/ClientPortal.tsx
+@@ -32,10 +32,9 @@ import {
+ } from 'recharts';
+ import { Client, Instrument, CalibrationReport, RncReport } from '../types';
+ 
+-import { syncFieldServiceRecords, FieldServiceRecord } from '../lib/firebase';
++import type { FieldServiceRecord, SavedIntake } from '../lib/firebase';
+ import { PrivacyPolicyModal } from './LGPDPrivacy';
+ import { getReportAuthKey } from '../utils/authKey';
+-import { syncClientIntakes, SavedIntake, syncRncReports } from '../lib/firebase';
+ 
+ 
+ const formatDateBR = (dateStr: string | undefined): string => {
+@@ -68,39 +67,23 @@ interface ClientPortalProps {
+   client: Client;
+   instruments: Instrument[];
+   reports: CalibrationReport[];
++  clientIntakes: SavedIntake[];
++  rncReports: RncReport[];
++  fieldServiceRecords: FieldServiceRecord[];
+   customLogo?: string;
+   onLogout: () => void;
+ }
+ 
+-export default function ClientPortal({ client, instruments, reports, customLogo, onLogout }: ClientPortalProps) {
+-  const [clientIntakes, setClientIntakes] = useState<SavedIntake[]>([]);
+-
+-  const [fieldServiceRecords, setFieldServiceRecords] = useState<FieldServiceRecord[]>([]);
+-
+-  useEffect(() => {
+-    if (client?.isFieldService) {
+-      const unsub = syncFieldServiceRecords((records) => {
+-        setFieldServiceRecords(records);
+-      });
+-      return () => {
+-        unsub.then(u => u());
+-      }
+-    }
+-  }, [client?.isFieldService]);
+-
+-  
+-  useEffect(() => {
+-    if (client?.id) {
+-      const unsub = syncClientIntakes(client.id, (list) => {
+-        setClientIntakes(list);
+-      });
+-      return () => {
+-        unsub.then((fn) => {
+-          if (fn) fn();
+-        });
+-      };
+-    }
+-  }, [client?.id]);
++export default function ClientPortal({
++  client,
++  instruments,
++  reports,
++  clientIntakes,
++  rncReports,
++  fieldServiceRecords,
++  customLogo,
++  onLogout,
++}: ClientPortalProps) {
+ 
+   const getClientStatus = (inst: Instrument, allInsts: Instrument[]) => {
+     if (inst.status === 'Disponível para Retirada' || inst.status === 'Entregue') {
+@@ -142,25 +125,11 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
+   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
+   const [fsTag, setFsTag] = useState<string>("");
+   const [fsEquip, setFsEquip] = useState<string>("");
+-  const [rncReports, setRncReports] = useState<RncReport[]>([]);
+   const [selectedRncReport, setSelectedRncReport] = useState<RncReport | null>(null);
+   const [showRncViewModal, setShowRncViewModal] = useState<boolean>(false);
+ 
+   const [copiedKey, setCopiedKey] = useState(false);
+ 
+-  useEffect(() => {
+-    let unsubscribeRnc: any = null;
+-    syncRncReports((list) => {
+-      setRncReports(list);
+-    }).then(unsub => {
+-      unsubscribeRnc = unsub;
+-    }).catch(console.error);
+-
+-    return () => {
+-      if (unsubscribeRnc) unsubscribeRnc();
+-    };
+-  }, []);
+-
+   // Read URL query string for ?chave=...
+   useEffect(() => {
+     const params = new URLSearchParams(window.location.search);
+diff --git a/src/lib/firebase.ts b/src/lib/firebase.ts
+index 43faec3..e1bd763 100644
+--- a/src/lib/firebase.ts
++++ b/src/lib/firebase.ts
+@@ -709,7 +709,8 @@ export async function syncInstruments(callback: (instruments: Instrument[]) => v
+         const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
+         onData(list);
+       }, onError);
+-    }
++    },
++    { persistCache: false }
+   );
+   return shared(callback);
+ }
+@@ -801,7 +802,8 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
+         const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
+         onData(list);
+       }, onError);
+-    }
++    },
++    { persistCache: false }
+   );
+   return shared(callback);
+ }

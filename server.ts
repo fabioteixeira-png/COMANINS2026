@@ -1140,6 +1140,92 @@ app.post('/api/auth/sync-client-profile', requireAuth, async (req: AuthRequest, 
   }
 });
 
+app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    if (!firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+
+    const email = String(req.user?.email || '').trim().toLowerCase();
+    if (!email.endsWith('@comanins.client')) {
+      return res.status(403).json({ error: 'NOT_CLIENT_ACCOUNT' });
+    }
+
+    const profile: any = await findClientForAuth(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
+    }
+
+    if (profile.authUid && String(profile.authUid) !== String(req.user?.uid || '')) {
+      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
+    }
+
+    const clientId = String(profile.id);
+    const instrumentsSnap = await firestoreDb
+      .collection('instruments')
+      .where('clientId', '==', clientId)
+      .get();
+
+    const instruments = instrumentsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const instrumentIdSet = new Set(instruments.map((item: any) => String(item.id)).filter(Boolean));
+
+    // Legacy calibration/RNC documents do not consistently contain clientId.
+    // Read them server-side and filter by the already authorized instrument set;
+    // none of the unfiltered documents are ever returned to the browser.
+    const [reportsSnap, rncSnap, intakesSnap] = await Promise.all([
+      firestoreDb.collection('calibrationReports').get(),
+      firestoreDb.collection('rncReports').get(),
+      firestoreDb.collection('savedIntakes').where('clientId', '==', clientId).get(),
+    ]);
+
+    const reports = reportsSnap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
+
+    const rncReports = rncSnap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
+
+    const clientIntakes = intakesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    let fieldServiceRecords: any[] = [];
+    if (profile?.isFieldService === true) {
+      const certificateKeys = new Set(
+        instruments
+          .map((item: any) => String(item?.certificateNumber || '').replace(/\D/g, ''))
+          .filter(Boolean),
+      );
+
+      if (certificateKeys.size > 0) {
+        const fieldServiceSnap = await firestoreDb.collection('fieldServiceRecords').get();
+        fieldServiceRecords = fieldServiceSnap.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((item: any) => {
+            const certificateKey = String(item?.certificate || '').replace(/\D/g, '');
+            return Boolean(certificateKey) && certificateKeys.has(certificateKey);
+          });
+      }
+    }
+
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      clientId,
+      instruments,
+      reports,
+      clientIntakes,
+      rncReports,
+      fieldServiceRecords,
+    });
+  } catch (error: any) {
+    if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
+      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
+    }
+    console.error('Client portal data error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.post('/api/auth/complete-client-password-change', requireAuth, async (_req: AuthRequest, res) => {
   return res.status(410).json({ error: 'CLIENT_PASSWORD_CHANGE_DISABLED' });
 });

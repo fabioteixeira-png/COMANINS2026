@@ -69,15 +69,15 @@ service cloud.firestore {
     }
     match /systemSettings/{document=**} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isInternalAccount();
     }
     match /sitePhotos/{document=**} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isInternalAccount();
     }
     match /contactMessages/{document=**} {
       allow create: if true;
-      allow read, update, delete: if request.auth != null;
+      allow read, update, delete: if isInternalAccount();
     }
     match /portalUsers/{document=**} {
       // Etapa 1D: remove leitura pública.
@@ -140,6 +140,27 @@ service cloud.firestore {
       );
     }
 
+    // Dados operacionais exibidos no Portal do Cliente.
+    // Clientes não consultam estas coleções diretamente: os dados passam por
+    // /api/client-portal/data, que usa o UID autenticado para localizar o cliente
+    // e filtra os registros no servidor. Isso evita que regras virem apenas
+    // filtros visuais e impede consulta cruzada entre clientes.
+    match /instruments/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /calibrationReports/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /savedIntakes/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /rncReports/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /fieldServiceRecords/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+
     // Financeiro: acesso somente para Financeiro e Administradores.
     match /financeTransactions/{document=**} {
       allow read, write: if canManageFinance();
@@ -157,11 +178,11 @@ service cloud.firestore {
       allow read, write: if canManageFinance();
     }
 
-    // Catch-all temporário para as coleções ainda não segmentadas.
-    // Coleções sensíveis acima ficam explicitamente excluídas para que as
-    // permissões específicas não sejam anuladas por esta regra genérica.
+    // Catch-all para módulos internos ainda não segmentados por função.
+    // Contas de cliente não recebem acesso genérico a nenhuma coleção: o Portal
+    // do Cliente consome somente os dados filtrados pelo servidor autenticado.
     match /{collection}/{document=**} {
-      allow read, write: if request.auth != null &&
+      allow read, write: if isInternalAccount() &&
         collection != 'portalUsers' &&
         collection != 'clients' &&
         collection != 'clientPortalCredentials' &&
@@ -174,7 +195,12 @@ service cloud.firestore {
         collection != 'financeContracts' &&
         collection != 'financeMeasurements' &&
         collection != 'financeBankAccounts' &&
-        collection != 'financeCategories';
+        collection != 'financeCategories' &&
+        collection != 'instruments' &&
+        collection != 'calibrationReports' &&
+        collection != 'savedIntakes' &&
+        collection != 'rncReports' &&
+        collection != 'fieldServiceRecords';
     }
   }
 }

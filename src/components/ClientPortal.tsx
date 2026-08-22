@@ -32,10 +32,9 @@ import {
 } from 'recharts';
 import { Client, Instrument, CalibrationReport, RncReport } from '../types';
 
-import { syncFieldServiceRecords, FieldServiceRecord } from '../lib/firebase';
+import type { FieldServiceRecord, SavedIntake } from '../lib/firebase';
 import { PrivacyPolicyModal } from './LGPDPrivacy';
 import { getReportAuthKey } from '../utils/authKey';
-import { syncClientIntakes, SavedIntake, syncRncReports } from '../lib/firebase';
 
 
 const formatDateBR = (dateStr: string | undefined): string => {
@@ -68,39 +67,23 @@ interface ClientPortalProps {
   client: Client;
   instruments: Instrument[];
   reports: CalibrationReport[];
+  clientIntakes: SavedIntake[];
+  rncReports: RncReport[];
+  fieldServiceRecords: FieldServiceRecord[];
   customLogo?: string;
   onLogout: () => void;
 }
 
-export default function ClientPortal({ client, instruments, reports, customLogo, onLogout }: ClientPortalProps) {
-  const [clientIntakes, setClientIntakes] = useState<SavedIntake[]>([]);
-
-  const [fieldServiceRecords, setFieldServiceRecords] = useState<FieldServiceRecord[]>([]);
-
-  useEffect(() => {
-    if (client?.isFieldService) {
-      const unsub = syncFieldServiceRecords((records) => {
-        setFieldServiceRecords(records);
-      });
-      return () => {
-        unsub.then(u => u());
-      }
-    }
-  }, [client?.isFieldService]);
-
-  
-  useEffect(() => {
-    if (client?.id) {
-      const unsub = syncClientIntakes(client.id, (list) => {
-        setClientIntakes(list);
-      });
-      return () => {
-        unsub.then((fn) => {
-          if (fn) fn();
-        });
-      };
-    }
-  }, [client?.id]);
+export default function ClientPortal({
+  client,
+  instruments,
+  reports,
+  clientIntakes,
+  rncReports,
+  fieldServiceRecords,
+  customLogo,
+  onLogout,
+}: ClientPortalProps) {
 
   const getClientStatus = (inst: Instrument, allInsts: Instrument[]) => {
     if (inst.status === 'Disponível para Retirada' || inst.status === 'Entregue') {
@@ -142,24 +125,10 @@ export default function ClientPortal({ client, instruments, reports, customLogo,
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
   const [fsTag, setFsTag] = useState<string>("");
   const [fsEquip, setFsEquip] = useState<string>("");
-  const [rncReports, setRncReports] = useState<RncReport[]>([]);
   const [selectedRncReport, setSelectedRncReport] = useState<RncReport | null>(null);
   const [showRncViewModal, setShowRncViewModal] = useState<boolean>(false);
 
   const [copiedKey, setCopiedKey] = useState(false);
-
-  useEffect(() => {
-    let unsubscribeRnc: any = null;
-    syncRncReports((list) => {
-      setRncReports(list);
-    }).then(unsub => {
-      unsubscribeRnc = unsub;
-    }).catch(console.error);
-
-    return () => {
-      if (unsubscribeRnc) unsubscribeRnc();
-    };
-  }, []);
 
   // Read URL query string for ?chave=...
   useEffect(() => {

@@ -7,7 +7,7 @@ import InternalPortal from './components/InternalPortal';
 import ClientPortal from './components/ClientPortal';
 import LoginScreen from './components/LoginScreen';
 import {
- Client, Instrument, CalibrationReport, ContactMessage } from './types';
+ Client, Instrument, CalibrationReport, ContactMessage, RncReport } from './types';
 import {
  RefreshCw, Database } from 'lucide-react';
 import {
@@ -41,6 +41,7 @@ import {
   PortalUser,
   auth
 } from './lib/firebase';
+import type { SavedIntake, FieldServiceRecord } from './lib/firebase';
 
 export default function App() {
   const [viewMode, setViewMode] = useState<'public' | 'login' | 'portal' | 'client'>('public');
@@ -52,6 +53,9 @@ export default function App() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [reports, setReports] = useState<CalibrationReport[]>([]);
   const [messages, setMessages] = useState<ContactMessage[]>([]);
+  const [clientIntakes, setClientIntakes] = useState<SavedIntake[]>([]);
+  const [clientRncReports, setClientRncReports] = useState<RncReport[]>([]);
+  const [clientFieldServiceRecords, setClientFieldServiceRecords] = useState<FieldServiceRecord[]>([]);
   const [internalUsers, setInternalUsers] = useState<PortalUser[]>([]);
 
   const [currentInternalUser, setCurrentInternalUser] = useState<{
@@ -93,17 +97,14 @@ export default function App() {
     return () => window.removeEventListener('firestore-quota-exceeded', handleQuota);
   }, []);
 
-  // Subscribe to real-time Firestore collections
+  // Public site only subscribes to public presentation data. Operational
+  // collections are started only after the corresponding account is authenticated.
   useEffect(() => {
     let unsubs: (() => void)[] = [];
 
-    const initFirebaseSync = async () => {
+    const initPublicFirebaseSync = async () => {
       setIsLoading(true);
       try {
-        const u2 = await syncInstruments(setInstruments);
-        const u3 = await syncReports(setReports);
-        const u4 = await syncMessages(setMessages);
-
         const u6 = await syncCustomLogo(setCustomLogo);
         const u7 = await syncHeaderLogo(setHeaderLogo);
         const u8 = await syncSitePhotosConfig((photos) => {
@@ -111,21 +112,105 @@ export default function App() {
             setSitePhotos(photos);
           }
         });
-        unsubs = [u2, u3, u4, u6, u7, u8];
+        unsubs = [u6, u7, u8];
       } catch (err) {
-        console.error('Error initializing Firestore sync:', err);
-
+        console.error('Error initializing public Firestore sync:', err);
       } finally {
         setIsLoading(false);
       }
     };
 
-    initFirebaseSync();
+    initPublicFirebaseSync();
 
     return () => {
       unsubs.forEach(unsub => unsub && unsub());
     };
   }, []);
+
+  // Internal users keep the existing real-time Firestore subscriptions. Client
+  // users receive only their own operational data from the authenticated server
+  // endpoint, never from a global Firestore listener.
+  useEffect(() => {
+    let cancelled = false;
+    let unsubs: (() => void)[] = [];
+
+    const clearClientPortalData = () => {
+      setClientIntakes([]);
+      setClientRncReports([]);
+      setClientFieldServiceRecords([]);
+    };
+
+    const startAuthenticatedDataSync = async () => {
+      if (viewMode === 'portal' && currentInternalUser) {
+        clearClientPortalData();
+        try {
+          const u2 = await syncInstruments(setInstruments);
+          const u3 = await syncReports(setReports);
+          const u4 = await syncMessages(setMessages);
+          if (cancelled) {
+            u2?.();
+            u3?.();
+            u4?.();
+            return;
+          }
+          unsubs = [u2, u3, u4];
+        } catch (err) {
+          console.error('Error initializing internal operational sync:', err);
+        }
+        return;
+      }
+
+      if (viewMode === 'client' && currentClient) {
+        setInstruments([]);
+        setReports([]);
+        setMessages([]);
+        clearClientPortalData();
+        try {
+          // Remove technical caches from older versions so a client session can
+          // never inherit a previous internal user's locally persisted dataset.
+          try {
+            localStorage.removeItem('comanins_cache_instruments');
+            localStorage.removeItem('comanins_cache_calibrationReports');
+            localStorage.removeItem('comanins_cache_savedIntakes');
+            localStorage.removeItem('comanins_cache_rncReports');
+          } catch (e) {}
+
+          const response = await authJsonFetch('/api/client-portal/data');
+          const data = await response.json();
+          if (!response.ok || data?.success !== true) {
+            throw new Error(data?.error || 'CLIENT_PORTAL_DATA_UNAVAILABLE');
+          }
+          if (cancelled) return;
+
+          setInstruments(Array.isArray(data.instruments) ? data.instruments : []);
+          setReports(Array.isArray(data.reports) ? data.reports : []);
+          setClientIntakes(Array.isArray(data.clientIntakes) ? data.clientIntakes : []);
+          setClientRncReports(Array.isArray(data.rncReports) ? data.rncReports : []);
+          setClientFieldServiceRecords(Array.isArray(data.fieldServiceRecords) ? data.fieldServiceRecords : []);
+        } catch (err) {
+          console.error('Error loading isolated client portal data:', err);
+          if (!cancelled) {
+            setInstruments([]);
+            setReports([]);
+            clearClientPortalData();
+          }
+        }
+        return;
+      }
+
+      setInstruments([]);
+      setReports([]);
+      setMessages([]);
+      clearClientPortalData();
+    };
+
+    startAuthenticatedDataSync();
+
+    return () => {
+      cancelled = true;
+      unsubs.forEach((unsub) => unsub && unsub());
+    };
+  }, [viewMode, currentInternalUser, currentClient]);
 
   // Client master data must not be downloaded on the public site or login screen.
   // It is only required by authenticated internal users; client users receive only
@@ -502,12 +587,20 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
             client={currentClient}
             instruments={instruments}
             reports={reports}
+            clientIntakes={clientIntakes}
+            rncReports={clientRncReports}
+            fieldServiceRecords={clientFieldServiceRecords}
             customLogo={activeLogo}
             onLogout={async () => {
               try {
                 await signOut(auth);
               } finally {
                 setCurrentClient(null);
+                setClientIntakes([]);
+                setClientRncReports([]);
+                setClientFieldServiceRecords([]);
+                setInstruments([]);
+                setReports([]);
                 setViewMode('public');
               }
             }}
