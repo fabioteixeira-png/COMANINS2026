@@ -150,9 +150,15 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   }
 
   const email = String(decoded.email || '').trim().toLowerCase();
+
+  // Legacy username linking is allowed only for Firebase accounts that were
+  // already marked as internal by the trusted Admin SDK. A public Firebase
+  // sign-up cannot set custom claims, so it cannot claim an unlinked employee.
+  if (normalizeAccessValue(decoded?.accountType) !== 'internal') return null;
+
   const username = email.endsWith('@comanins.internal')
     ? email.slice(0, -'@comanins.internal'.length)
-    : email.split('@')[0];
+    : '';
 
   if (!username) return null;
 
@@ -397,7 +403,16 @@ const ensureClientPortalAccess = async (clientId: string) => {
         if (!bound.empty && bound.docs[0].id !== client.id) {
           throw new Error('CLIENT_AUTH_UID_CONFLICT');
         }
-        authUser = await adminAuth.updateUser(authUser.uid, { password });
+
+        if (bound.empty) {
+          // A public Firebase sign-up may have pre-registered this predictable
+          // CNPJ-based email. Replace the unbound account so the old UID cannot
+          // become the official client identity.
+          await adminAuth.deleteUser(authUser.uid);
+          authUser = await adminAuth.createUser({ email: authEmail, password });
+        } else {
+          authUser = await adminAuth.updateUser(authUser.uid, { password });
+        }
       } catch (error: any) {
         if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') throw error;
         if (error?.code !== 'auth/user-not-found') throw error;
@@ -457,13 +472,20 @@ const findClientForAuth = async (decoded: any) => {
 
   const email = String(decoded.email || '').trim().toLowerCase();
   if (!email.endsWith('@comanins.client')) return null;
-  const cnpjFromEmail = normalizeCnpj(email.slice(0, -'@comanins.client'.length));
-  if (!cnpjFromEmail) return null;
 
-  // CNPJ may be stored formatted or unformatted, so compare normalized values.
-  const snapshot = await clientsRef.get();
-  const match = snapshot.docs.find((doc) => normalizeCnpj(doc.data()?.cnpj) === cnpjFromEmail);
-  if (!match) return null;
+  // A client may use the legacy email/CNPJ lookup only when the token already
+  // carries server-issued client claims. This prevents someone from creating a
+  // public Firebase account for a known CNPJ and claiming an unprovisioned client.
+  if (normalizeAccessValue(decoded?.accountType) !== 'client') return null;
+  const claimedClientId = String(decoded?.clientId || '').trim();
+  if (!claimedClientId) return null;
+
+  const claimedDoc = await clientsRef.doc(claimedClientId).get();
+  if (!claimedDoc.exists) return null;
+  const claimedData = claimedDoc.data();
+  const cnpjFromEmail = normalizeCnpj(email.slice(0, -'@comanins.client'.length));
+  if (!cnpjFromEmail || normalizeCnpj(claimedData?.cnpj) !== cnpjFromEmail) return null;
+  const match = claimedDoc;
 
   const data = match.data();
   const existingAuthUid = String(data?.authUid || '').trim();
@@ -1408,7 +1430,43 @@ app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, admi
     } catch (error: any) {
       if (error?.code === 'auth/email-already-exists') {
         const existing = await adminAuth.getUserByEmail(email);
-        return res.json({ success: true, uid: existing.uid, alreadyExists: true });
+
+        // Reuse an existing account only when it is already bound to a portal
+        // user or already carries a trusted internal claim. Otherwise the email
+        // may have been pre-registered through the public Firebase sign-up API.
+        const boundByUid = await firestoreDb
+          .collection('portalUsers')
+          .where('authUid', '==', existing.uid)
+          .limit(1)
+          .get();
+        const trustedExisting =
+          !boundByUid.empty || normalizeAccessValue(existing.customClaims?.accountType) === 'internal';
+
+        if (trustedExisting) {
+          await adminAuth.setCustomUserClaims(existing.uid, {
+            ...(existing.customClaims || {}),
+            ...initialClaims,
+          });
+          return res.json({ success: true, uid: existing.uid, alreadyExists: true });
+        }
+
+        // Take ownership of an untrusted/pre-registered technical address by
+        // replacing the Auth user. The old UID will not match any portalUsers
+        // document and cannot use the legacy linking path without Admin claims.
+        await adminAuth.deleteUser(existing.uid);
+        const recreated = await adminAuth.createUser({
+          email,
+          password,
+          emailVerified: false,
+          disabled: false,
+        });
+        await adminAuth.setCustomUserClaims(recreated.uid, initialClaims);
+        return res.json({
+          success: true,
+          uid: recreated.uid,
+          alreadyExists: false,
+          replacedUntrustedAccount: true,
+        });
       }
       throw error;
     }

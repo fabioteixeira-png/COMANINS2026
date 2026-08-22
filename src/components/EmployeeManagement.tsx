@@ -764,15 +764,17 @@ export default function EmployeeManagement({
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={handleOpenCreate}
-              className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center space-x-2 shadow-sm"
-            >
-              <UserPlus className="h-4 w-4" />
-              <span>+ Novo Colaborador</span>
-            </button>
-          </div>
+          {isUserAdmin && (
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleOpenCreate}
+                className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center space-x-2 shadow-sm"
+              >
+                <UserPlus className="h-4 w-4" />
+                <span>+ Novo Colaborador</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -945,7 +947,7 @@ export default function EmployeeManagement({
                                 <Edit className="h-4 w-4" />
                               </button>
 
-                              {(currentUser?.role === 'Administrador' || currentUser?.username !== emp.username) && (
+                              {isUserAdmin && (
                                 <button
                                   onClick={() => {
                                     if (requestAdminDelete) {
@@ -1511,7 +1513,8 @@ export default function EmployeeManagement({
                       <select
                         value={formData.role || ''}
                         onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold text-slate-900"
+                        disabled={!isUserAdmin}
+                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold text-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <option value="">Selecione...</option>
                         {dropdownOptions?.cargos?.map((cargo: string, idx: number) => (
@@ -2613,7 +2616,8 @@ export default function EmployeeManagement({
                         required
                         value={formData.username || ''}
                         onChange={(e) => setFormData({ ...formData, username: e.target.value.toLowerCase().trim() })}
-                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono font-bold text-royal-blue"
+                        disabled={!isUserAdmin}
+                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono font-bold text-royal-blue disabled:opacity-60 disabled:cursor-not-allowed"
                         placeholder="Ex: joaosilva"
                       />
                     </div>
@@ -2623,7 +2627,8 @@ export default function EmployeeManagement({
                       <select
                         value={(formData as any).permissionLevel || 'Padrão'}
                         onChange={(e) => setFormData({ ...formData, permissionLevel: e.target.value } as any)}
-                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold"
+                        disabled={!isUserAdmin}
+                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <option value="Administrador">Administrador (Total)</option>
                         <option value="Padrão">Padrão (Intermediário)</option>

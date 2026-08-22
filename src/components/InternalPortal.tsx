@@ -2762,7 +2762,6 @@ Status atual: ${e.status}.`,
       {
         Nome_Completo: "Carlos Eduardo Moreira",
         Login_Usuario: "carlos.moreira",
-        Senha: "Change123!",
         Cargo_Funcao: "Técnico de Laboratório",
         Matricula_Registro: "REG-1042",
         CPF: "123.456.789-00",
@@ -2775,7 +2774,6 @@ Status atual: ${e.status}.`,
       {
         Nome_Completo: "Mariana Santos Lima",
         Login_Usuario: "mariana.lima",
-        Senha: "Change123!",
         Cargo_Funcao: "Recursos Humanos (RH)",
         Matricula_Registro: "REG-1055",
         CPF: "987.654.321-11",
@@ -2839,7 +2837,6 @@ Status atual: ${e.status}.`,
       {
         Nome_Completo: "Carlos Eduardo Moreira",
         Login_Usuario: "carlos.moreira",
-        Senha: "Change123!",
         Cargo_Funcao: "Técnico de Laboratório",
         Matricula_Registro: "REG-1042",
         CPF: "123.456.789-00",
@@ -3665,7 +3662,7 @@ Status atual: ${e.status}.`,
             successCount++;
           }
         } else if (importType === "employees") {
-          // Fields: nome_completo, login_usuario, senha, cargo_funcao, matricula_registro, cpf, email, telefone, data_admissao, dia_aniversario, mes_aniversario
+          // Fields: nome_completo, login_usuario, cargo_funcao, matricula_registro, cpf, email, telefone, data_admissao, dia_aniversario, mes_aniversario
           const name =
             row.nome_completo ||
             row.nome ||
@@ -13801,8 +13798,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <span>1. Modelo Clientes</span>
                       </div>
                       <p className="text-slate-600 text-[11px] leading-relaxed">
-                        Razão Social, CNPJ, E-mail, Telefone, Endereço e Senha
-                        do Portal.
+                        Razão Social, CNPJ, E-mail, Telefone e Endereço. A senha
+                        do Portal é gerada automaticamente na primeira Entrada de Material.
                       </p>
                       <button
                         onClick={handleDownloadClientTemplate}

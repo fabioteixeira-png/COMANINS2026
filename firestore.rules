@@ -70,11 +70,15 @@ service cloud.firestore {
     match /systemSettings/{documentId} {
       // Only presentation settings are public. Operational sequences/catalogs require login.
       allow read: if isInternalAccount() || documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos'];
-      allow write: if isInternalAccount();
+
+      // Operational counters are written by normal internal workflows.
+      allow write: if (documentId in ['certSequence', 'intakeSequence'] && isInternalAccount()) ||
+        (documentId == 'examTypes' && canManageRh()) ||
+        (documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos', 'dropdownOptions'] && isAdministrator());
     }
     match /sitePhotos/{document=**} {
       allow read: if true;
-      allow write: if isInternalAccount();
+      allow write: if isAdministrator();
     }
     match /contactMessages/{document=**} {
       // Public submissions are persisted by the rate-limited backend, never directly by browsers.
@@ -90,7 +94,23 @@ service cloud.firestore {
       // Self-service updates are restricted to password-change state and digital
       // signature metadata. Role, permissionLevel, username, auth linkage and all
       // RH/financial fields cannot be changed by the employee through Firestore.
-      allow update: if canManageRh() || (
+      allow update: if isAdministrator() || (
+        // RH can maintain HR data but cannot change identity, authorization,
+        // forced-password state or another employee's digital signature.
+        isRhAccount() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'username',
+          'role',
+          'permissionLevel',
+          'authUid',
+          'authEmail',
+          'passwordChangeRequired',
+          'mustChangePassword',
+          'signaturePath',
+          'signatureVersion',
+          'signatureDate'
+        ])
+      ) || (
         isOwnPortalUser() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'passwordChangeRequired',
