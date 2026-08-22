@@ -1,9 +1,43 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isInternalAccount() {
+      return isSignedIn() && request.auth.token.accountType == 'internal';
+    }
+
+    function isClientAccount() {
+      return isSignedIn() && request.auth.token.accountType == 'client';
+    }
+
+    function isSignatureOwner(userId) {
+      return isInternalAccount()
+        && request.auth.token.portalUserId == userId;
+    }
+
+    function isValidSignatureImage() {
+      return request.resource != null
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/(png|jpeg|webp)');
+    }
+
+    // Assinaturas digitais dos técnicos.
+    // Leitura: somente usuários autenticados (internos ou clientes).
+    // Escrita: somente o próprio colaborador vinculado ao portalUserId.
+    // Cada versão é imutável: não permitimos sobrescrita ou exclusão pelo cliente web.
+    match /signatures/{userId}/{fileName} {
+      allow read: if isInternalAccount() || isClientAccount();
+      allow create: if isSignatureOwner(userId) && isValidSignatureImage();
+      allow update, delete: if false;
+    }
+
+    // Nenhum outro caminho do Storage fica exposto por padrão.
     match /{allPaths=**} {
-      allow read: if true;
-      allow write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }
