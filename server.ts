@@ -14,6 +14,7 @@ import nodemailer from 'nodemailer';
 import { adminAuth, adminDb } from './src/lib/firebase-admin.ts';
 import { initializeApp as initClientApp } from 'firebase/app';
 import { getFirestore as getClientFirestore, collection as getClientCollection, getDocs as getClientDocs } from 'firebase/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 
 let firebaseConfig: any = {};
 try {
@@ -124,6 +125,28 @@ const syncInternalAuthProfile = async (decoded: any) => {
   });
 
   return mergedProfile;
+};
+
+const scrubLegacyInternalPasswordFields = async (): Promise<void> => {
+  if (!firestoreDb) return;
+  try {
+    const snapshot = await firestoreDb.collection('portalUsers').get();
+    const legacyDocs = snapshot.docs.filter((doc) =>
+      Object.prototype.hasOwnProperty.call(doc.data() || {}, 'password')
+    );
+
+    if (legacyDocs.length === 0) return;
+
+    const batch = firestoreDb.batch();
+    for (const doc of legacyDocs) {
+      batch.update(doc.ref, { password: FieldValue.delete() });
+    }
+    await batch.commit();
+    console.log(`[SECURITY] Removed legacy password field from ${legacyDocs.length} portalUsers document(s).`);
+  } catch (error) {
+    // A falha de limpeza não pode derrubar o site público.
+    console.error('[SECURITY] Could not remove legacy portalUsers password fields:', error);
+  }
 };
 
 
@@ -880,52 +903,36 @@ app.post("/api/auth/verify-admin", requireAuth, async (req: AuthRequest, res) =>
 
 app.post("/api/auth/legacy-login", async (req, res) => {
   try {
-    const { username, cnpj, password, type } = req.body;
-    
+    const { cnpj, password, type } = req.body;
+
+    // Contas internas já utilizam exclusivamente Firebase Authentication.
+    // Nunca voltar a validar senha armazenada em portalUsers.
     if (type === 'internal') {
-      const usersRef = getClientCollection(clientDb, "portalUsers");
-      const snap = await getClientDocs(usersRef);
-      const user = snap.docs.find(d => {
-        const u = d.data();
-        return (u.username || '').toLowerCase() === username.toLowerCase();
-      });
-      
-      if (!user) return res.json({ valid: false });
-      
-      const userData = user.data();
-      if (userData.password === password) {
-        return res.json({ valid: true, user: { id: user.id, ...userData } });
-      }
-      return res.json({ valid: false });
-      
-    } else if (type === 'client') {
+      return res.status(410).json({ error: 'INTERNAL_LEGACY_AUTH_DISABLED' });
+    }
+
+    if (type === 'client') {
       const clientsRef = getClientCollection(clientDb, "clients");
       const snap = await getClientDocs(clientsRef);
-      const cleanCnpj = cnpj.replace(/\D/g, '');
+      const cleanCnpj = String(cnpj || '').replace(/\D/g, '');
       const client = snap.docs.find(d => {
         const c = d.data();
         return (c.cnpj || '').replace(/\D/g, '') === cleanCnpj;
       });
-      
+
       if (!client) return res.json({ valid: false });
-      
+
       const clientData = client.data();
       if (clientData.password === password) {
         return res.json({ valid: true, user: { id: client.id, ...clientData } });
       }
       return res.json({ valid: false });
     }
-    
-    res.json({ valid: false });
+
+    return res.json({ valid: false });
   } catch (error: any) {
-    console.error("Legacy login error:", error);
-    if (error.code === 7 || (error.message && error.message.includes('PERMISSION_DENIED'))) {
-        console.error("\n\n[ERRO CRÍTICO DE PERMISSÃO]");
-        console.error("O servidor Node.js não possui permissão para ler o banco de dados.");
-        console.error("Você precisa configurar as variáveis de ambiente: FIREBASE_ADMIN_PROJECT_ID, FIREBASE_ADMIN_CLIENT_EMAIL e FIREBASE_ADMIN_PRIVATE_KEY");
-        console.error("com o JSON da conta de serviço (Service Account) do Firebase.\n\n");
-    }
-    res.status(500).json({ error: "Erro de servidor ao validar credencial antiga." });
+    console.error("Legacy client login error:", error);
+    return res.status(500).json({ error: "Erro de servidor ao validar credencial antiga do cliente." });
   }
 });
 
@@ -1677,6 +1684,8 @@ Required JSON format:
   }
 
   // Start server
+  void scrubLegacyInternalPasswordFields();
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor COMANINS rodando na porta ${PORT}`);
   });

@@ -280,7 +280,6 @@ export interface PortalUser {
   role: string;
   permissionLevel?: string;
   register: string;
-  password?: string;
   mustChangePassword?: boolean;
   passwordChangeRequired?: boolean;
   authUid?: string;
@@ -437,7 +436,6 @@ export const INITIAL_PORTAL_USERS: PortalUser[] = [
     role: "Administrador",
     permissionLevel: "Administrador",
     register: "CFT-BA 123456",
-    password: "comanins2026",
     department: "Direção Geral",
     companyUnit: "COMANINS - Filial Camaçari",
     status: "Ativo",
@@ -452,7 +450,6 @@ export const INITIAL_PORTAL_USERS: PortalUser[] = [
     role: "Administrador",
     permissionLevel: "Administrador",
     register: "DIR-001",
-    password: "comanins2026",
     department: "Direção / Gerência Geral",
     companyUnit: "COMANINS - Filial Camaçari",
     status: "Ativo",
@@ -467,7 +464,6 @@ export const INITIAL_PORTAL_USERS: PortalUser[] = [
     role: "Recursos Humanos (RH)",
     permissionLevel: "Recursos Humanos (RH)",
     register: "RH-001",
-    password: "comanins2026",
     department: "Recursos Humanos / Gestão de Pessoas",
     companyUnit: "COMANINS - Filial Camaçari",
     status: "Ativo",

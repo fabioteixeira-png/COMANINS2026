@@ -15,7 +15,6 @@ export interface InternalUser {
   username: string;
   role: string;
   register: string;
-  password?: string;
   mustChangePassword?: boolean;
   passwordChangeRequired?: boolean;
   authUid?: string;
@@ -168,38 +167,7 @@ export default function LoginScreen({
       }
     } catch (err: any) {
       if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        try {
-          const res = await fetch('/api/auth/legacy-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: cleanUser, password: cleanPass, type: 'internal' })
-          });
-          
-          if (!res.ok) {
-            setErrorMsg('Não foi possível conectar ao servidor para validar a credencial antiga. Tente novamente ou contate o administrador.');
-            return;
-          }
-          
-          const data = await res.json();
-          if (res.ok && data.valid) {
-            let userDoc = data.user;
-            if (userDoc) {
-              setPendingChangeUser(userDoc);
-              setPasswordChangeRequired(true);
-              setPendingUserEmail(email);
-              setLegacyAuthSuccess(true);
-              setActiveTabType('internal');
-            } else {
-              setErrorMsg('Usuário não encontrado na base.');
-            }
-          } else if (res.ok && !data.valid) {
-            setErrorMsg('Usuário ou senha interna incorretos. Por favor, verifique suas credenciais.');
-          } else {
-            setErrorMsg('Não foi possível validar sua conta antiga para migração. Tente novamente ou contate o administrador.');
-          }
-        } catch (serverErr) {
-          setErrorMsg('Erro ao conectar ao servidor para validação de legado.');
-        }
+        setErrorMsg('Usuário ou senha interna incorretos. Por favor, verifique suas credenciais.');
       } else {
         setErrorMsg('Erro de autenticação: ' + err.message);
       }

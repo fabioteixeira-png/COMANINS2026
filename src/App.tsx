@@ -373,7 +373,8 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
 
   const handleUpdateInternalUser = async (id: string, updates: Partial<PortalUser>) => {
     try {
-      const cleanUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
+      const { password: _legacyPassword, ...passwordFreeUpdates } = updates as Partial<PortalUser> & { password?: string };
+      const cleanUpdates = Object.entries(passwordFreeUpdates).reduce((acc, [key, value]) => {
         if (value === null) {
           acc[key] = deleteField();
         } else if (value !== undefined) {

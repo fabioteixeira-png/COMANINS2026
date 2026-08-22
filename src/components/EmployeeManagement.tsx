@@ -211,7 +211,6 @@ export default function EmployeeManagement({
     name: '',
     socialName: '',
     username: '',
-    password: '',
     role: 'Técnico de Laboratório',
     register: '',
     cpf: '',
@@ -555,7 +554,6 @@ export default function EmployeeManagement({
       name: '',
       socialName: '',
       username: '',
-      password: '',
       role: 'Técnico de Laboratório',
       register: `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
       cpf: '',
@@ -632,7 +630,8 @@ export default function EmployeeManagement({
   // Open Edit Modal
   const handleOpenEdit = async (user: PortalUser) => {
     setSelectedUser(user);
-    setFormData({ ...user });
+    const { password: _legacyPassword, ...safeUser } = user as PortalUser & { password?: string };
+    setFormData(safeUser);
     setActiveFormTab(1);
     
     setIsLoadingDocs(true);
@@ -686,13 +685,12 @@ export default function EmployeeManagement({
     const logs = [auditEntry, ...(formData.auditLogs || [])];
 
     if (selectedUser && onUpdateInternalUser) {
-      // Update existing
-      const isPasswordChanged = formData.password && formData.password !== selectedUser.password;
-      
+      // Update existing. Senhas internas são gerenciadas exclusivamente pelo Firebase Authentication.
+      const { password: _legacyPassword, ...safeFormData } = formData as Partial<PortalUser> & { password?: string };
       const updatePayload: any = {
-        ...formData,
+        ...safeFormData,
         permissionLevel: (formData as any).permissionLevel || 'Padrão',
-        mustChangePassword: isPasswordChanged ? true : (formData.mustChangePassword ?? selectedUser.mustChangePassword),
+        mustChangePassword: formData.mustChangePassword ?? selectedUser.mustChangePassword,
         auditLogs: logs
       };
       
@@ -712,7 +710,6 @@ export default function EmployeeManagement({
         role: formData.role || 'Técnico de Laboratório',
         permissionLevel: (formData as any).permissionLevel || 'Padrão',
         register: formData.register || `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
-        password: formData.password?.trim() || undefined,
         mustChangePassword: true,
         auditLogs: logs
       };
@@ -2618,17 +2615,6 @@ export default function EmployeeManagement({
                         onChange={(e) => setFormData({ ...formData, username: e.target.value.toLowerCase().trim() })}
                         className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono font-bold text-royal-blue"
                         placeholder="Ex: joaosilva"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold mb-1">Senha de Acesso ao Portal</label>
-                      <input
-                        type="text"
-                        value={formData.password || ''}
-                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-mono"
-                        placeholder="Senha de acesso"
                       />
                     </div>
 

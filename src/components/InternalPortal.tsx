@@ -957,7 +957,6 @@ export default function InternalPortal({
     permissionLevel?: string;
     birthDate?: string;
     id?: string;
-    password?: string;
   }>({ name: "", username: "", role: "", permissionLevel: "Padrão" });
   const [isEditingRoles, setIsEditingRoles] = useState(false);
   const [editingRolesStr, setEditingRolesStr] = useState("");
@@ -3306,7 +3305,6 @@ Status atual: ${e.status}.`,
             await onAddInternalUser({
               name: u.name || "Usuário",
               username: u.username,
-              password: u.password || "123456",
               role: u.role || "Técnico de Laboratório",
               register: u.register || "",
               cpf: u.cpf || "",
@@ -3733,7 +3731,6 @@ Status atual: ${e.status}.`,
           )
             .toLowerCase()
             .trim();
-          const password = row.senha || row.password || "Change123!";
           const role =
             row.cargo_funcao ||
             row.cargo ||
@@ -3758,7 +3755,6 @@ Status atual: ${e.status}.`,
               await onAddInternalUser({
                 name,
                 username,
-                password,
                 role,
                 register,
                 cpf,
@@ -20738,12 +20734,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   role: editingUserData.role,
                   permissionLevel: editingUserData.permissionLevel || "Padrão",
                 };
-                if (
-                  editingUserData.password &&
-                  editingUserData.password.trim().length > 0
-                ) {
-                  updates.password = editingUserData.password;
-                }
                 onUpdateInternalUser(editingUserId, updates);
                 setEditingUserId(null);
               }}
@@ -20781,23 +20771,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     })
                   }
                   className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-slate-800 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold text-sm">
-                  Nova Senha (opcional)
-                </label>
-                <input
-                  type="password"
-                  value={editingUserData.password || ""}
-                  onChange={(e) =>
-                    setEditingUserData({
-                      ...editingUserData,
-                      password: e.target.value,
-                    })
-                  }
-                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-slate-800 font-mono"
-                  placeholder="Deixe em branco para manter a atual"
                 />
               </div>
               <div>
