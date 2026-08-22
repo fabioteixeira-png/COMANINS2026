@@ -2612,8 +2612,6 @@ Status atual: ${e.status}.`,
             email: clientEmail.trim(),
             phone: clientPhone.trim(),
             city: clientCity.trim(),
-            password:
-              clientPassword.trim() || editingClient.password || "123456",
             isFieldService: clientIsFieldService,
           });
         }
@@ -6442,19 +6440,24 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       placeholder="Ex: Av. Alberto Soares Sampaio, 2122 A - Capuava, Mauá - SP, 09380-120"
                     />
                   </div>
-                  <div>
-                    <label className="block text-slate-600 mb-1">
-                      Senha de Acesso Portal *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={clientPassword}
-                      onChange={(e) => setClientPassword(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                      placeholder="Ex: 123456"
-                    />
-                  </div>
+                  {!editingClient && (
+                    <div>
+                      <label className="block text-slate-600 mb-1">
+                        Senha temporária de acesso *
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={clientPassword}
+                        onChange={(e) => setClientPassword(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
+                        placeholder="Senha temporária para o primeiro acesso"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Após o primeiro acesso, o cliente definirá uma nova senha no Firebase.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="flex items-center space-x-2 mt-4 col-span-1 sm:col-span-2">
                     <input

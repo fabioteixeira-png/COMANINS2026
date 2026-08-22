@@ -74,8 +74,7 @@ export const INITIAL_CLIENTS: Client[] = [
     cnpj: "33.000.167/0001-56",
     email: "instrumentacao@petrobras.com.br",
     phone: "(11) 4344-8000",
-    city: "Mauá - SP",
-    password: "123456"
+    city: "Mauá - SP"
   },
   {
     id: "c2",
@@ -83,8 +82,7 @@ export const INITIAL_CLIENTS: Client[] = [
     cnpj: "07.526.557/0001-89",
     email: "manutencao.jundiai@ambev.com.br",
     phone: "(11) 4589-9200",
-    city: "Jundiaí - SP",
-    password: "123456"
+    city: "Jundiaí - SP"
   },
   {
     id: "c3",
@@ -92,8 +90,7 @@ export const INITIAL_CLIENTS: Client[] = [
     cnpj: "42.150.391/0001-22",
     email: "metrologia@braskem.com.br",
     phone: "(11) 4434-2000",
-    city: "Santo André - SP",
-    password: "123456"
+    city: "Santo André - SP"
   }
 ];
 
@@ -646,27 +643,30 @@ export async function getPaginatedDocs<T>(
 }
 
 // 1. Clients
+const sanitizeClientRecord = (client: Client): Client => {
+  const { password, ...safeClient } = client;
+  return safeClient as Client;
+};
+
 export async function syncClients(callback: (clients: Client[]) => void) {
-  const shared = createSharedSync<Client[]>(
-    'clients',
-    'clients',
-    INITIAL_CLIENTS,
-    (onData, onError) => {
-      const q = query(collection(db, 'clients'));
-      return onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Client));
-        onData(list);
-      }, onError);
-    }
-  );
-  return shared(callback);
+  try { localStorage.removeItem('comanins_cache_clients'); } catch (e) {}
+  const q = query(collection(db, 'clients'));
+  return onSnapshot(q, (snapshot) => {
+    const list = snapshot.docs.map(d =>
+      sanitizeClientRecord({ ...d.data(), id: d.id } as Client)
+    );
+    callback(list);
+  }, (err) => {
+    handleQuotaOrError(err);
+    callback([]);
+  });
 }
 
 export async function addClientDoc(data: Omit<Client, 'id'>): Promise<Client> {
   const newId = 'c_' + Date.now();
   const client: Client = { ...data, id: newId };
   await setDoc(doc(db, 'clients', newId), client);
-  return client;
+  return sanitizeClientRecord(client);
 }
 
 export async function addClientsBulkDocs(list: Omit<Client, 'id'>[]): Promise<Client[]> {
@@ -675,7 +675,7 @@ export async function addClientsBulkDocs(list: Omit<Client, 'id'>[]): Promise<Cl
     const newId = 'c_' + (Date.now() + i);
     const item: Client = { ...list[i], id: newId };
     await setDoc(doc(db, 'clients', newId), item);
-    result.push(item);
+    result.push(sanitizeClientRecord(item));
   }
   return result;
 }
@@ -686,7 +686,7 @@ export async function deleteClientDoc(id: string): Promise<void> {
 
 export async function updateClientDoc(client: Client): Promise<Client> {
   await setDoc(doc(db, 'clients', client.id), client, { merge: true });
-  return client;
+  return sanitizeClientRecord(client);
 }
 
 // 2. Instruments

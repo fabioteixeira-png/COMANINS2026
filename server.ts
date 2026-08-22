@@ -12,8 +12,6 @@ import { getOrCreateUser } from './src/db/users.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 import { adminAuth, adminDb } from './src/lib/firebase-admin.ts';
-import { initializeApp as initClientApp } from 'firebase/app';
-import { getFirestore as getClientFirestore, collection as getClientCollection, getDocs as getClientDocs } from 'firebase/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 
 let firebaseConfig: any = {};
@@ -24,9 +22,6 @@ try {
 } catch (e) {
   console.warn("⚠️ Arquivo firebase-applet-config.json não encontrado ou inválido.");
 }
-
-const clientApp = firebaseConfig.projectId ? initClientApp(firebaseConfig) : null;
-const clientDb = clientApp ? getClientFirestore(clientApp) : null;
 
 const firestoreDb = adminDb;
 
@@ -95,6 +90,82 @@ const sanitizePortalUserForClient = (profile: any) => {
   if (!profile) return profile;
   const { password, ...safeProfile } = profile;
   return safeProfile;
+};
+
+const normalizeCnpj = (value: unknown) => String(value || '').replace(/\D/g, '');
+
+const sanitizeClientForPortal = (profile: any) => {
+  if (!profile) return profile;
+  const { password, ...safeProfile } = profile;
+  return safeProfile;
+};
+
+const findClientForAuth = async (decoded: any) => {
+  if (!firestoreDb) {
+    throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  }
+
+  const clientsRef = firestoreDb.collection('clients');
+  const byUid = await clientsRef.where('authUid', '==', decoded.uid).limit(1).get();
+  if (!byUid.empty) {
+    const doc = byUid.docs[0];
+    return { id: doc.id, ...doc.data() };
+  }
+
+  const email = String(decoded.email || '').trim().toLowerCase();
+  if (!email.endsWith('@comanins.client')) return null;
+  const cnpjFromEmail = normalizeCnpj(email.slice(0, -'@comanins.client'.length));
+  if (!cnpjFromEmail) return null;
+
+  // CNPJ may be stored formatted or unformatted, so compare normalized values.
+  const snapshot = await clientsRef.get();
+  const match = snapshot.docs.find((doc) => normalizeCnpj(doc.data()?.cnpj) === cnpjFromEmail);
+  if (!match) return null;
+
+  const data = match.data();
+  const existingAuthUid = String(data?.authUid || '').trim();
+  if (existingAuthUid && existingAuthUid !== decoded.uid) {
+    throw new Error('CLIENT_AUTH_UID_CONFLICT');
+  }
+
+  return { id: match.id, ...data };
+};
+
+const buildClientClaims = (profile: any) => ({
+  accountType: 'client',
+  clientId: String(profile.id),
+  passwordChangeRequired:
+    profile?.passwordChangeRequired !== false || profile?.mustChangePassword === true,
+});
+
+const syncClientAuthProfile = async (decoded: any) => {
+  if (!adminAuth || !firestoreDb) {
+    throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  }
+
+  const email = String(decoded.email || '').trim().toLowerCase();
+  if (!email.endsWith('@comanins.client')) {
+    throw new Error('NOT_CLIENT_ACCOUNT');
+  }
+
+  const profile: any = await findClientForAuth(decoded);
+  if (!profile) return null;
+
+  const updates: Record<string, string> = {};
+  if (profile.authUid !== decoded.uid) updates.authUid = decoded.uid;
+  if (profile.authEmail !== email) updates.authEmail = email;
+  if (Object.keys(updates).length > 0) {
+    await firestoreDb.collection('clients').doc(profile.id).update(updates);
+  }
+
+  const mergedProfile = { ...profile, ...updates };
+  const authUser = await adminAuth.getUser(decoded.uid);
+  await adminAuth.setCustomUserClaims(decoded.uid, {
+    ...(authUser.customClaims || {}),
+    ...buildClientClaims(mergedProfile),
+  });
+
+  return mergedProfile;
 };
 
 const syncInternalAuthProfile = async (decoded: any) => {
@@ -795,6 +866,82 @@ app.post("/api/auth/sync-internal-profile", requireAuth, async (req: AuthRequest
   }
 });
 
+app.post('/api/auth/sync-client-profile', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const profile = await syncClientAuthProfile(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
+    }
+
+    return res.json({
+      success: true,
+      client: sanitizeClientForPortal(profile),
+      claims: buildClientClaims(profile),
+    });
+  } catch (error: any) {
+    if (error?.message === 'FIREBASE_ADMIN_NOT_CONFIGURED') {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
+      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
+    }
+    if (error?.message === 'NOT_CLIENT_ACCOUNT') {
+      return res.status(403).json({ error: 'NOT_CLIENT_ACCOUNT' });
+    }
+    console.error('Sync client profile error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/auth/complete-client-password-change', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    if (!adminAuth || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+
+    const profile: any = await findClientForAuth(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
+    }
+
+    await firestoreDb.collection('clients').doc(profile.id).update({
+      passwordChangeRequired: false,
+      mustChangePassword: false,
+      password: FieldValue.delete(),
+      authUid: req.user?.uid,
+      authEmail: String(req.user?.email || '').trim().toLowerCase(),
+    });
+
+    const updatedProfile = {
+      ...profile,
+      passwordChangeRequired: false,
+      mustChangePassword: false,
+      authUid: req.user?.uid,
+      authEmail: String(req.user?.email || '').trim().toLowerCase(),
+    };
+    delete updatedProfile.password;
+
+    const authUser = await adminAuth.getUser(req.user!.uid);
+    await adminAuth.setCustomUserClaims(req.user!.uid, {
+      ...(authUser.customClaims || {}),
+      ...buildClientClaims(updatedProfile),
+      passwordChangeRequired: false,
+    });
+
+    return res.json({
+      success: true,
+      client: sanitizeClientForPortal(updatedProfile),
+      claims: { ...buildClientClaims(updatedProfile), passwordChangeRequired: false },
+    });
+  } catch (error: any) {
+    if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
+      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
+    }
+    console.error('Complete client password change error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => {
   try {
     if (!adminAuth || !firestoreDb) {
@@ -913,19 +1060,21 @@ app.post("/api/auth/legacy-login", async (req, res) => {
     }
 
     if (type === 'client') {
-      const clientsRef = getClientCollection(clientDb, "clients");
-      const snap = await getClientDocs(clientsRef);
-      const cleanCnpj = String(cnpj || '').replace(/\D/g, '');
-      const client = snap.docs.find(d => {
-        const c = d.data();
-        return (c.cnpj || '').replace(/\D/g, '') === cleanCnpj;
-      });
+      if (!firestoreDb) {
+        return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+      }
+      const snap = await firestoreDb.collection('clients').get();
+      const cleanCnpj = normalizeCnpj(cnpj);
+      const client = snap.docs.find((d) => normalizeCnpj(d.data()?.cnpj) === cleanCnpj);
 
       if (!client) return res.json({ valid: false });
 
       const clientData = client.data();
       if (clientData.password === password) {
-        return res.json({ valid: true, user: { id: client.id, ...clientData } });
+        return res.json({
+          valid: true,
+          user: sanitizeClientForPortal({ id: client.id, ...clientData }),
+        });
       }
       return res.json({ valid: false });
     }

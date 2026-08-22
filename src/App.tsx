@@ -100,7 +100,6 @@ export default function App() {
     const initFirebaseSync = async () => {
       setIsLoading(true);
       try {
-        const u1 = await syncClients(setClients);
         const u2 = await syncInstruments(setInstruments);
         const u3 = await syncReports(setReports);
         const u4 = await syncMessages(setMessages);
@@ -112,7 +111,7 @@ export default function App() {
             setSitePhotos(photos);
           }
         });
-        unsubs = [u1, u2, u3, u4, u6, u7, u8];
+        unsubs = [u2, u3, u4, u6, u7, u8];
       } catch (err) {
         console.error('Error initializing Firestore sync:', err);
 
@@ -127,6 +126,38 @@ export default function App() {
       unsubs.forEach(unsub => unsub && unsub());
     };
   }, []);
+
+  // Client master data must not be downloaded on the public site or login screen.
+  // It is only required by authenticated internal users; client users receive only
+  // their own profile from /api/auth/sync-client-profile.
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+
+    const startClientsSync = async () => {
+      if (viewMode !== 'portal' || !currentInternalUser) {
+        setClients([]);
+        try { localStorage.removeItem('comanins_cache_clients'); } catch (e) {}
+        return;
+      }
+
+      try {
+        unsubscribe = await syncClients((list) => {
+          if (!cancelled) setClients(list);
+        });
+      } catch (err) {
+        console.error('Error initializing authenticated clients sync:', err);
+        if (!cancelled) setClients([]);
+      }
+    };
+
+    startClientsSync();
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [viewMode, currentInternalUser]);
 
   // portalUsers contains employee data and must never be subscribed before an internal login.
   useEffect(() => {
@@ -453,7 +484,6 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
         ) : viewMode === 'login' ? (
           <LoginScreen
             customLogo={activeLogo}
-            clients={clients}
             initialTab={loginTab}
             internalUsers={internalUsers}
             onUpdateInternalUser={handleUpdateInternalUser}

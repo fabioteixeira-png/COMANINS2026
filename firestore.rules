@@ -5,6 +5,12 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.accountType == 'internal';
     }
 
+    function isClientAccount() {
+      return request.auth != null &&
+        request.auth.token.accountType == 'client' &&
+        request.auth.token.clientId != null;
+    }
+
     function isAdministrator() {
       return isInternalAccount() && (
         request.auth.token.permissionLevel == 'Administrador' ||
@@ -81,9 +87,12 @@ service cloud.firestore {
       allow update: if isOwnPortalUser() || isAdministrator();
       allow create, delete: if isAdministrator();
     }
-    match /clients/{document=**} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    match /clients/{clientId} {
+      // Client master data is no longer public. Internal accounts can manage the
+      // directory; a client account can read only its own company profile.
+      allow read: if isInternalAccount() ||
+        (isClientAccount() && request.auth.token.clientId == clientId);
+      allow create, update, delete: if isInternalAccount();
     }
 
     // Documentos individuais do colaborador: o próprio titular pode ler;
@@ -147,6 +156,7 @@ service cloud.firestore {
     match /{collection}/{document=**} {
       allow read, write: if request.auth != null &&
         collection != 'portalUsers' &&
+        collection != 'clients' &&
         collection != 'employeeDocuments' &&
         collection != 'medical_exams' &&
         collection != 'employeeAsos' &&

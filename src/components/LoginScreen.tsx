@@ -3,9 +3,7 @@ import ComaninsLogo from './ComaninsLogo';
 import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge } from 'lucide-react';
 import { Client } from '../types';
 import { auth } from '../lib/firebase';
-import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword, getIdToken } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { maskCpfCnpj } from '../utils/masks';
 import { authJsonFetch } from '../utils/authApi';
 
@@ -26,7 +24,6 @@ export interface InternalUser {
 }
 
 interface LoginScreenProps {
-  clients: Client[];
   initialTab: 'internal' | 'client';
   onLoginSuccessInternal: (user: InternalUser) => void;
   onLoginSuccessClient: (client: Client) => void;
@@ -37,7 +34,6 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ 
-  clients, 
   initialTab, 
   onLoginSuccessInternal, 
   onLoginSuccessClient, 
@@ -184,15 +180,30 @@ export default function LoginScreen({
 
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, cleanPass);
-      let clientDoc = clients.find(c => c.cnpj?.replace(/\D/g, '') === cleanCnpj);
-      if (!clientDoc) {
-        // Fallback to fetch from DB just in case cache is empty
 
+      const syncResponse = await authJsonFetch('/api/auth/sync-client-profile', {
+        method: 'POST',
+      });
+      const syncData = await syncResponse.json();
+      if (!syncResponse.ok || !syncData?.client) {
+        if (syncResponse.status === 409) {
+          setErrorMsg('Esta conta Firebase está vinculada a outro cliente. Contate o administrador.');
+        } else if (syncResponse.status === 404) {
+          setErrorMsg('Conta autenticada, mas cadastro do cliente não foi encontrado. Contate a COMANINS.');
+        } else {
+          setErrorMsg('Não foi possível sincronizar o cadastro do cliente. Contate a COMANINS.');
+        }
+        await auth.signOut();
+        return;
       }
-      
-      const tokenResult = await userCredential.user.getIdTokenResult();
-      const needsChange = tokenResult.claims.passwordChangeRequired === true || clientDoc?.passwordChangeRequired === true || (clientDoc && clientDoc.passwordChangeRequired !== false);
-      
+
+      const clientDoc = syncData.client as Client;
+      await userCredential.user.getIdToken(true);
+      const tokenResult = await userCredential.user.getIdTokenResult(true);
+      const needsChange = tokenResult.claims.passwordChangeRequired === true ||
+        clientDoc?.passwordChangeRequired === true ||
+        (clientDoc && clientDoc.passwordChangeRequired !== false);
+
       if (needsChange) {
         setPendingChangeUser(clientDoc as any);
         setPasswordChangeRequired(true);
@@ -307,11 +318,17 @@ export default function LoginScreen({
         }
         onLoginSuccessInternal(syncData.user as InternalUser);
       } else if (activeTabType === 'client' && pendingChangeUser?.id) {
-        await updateDoc(doc(db, 'clients', pendingChangeUser.id), { passwordChangeRequired: false, mustChangePassword: false });
+        const completeResponse = await authJsonFetch('/api/auth/complete-client-password-change', {
+          method: 'POST',
+        });
+        const completeData = await completeResponse.json();
+        if (!completeResponse.ok || !completeData?.client) {
+          throw new Error('Senha atualizada, mas não foi possível concluir a migração segura do cliente.');
+        }
         if (auth.currentUser) {
           await auth.currentUser.getIdToken(true);
         }
-        onLoginSuccessClient(pendingChangeUser as unknown as Client);
+        onLoginSuccessClient(completeData.client as Client);
       }
 
     } catch (err: any) {
