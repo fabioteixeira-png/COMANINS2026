@@ -1,6 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isInternalAccount() {
+      return request.auth != null && request.auth.token.accountType == 'internal';
+    }
+
+    function isAdministrator() {
+      return isInternalAccount() && (
+        request.auth.token.permissionLevel == 'Administrador' ||
+        request.auth.token.role == 'Administrador' ||
+        request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'master'
+      );
+    }
+
+    function isOwnPortalUser() {
+      return request.auth != null &&
+        request.auth.token.email != null &&
+        resource.data.username != null &&
+        request.auth.token.email == resource.data.username + '@comanins.internal';
+    }
     match /systemSettings/{document=**} {
       allow read: if true;
       allow write: if request.auth != null;
@@ -14,8 +33,12 @@ service cloud.firestore {
       allow read, update, delete: if request.auth != null;
     }
     match /portalUsers/{document=**} {
-      allow read: if true;
-      allow write: if request.auth != null;
+      // Etapa 1D: remove leitura pública.
+      // Leitura permanece disponível apenas para contas internas autenticadas.
+      allow read: if isInternalAccount();
+      // O próprio colaborador pode atualizar seu cadastro; criação/exclusão ficam restritas a administrador.
+      allow update: if isOwnPortalUser() || isAdministrator();
+      allow create, delete: if isAdministrator();
     }
     match /clients/{document=**} {
       allow read: if true;

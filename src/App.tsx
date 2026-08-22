@@ -104,9 +104,6 @@ export default function App() {
         const u2 = await syncInstruments(setInstruments);
         const u3 = await syncReports(setReports);
         const u4 = await syncMessages(setMessages);
-        const u5 = await syncPortalUsers((users) => {
-          setInternalUsers(users);
-        });
 
         const u6 = await syncCustomLogo(setCustomLogo);
         const u7 = await syncHeaderLogo(setHeaderLogo);
@@ -115,7 +112,7 @@ export default function App() {
             setSitePhotos(photos);
           }
         });
-        unsubs = [u1, u2, u3, u4, u5, u6, u7, u8];
+        unsubs = [u1, u2, u3, u4, u6, u7, u8];
       } catch (err) {
         console.error('Error initializing Firestore sync:', err);
 
@@ -129,6 +126,45 @@ export default function App() {
     return () => {
       unsubs.forEach(unsub => unsub && unsub());
     };
+  }, []);
+
+  // portalUsers contains employee data and must never be subscribed before an internal login.
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+
+    const startInternalUsersSync = async () => {
+      if (viewMode !== 'portal' || !currentInternalUser) {
+        setInternalUsers([]);
+        try {
+          localStorage.removeItem('comanins_portal_users_cache');
+        } catch (e) {}
+        return;
+      }
+
+      try {
+        unsubscribe = await syncPortalUsers((users) => {
+          if (!cancelled) setInternalUsers(users);
+        });
+      } catch (err) {
+        console.error('Error initializing portalUsers sync:', err);
+        if (!cancelled) setInternalUsers([]);
+      }
+    };
+
+    startInternalUsersSync();
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [viewMode, currentInternalUser]);
+
+  // Remove legacy employee cache left by older versions.
+  useEffect(() => {
+    try {
+      localStorage.removeItem('comanins_portal_users_cache');
+    } catch (e) {}
   }, []);
 
   // CLIENT CRUD ACTIONS (Firestore)
@@ -458,6 +494,8 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
                 await signOut(auth);
               } finally {
                 setCurrentInternalUser(null);
+                setInternalUsers([]);
+                try { localStorage.removeItem('comanins_portal_users_cache'); } catch (e) {}
                 setViewMode('public');
               }
             }}

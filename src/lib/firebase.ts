@@ -1245,107 +1245,32 @@ export async function deleteIntakeDoc(id: string): Promise<void> {
 // 6. Portal Users
 export async function syncPortalUsers(callback: (users: PortalUser[]) => void) {
   const colRef = collection(db, 'portalUsers');
-  const seedRef = doc(db, 'systemSettings', 'portalUsersSeeded');
 
-  // Deliver cached data immediately if present
-  const savedCache = localStorage.getItem('comanins_portal_users_cache');
-  if (savedCache) {
-    try {
-      const parsed = JSON.parse(savedCache);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        callback(parsed);
-      }
-    } catch (e) {}
-  }
-
-  return onSnapshot(colRef, async (snapshot) => {
-    if (snapshot.empty) {
-      try {
-        const seedSnap = await getDoc(seedRef);
-        if (!seedSnap.exists()) {
-          await setDoc(seedRef, { seededAt: new Date().toISOString() });
-          for (const user of INITIAL_PORTAL_USERS) {
-            await setDoc(doc(colRef, user.id), user);
-          }
-          try {
-            localStorage.setItem('comanins_portal_users_cache', JSON.stringify(INITIAL_PORTAL_USERS));
-          } catch (e) {}
-          callback(INITIAL_PORTAL_USERS);
-          return;
-        }
-      } catch (e) {
-        console.error('Error checking portalUsers seed flag:', e);
-      }
-      const saved = localStorage.getItem('comanins_portal_users_cache');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            callback(parsed);
-            return;
-          }
-        } catch (e) {}
-      }
-      callback(INITIAL_PORTAL_USERS);
-    } else {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PortalUser));
-      try {
-        localStorage.setItem('comanins_portal_users_cache', JSON.stringify(list));
-      } catch (e) {}
-      callback(list);
-    }
+  // Employee records are intentionally not cached in localStorage.
+  // This listener must only be started after an authenticated internal login.
+  return onSnapshot(colRef, (snapshot) => {
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PortalUser));
+    callback(list);
   }, (err) => {
-    console.warn('Firestore syncPortalUsers notice (Quota or network):', err);
+    console.warn('Firestore syncPortalUsers notice:', err);
     if (err && String(err).includes('Quota limit exceeded')) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('firestore-quota-exceeded', { detail: err }));
       }
     }
-    const saved = localStorage.getItem('comanins_portal_users_cache');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          callback(parsed);
-          return;
-        }
-      } catch (e) {}
-    }
-    callback(INITIAL_PORTAL_USERS);
+    callback([]);
   });
 }
 
 export async function addPortalUserDoc(user: Omit<PortalUser, 'id'>): Promise<PortalUser> {
   const newId = 'user_' + Date.now();
   const fullUser: PortalUser = { ...user, id: newId };
-  try {
-    await setDoc(doc(db, 'portalUsers', newId), fullUser);
-  } catch (e) {
-    console.warn('Firestore addPortalUserDoc offline fallback:', e);
-  }
-  // Always update local cache
-  try {
-    const saved = localStorage.getItem('comanins_portal_users_cache');
-    const list: PortalUser[] = saved ? JSON.parse(saved) : [...INITIAL_PORTAL_USERS];
-    const updated = [fullUser, ...list.filter(u => u.id !== newId)];
-    localStorage.setItem('comanins_portal_users_cache', JSON.stringify(updated));
-  } catch (e) {}
+  await setDoc(doc(db, 'portalUsers', newId), fullUser);
   return fullUser;
 }
 
 export async function updatePortalUserDoc(id: string, updates: Partial<PortalUser>): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'portalUsers', id), updates);
-  } catch (e) {
-    console.error('Firestore updatePortalUserDoc error:', e);
-    throw e;
-  }
-  try {
-    const saved = localStorage.getItem('comanins_portal_users_cache');
-    const list: PortalUser[] = saved ? JSON.parse(saved) : [...INITIAL_PORTAL_USERS];
-    const updated = list.map(u => u.id === id ? { ...u, ...updates } : u);
-    localStorage.setItem('comanins_portal_users_cache', JSON.stringify(updated));
-  } catch (e) {}
+  await updateDoc(doc(db, 'portalUsers', id), updates);
 }
 
 export async function uploadSignatureImage(file: File, userId: string, version: number): Promise<string> {
@@ -1358,17 +1283,7 @@ export async function uploadSignatureImage(file: File, userId: string, version: 
 }
 
 export async function deletePortalUserDoc(idOrUsername: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'portalUsers', idOrUsername));
-  } catch (e) {
-    console.warn('Firestore deletePortalUserDoc offline fallback:', e);
-  }
-  try {
-    const saved = localStorage.getItem('comanins_portal_users_cache');
-    const list: PortalUser[] = saved ? JSON.parse(saved) : [...INITIAL_PORTAL_USERS];
-    const updated = list.filter(u => u.id !== idOrUsername && u.username !== idOrUsername);
-    localStorage.setItem('comanins_portal_users_cache', JSON.stringify(updated));
-  } catch (e) {}
+  await deleteDoc(doc(db, 'portalUsers', idOrUsername));
 }
 
 // 7. Employee Birthdays
