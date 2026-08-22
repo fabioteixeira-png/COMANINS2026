@@ -22,7 +22,6 @@ import {
   syncInstruments,
   syncReports,
   syncMessages,
-  syncPortalUsers,
   addClientDoc,
   addClientsBulkDocs,
   deleteClientDoc,
@@ -244,12 +243,13 @@ export default function App() {
     };
   }, [viewMode, currentInternalUser]);
 
-  // portalUsers contains employee data and must never be subscribed before an internal login.
+  // Employee directory is loaded through the authenticated backend. Admin/RH
+  // receive the full RH profile set; other internal roles receive only the
+  // operational directory fields required by the portal.
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
     let cancelled = false;
 
-    const startInternalUsersSync = async () => {
+    const loadInternalUsers = async () => {
       if (viewMode !== 'portal' || !currentInternalUser) {
         setInternalUsers([]);
         try {
@@ -259,20 +259,24 @@ export default function App() {
       }
 
       try {
-        unsubscribe = await syncPortalUsers((users) => {
-          if (!cancelled) setInternalUsers(users);
-        });
+        const response = await authJsonFetch('/api/internal/portal-users');
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || 'Não foi possível carregar o diretório interno.');
+        }
+        if (!cancelled) {
+          setInternalUsers(Array.isArray(data?.users) ? data.users : []);
+        }
       } catch (err) {
-        console.error('Error initializing portalUsers sync:', err);
+        console.error('Error loading protected internal user directory:', err);
         if (!cancelled) setInternalUsers([]);
       }
     };
 
-    startInternalUsersSync();
+    loadInternalUsers();
 
     return () => {
       cancelled = true;
-      if (unsubscribe) unsubscribe();
     };
   }, [viewMode, currentInternalUser]);
 
@@ -455,6 +459,11 @@ export default function App() {
           authUid: data.uid,
           authEmail: email,
         });
+        setInternalUsers(prev => prev.map(user =>
+          user.id === existingPortalUser.id
+            ? { ...user, authUid: data.uid, authEmail: email }
+            : user
+        ));
 
         alert('Este usuário já existia no portal. A conta Firebase foi vinculada ao cadastro existente sem criar duplicidade.');
         return;
@@ -472,7 +481,8 @@ export default function App() {
       cleanUser.authEmail = email;
       delete cleanUser.password;
 
-      await addPortalUserDoc(cleanUser);
+      const savedUser = await addPortalUserDoc(cleanUser);
+      setInternalUsers(prev => [savedUser, ...prev.filter(user => user.id !== savedUser.id)]);
       if (data.alreadyExists) {
         alert('A conta Firebase já existia. O cadastro foi vinculado sem alterar a senha atual dessa conta.');
       } else if (!newUser.password) {
@@ -499,6 +509,18 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
         return acc;
       }, {} as any);
       await updatePortalUserDoc(id, cleanUpdates);
+      setInternalUsers(prev => prev.map(user => {
+        if (user.id !== id) return user;
+        const nextUser: any = { ...user };
+        Object.entries(passwordFreeUpdates).forEach(([key, value]) => {
+          if (value === null) {
+            delete nextUser[key];
+          } else if (value !== undefined) {
+            nextUser[key] = value;
+          }
+        });
+        return nextUser as PortalUser;
+      }));
     } catch (err: any) {
       console.error('Error updating internal user in Firestore:', err);
       if (err.message && err.message.includes("exceeds the maximum allowed size")) {
@@ -514,6 +536,7 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
       const target = internalUsers.find(u => u.username === username);
       if (target) {
         await deletePortalUserDoc(target.id);
+        setInternalUsers(prev => prev.filter(user => user.id !== target.id));
       }
     } catch (err) {
       console.error('Error deleting internal user from Firestore:', err);

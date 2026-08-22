@@ -1,0 +1,251 @@
+diff --git a/firestore.rules b/firestore.rules
+index 2afc0df..0fb5dcb 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -80,11 +80,25 @@ service cloud.firestore {
+       allow read, update, delete: if isInternalAccount();
+     }
+     match /portalUsers/{document=**} {
+-      // Etapa 1D: remove leitura pública.
+-      // Leitura permanece disponível apenas para contas internas autenticadas.
+-      allow read: if isInternalAccount();
+-      // O próprio colaborador pode atualizar seu cadastro; criação/exclusão ficam restritas a administrador.
+-      allow update: if isOwnPortalUser() || isAdministrator();
++      // Admin/RH can read complete employee profiles. Ordinary internal accounts
++      // can read only their own document directly; the cross-employee directory
++      // is delivered by /api/internal/portal-users with sensitive fields removed.
++      allow read: if canManageRh() || isOwnPortalUser();
++
++      // Self-service updates are restricted to password-change state and digital
++      // signature metadata. Role, permissionLevel, username, auth linkage and all
++      // RH/financial fields cannot be changed by the employee through Firestore.
++      allow update: if canManageRh() || (
++        isOwnPortalUser() &&
++        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
++          'passwordChangeRequired',
++          'mustChangePassword',
++          'signaturePath',
++          'signatureVersion',
++          'signatureDate'
++        ])
++      );
++
+       allow create, delete: if isAdministrator();
+     }
+     match /clients/{clientId} {
+diff --git a/server.ts b/server.ts
+index ef26653..875e525 100644
+--- a/server.ts
++++ b/server.ts
+@@ -37,6 +37,20 @@ const isAdministratorProfile = (profile: any): boolean => {
+   return ['administrador', 'admin', 'master', 'diretor', 'diretoria'].includes(role);
+ };
+ 
++const isRhProfile = (profile: any): boolean => {
++  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
++  const role = normalizeAccessValue(profile?.role);
++  return [
++    'recursos humanos (rh)',
++    'recursos humanos',
++    'rh',
++  ].includes(permissionLevel) || [
++    'recursos humanos (rh)',
++    'recursos humanos',
++    'rh',
++  ].includes(role);
++};
++
+ const findPortalUserForAuth = async (decoded: any) => {
+   if (!firestoreDb) {
+     throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+@@ -93,6 +107,35 @@ const sanitizePortalUserForClient = (profile: any) => {
+   return safeProfile;
+ };
+ 
++// Directory view used by ordinary internal accounts. It contains only the
++// professional fields needed by operational modules (technician selection,
++// signatures, stock assignments, etc.) and deliberately excludes CPF, salary,
++// address, banking, health, emergency and attached RH data.
++const sanitizePortalUserForDirectory = (profile: any) => {
++  if (!profile) return profile;
++  return {
++    id: String(profile.id || ''),
++    name: String(profile.name || ''),
++    username: String(profile.username || ''),
++    role: String(profile.role || ''),
++    permissionLevel: profile.permissionLevel ? String(profile.permissionLevel) : undefined,
++    register: profile.register ? String(profile.register) : '',
++    workEmail: profile.workEmail ? String(profile.workEmail) : '',
++    companyUnit: profile.companyUnit ? String(profile.companyUnit) : '',
++    department: profile.department ? String(profile.department) : '',
++    costCenter: profile.costCenter ? String(profile.costCenter) : '',
++    manager: profile.manager ? String(profile.manager) : '',
++    workplace: profile.workplace ? String(profile.workplace) : '',
++    status: profile.status ? String(profile.status) : undefined,
++    professionalReg: profile.professionalReg ? String(profile.professionalReg) : '',
++    signaturePath: profile.signaturePath ? String(profile.signaturePath) : '',
++    signatureVersion: Number.isFinite(Number(profile.signatureVersion))
++      ? Number(profile.signatureVersion)
++      : undefined,
++    signatureDate: profile.signatureDate ? String(profile.signatureDate) : '',
++  };
++};
++
+ const normalizeCnpj = (value: unknown) => String(value || '').replace(/\D/g, '');
+ 
+ const sanitizeClientForPortal = (profile: any) => {
+@@ -1198,6 +1241,45 @@ app.post("/api/auth/sync-internal-profile", requireAuth, async (req: AuthRequest
+   }
+ });
+ 
++app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res) => {
++  try {
++    if (!req.user || !firestoreDb) {
++      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
++    }
++
++    const requesterProfile = await requireInternalPortalRequester(req.user);
++    const canReadFullProfiles =
++      isAdministratorProfile(requesterProfile) || isRhProfile(requesterProfile);
++
++    const snapshot = await firestoreDb.collection('portalUsers').get();
++    const users = snapshot.docs.map((doc) => {
++      const profile = { id: doc.id, ...doc.data() };
++      return canReadFullProfiles
++        ? sanitizePortalUserForClient(profile)
++        : sanitizePortalUserForDirectory(profile);
++    });
++
++    users.sort((a: any, b: any) =>
++      String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR')
++    );
++
++    return res.json({
++      success: true,
++      accessMode: canReadFullProfiles ? 'full' : 'directory',
++      users,
++    });
++  } catch (error: any) {
++    if (error?.message === 'NOT_INTERNAL_ACCOUNT') {
++      return res.status(403).json({ error: 'NOT_INTERNAL_ACCOUNT' });
++    }
++    if (error?.message === 'INTERNAL_PROFILE_NOT_FOUND') {
++      return res.status(404).json({ error: 'INTERNAL_PROFILE_NOT_FOUND' });
++    }
++    console.error('Internal portal users directory error:', error);
++    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
++  }
++});
++
+ app.post('/api/client-portal/ensure-access', requireAuth, async (req: AuthRequest, res) => {
+   try {
+     await requireInternalPortalRequester(req.user);
+diff --git a/src/App.tsx b/src/App.tsx
+index 58683b1..3365da9 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -22,7 +22,6 @@ import {
+   syncInstruments,
+   syncReports,
+   syncMessages,
+-  syncPortalUsers,
+   addClientDoc,
+   addClientsBulkDocs,
+   deleteClientDoc,
+@@ -244,12 +243,13 @@ export default function App() {
+     };
+   }, [viewMode, currentInternalUser]);
+ 
+-  // portalUsers contains employee data and must never be subscribed before an internal login.
++  // Employee directory is loaded through the authenticated backend. Admin/RH
++  // receive the full RH profile set; other internal roles receive only the
++  // operational directory fields required by the portal.
+   useEffect(() => {
+-    let unsubscribe: (() => void) | undefined;
+     let cancelled = false;
+ 
+-    const startInternalUsersSync = async () => {
++    const loadInternalUsers = async () => {
+       if (viewMode !== 'portal' || !currentInternalUser) {
+         setInternalUsers([]);
+         try {
+@@ -259,20 +259,24 @@ export default function App() {
+       }
+ 
+       try {
+-        unsubscribe = await syncPortalUsers((users) => {
+-          if (!cancelled) setInternalUsers(users);
+-        });
++        const response = await authJsonFetch('/api/internal/portal-users');
++        const data = await response.json();
++        if (!response.ok) {
++          throw new Error(data?.error || 'Não foi possível carregar o diretório interno.');
++        }
++        if (!cancelled) {
++          setInternalUsers(Array.isArray(data?.users) ? data.users : []);
++        }
+       } catch (err) {
+-        console.error('Error initializing portalUsers sync:', err);
++        console.error('Error loading protected internal user directory:', err);
+         if (!cancelled) setInternalUsers([]);
+       }
+     };
+ 
+-    startInternalUsersSync();
++    loadInternalUsers();
+ 
+     return () => {
+       cancelled = true;
+-      if (unsubscribe) unsubscribe();
+     };
+   }, [viewMode, currentInternalUser]);
+ 
+@@ -455,6 +459,11 @@ export default function App() {
+           authUid: data.uid,
+           authEmail: email,
+         });
++        setInternalUsers(prev => prev.map(user =>
++          user.id === existingPortalUser.id
++            ? { ...user, authUid: data.uid, authEmail: email }
++            : user
++        ));
+ 
+         alert('Este usuário já existia no portal. A conta Firebase foi vinculada ao cadastro existente sem criar duplicidade.');
+         return;
+@@ -472,7 +481,8 @@ export default function App() {
+       cleanUser.authEmail = email;
+       delete cleanUser.password;
+ 
+-      await addPortalUserDoc(cleanUser);
++      const savedUser = await addPortalUserDoc(cleanUser);
++      setInternalUsers(prev => [savedUser, ...prev.filter(user => user.id !== savedUser.id)]);
+       if (data.alreadyExists) {
+         alert('A conta Firebase já existia. O cadastro foi vinculado sem alterar a senha atual dessa conta.');
+       } else if (!newUser.password) {
+@@ -499,6 +509,18 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
+         return acc;
+       }, {} as any);
+       await updatePortalUserDoc(id, cleanUpdates);
++      setInternalUsers(prev => prev.map(user => {
++        if (user.id !== id) return user;
++        const nextUser: any = { ...user };
++        Object.entries(passwordFreeUpdates).forEach(([key, value]) => {
++          if (value === null) {
++            delete nextUser[key];
++          } else if (value !== undefined) {
++            nextUser[key] = value;
++          }
++        });
++        return nextUser as PortalUser;
++      }));
+     } catch (err: any) {
+       console.error('Error updating internal user in Firestore:', err);
+       if (err.message && err.message.includes("exceeds the maximum allowed size")) {
+@@ -514,6 +536,7 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
+       const target = internalUsers.find(u => u.username === username);
+       if (target) {
+         await deletePortalUserDoc(target.id);
++        setInternalUsers(prev => prev.filter(user => user.id !== target.id));
+       }
+     } catch (err) {
+       console.error('Error deleting internal user from Firestore:', err);

@@ -80,11 +80,25 @@ service cloud.firestore {
       allow read, update, delete: if isInternalAccount();
     }
     match /portalUsers/{document=**} {
-      // Etapa 1D: remove leitura pública.
-      // Leitura permanece disponível apenas para contas internas autenticadas.
-      allow read: if isInternalAccount();
-      // O próprio colaborador pode atualizar seu cadastro; criação/exclusão ficam restritas a administrador.
-      allow update: if isOwnPortalUser() || isAdministrator();
+      // Admin/RH can read complete employee profiles. Ordinary internal accounts
+      // can read only their own document directly; the cross-employee directory
+      // is delivered by /api/internal/portal-users with sensitive fields removed.
+      allow read: if canManageRh() || isOwnPortalUser();
+
+      // Self-service updates are restricted to password-change state and digital
+      // signature metadata. Role, permissionLevel, username, auth linkage and all
+      // RH/financial fields cannot be changed by the employee through Firestore.
+      allow update: if canManageRh() || (
+        isOwnPortalUser() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'passwordChangeRequired',
+          'mustChangePassword',
+          'signaturePath',
+          'signatureVersion',
+          'signatureDate'
+        ])
+      );
+
       allow create, delete: if isAdministrator();
     }
     match /clients/{clientId} {

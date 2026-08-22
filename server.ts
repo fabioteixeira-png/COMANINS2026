@@ -37,6 +37,20 @@ const isAdministratorProfile = (profile: any): boolean => {
   return ['administrador', 'admin', 'master', 'diretor', 'diretoria'].includes(role);
 };
 
+const isRhProfile = (profile: any): boolean => {
+  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
+  const role = normalizeAccessValue(profile?.role);
+  return [
+    'recursos humanos (rh)',
+    'recursos humanos',
+    'rh',
+  ].includes(permissionLevel) || [
+    'recursos humanos (rh)',
+    'recursos humanos',
+    'rh',
+  ].includes(role);
+};
+
 const findPortalUserForAuth = async (decoded: any) => {
   if (!firestoreDb) {
     throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
@@ -91,6 +105,35 @@ const sanitizePortalUserForClient = (profile: any) => {
   if (!profile) return profile;
   const { password, ...safeProfile } = profile;
   return safeProfile;
+};
+
+// Directory view used by ordinary internal accounts. It contains only the
+// professional fields needed by operational modules (technician selection,
+// signatures, stock assignments, etc.) and deliberately excludes CPF, salary,
+// address, banking, health, emergency and attached RH data.
+const sanitizePortalUserForDirectory = (profile: any) => {
+  if (!profile) return profile;
+  return {
+    id: String(profile.id || ''),
+    name: String(profile.name || ''),
+    username: String(profile.username || ''),
+    role: String(profile.role || ''),
+    permissionLevel: profile.permissionLevel ? String(profile.permissionLevel) : undefined,
+    register: profile.register ? String(profile.register) : '',
+    workEmail: profile.workEmail ? String(profile.workEmail) : '',
+    companyUnit: profile.companyUnit ? String(profile.companyUnit) : '',
+    department: profile.department ? String(profile.department) : '',
+    costCenter: profile.costCenter ? String(profile.costCenter) : '',
+    manager: profile.manager ? String(profile.manager) : '',
+    workplace: profile.workplace ? String(profile.workplace) : '',
+    status: profile.status ? String(profile.status) : undefined,
+    professionalReg: profile.professionalReg ? String(profile.professionalReg) : '',
+    signaturePath: profile.signaturePath ? String(profile.signaturePath) : '',
+    signatureVersion: Number.isFinite(Number(profile.signatureVersion))
+      ? Number(profile.signatureVersion)
+      : undefined,
+    signatureDate: profile.signatureDate ? String(profile.signatureDate) : '',
+  };
 };
 
 const normalizeCnpj = (value: unknown) => String(value || '').replace(/\D/g, '');
@@ -1194,6 +1237,45 @@ app.post("/api/auth/sync-internal-profile", requireAuth, async (req: AuthRequest
       return res.status(403).json({ error: 'NOT_INTERNAL_ACCOUNT' });
     }
     console.error('Sync internal profile error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+
+    const requesterProfile = await requireInternalPortalRequester(req.user);
+    const canReadFullProfiles =
+      isAdministratorProfile(requesterProfile) || isRhProfile(requesterProfile);
+
+    const snapshot = await firestoreDb.collection('portalUsers').get();
+    const users = snapshot.docs.map((doc) => {
+      const profile = { id: doc.id, ...doc.data() };
+      return canReadFullProfiles
+        ? sanitizePortalUserForClient(profile)
+        : sanitizePortalUserForDirectory(profile);
+    });
+
+    users.sort((a: any, b: any) =>
+      String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR')
+    );
+
+    return res.json({
+      success: true,
+      accessMode: canReadFullProfiles ? 'full' : 'directory',
+      users,
+    });
+  } catch (error: any) {
+    if (error?.message === 'NOT_INTERNAL_ACCOUNT') {
+      return res.status(403).json({ error: 'NOT_INTERNAL_ACCOUNT' });
+    }
+    if (error?.message === 'INTERNAL_PROFILE_NOT_FOUND') {
+      return res.status(404).json({ error: 'INTERNAL_PROFILE_NOT_FOUND' });
+    }
+    console.error('Internal portal users directory error:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });
