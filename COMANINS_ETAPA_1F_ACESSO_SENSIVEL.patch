@@ -1,0 +1,509 @@
+diff --git a/firestore.rules b/firestore.rules
+index 387263f..81aa015 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -9,8 +9,27 @@ service cloud.firestore {
+       return isInternalAccount() && (
+         request.auth.token.permissionLevel == 'Administrador' ||
+         request.auth.token.role == 'Administrador' ||
++        request.auth.token.role == 'Admin' ||
+         request.auth.token.role == 'admin' ||
+-        request.auth.token.role == 'master'
++        request.auth.token.role == 'master' ||
++        request.auth.token.role == 'Diretor' ||
++        request.auth.token.role == 'Diretoria'
++      );
++    }
++
++    function isRhAccount() {
++      return isInternalAccount() && (
++        request.auth.token.permissionLevel == 'Recursos Humanos (RH)' ||
++        request.auth.token.role == 'Recursos Humanos (RH)' ||
++        request.auth.token.role == 'Recursos Humanos' ||
++        request.auth.token.role == 'RH'
++      );
++    }
++
++    function isFinanceAccount() {
++      return isInternalAccount() && (
++        request.auth.token.permissionLevel == 'Financeiro' ||
++        request.auth.token.role == 'Financeiro'
+       );
+     }
+ 
+@@ -20,6 +39,28 @@ service cloud.firestore {
+         resource.data.username != null &&
+         request.auth.token.email == resource.data.username + '@comanins.internal';
+     }
++
++    function isOwnEmployeeResource() {
++      return isInternalAccount() &&
++        request.auth.token.portalUserId != null && (
++          resource.data.employeeId == request.auth.token.portalUserId ||
++          resource.data.userId == request.auth.token.portalUserId ||
++          (request.auth.token.username != null && resource.data.employeeId == request.auth.token.username) ||
++          (request.auth.token.username != null && resource.data.userId == request.auth.token.username)
++        );
++    }
++
++    function canManageRh() {
++      return isAdministrator() || isRhAccount();
++    }
++
++    function canManagePayslips() {
++      return isAdministrator() || isRhAccount() || isFinanceAccount();
++    }
++
++    function canManageFinance() {
++      return isAdministrator() || isFinanceAccount();
++    }
+     match /systemSettings/{document=**} {
+       allow read: if true;
+       allow write: if request.auth != null;
+@@ -44,11 +85,78 @@ service cloud.firestore {
+       allow read: if true;
+       allow write: if request.auth != null;
+     }
+-    // Catch-all temporario para as demais colecoes.
+-    // IMPORTANTE: portalUsers fica explicitamente excluida para que as regras acima
+-    // nao sejam anuladas por uma permissao generica.
++
++    // Documentos individuais do colaborador: o próprio titular pode ler;
++    // RH/Admin gerenciam inclusão, alteração e exclusão.
++    match /employeeDocuments/{document=**} {
++      allow read: if isOwnEmployeeResource() || canManageRh();
++      allow create, update, delete: if canManageRh();
++    }
++
++    // Exames ocupacionais e ASOs contêm dados sensíveis de saúde.
++    match /medical_exams/{document=**} {
++      allow read, write: if canManageRh();
++    }
++    match /employeeAsos/{document=**} {
++      allow read, write: if canManageRh();
++    }
++    match /health_program_docs/{document=**} {
++      allow read, write: if canManageRh();
++    }
++
++    // Contra-cheques e documentos financeiros pessoais.
++    // O colaborador lê apenas os próprios documentos e pode registrar somente
++    // os campos de ciência/visualização. RH, Financeiro e Admin gerenciam o todo.
++    match /payslips/{document=**} {
++      allow read: if isOwnEmployeeResource() || canManagePayslips();
++      allow create, delete: if canManagePayslips();
++      allow update: if canManagePayslips() || (
++        isOwnEmployeeResource() &&
++        request.resource.data.employeeId == resource.data.employeeId &&
++        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
++          'visualized',
++          'visualizedAt',
++          'visualizedIp',
++          'visualizedUserAgent',
++          'lgpdConsentAccepted',
++          'lgpdConsentDate'
++        ])
++      );
++    }
++
++    // Financeiro: acesso somente para Financeiro e Administradores.
++    match /financeTransactions/{document=**} {
++      allow read, write: if canManageFinance();
++    }
++    match /financeContracts/{document=**} {
++      allow read, write: if canManageFinance();
++    }
++    match /financeMeasurements/{document=**} {
++      allow read, write: if canManageFinance();
++    }
++    match /financeBankAccounts/{document=**} {
++      allow read, write: if canManageFinance();
++    }
++    match /financeCategories/{document=**} {
++      allow read, write: if canManageFinance();
++    }
++
++    // Catch-all temporário para as coleções ainda não segmentadas.
++    // Coleções sensíveis acima ficam explicitamente excluídas para que as
++    // permissões específicas não sejam anuladas por esta regra genérica.
+     match /{collection}/{document=**} {
+-      allow read, write: if collection != 'portalUsers' && request.auth != null;
++      allow read, write: if request.auth != null &&
++        collection != 'portalUsers' &&
++        collection != 'employeeDocuments' &&
++        collection != 'medical_exams' &&
++        collection != 'employeeAsos' &&
++        collection != 'health_program_docs' &&
++        collection != 'payslips' &&
++        collection != 'financeTransactions' &&
++        collection != 'financeContracts' &&
++        collection != 'financeMeasurements' &&
++        collection != 'financeBankAccounts' &&
++        collection != 'financeCategories';
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/server.ts b/server.ts
+index ef9a06d..8974756 100644
+--- a/server.ts
++++ b/server.ts
+@@ -84,6 +84,7 @@ const buildInternalClaims = (profile: any) => {
+       profile?.passwordChangeRequired !== false || profile?.mustChangePassword === true,
+   };
+ 
++  if (profile?.username) claims.username = String(profile.username).trim().toLowerCase();
+   if (profile?.role) claims.role = String(profile.role);
+   if (profile?.permissionLevel) claims.permissionLevel = String(profile.permissionLevel);
+ 
+diff --git a/src/components/InternalPortal.tsx b/src/components/InternalPortal.tsx
+index 2f3795e..52a642f 100644
+--- a/src/components/InternalPortal.tsx
++++ b/src/components/InternalPortal.tsx
+@@ -659,12 +659,42 @@ export default function InternalPortal({
+ 
+   const isUserAdmin =
+     currentUser?.permissionLevel === "Administrador" ||
+-    (!currentUser?.permissionLevel &&
+-      (currentUser?.role === "Administrador" ||
+-        currentUser?.role === "Admin" ||
+-        currentUser?.role === "admin" ||
+-        currentUser?.role === "master" ||
+-        currentUser?.role === "Diretor"));
++    currentUser?.role === "Administrador" ||
++    currentUser?.role === "Admin" ||
++    currentUser?.role === "admin" ||
++    currentUser?.role === "master" ||
++    currentUser?.role === "Diretor" ||
++    currentUser?.role === "Diretoria";
++
++  const isRhUser =
++    currentUser?.permissionLevel === "Recursos Humanos (RH)" ||
++    currentUser?.role === "Recursos Humanos (RH)" ||
++    currentUser?.role === "Recursos Humanos" ||
++    currentUser?.role === "RH";
++
++  const isFinanceUser =
++    currentUser?.permissionLevel === "Financeiro" ||
++    currentUser?.role === "Financeiro";
++
++  const canManageRh = isUserAdmin || isRhUser;
++  const canManagePayslips = canManageRh || isFinanceUser;
++  const canAccessFinance = isUserAdmin || isFinanceUser;
++
++  React.useEffect(() => {
++    const sensitiveCacheKeys = [
++      'comanins_cache_payslips',
++      'comanins_cache_medical_exams',
++      'comanins_cache_health_program_docs',
++      'comanins_cache_financeTransactions',
++      'comanins_cache_financeContracts',
++      'comanins_cache_financeMeasurements',
++      'comanins_cache_financeBankAccounts',
++      'comanins_cache_financeCategories',
++    ];
++    sensitiveCacheKeys.forEach((key) => {
++      try { localStorage.removeItem(key); } catch (e) {}
++    });
++  }, []);
+ 
+   const checkIsAfterHours = () => {
+     const now = new Date();
+@@ -736,7 +766,7 @@ export default function InternalPortal({
+   useEffect(() => {
+     if (currentUser && (currentUser.id || currentUser.username)) {
+       setIsLoadingMyDocs(true);
+-      getEmployeeDocuments(currentUser.id || '', currentUser.username, (currentUser as any).cpf)
++      getEmployeeDocuments(currentUser.id || '', currentUser.username)
+         .then(docs => {
+           setMyEmployeeDocs(docs);
+           setIsLoadingMyDocs(false);
+@@ -1661,9 +1691,20 @@ export default function InternalPortal({
+     unsubs.push(syncEmployeeBirthdays((list) => setEmployeeBirthdays(list)));
+     unsubs.push(syncTrainings((list) => setTrainings(list)));
+     unsubs.push(syncEmployeeTrainings((list) => setEmployeeTrainings(list)));
+-    unsubs.push(syncEmployeeAsos((list) => setEmployeeAsos(list)));
+-    unsubs.push(syncMedicalExams((list) => setMedicalExams(list)));
+-    unsubs.push(syncPayslips((list) => setPayslips(list)));
++    if (canManageRh) {
++      unsubs.push(syncEmployeeAsos((list) => setEmployeeAsos(list)));
++      unsubs.push(syncMedicalExams((list) => setMedicalExams(list)));
++    } else {
++      setEmployeeAsos([]);
++      setMedicalExams([]);
++    }
++    if (canManagePayslips) {
++      unsubs.push(syncPayslips((list) => setPayslips(list)));
++    } else if (currentUser?.id) {
++      unsubs.push(syncPayslips((list) => setPayslips(list), currentUser.id));
++    } else {
++      setPayslips([]);
++    }
+     unsubs.push(syncExamTypes((list) => setExamTypesCatalog(list)));
+     unsubs.push(syncInventoryItems((list) => setInventoryItems(list)));
+     unsubs.push(
+@@ -5504,7 +5545,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
+               >
+                 Controle de Estoque
+               </button>
+-              <button
++              {canManageRh && (
++                <button
+                   onClick={() => {
+                     setActiveTab("colaboradores");
+                     setRhSubTab("cadastro");
+@@ -5518,6 +5560,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
+                 >
+                   Colaboradores (RH)
+                 </button>
++              )}
+             </>
+           )}
+ 
+@@ -5552,35 +5595,39 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
+             <span>Comunicação Interna</span>
+           </button>
+ 
+-          {!isLimitedRole && (
++          {(canAccessFinance || canManageRh) && (
+             <>
+               <div className="pt-4 pb-1">
+                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
+                   Administrativo
+                 </span>
+               </div>
+-              <button
+-                onClick={() => setActiveTab("financeiro")}
+-                className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+-                  activeTab === "financeiro"
+-                    ? "bg-blue-50 text-royal-blue font-bold"
+-                    : "text-slate-700 hover:bg-slate-50"
+-                }`}
+-              >
+-                <TrendingUp className="h-4 w-4 text-slate-500" />
+-                <span>Financeiro</span>
+-              </button>
+-              <button
+-                onClick={() => setActiveTab("programas_saude")}
+-                className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+-                  activeTab === "programas_saude"
+-                    ? "bg-blue-50 text-royal-blue font-bold"
+-                    : "text-slate-700 hover:bg-slate-50"
+-                }`}
+-              >
+-                <ShieldCheck className="h-4 w-4 text-slate-500" />
+-                <span>Programa de Saúde (PGR/PCMSO)</span>
+-              </button>
++              {canAccessFinance && (
++                <button
++                  onClick={() => setActiveTab("financeiro")}
++                  className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
++                    activeTab === "financeiro"
++                      ? "bg-blue-50 text-royal-blue font-bold"
++                      : "text-slate-700 hover:bg-slate-50"
++                  }`}
++                >
++                  <TrendingUp className="h-4 w-4 text-slate-500" />
++                  <span>Financeiro</span>
++                </button>
++              )}
++              {canManageRh && (
++                <button
++                  onClick={() => setActiveTab("programas_saude")}
++                  className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
++                    activeTab === "programas_saude"
++                      ? "bg-blue-50 text-royal-blue font-bold"
++                      : "text-slate-700 hover:bg-slate-50"
++                  }`}
++                >
++                  <ShieldCheck className="h-4 w-4 text-slate-500" />
++                  <span>Programa de Saúde (PGR/PCMSO)</span>
++                </button>
++              )}
+             </>
+           )}
+ 
+@@ -12114,8 +12161,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
+ 
+         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
+         {activeTab === "field_service" && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
+-        {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
+-        {activeTab === "programas_saude" && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
++        {activeTab === "financeiro" && canAccessFinance && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
++        {activeTab === "programas_saude" && canManageRh && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
+         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
+         {activeTab === "minha_assinatura" && <MySignature currentUser={currentUser as any} onUpdateUser={onUpdateInternalUser || (() => {})} />}
+ 
+@@ -14991,7 +15038,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
+ 
+         {/* TAB: COLABORADORES & RECURSOS HUMANOS */}
+         {activeTab === "colaboradores" &&
+-          rhSubTab !== "contra_cheques" && (
++          rhSubTab !== "contra_cheques" && canManageRh && (
+             <EmployeeManagement
+               currentUser={currentUser}
+               dropdownOptions={dropdownOptions}
+diff --git a/src/lib/firebase.ts b/src/lib/firebase.ts
+index 9b4070e..cc33d01 100644
+--- a/src/lib/firebase.ts
++++ b/src/lib/firebase.ts
+@@ -535,15 +535,17 @@ export function createSharedSync<T>(
+   channelKey: string,
+   cacheKey: string,
+   fallbackData: T,
+-  startListener: (onData: (data: T) => void, onError: (err: any) => void) => () => void
++  startListener: (onData: (data: T) => void, onError: (err: any) => void) => () => void,
++  options?: { persistCache?: boolean }
+ ): (callback: (data: T) => void) => () => void {
++  const persistCache = options?.persistCache !== false;
+   return (callback: (data: T) => void) => {
+     let channel = activeChannels.get(channelKey);
+     if (!channel) {
+       channel = {
+         listeners: new Set(),
+         unsubFirestore: null,
+-        lastData: getLocalCache<T>(cacheKey, fallbackData),
++        lastData: persistCache ? getLocalCache<T>(cacheKey, fallbackData) : fallbackData,
+         isStarting: false,
+       };
+       activeChannels.set(channelKey, channel);
+@@ -568,7 +570,9 @@ export function createSharedSync<T>(
+           (newData) => {
+             if (channel) {
+               channel.lastData = newData;
+-              setLocalCache(cacheKey, newData);
++              if (persistCache) {
++                setLocalCache(cacheKey, newData);
++              }
+               
+               // Track Firestore Read Telemetry
+               const readCount = Array.isArray(newData) ? Math.max(1, newData.length) : 1;
+@@ -1658,16 +1662,14 @@ export async function deleteReferenceStandardDoc(id: string): Promise<void> {
+ }
+ 
+ export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void) {
+-  const cached = getLocalCache<MedicalExam[]>('medical_exams', []);
+-  if (cached.length > 0) callback(cached);
++  try { localStorage.removeItem('comanins_cache_medical_exams'); } catch (e) {}
+   const q = query(collection(db, 'medical_exams'), limit(25));
+   return onSnapshot(q, async (snapshot) => {
+     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
+-    setLocalCache('medical_exams', list);
+     callback(list);
+   }, (err) => {
+     handleQuotaOrError(err);
+-    callback(getLocalCache<MedicalExam[]>('medical_exams', []));
++    callback([]);
+   });
+ }
+ 
+@@ -1858,17 +1860,17 @@ export async function resetIndividualCollection(type: string): Promise<void> {
+ }
+ 
+ // 8. Payslips (Contra-cheques)
+-export async function syncPayslips(callback: (payslips: Payslip[]) => void) {
+-  const cached = getLocalCache<Payslip[]>('payslips', []);
+-  if (cached.length > 0) callback(cached);
+-  const q = query(collection(db, 'payslips'));
++export async function syncPayslips(callback: (payslips: Payslip[]) => void, employeeId?: string) {
++  try { localStorage.removeItem('comanins_cache_payslips'); } catch (e) {}
++  const q = employeeId
++    ? query(collection(db, 'payslips'), where('employeeId', '==', employeeId))
++    : query(collection(db, 'payslips'));
+   return onSnapshot(q, (snapshot) => {
+     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
+-    setLocalCache('payslips', list);
+     callback(list);
+   }, (err) => {
+     handleQuotaOrError(err);
+-    callback(getLocalCache<Payslip[]>('payslips', []));
++    callback([]);
+   });
+ }
+ 
+@@ -1955,7 +1957,8 @@ export const syncFinanceTransactions = (callback: (transactions: FinanceTransact
+         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction));
+         onData(items);
+       }, onError);
+-    }
++    },
++    { persistCache: false }
+   );
+   return shared(callback);
+ };
+@@ -1994,7 +1997,8 @@ export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) =>
+         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract));
+         onData(items);
+       }, onError);
+-    }
++    },
++    { persistCache: false }
+   );
+   return shared(callback);
+ };
+@@ -2025,7 +2029,8 @@ export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurem
+         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement));
+         onData(items);
+       }, onError);
+-    }
++    },
++    { persistCache: false }
+   );
+   return shared(callback);
+ };
+@@ -2065,7 +2070,8 @@ export const syncFinanceCollection = <T>(collectionName: string, callback: (data
+         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T));
+         onData(items);
+       }, onError);
+-    }
++    },
++    { persistCache: false }
+   );
+   return shared(callback);
+ };
+@@ -2285,16 +2291,14 @@ export async function bulkUpsertFieldServiceRecords(updates: {id: string, data:
+ }
+ 
+ export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocument[]) => void) {
+-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+-  if (cached.length > 0) callback(cached);
++  try { localStorage.removeItem('comanins_cache_health_program_docs'); } catch (e) {}
+   const q = query(collection(db, 'health_program_docs'), limit(100));
+   return onSnapshot(q, async (snapshot) => {
+     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument));
+-    setLocalCache('health_program_docs', list);
+     callback(list);
+   }, (err) => {
+     handleQuotaOrError(err);
+-    callback(getLocalCache<HealthProgramDocument[]>('health_program_docs', []));
++    callback([]);
+   });
+ }
+ 
+@@ -2303,26 +2307,14 @@ export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'
+   const docData: HealthProgramDocument = { ...data, id: newId };
+   await setDoc(doc(db, 'health_program_docs', newId), docData);
+ 
+-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+-  const updated = [docData, ...cached.filter(d => d.id !== newId)];
+-  setLocalCache('health_program_docs', updated);
+-
+   return docData;
+ }
+ 
+ export async function updateHealthProgramDoc(id: string, updates: Partial<HealthProgramDocument>): Promise<void> {
+   await updateDoc(doc(db, 'health_program_docs', id), updates);
+-
+-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+-  const updated = cached.map(d => d.id === id ? { ...d, ...updates } : d);
+-  setLocalCache('health_program_docs', updated);
+ }
+ 
+ export async function deleteHealthProgramDoc(id: string): Promise<void> {
+   await deleteDoc(doc(db, 'health_program_docs', id));
+-
+-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
+-  const updated = cached.filter(d => d.id !== id);
+-  setLocalCache('health_program_docs', updated);
+ }
+ 

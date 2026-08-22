@@ -531,15 +531,17 @@ export function createSharedSync<T>(
   channelKey: string,
   cacheKey: string,
   fallbackData: T,
-  startListener: (onData: (data: T) => void, onError: (err: any) => void) => () => void
+  startListener: (onData: (data: T) => void, onError: (err: any) => void) => () => void,
+  options?: { persistCache?: boolean }
 ): (callback: (data: T) => void) => () => void {
+  const shouldPersistCache = options?.persistCache ?? true;
   return (callback: (data: T) => void) => {
     let channel = activeChannels.get(channelKey);
     if (!channel) {
       channel = {
         listeners: new Set(),
         unsubFirestore: null,
-        lastData: getLocalCache<T>(cacheKey, fallbackData),
+        lastData: shouldPersistCache ? getLocalCache<T>(cacheKey, fallbackData) : null,
         isStarting: false,
       };
       activeChannels.set(channelKey, channel);
@@ -564,7 +566,9 @@ export function createSharedSync<T>(
           (newData) => {
             if (channel) {
               channel.lastData = newData;
-              setLocalCache(cacheKey, newData);
+              if (shouldPersistCache) {
+                setLocalCache(cacheKey, newData);
+              }
               
               // Track Firestore Read Telemetry
               const readCount = Array.isArray(newData) ? Math.max(1, newData.length) : 1;
@@ -1654,16 +1658,16 @@ export async function deleteReferenceStandardDoc(id: string): Promise<void> {
 }
 
 export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void) {
-  const cached = getLocalCache<MedicalExam[]>('medical_exams', []);
-  if (cached.length > 0) callback(cached);
+  try {
+    localStorage.removeItem('comanins_cache_medical_exams');
+  } catch (e) {}
   const q = query(collection(db, 'medical_exams'), limit(25));
   return onSnapshot(q, async (snapshot) => {
     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
-    setLocalCache('medical_exams', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<MedicalExam[]>('medical_exams', []));
+    callback([]);
   });
 }
 
@@ -1854,17 +1858,19 @@ export async function resetIndividualCollection(type: string): Promise<void> {
 }
 
 // 8. Payslips (Contra-cheques)
-export async function syncPayslips(callback: (payslips: Payslip[]) => void) {
-  const cached = getLocalCache<Payslip[]>('payslips', []);
-  if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'payslips'));
+export async function syncPayslips(callback: (payslips: Payslip[]) => void, employeeId?: string) {
+  try {
+    localStorage.removeItem('comanins_cache_payslips');
+  } catch (e) {}
+  const q = employeeId
+    ? query(collection(db, 'payslips'), where('employeeId', '==', employeeId))
+    : query(collection(db, 'payslips'));
   return onSnapshot(q, (snapshot) => {
     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
-    setLocalCache('payslips', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<Payslip[]>('payslips', []));
+    callback([]);
   });
 }
 
@@ -1951,7 +1957,8 @@ export const syncFinanceTransactions = (callback: (transactions: FinanceTransact
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction));
         onData(items);
       }, onError);
-    }
+    },
+    { persistCache: false }
   );
   return shared(callback);
 };
@@ -1990,7 +1997,8 @@ export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) =>
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract));
         onData(items);
       }, onError);
-    }
+    },
+    { persistCache: false }
   );
   return shared(callback);
 };
@@ -2021,7 +2029,8 @@ export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurem
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement));
         onData(items);
       }, onError);
-    }
+    },
+    { persistCache: false }
   );
   return shared(callback);
 };
@@ -2061,7 +2070,8 @@ export const syncFinanceCollection = <T>(collectionName: string, callback: (data
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T));
         onData(items);
       }, onError);
-    }
+    },
+    { persistCache: false }
   );
   return shared(callback);
 };
@@ -2281,16 +2291,16 @@ export async function bulkUpsertFieldServiceRecords(updates: {id: string, data: 
 }
 
 export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocument[]) => void) {
-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
-  if (cached.length > 0) callback(cached);
+  try {
+    localStorage.removeItem('comanins_cache_health_program_docs');
+  } catch (e) {}
   const q = query(collection(db, 'health_program_docs'), limit(100));
   return onSnapshot(q, async (snapshot) => {
     const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument));
-    setLocalCache('health_program_docs', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<HealthProgramDocument[]>('health_program_docs', []));
+    callback([]);
   });
 }
 
@@ -2299,26 +2309,14 @@ export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'
   const docData: HealthProgramDocument = { ...data, id: newId };
   await setDoc(doc(db, 'health_program_docs', newId), docData);
 
-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
-  const updated = [docData, ...cached.filter(d => d.id !== newId)];
-  setLocalCache('health_program_docs', updated);
-
   return docData;
 }
 
 export async function updateHealthProgramDoc(id: string, updates: Partial<HealthProgramDocument>): Promise<void> {
   await updateDoc(doc(db, 'health_program_docs', id), updates);
-
-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
-  const updated = cached.map(d => d.id === id ? { ...d, ...updates } : d);
-  setLocalCache('health_program_docs', updated);
 }
 
 export async function deleteHealthProgramDoc(id: string): Promise<void> {
   await deleteDoc(doc(db, 'health_program_docs', id));
-
-  const cached = getLocalCache<HealthProgramDocument[]>('health_program_docs', []);
-  const updated = cached.filter(d => d.id !== id);
-  setLocalCache('health_program_docs', updated);
 }
 

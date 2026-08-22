@@ -664,7 +664,34 @@ export default function InternalPortal({
         currentUser?.role === "Admin" ||
         currentUser?.role === "admin" ||
         currentUser?.role === "master" ||
-        currentUser?.role === "Diretor"));
+        currentUser?.role === "Diretor" ||
+        currentUser?.role === "Diretoria"));
+
+  const isRhUser =
+    currentUser?.permissionLevel === "Recursos Humanos (RH)" ||
+    currentUser?.role === "Recursos Humanos (RH)" ||
+    currentUser?.role === "Recursos Humanos" ||
+    currentUser?.role === "RH";
+
+  const isFinanceUser =
+    currentUser?.permissionLevel === "Financeiro" ||
+    currentUser?.role === "Financeiro";
+
+  const canManageRh = isUserAdmin || isRhUser;
+  const canManagePayslips = isUserAdmin || isRhUser || isFinanceUser;
+  const canAccessFinance = isUserAdmin || isFinanceUser;
+
+  useEffect(() => {
+    // Limpa caches locais legados de colecoes sensiveis para garantir
+    // que o acesso seja sempre validado via regras de seguranca do Firestore.
+    try {
+      localStorage.removeItem("comanins_cache_medical_exams");
+      localStorage.removeItem("comanins_cache_payslips");
+      localStorage.removeItem("comanins_cache_health_program_docs");
+    } catch (e) {
+      // Ignora erro de acesso ao localStorage
+    }
+  }, []);
 
   const checkIsAfterHours = () => {
     const now = new Date();
@@ -736,7 +763,7 @@ export default function InternalPortal({
   useEffect(() => {
     if (currentUser && (currentUser.id || currentUser.username)) {
       setIsLoadingMyDocs(true);
-      getEmployeeDocuments(currentUser.id || '', currentUser.username, (currentUser as any).cpf)
+      getEmployeeDocuments(currentUser.id || '', currentUser.username)
         .then(docs => {
           setMyEmployeeDocs(docs);
           setIsLoadingMyDocs(false);
@@ -1660,9 +1687,16 @@ export default function InternalPortal({
     unsubs.push(syncEmployeeBirthdays((list) => setEmployeeBirthdays(list)));
     unsubs.push(syncTrainings((list) => setTrainings(list)));
     unsubs.push(syncEmployeeTrainings((list) => setEmployeeTrainings(list)));
-    unsubs.push(syncEmployeeAsos((list) => setEmployeeAsos(list)));
-    unsubs.push(syncMedicalExams((list) => setMedicalExams(list)));
-    unsubs.push(syncPayslips((list) => setPayslips(list)));
+    if (canManageRh) {
+      unsubs.push(syncEmployeeAsos((list) => setEmployeeAsos(list)));
+      unsubs.push(syncMedicalExams((list) => setMedicalExams(list)));
+    }
+    // Gestores sincronizam a colecao completa; colaboradores comuns sincronizam apenas os proprios contra-cheques
+    if (canManagePayslips) {
+      unsubs.push(syncPayslips((list) => setPayslips(list)));
+    } else if (currentUser?.id) {
+      unsubs.push(syncPayslips((list) => setPayslips(list), currentUser.id));
+    }
     unsubs.push(syncExamTypes((list) => setExamTypesCatalog(list)));
     unsubs.push(syncInventoryItems((list) => setInventoryItems(list)));
     unsubs.push(
@@ -5500,7 +5534,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               >
                 Controle de Estoque
               </button>
-              <button
+              {canManageRh && (
+                <button
                   onClick={() => {
                     setActiveTab("colaboradores");
                     setRhSubTab("cadastro");
@@ -5514,6 +5549,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 >
                   Colaboradores (RH)
                 </button>
+              )}
             </>
           )}
 
@@ -5548,35 +5584,39 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             <span>Comunicação Interna</span>
           </button>
 
-          {!isLimitedRole && (
+          {(canAccessFinance || canManageRh) && (
             <>
               <div className="pt-4 pb-1">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
                   Administrativo
                 </span>
               </div>
-              <button
-                onClick={() => setActiveTab("financeiro")}
-                className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
-                  activeTab === "financeiro"
-                    ? "bg-blue-50 text-royal-blue font-bold"
-                    : "text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                <TrendingUp className="h-4 w-4 text-slate-500" />
-                <span>Financeiro</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("programas_saude")}
-                className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
-                  activeTab === "programas_saude"
-                    ? "bg-blue-50 text-royal-blue font-bold"
-                    : "text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                <ShieldCheck className="h-4 w-4 text-slate-500" />
-                <span>Programa de Saúde (PGR/PCMSO)</span>
-              </button>
+              {canAccessFinance && (
+                <button
+                  onClick={() => setActiveTab("financeiro")}
+                  className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+                    activeTab === "financeiro"
+                      ? "bg-blue-50 text-royal-blue font-bold"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <TrendingUp className="h-4 w-4 text-slate-500" />
+                  <span>Financeiro</span>
+                </button>
+              )}
+              {canManageRh && (
+                <button
+                  onClick={() => setActiveTab("programas_saude")}
+                  className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+                    activeTab === "programas_saude"
+                      ? "bg-blue-50 text-royal-blue font-bold"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <ShieldCheck className="h-4 w-4 text-slate-500" />
+                  <span>Programa de Saúde (PGR/PCMSO)</span>
+                </button>
+              )}
             </>
           )}
 
@@ -12110,8 +12150,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
         {activeTab === "field_service" && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
-        {activeTab === "financeiro" && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
-        {activeTab === "programas_saude" && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
+        {activeTab === "financeiro" && canAccessFinance && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
+        {activeTab === "programas_saude" && canManageRh && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
         {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
         {activeTab === "minha_assinatura" && <MySignature currentUser={currentUser as any} onUpdateUser={onUpdateInternalUser || (() => {})} />}
 
@@ -14987,7 +15027,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
         {/* TAB: COLABORADORES & RECURSOS HUMANOS */}
         {activeTab === "colaboradores" &&
-          rhSubTab !== "contra_cheques" && (
+          rhSubTab !== "contra_cheques" &&
+          canManageRh && (
             <EmployeeManagement
               currentUser={currentUser}
               dropdownOptions={dropdownOptions}

@@ -84,6 +84,7 @@ const buildInternalClaims = (profile: any) => {
       profile?.passwordChangeRequired !== false || profile?.mustChangePassword === true,
   };
 
+  if (profile?.username) claims.username = String(profile.username).trim().toLowerCase();
   if (profile?.role) claims.role = String(profile.role);
   if (profile?.permissionLevel) claims.permissionLevel = String(profile.permissionLevel);
 

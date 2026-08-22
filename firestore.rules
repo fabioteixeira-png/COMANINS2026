@@ -9,8 +9,27 @@ service cloud.firestore {
       return isInternalAccount() && (
         request.auth.token.permissionLevel == 'Administrador' ||
         request.auth.token.role == 'Administrador' ||
+        request.auth.token.role == 'Admin' ||
         request.auth.token.role == 'admin' ||
-        request.auth.token.role == 'master'
+        request.auth.token.role == 'master' ||
+        request.auth.token.role == 'Diretor' ||
+        request.auth.token.role == 'Diretoria'
+      );
+    }
+
+    function isRhAccount() {
+      return isInternalAccount() && (
+        request.auth.token.permissionLevel == 'Recursos Humanos (RH)' ||
+        request.auth.token.role == 'Recursos Humanos (RH)' ||
+        request.auth.token.role == 'Recursos Humanos' ||
+        request.auth.token.role == 'RH'
+      );
+    }
+
+    function isFinanceAccount() {
+      return isInternalAccount() && (
+        request.auth.token.permissionLevel == 'Financeiro' ||
+        request.auth.token.role == 'Financeiro'
       );
     }
 
@@ -19,6 +38,28 @@ service cloud.firestore {
         request.auth.token.email != null &&
         resource.data.username != null &&
         request.auth.token.email == resource.data.username + '@comanins.internal';
+    }
+
+    function isOwnEmployeeResource() {
+      return isInternalAccount() &&
+        request.auth.token.portalUserId != null && (
+          resource.data.employeeId == request.auth.token.portalUserId ||
+          resource.data.userId == request.auth.token.portalUserId ||
+          (request.auth.token.username != null && resource.data.employeeId == request.auth.token.username) ||
+          (request.auth.token.username != null && resource.data.userId == request.auth.token.username)
+        );
+    }
+
+    function canManageRh() {
+      return isAdministrator() || isRhAccount();
+    }
+
+    function canManagePayslips() {
+      return isAdministrator() || isRhAccount() || isFinanceAccount();
+    }
+
+    function canManageFinance() {
+      return isAdministrator() || isFinanceAccount();
     }
     match /systemSettings/{document=**} {
       allow read: if true;
@@ -44,11 +85,78 @@ service cloud.firestore {
       allow read: if true;
       allow write: if request.auth != null;
     }
-    // Catch-all temporario para as demais colecoes.
-    // IMPORTANTE: portalUsers fica explicitamente excluida para que as regras acima
-    // nao sejam anuladas por uma permissao generica.
+
+    // Documentos individuais do colaborador: o próprio titular pode ler;
+    // RH/Admin gerenciam inclusão, alteração e exclusão.
+    match /employeeDocuments/{document=**} {
+      allow read: if isOwnEmployeeResource() || canManageRh();
+      allow create, update, delete: if canManageRh();
+    }
+
+    // Exames ocupacionais e ASOs contêm dados sensíveis de saúde.
+    match /medical_exams/{document=**} {
+      allow read, write: if canManageRh();
+    }
+    match /employeeAsos/{document=**} {
+      allow read, write: if canManageRh();
+    }
+    match /health_program_docs/{document=**} {
+      allow read, write: if canManageRh();
+    }
+
+    // Contra-cheques e documentos financeiros pessoais.
+    // O colaborador lê apenas os próprios documentos e pode registrar somente
+    // os campos de ciência/visualização. RH, Financeiro e Admin gerenciam o todo.
+    match /payslips/{document=**} {
+      allow read: if isOwnEmployeeResource() || canManagePayslips();
+      allow create, delete: if canManagePayslips();
+      allow update: if canManagePayslips() || (
+        isOwnEmployeeResource() &&
+        request.resource.data.employeeId == resource.data.employeeId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'visualized',
+          'visualizedAt',
+          'visualizedIp',
+          'visualizedUserAgent',
+          'lgpdConsentAccepted',
+          'lgpdConsentDate'
+        ])
+      );
+    }
+
+    // Financeiro: acesso somente para Financeiro e Administradores.
+    match /financeTransactions/{document=**} {
+      allow read, write: if canManageFinance();
+    }
+    match /financeContracts/{document=**} {
+      allow read, write: if canManageFinance();
+    }
+    match /financeMeasurements/{document=**} {
+      allow read, write: if canManageFinance();
+    }
+    match /financeBankAccounts/{document=**} {
+      allow read, write: if canManageFinance();
+    }
+    match /financeCategories/{document=**} {
+      allow read, write: if canManageFinance();
+    }
+
+    // Catch-all temporário para as coleções ainda não segmentadas.
+    // Coleções sensíveis acima ficam explicitamente excluídas para que as
+    // permissões específicas não sejam anuladas por esta regra genérica.
     match /{collection}/{document=**} {
-      allow read, write: if collection != 'portalUsers' && request.auth != null;
+      allow read, write: if request.auth != null &&
+        collection != 'portalUsers' &&
+        collection != 'employeeDocuments' &&
+        collection != 'medical_exams' &&
+        collection != 'employeeAsos' &&
+        collection != 'health_program_docs' &&
+        collection != 'payslips' &&
+        collection != 'financeTransactions' &&
+        collection != 'financeContracts' &&
+        collection != 'financeMeasurements' &&
+        collection != 'financeBankAccounts' &&
+        collection != 'financeCategories';
     }
   }
 }
