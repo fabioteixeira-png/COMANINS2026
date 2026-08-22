@@ -32,7 +32,6 @@ import {
   updateInstrumentDoc,
   saveCalibrationDoc,
   deleteReportDoc,
-  addMessageDoc,
   updateMessageDoc,
   addPortalUserDoc,
   updatePortalUserDoc,
@@ -412,11 +411,15 @@ export default function App() {
 
   const handleSubmitContactFromPublic = async (contactData: Omit<ContactMessage, 'id' | 'date' | 'status'>): Promise<boolean> => {
     try {
-      await addMessageDoc(contactData);
-      return true;
+      const response = await fetch('/api/send-contact-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(contactData),
+      });
+      const result = await response.json().catch(() => ({}));
+      return response.ok && result?.success === true;
     } catch (err) {
-      console.error('Error submitting contact message to Firestore:', err);
-
+      console.error('Error submitting public contact:', err);
       return false;
     }
   };

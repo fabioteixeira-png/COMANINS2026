@@ -12,7 +12,7 @@ export interface Client {
   email: string;
   phone: string;
   city: string;
-  password?: string;
+  password?: string; // tolerated only to sanitize legacy client documents
   isFieldService?: boolean;
 }
 

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { safeFetch } from '../utils/apiClient';
 import { QRCodeSVG } from 'qrcode.react';
 import ComaninsLogo from './ComaninsLogo';
 import { maskPhone } from '../utils/masks';
@@ -142,24 +141,6 @@ export default function PublicSite({ onNavigateToPortal, onSubmitContact, custom
       });
       if (success) {
         setSubmitSuccess(true);
-        
-        // Send email via backend server
-        try {
-          await safeFetch('/api/send-contact-email', {
-            method: 'POST',
-            body: JSON.stringify({
-              name,
-              company,
-              email,
-              phone,
-              message,
-              category
-            }),
-          });
-        } catch (emailErr) {
-          console.error("Failed to send email notification", emailErr);
-        }
-
         setName('');
         setCompany('');
         setEmail('');

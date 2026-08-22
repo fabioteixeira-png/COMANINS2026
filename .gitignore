@@ -6,3 +6,8 @@ coverage
 !.env.example
 *.log
 
+# Security/maintenance artifacts must never be committed
+*.patch
+*.rej
+db.json
+public/dist.zip

@@ -67,8 +67,9 @@ service cloud.firestore {
     function canManageFinance() {
       return isAdministrator() || isFinanceAccount();
     }
-    match /systemSettings/{document=**} {
-      allow read: if true;
+    match /systemSettings/{documentId} {
+      // Only presentation settings are public. Operational sequences/catalogs require login.
+      allow read: if isInternalAccount() || documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos'];
       allow write: if isInternalAccount();
     }
     match /sitePhotos/{document=**} {
@@ -76,7 +77,8 @@ service cloud.firestore {
       allow write: if isInternalAccount();
     }
     match /contactMessages/{document=**} {
-      allow create: if true;
+      // Public submissions are persisted by the rate-limited backend, never directly by browsers.
+      allow create: if false;
       allow read, update, delete: if isInternalAccount();
     }
     match /portalUsers/{document=**} {
@@ -200,30 +202,43 @@ service cloud.firestore {
       allow read, write: if canManageFinance();
     }
 
-    // Catch-all para módulos internos ainda não segmentados por função.
-    // Contas de cliente não recebem acesso genérico a nenhuma coleção: o Portal
-    // do Cliente consome somente os dados filtrados pelo servidor autenticado.
-    match /{collection}/{document=**} {
-      allow read, write: if isInternalAccount() &&
-        collection != 'portalUsers' &&
-        collection != 'clients' &&
-        collection != 'clientPortalCredentials' &&
-        collection != 'securityMigrations' &&
-        collection != 'employeeDocuments' &&
-        collection != 'medical_exams' &&
-        collection != 'employeeAsos' &&
-        collection != 'health_program_docs' &&
-        collection != 'payslips' &&
-        collection != 'financeTransactions' &&
-        collection != 'financeContracts' &&
-        collection != 'financeMeasurements' &&
-        collection != 'financeBankAccounts' &&
-        collection != 'financeCategories' &&
-        collection != 'instruments' &&
-        collection != 'calibrationReports' &&
-        collection != 'savedIntakes' &&
-        collection != 'rncReports' &&
-        collection != 'fieldServiceRecords';
+    // Remaining operational collections explicitly allowed to internal accounts.
+    match /inventoryItems/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /inventoryTransactions/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /referenceStandards/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /calibrationAuditLogs/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /internal_tickets/{document=**} {
+      allow read, write: if isInternalAccount();
+    }
+    match /accessAuditLogs/{document=**} {
+      allow read, create: if isInternalAccount();
+      allow update: if false;
+      allow delete: if isAdministrator();
+    }
+    match /employeeBirthdays/{document=**} {
+      allow read: if isInternalAccount();
+      allow create, update, delete: if canManageRh();
+    }
+    match /trainings/{document=**} {
+      allow read: if isInternalAccount();
+      allow create, update, delete: if canManageRh();
+    }
+    match /employeeTrainings/{document=**} {
+      allow read: if isInternalAccount();
+      allow create, update, delete: if canManageRh();
+    }
+
+    // Final production posture: any collection not explicitly listed above is denied.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

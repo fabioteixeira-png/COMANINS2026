@@ -66,8 +66,6 @@ import {
   deleteMedicalExamDoc,
   syncExamTypes,
   saveExamTypes,
-  clearAndResetDatabase,
-  resetIndividualCollection,
   syncPayslips,
   addPayslipDoc,
   updatePayslipDoc,
@@ -1256,9 +1254,6 @@ export default function InternalPortal({
     | "lgpd"
     | "maintenance"
   >("company");
-  const [maintenancePassword, setMaintenancePassword] = useState<string>("");
-  const [maintenanceError, setMaintenanceError] = useState<string>("");
-  const [isResetting, setIsResetting] = useState<boolean>(false);
 
   // Admin Password Delete Modal State
   const [showAdminDeleteModal, setShowAdminDeleteModal] =
@@ -1430,75 +1425,7 @@ export default function InternalPortal({
     }
   };
 
-  const handleResetDatabase = async () => {
-    setMaintenanceError("");
-    try {
-      const valid = await verifyAdminCredentials(currentUser?.username || '', maintenancePassword);
-      if (!valid) {
-        setMaintenanceError("Credencial administrativa inválida.");
-        return;
-      }
-    } catch (error: any) {
-      setMaintenanceError(error?.message || "Não foi possível validar a autorização administrativa.");
-      return;
-    }
-
-    if (window.confirm("ATENÇÃO: Você tem certeza que deseja EXCLUIR TODO O BANCO DE DADOS e restaurar as configurações originais? Esta ação é irreversível.")) {
-      setIsResetting(true);
-      try {
-        await clearAndResetDatabase();
-        alert("✓ Banco de dados redefinido com sucesso para os valores padrões!");
-        setMaintenancePassword("");
-      } catch (err: any) {
-        console.error("Error resetting database:", err);
-        setMaintenanceError("Falha ao redefinir banco de dados: " + (err.message || err.toString()));
-      } finally {
-        setIsResetting(false);
-      }
-    }
-  };
-
-  const handleResetIndividual = async (collectionName: string, name: string) => {
-    setMaintenanceError("");
-    const promptPassword = window.prompt(`Para confirmar a exclusão e redefinição do módulo "${name}", digite a senha de administrador:`);
-    if (promptPassword === null) return;
-    const typedPassword = promptPassword.trim();
-    if (!typedPassword) {
-      alert("A senha do administrador é obrigatória.");
-      return;
-    }
-    
-    try {
-      const valid = await verifyAdminCredentials(currentUser?.username || '', typedPassword);
-      if (!valid) {
-        alert("Credencial administrativa inválida.");
-        return;
-      }
-    } catch (error: any) {
-      alert(error?.message || "Não foi possível validar a autorização administrativa.");
-      return;
-    }
-
-    if (!window.confirm(
-        `ATENÇÃO: Você tem certeza que deseja EXCLUIR e restaurar o módulo "${name}"? Os dados atuais cadastrados nele serão perdidos.`,
-      )
-    ) {
-      return;
-    }
-
-    setIsResetting(true);
-    try {
-      await resetIndividualCollection(collectionName);
-      alert(
-        `✓ Módulo "${name}" redefinido com sucesso para os valores padrões!`,
-      );
-    } catch (err: any) {
-      console.error("Error resetting individual collection:", err);
-      alert("Falha ao redefinir módulo: " + (err.message || err.toString()));
-    } finally {
-      setIsResetting(false);
-    }
-  };
+  // Destructive database reset actions are intentionally unavailable in production.
 
   const [companyData, setCompanyData] = useState(() => {
     const saved = localStorage.getItem("comanins_company_data");
@@ -12355,12 +12282,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 onClick={() => setConfigSubTab("maintenance")}
                 className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
                   configSubTab === "maintenance"
-                    ? "bg-red-600 text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-red-50 border border-slate-200"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "bg-white text-slate-700 hover:bg-emerald-50 border border-slate-200"
                 }`}
               >
-                <RotateCcw className="h-4 w-4" />
-                <span>Limpeza do Banco</span>
+                <ShieldCheck className="h-4 w-4" />
+                <span>Segurança do Banco</span>
               </button>
             </div>
 
@@ -14693,400 +14620,31 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
             )}
 
-            {/* SUB-TAB 8: MANUTENÇÃO & LIMPEZA */}
+            {/* SUB-TAB 8: MANUTENÇÃO & SEGURANÇA */}
             {configSubTab === "maintenance" && (
               <div className="space-y-6">
-                <div className="bg-white p-6 rounded-2xl border border-red-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-red-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-red-50 text-red-600 rounded-xl border border-red-100">
-                        <Trash2 className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3
-                          id="reset-database-title"
-                          className="font-display font-extrabold text-slate-900 text-base"
-                        >
-                          Limpeza e Reset do Banco de Dados
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Apaga todos os registros atuais e restaura o banco de
-                          dados aos dados padrões de fábrica da COMANINS.
-                        </p>
-                      </div>
+                <div className="bg-white p-6 rounded-2xl border border-emerald-200 shadow-sm space-y-4">
+                  <div className="flex items-center space-x-3 border-b border-emerald-100 pb-4">
+                    <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
+                      <ShieldCheck className="h-6 w-6" />
                     </div>
-                    <span className="self-start sm:self-auto text-[10px] font-mono font-bold bg-red-50 text-red-700 border border-red-200 px-3 py-1 rounded-full uppercase tracking-wider">
-                      Ação Restrita
-                    </span>
+                    <div>
+                      <h3 className="font-display font-extrabold text-slate-900 text-base">
+                        Proteção do Banco de Dados
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Funções de reset em massa foram removidas do ambiente de produção.
+                      </p>
+                    </div>
                   </div>
-
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 space-y-2">
-                    <p className="font-bold flex items-center gap-1.5">
-                      <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
-                      <span>Aviso Importante de Sobregravação</span>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 space-y-2">
+                    <p className="font-bold">Política de recuperação segura</p>
+                    <p className="leading-relaxed">
+                      Clientes, instrumentos, certificados, guias, estoque, usuários, exames e demais registros não podem mais ser apagados por um comando de restauração geral. Para recuperação, utilize os recursos de exportação/backup e uma restauração controlada.
                     </p>
                     <p className="leading-relaxed">
-                      Esta operação irá <strong>EXCLUIR PERMANENTEMENTE</strong>{" "}
-                      todos os clientes, instrumentos, certificados, mensagens
-                      de contato, guias de entrada, estoques, treinamentos e
-                      exames que foram cadastrados recentemente. Em seguida, os
-                      dados padrões iniciais serão recriados.
+                      Exclusões individuais continuam sujeitas às permissões de cada módulo e às confirmações administrativas existentes.
                     </p>
-                  </div>
-
-                  <div className="max-w-md space-y-4 pt-2">
-                    <div className="text-xs">
-                      <label className="block text-slate-700 font-bold mb-1.5 flex items-center gap-1.5">
-                        <Key className="h-4 w-4 text-royal-blue" />
-                        <span>Senha do Administrador para Confirmação:</span>
-                      </label>
-                      <input
-                        id="admin-reset-password-input"
-                        type="password"
-                        placeholder="Digite a senha administrador..."
-                        value={maintenancePassword}
-                        onChange={(e) => {
-                          setMaintenancePassword(e.target.value);
-                          setMaintenanceError("");
-                        }}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 text-sm font-mono focus:ring-1 focus:ring-red-500 focus:outline-none"
-                      />
-                      {maintenanceError && (
-                        <p className="text-red-600 text-xs mt-1.5 font-bold flex items-center gap-1">
-                          <AlertCircle className="h-3.5 w-3.5" />
-                          <span>{maintenanceError}</span>
-                        </p>
-                      )}
-                    </div>
-
-                    <button
-                      id="btn-confirm-database-reset"
-                      type="button"
-                      disabled={isResetting}
-                      onClick={handleResetDatabase}
-                      className={`w-full font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center space-x-2 text-xs shadow-md cursor-pointer ${
-                        isResetting
-                          ? "bg-slate-400 text-white cursor-not-allowed"
-                          : "bg-red-600 hover:bg-red-700 text-white active:scale-95"
-                      }`}
-                    >
-                      {isResetting ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                          <span>Limpando e Restaurando Banco de Dados...</span>
-                        </>
-                      ) : (
-                        <>
-                          <RotateCcw className="h-4 w-4" />
-                          <span>Limpar e Restaurar Banco de Dados Padrão</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* SEÇÃO DE LIMPEZA INDIVIDUAL POR ITEM */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                  <div className="border-b border-slate-100 pb-4">
-                    <h3 className="font-display font-extrabold text-slate-900 text-base flex items-center gap-2">
-                      <Sliders className="h-5 w-5 text-royal-blue" />
-                      <span>Limpeza Individual de Módulos (Por Item)</span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Utilize os botões abaixo para limpar ou restaurar dados de
-                      tabelas específicas de forma isolada. Ao clicar em um
-                      botão, você deverá informar a senha do administrador na
-                      janela de diálogo que se abrirá.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* ITEM 1: CLIENTES */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100">
-                            <Building2 className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Clientes e Plantas
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Exclui clientes cadastrados e restaura os 3 clientes
-                          iniciais da COMANINS (Petrobras, Ambev, Braskem).
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual("clients", "Clientes e Plantas")
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Redefinir Clientes</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 2: INSTRUMENTOS */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100">
-                            <Gauge className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Instrumentos de Medição
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Exclui instrumentos cadastrados e restaura os 4
-                          equipamentos iniciais (manômetros e transmissores).
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "instruments",
-                            "Instrumentos de Medição",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Redefinir Instrumentos</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 3: LAUDOS / CERTIFICADOS */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100">
-                            <FileCheck className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Laudos & Certificados
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Exclui todos os laudos gerados por técnicos e reativa
-                          o certificado modelo inicial para testes rápidos.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "calibrationReports",
-                            "Laudos e Certificados",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Redefinir Certificados</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 4: DIRETRIZES DE ENTRADA / TRIAGEM */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-amber-50 text-amber-600 rounded-lg border border-amber-100">
-                            <ClipboardCheck className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Guias de Entrada & Fotos
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Limpa de forma definitiva todas as guias de
-                          recepção/triagens cadastradas e os uploads de fotos do
-                          local.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "savedIntakes",
-                            "Guias de Entrada e Fotos",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Excluir Todas as Guias</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 5: ESTOQUE E EPI */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-orange-50 text-orange-600 rounded-lg border border-orange-100">
-                            <Package className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Controle de Estoque & EPI
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Limpa a tabela de materiais cadastrados, consumíveis
-                          de laboratório e histórico de movimentações.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "inventory",
-                            "Controle de Estoque e EPI",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Excluir Todo o Estoque</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 6: PADRÕES DE REFERÊNCIA */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-pink-50 text-pink-600 rounded-lg border border-pink-100">
-                            <Sliders className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Padrões Metrológicos
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Apaga todos os padrões metrológicos calibrados de
-                          rastreabilidade (padrões utilizados na calibração).
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "referenceStandards",
-                            "Padrões de Referência",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Excluir Todos os Padrões</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 7: SAÚDE OCUPACIONAL (ASO) */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-rose-50 text-rose-600 rounded-lg border border-rose-100">
-                            <Activity className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Saúde Ocupacional (ASO)
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Exclui o histórico de exames médicos dos
-                          colaboradores, admissões e monitoramento de exames
-                          vencidos.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "medical_exams",
-                            "Saúde Ocupacional (ASO)",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Excluir ASOs e Exames</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 8: CONTAS E OPERADORES */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-purple-50 text-purple-600 rounded-lg border border-purple-100">
-                            <Users className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Contas de Operadores
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Exclui logins de operadores do sistema, restaurando
-                          apenas o usuário administrador mestre.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "portalUsers",
-                            "Contas de Operadores",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Redefinir Operadores</span>
-                      </button>
-                    </div>
-
-                    {/* ITEM 9: MENSAGENS FALE CONOSCO */}
-                    <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="p-2 bg-teal-50 text-teal-600 rounded-lg border border-teal-100">
-                            <MessageSquare className="h-4 w-4" />
-                          </div>
-                          <h4 className="font-bold text-slate-900 text-xs">
-                            Mensagens de Contato
-                          </h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Exclui as mensagens enviadas através do Portal do
-                          Cliente e gera o contato de simulação.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isResetting}
-                        onClick={() =>
-                          handleResetIndividual(
-                            "contactMessages",
-                            "Mensagens de Contato",
-                          )
-                        }
-                        className="mt-4 w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 font-bold py-2 px-3 rounded-lg border border-slate-200 hover:border-red-200 transition-all text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Redefinir Mensagens</span>
-                      </button>
-                    </div>
                   </div>
                 </div>
               </div>

@@ -8,9 +8,6 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth } from './src/middleware/auth.ts';
 import type { AuthRequest } from './src/middleware/auth.ts';
-import { db } from './src/db/index.ts';
-import { users } from './src/db/schema.ts';
-import { getOrCreateUser } from './src/db/users.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 import { adminAuth, adminDb } from './src/lib/firebase-admin.ts';
@@ -708,182 +705,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
 });
 
-// In-Memory Database State with File Persistence
-const DB_FILE = path.join(process.cwd(), "db.json");
-
-const initialClients: any[] = [
-  { id: "c1", name: "Petrobras S.A. - Refinaria Capuava", cnpj: "33.000.167/0001-56", email: "instrumentacao@petrobras.com.br", phone: "(11) 4344-8000", city: "Mauá - SP", password: "123456" },
-  { id: "c2", name: "Cervejaria Ambev - Unidade Jundiaí", cnpj: "07.526.557/0001-89", email: "manutencao.jundiai@ambev.com.br", phone: "(11) 4589-9200", city: "Jundiaí - SP", password: "123456" },
-  { id: "c3", name: "Braskem Química S.A.", cnpj: "42.150.391/0001-22", email: "metrologia@braskem.com.br", phone: "(11) 4434-2000", city: "Santo André - SP", password: "123456" },
-];
-
-const initialInstruments: any[] = [
-  {
-    id: "i1",
-    tag: "PI-101",
-    description: "Manômetro Analógico",
-    brand: "WIKA",
-    model: "213.53",
-    serialNumber: "W9843212",
-    category: "pressure" as const,
-    rangeMin: 0,
-    rangeMax: 10,
-    unit: "bar",
-    mpe: 0.1, // +-0.1 bar tolerance
-    lastCalibrationDate: "2025-07-15",
-    nextCalibrationDate: "2026-07-15",
-    status: "Aguardando Triagem" as const,
-    clientId: "c1",
-  },
-  {
-    id: "i2",
-    tag: "TI-201",
-    description: "Transmissor de Temperatura PT100",
-    brand: "Rosemount",
-    model: "3144P",
-    serialNumber: "RM772635",
-    category: "temperature" as const,
-    rangeMin: 0,
-    rangeMax: 200,
-    unit: "°C",
-    mpe: 0.2, // +-0.2 °C tolerance
-    lastCalibrationDate: "2025-05-10",
-    nextCalibrationDate: "2026-05-10",
-    status: "Em Calibração" as const,
-    clientId: "c1",
-  },
-  {
-    id: "i3",
-    tag: "PT-302",
-    description: "Transmissor de Pressão Hart",
-    brand: "Smar",
-    model: "LD301",
-    serialNumber: "SM449201",
-    category: "pressure" as const,
-    rangeMin: 0,
-    rangeMax: 100,
-    unit: "bar",
-    mpe: 0.25, // +-0.25 bar tolerance
-    lastCalibrationDate: "2025-08-01",
-    nextCalibrationDate: "2026-08-01",
-    status: "Calibrado" as const,
-    clientId: "c3",
-  },
-  {
-    id: "i4",
-    tag: "TE-401",
-    description: "Termômetro Digital Industrial",
-    brand: "Incoterm",
-    model: "T-Globo",
-    serialNumber: "INC22039",
-    category: "temperature" as const,
-    rangeMin: -50,
-    rangeMax: 150,
-    unit: "°C",
-    mpe: 0.5, // +-0.5 °C tolerance
-    lastCalibrationDate: "2026-02-12",
-    nextCalibrationDate: "2027-02-12",
-    status: "Entregue" as const,
-    clientId: "c2",
-  },
-];
-
-const initialCalibrationReports: any[] = [
-  {
-    id: "r1",
-    instrumentId: "i3",
-    technicianName: "Eng. Carlos Moreira",
-    date: "2025-08-01",
-    points: [
-      { id: "p1", nominalValue: 0, standardValue: 0.00, instrumentValue: 0.02, error: 0.02, mpe: 0.25, pass: true },
-      { id: "p2", nominalValue: 25, standardValue: 25.00, instrumentValue: 25.05, error: 0.05, mpe: 0.25, pass: true },
-      { id: "p3", nominalValue: 50, standardValue: 50.00, instrumentValue: 50.08, error: 0.08, mpe: 0.25, pass: true },
-      { id: "p4", nominalValue: 75, standardValue: 75.00, instrumentValue: 74.95, error: -0.05, mpe: 0.25, pass: true },
-      { id: "p5", nominalValue: 100, standardValue: 100.00, instrumentValue: 100.12, error: 0.12, mpe: 0.25, pass: true },
-    ],
-    maxError: 0.12,
-    maxRelativeError: 0.12,
-    approved: true,
-    observations: "Instrumento calibrado em conformidade com o erro máximo admissível. Apresenta excelente estabilidade.",
-  }
-];
-
-const initialContactMessages: any[] = [
-  {
-    id: "m1",
-    name: "Mariana Costa",
-    company: "Laticínios Sul de Minas",
-    email: "marianacosta@suldeminas.com.br",
-    phone: "(35) 3456-7890",
-    message: "Gostaria de solicitar um orçamento para calibração de 12 termômetros industriais e 5 manômetros de vapor.",
-    category: "calibracao" as const,
-    date: "2026-07-19",
-    status: "pendente" as const,
-  }
-];
-
-let clients: any[] = [];
-let instruments: any[] = [];
-let calibrationReports: any[] = [];
-let contactMessages: any[] = [];
-
-function saveDatabase() {
-  try {
-    const data = {
-      clients,
-      instruments,
-      calibrationReports,
-      contactMessages,
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
-  } catch (err) {
-    console.error("Erro ao salvar o banco de dados no arquivo:", err);
-  }
-}
-
-function loadDatabase() {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
-      clients = data.clients || [...initialClients];
-      instruments = data.instruments || [...initialInstruments];
-      calibrationReports = data.calibrationReports || [...initialCalibrationReports];
-      contactMessages = data.contactMessages || [...initialContactMessages];
-    } else {
-      clients = [...initialClients];
-      instruments = [...initialInstruments];
-      calibrationReports = [...initialCalibrationReports];
-      contactMessages = [...initialContactMessages];
-      saveDatabase();
-    }
-  } catch (err) {
-    console.error("Erro ao carregar o banco de dados do arquivo, usando valores padrões:", err);
-    clients = [...initialClients];
-    instruments = [...initialInstruments];
-    calibrationReports = [...initialCalibrationReports];
-    contactMessages = [...initialContactMessages];
-  }
-}
-
-// Inicializar banco de dados
-loadDatabase();
-
-// Clean up any test/imported client named "Manometros - Entrada de Dados" or similar if they exist
-const beforeCleanCount = clients.length;
-clients = clients.filter((c: any) => {
-  const nameLower = String(c.name || '').toLowerCase();
-  return !(nameLower.includes("manometros") && nameLower.includes("entrada")) && 
-         !nameLower.includes("manometros - entrada") && 
-         !nameLower.includes("manômetros - entrada de dados");
-});
-
-if (clients.length !== beforeCleanCount) {
-  const clientIds = new Set(clients.map((c: any) => c.id));
-  instruments = instruments.filter((i: any) => clientIds.has(i.clientId));
-  const instIds = new Set(instruments.map((i: any) => i.id));
-  calibrationReports = calibrationReports.filter((r: any) => instIds.has(r.instrumentId));
-  saveDatabase();
-}
+// Firestore/Firebase Admin are the only production data stores.
 
 // Lazy initialize Gemini API to handle missing keys gracefully
 let ai: GoogleGenAI | null = null;
@@ -1385,7 +1207,7 @@ app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res)
   }
 });
 
-app.post('/api/client-portal/ensure-access', requireAuth, async (req: AuthRequest, res) => {
+app.post('/api/client-portal/ensure-access', requireAuth, requireInternalAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   try {
     await requireInternalPortalRequester(req.user);
     const clientId = String(req.body?.clientId || '').trim();
@@ -1544,9 +1366,6 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
   }
 });
 
-app.post('/api/auth/complete-client-password-change', requireAuth, async (_req: AuthRequest, res) => {
-  return res.status(410).json({ error: 'CLIENT_PASSWORD_CHANGE_DISABLED' });
-});
 
 app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   try {
@@ -1655,298 +1474,7 @@ app.post("/api/auth/verify-admin", requireAuth, requireInternalAccount, adminApi
   }
 });
 
-app.post("/api/auth/legacy-login", async (req, res) => {
-  try {
-    const { cnpj, password, type } = req.body;
-
-    // Contas internas já utilizam exclusivamente Firebase Authentication.
-    // Nunca voltar a validar senha armazenada em portalUsers.
-    if (type === 'internal') {
-      return res.status(410).json({ error: 'INTERNAL_LEGACY_AUTH_DISABLED' });
-    }
-
-    if (type === 'client') {
-      // Etapa 1H: clientes usam somente a credencial fixa criada pela COMANINS
-      // na primeira Entrada de Material. Senhas legadas do Firestore não autenticam mais.
-      return res.status(410).json({ error: 'CLIENT_LEGACY_AUTH_DISABLED' });
-    }
-
-    return res.json({ valid: false });
-  } catch (error: any) {
-    console.error("Legacy client login error:", error);
-    return res.status(500).json({ error: "Erro de servidor ao validar credencial antiga do cliente." });
-  }
-});
-
-app.post("/api/clients", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
-  const { name, cnpj, email, phone, city, password } = req.body;
-  if (!name || !cnpj) {
-    return res.status(400).json({ error: "Nome e CNPJ são obrigatórios." });
-  }
-  const newClient = {
-    id: "c_" + Date.now(),
-    name,
-    cnpj,
-    email: email || "",
-    phone: phone || "",
-    city: city || "",
-    password: password || "123456"
-  };
-  clients.push(newClient);
-  saveDatabase();
-  res.status(201).json(newClient);
-});
-
-app.post("/api/clients/bulk", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
-  const { list } = req.body;
-  if (!list || !Array.isArray(list)) {
-    return res.status(400).json({ error: "Lista de clientes inválida ou vazia." });
-  }
-
-  const added: any[] = [];
-  list.forEach((item: any, i: number) => {
-    const { name, cnpj, email, phone, city, password } = item;
-    if (name && cnpj) {
-      const newClient = {
-        id: "c_" + (Date.now() + i),
-        name: String(name).trim(),
-        cnpj: String(cnpj).trim(),
-        email: String(email || "").trim(),
-        phone: String(phone || "").trim(),
-        city: String(city || "").trim(),
-        password: String(password || "123456").trim()
-      };
-      clients.push(newClient);
-      added.push(newClient);
-    }
-  });
-
-  if (added.length > 0) {
-    saveDatabase();
-  }
-  res.status(201).json({ success: true, count: added.length, list: added });
-});
-
-app.delete("/api/clients/:id", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
-  const { id } = req.params;
-  const index = clients.findIndex(item => item.id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Cliente não encontrado." });
-  }
-  clients.splice(index, 1);
-  instruments = instruments.filter(i => i.clientId !== id);
-  const instIds = new Set(instruments.map(i => i.id));
-  calibrationReports = calibrationReports.filter(r => instIds.has(r.instrumentId));
-  saveDatabase();
-  res.json({ success: true });
-});
-
-// Instruments endpoints
-app.get("/api/instruments", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  res.json(instruments);
-});
-
-app.post("/api/instruments", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { tag, description, brand, model, serialNumber, category, rangeMin, rangeMax, unit, mpe, clientId } = req.body;
-  if (!tag || !description || !category || clientId === undefined) {
-    return res.status(400).json({ error: "Tag, descrição, grandeza e cliente são obrigatórios." });
-  }
-  const newInstrument = {
-    id: "i_" + Date.now(),
-    tag,
-    description,
-    brand: brand || "",
-    model: model || "",
-    serialNumber: serialNumber || "",
-    category: category as "pressure" | "temperature",
-    rangeMin: Number(rangeMin) || 0,
-    rangeMax: Number(rangeMax) || 100,
-    unit: unit || "",
-    mpe: Number(mpe) || 0.1,
-    lastCalibrationDate: "",
-    nextCalibrationDate: "",
-    status: "Aguardando Triagem" as const,
-    clientId,
-  };
-  instruments.push(newInstrument);
-  saveDatabase();
-  res.status(201).json(newInstrument);
-});
-
-app.post("/api/instruments/bulk", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { list } = req.body;
-  if (!list || !Array.isArray(list)) {
-    return res.status(400).json({ error: "Lista de instrumentos inválida." });
-  }
-
-  const added: any[] = [];
-  list.forEach((item: any, i: number) => {
-    const { tag, description, brand, model, serialNumber, category, rangeMin, rangeMax, unit, mpe, clientId } = item;
-    if (tag && description && category && clientId) {
-      const normCat = (String(category).toLowerCase().includes("temp") || String(category).toLowerCase() === "t") ? "temperature" : "pressure";
-      const newInstrument = {
-        id: "i_" + (Date.now() + i),
-        tag: String(tag).trim(),
-        description: String(description).trim(),
-        brand: String(brand || "").trim(),
-        model: String(model || "").trim(),
-        serialNumber: String(serialNumber || "").trim(),
-        category: normCat as "pressure" | "temperature",
-        rangeMin: Number(rangeMin) || 0,
-        rangeMax: Number(rangeMax) || 100,
-        unit: String(unit || "").trim(),
-        mpe: Number(mpe) || 0.1,
-        lastCalibrationDate: "",
-        nextCalibrationDate: "",
-        status: "Aguardando Triagem" as const,
-        clientId: String(clientId).trim(),
-      };
-      instruments.push(newInstrument);
-      added.push(newInstrument);
-    }
-  });
-
-  if (added.length > 0) {
-    saveDatabase();
-  }
-  res.status(201).json({ success: true, count: added.length, list: added });
-});
-
-app.put("/api/instruments/:id", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { id } = req.params;
-  const index = instruments.findIndex(item => item.id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Instrumento não encontrado." });
-  }
-  
-  const current = instruments[index];
-  const updated = {
-    ...current,
-    ...req.body,
-    // Garanta cast de valores numéricos
-    rangeMin: req.body.rangeMin !== undefined ? Number(req.body.rangeMin) : current.rangeMin,
-    rangeMax: req.body.rangeMax !== undefined ? Number(req.body.rangeMax) : current.rangeMax,
-    mpe: req.body.mpe !== undefined ? Number(req.body.mpe) : current.mpe,
-  };
-  
-  instruments[index] = updated;
-  saveDatabase();
-  res.json(updated);
-});
-
-app.delete("/api/instruments/:id", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { id } = req.params;
-  const index = instruments.findIndex(item => item.id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Instrumento não encontrado." });
-  }
-  instruments.splice(index, 1);
-  saveDatabase();
-  res.json({ success: true });
-});
-
-// Calibration reports endpoints
-app.get("/api/calibrations", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  res.json(calibrationReports);
-});
-
-app.post("/api/calibrations", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { instrumentId, technicianName, points, observations } = req.body;
-  if (!instrumentId || !points || !Array.isArray(points)) {
-    return res.status(400).json({ error: "Dados de calibração incompletos." });
-  }
-
-  const inst = instruments.find(item => item.id === instrumentId);
-  if (!inst) {
-    return res.status(404).json({ error: "Instrumento não encontrado." });
-  }
-
-  // Calculate error and check with MPE
-  let maxError = 0;
-  const processedPoints = points.map((p: any) => {
-    const error = Number((Number(p.instrumentValue) - Number(p.standardValue)).toFixed(4));
-    const absError = Math.abs(error);
-    if (absError > maxError) maxError = absError;
-    const pass = absError <= inst.mpe;
-    return {
-      id: p.id || "p_" + Math.random().toString(36).substring(2, 9),
-      nominalValue: Number(p.nominalValue),
-      standardValue: Number(p.standardValue),
-      instrumentValue: Number(p.instrumentValue),
-      error,
-      mpe: inst.mpe,
-      pass,
-    };
-  });
-
-  const span = inst.rangeMax - inst.rangeMin;
-  const maxRelativeError = span > 0 ? Number(((maxError / span) * 100).toFixed(4)) : 0;
-  const approved = processedPoints.every(p => p.pass);
-
-  const newReport = {
-    id: "r_" + Date.now(),
-    instrumentId,
-    clientId: inst.clientId,
-    technicianName: technicianName || "Técnico Geral",
-    date: new Date().toISOString().split("T")[0],
-    points: processedPoints,
-    maxError,
-    maxRelativeError,
-    approved,
-    observations: observations || "",
-  };
-
-  calibrationReports.push(newReport);
-
-  // Update original instrument state
-  inst.status = "Calibrado";
-  inst.lastCalibrationDate = newReport.date;
-  const nextDate = new Date();
-  nextDate.setFullYear(nextDate.getFullYear() + 1); // Default calibration period is 12 months
-  inst.nextCalibrationDate = nextDate.toISOString().split("T")[0];
-
-  saveDatabase();
-  res.status(201).json({ report: newReport, instrument: inst });
-});
-
-// Contact / Quote requests endpoints
-app.get("/api/contacts", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  res.json(contactMessages);
-});
-
-app.post("/api/contacts", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { name, company, email, phone, message, category } = req.body;
-  if (!name || !email || !message) {
-    return res.status(400).json({ error: "Nome, e-mail e mensagem são campos obrigatórios." });
-  }
-
-  const newMessage = {
-    id: "msg_" + Date.now(),
-    name,
-    company: company || "",
-    email,
-    phone: phone || "",
-    message,
-    category: (category || "calibracao") as "calibracao" | "manutencao" | "vendas" | "outros",
-    date: new Date().toISOString().split("T")[0],
-    status: "pendente" as const,
-  };
-
-  contactMessages.push(newMessage);
-  saveDatabase();
-  res.status(201).json(newMessage);
-});
-
-app.put("/api/contacts/:id", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
-  const { id } = req.params;
-  const msg = contactMessages.find(item => item.id === id);
-  if (!msg) {
-    return res.status(404).json({ error: "Mensagem não encontrada." });
-  }
-  msg.status = req.body.status || "respondido";
-  saveDatabase();
-  res.json(msg);
-});
+// Legacy local-database/auth APIs removed after the Firebase migration.
 
 // Helper function to invoke Gemini API with Exponential Backoff Retry for 429 Rate Limits
 async function callGeminiWithRetry(fn: () => Promise<any>, maxRetries = 3, initialDelay = 1000): Promise<any> {
@@ -1976,7 +1504,6 @@ async function callGeminiWithRetry(fn: () => Promise<any>, maxRetries = 3, initi
   }
 }
 
-// AI Portal Assistant - Using Gemini API
 app.post("/api/chat", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
   const { messages } = req.body;
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 30) {
@@ -2153,7 +1680,7 @@ app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLim
       return res.json({ success: true, emailSent: true });
     } catch (err) {
       console.error("[EMAIL] Erro ao enviar e-mail via SMTP:", err);
-      return res.json({ success: false, error: err.message });
+      return res.json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
   } else {
     console.log("[EMAIL] SMTP não configurado. Dados:", { to, subject });
@@ -2179,6 +1706,30 @@ app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequ
   const safePhone = escapeHtml(phone || 'Não informado');
   const safeCategory = escapeHtml(category || 'Outros');
   const safeMessage = escapeHtml(message);
+
+  if (!firestoreDb) {
+    return res.status(503).json({ error: 'CONTACT_SERVICE_UNAVAILABLE' });
+  }
+
+  const contactId = `msg_${Date.now()}_${randomBytes(4).toString('hex')}`;
+  try {
+    await firestoreDb.collection('contactMessages').doc(contactId).set({
+      id: contactId,
+      name,
+      company,
+      email,
+      phone,
+      message,
+      category: category || 'outros',
+      date: new Date().toISOString().split('T')[0],
+      createdAt: FieldValue.serverTimestamp(),
+      status: 'pendente',
+      source: 'public-site',
+    });
+  } catch (error) {
+    console.error('[CONTACT] Falha ao registrar contato no Firestore:', error);
+    return res.status(500).json({ error: 'CONTACT_PERSISTENCE_FAILED' });
+  }
 
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
 
@@ -2241,14 +1792,14 @@ app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequ
         text: `Nome: ${name}\nEmpresa: ${company}\nE-mail: ${email}\nTelefone: ${phone}\n\nMensagem:\n${message}`
       });
       
-      return res.json({ success: true, emailSent: true });
+      return res.json({ success: true, contactSaved: true, emailSent: true });
     } catch (err: any) {
       console.error("[CONTACT EMAIL] Erro ao enviar e-mail via SMTP:", err);
-      return res.json({ success: false, error: err.message });
+      return res.json({ success: true, contactSaved: true, emailSent: false, emailError: true });
     }
   } else {
     console.log("[CONTACT EMAIL] SMTP não configurado. Dados recebidos:", { name, company, email, phone, message });
-    return res.json({ success: true, emailSent: false, smtpNotConfigured: true });
+    return res.json({ success: true, contactSaved: true, emailSent: false, smtpNotConfigured: true });
   }
 });
 
@@ -2364,16 +1915,6 @@ app.post("/api/send-document-notification", requireAuth, requireInternalAccount,
   } else {
     console.log(`[PAYSLIP COMPLIANCE] SMTP não configurado. Comprovante impresso no console:\nSubject: ${emailSubject}\nTo: financeiro@comanins.com.br`);
     return res.json({ success: true, emailSent: false, smtpNotConfigured: true });
-  }
-});
-
-// Download dist.zip endpoint
-app.get("/api/download-dist", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
-  const zipPath = path.join(process.cwd(), "public", "dist.zip");
-  if (fs.existsSync(zipPath)) {
-    res.download(zipPath, "comanins-dist.zip");
-  } else {
-    res.status(404).json({ error: "Arquivo dist.zip não encontrado" });
   }
 });
 
