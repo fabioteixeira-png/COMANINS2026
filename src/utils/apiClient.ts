@@ -111,7 +111,10 @@ export async function safeFetch<T = any>(
       while (attempt <= maxRetries) {
         try {
           const requestHeaders = new Headers(headers || {});
-          if (!requestHeaders.has('Content-Type')) {
+          // Do not add Content-Type to bodyless GET requests. Adding
+          // application/json to third-party GETs (such as api.ipify.org)
+          // triggers a CORS preflight unnecessarily.
+          if (body != null && !requestHeaders.has('Content-Type')) {
             requestHeaders.set('Content-Type', 'application/json');
           }
 
