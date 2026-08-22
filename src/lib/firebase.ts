@@ -918,6 +918,7 @@ export async function saveCalibrationDoc(data: {
   const generatedAuthKey = generateAuthKey();
   const report: CalibrationReport = {
     id: reportId,
+    clientId: activeInst.clientId,
     certNumber: data.certNumber,
     authKey: generatedAuthKey,
     instrumentId: data.instrumentId,
@@ -1942,7 +1943,20 @@ export async function syncRncReports(callback: (reports: RncReport[]) => void) {
 }
 
 export async function saveRncReportDoc(data: RncReport): Promise<void> {
-  await setDoc(doc(db, 'rncReports', data.id), data);
+  let clientId = String(data.clientId || '').trim();
+
+  // Registros novos devem sempre carregar o vínculo do cliente. Para chamadas
+  // antigas/restaurações que ainda não enviem clientId, resolvemos pelo
+  // instrumento antes de gravar.
+  if (!clientId && data.instrumentId) {
+    const instrumentSnap = await getDoc(doc(db, 'instruments', data.instrumentId));
+    if (instrumentSnap.exists()) {
+      clientId = String(instrumentSnap.data()?.clientId || '').trim();
+    }
+  }
+
+  const payload: RncReport = clientId ? { ...data, clientId } : data;
+  await setDoc(doc(db, 'rncReports', data.id), payload);
 }
 
 export async function deleteRncDoc(id: string): Promise<void> {

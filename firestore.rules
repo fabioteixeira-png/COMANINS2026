@@ -102,6 +102,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+
+    // Marcadores de migração são gravados exclusivamente pelo Firebase Admin.
+    // Administradores podem consultar o status, mas nenhum navegador altera o estado.
+    match /securityMigrations/{document=**} {
+      allow read: if isAdministrator();
+      allow write: if false;
+    }
+
     // Documentos individuais do colaborador: o próprio titular pode ler;
     // RH/Admin gerenciam inclusão, alteração e exclusão.
     match /employeeDocuments/{document=**} {
@@ -186,6 +194,7 @@ service cloud.firestore {
         collection != 'portalUsers' &&
         collection != 'clients' &&
         collection != 'clientPortalCredentials' &&
+        collection != 'securityMigrations' &&
         collection != 'employeeDocuments' &&
         collection != 'medical_exams' &&
         collection != 'employeeAsos' &&

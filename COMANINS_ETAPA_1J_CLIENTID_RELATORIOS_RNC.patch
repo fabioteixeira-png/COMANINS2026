@@ -1,0 +1,271 @@
+diff --git a/firestore.rules b/firestore.rules
+index 5e8e1fa..2afc0df 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -102,6 +102,14 @@ service cloud.firestore {
+       allow read, write: if false;
+     }
+ 
++
++    // Marcadores de migração são gravados exclusivamente pelo Firebase Admin.
++    // Administradores podem consultar o status, mas nenhum navegador altera o estado.
++    match /securityMigrations/{document=**} {
++      allow read: if isAdministrator();
++      allow write: if false;
++    }
++
+     // Documentos individuais do colaborador: o próprio titular pode ler;
+     // RH/Admin gerenciam inclusão, alteração e exclusão.
+     match /employeeDocuments/{document=**} {
+@@ -186,6 +194,7 @@ service cloud.firestore {
+         collection != 'portalUsers' &&
+         collection != 'clients' &&
+         collection != 'clientPortalCredentials' &&
++        collection != 'securityMigrations' &&
+         collection != 'employeeDocuments' &&
+         collection != 'medical_exams' &&
+         collection != 'employeeAsos' &&
+diff --git a/server.ts b/server.ts
+index e6339f6..ef26653 100644
+--- a/server.ts
++++ b/server.ts
+@@ -412,6 +412,125 @@ const syncInternalAuthProfile = async (decoded: any) => {
+   return mergedProfile;
+ };
+ 
++const CLIENT_LINK_MIGRATION_ID = 'clientLinksV1';
++let clientLinkMigrationReady = false;
++let clientLinkMigrationPromise: Promise<void> | null = null;
++
++const isClientLinkMigrationComplete = async (): Promise<boolean> => {
++  if (clientLinkMigrationReady) return true;
++  if (!firestoreDb) return false;
++
++  try {
++    const marker = await firestoreDb
++      .collection('securityMigrations')
++      .doc(CLIENT_LINK_MIGRATION_ID)
++      .get();
++    clientLinkMigrationReady = marker.exists && marker.data()?.completed === true;
++    return clientLinkMigrationReady;
++  } catch (error) {
++    console.error('[MIGRATION] Could not read client link migration status:', error);
++    return false;
++  }
++};
++
++const backfillClientLinks = async (): Promise<void> => {
++  if (!firestoreDb) return;
++  if (clientLinkMigrationPromise) return clientLinkMigrationPromise;
++
++  const migrationPromise = (async () => {
++    const markerRef = firestoreDb.collection('securityMigrations').doc(CLIENT_LINK_MIGRATION_ID);
++    const marker = await markerRef.get();
++    if (marker.exists && marker.data()?.completed === true) {
++      clientLinkMigrationReady = true;
++      return;
++    }
++
++    console.log('[MIGRATION] Starting clientId backfill for calibrationReports and rncReports...');
++
++    const [instrumentSnap, reportSnap, rncSnap] = await Promise.all([
++      firestoreDb.collection('instruments').select('clientId').get(),
++      firestoreDb.collection('calibrationReports').select('instrumentId', 'clientId').get(),
++      firestoreDb.collection('rncReports').select('instrumentId', 'clientId').get(),
++    ]);
++
++    const clientIdByInstrument = new Map<string, string>();
++    for (const doc of instrumentSnap.docs) {
++      const clientId = String(doc.data()?.clientId || '').trim();
++      if (clientId) clientIdByInstrument.set(doc.id, clientId);
++    }
++
++    let batch = firestoreDb.batch();
++    let pendingWrites = 0;
++    let calibrationReportsUpdated = 0;
++    let rncReportsUpdated = 0;
++    let calibrationReportsOrphaned = 0;
++    let rncReportsOrphaned = 0;
++
++    const flushBatch = async () => {
++      if (pendingWrites === 0) return;
++      await batch.commit();
++      batch = firestoreDb.batch();
++      pendingWrites = 0;
++    };
++
++    const queueClientLink = async (
++      doc: any,
++      kind: 'calibration' | 'rnc',
++    ) => {
++      const data: any = doc.data();
++      const instrumentId = String(data?.instrumentId || '').trim();
++      const authoritativeClientId = instrumentId ? clientIdByInstrument.get(instrumentId) : undefined;
++
++      if (!authoritativeClientId) {
++        if (kind === 'calibration') calibrationReportsOrphaned += 1;
++        else rncReportsOrphaned += 1;
++        return;
++      }
++
++      if (String(data?.clientId || '').trim() === authoritativeClientId) return;
++
++      batch.update(doc.ref, { clientId: authoritativeClientId });
++      pendingWrites += 1;
++      if (kind === 'calibration') calibrationReportsUpdated += 1;
++      else rncReportsUpdated += 1;
++
++      // Firestore limits batches to 500 writes. Keep headroom for compatibility.
++      if (pendingWrites >= 400) await flushBatch();
++    };
++
++    for (const doc of reportSnap.docs) await queueClientLink(doc, 'calibration');
++    for (const doc of rncSnap.docs) await queueClientLink(doc, 'rnc');
++    await flushBatch();
++
++    await markerRef.set({
++      completed: true,
++      version: 1,
++      completedAt: new Date().toISOString(),
++      calibrationReportsUpdated,
++      rncReportsUpdated,
++      calibrationReportsOrphaned,
++      rncReportsOrphaned,
++    }, { merge: true });
++
++    clientLinkMigrationReady = true;
++    console.log(
++      `[MIGRATION] clientId backfill complete. calibrationReports=${calibrationReportsUpdated}, ` +
++      `rncReports=${rncReportsUpdated}, orphanedCalibration=${calibrationReportsOrphaned}, ` +
++      `orphanedRnc=${rncReportsOrphaned}`,
++    );
++  })()
++    .catch((error) => {
++      clientLinkMigrationReady = false;
++      console.error('[MIGRATION] clientId backfill failed; legacy portal filtering remains active:', error);
++    })
++    .finally(() => {
++      clientLinkMigrationPromise = null;
++    });
++
++  clientLinkMigrationPromise = migrationPromise;
++  return migrationPromise;
++};
++
+ const scrubLegacyInternalPasswordFields = async (): Promise<void> => {
+   if (!firestoreDb) return;
+   try {
+@@ -1169,15 +1288,26 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
+     const instruments = instrumentsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+     const instrumentIdSet = new Set(instruments.map((item: any) => String(item.id)).filter(Boolean));
+ 
+-    // Legacy calibration/RNC documents do not consistently contain clientId.
+-    // Read them server-side and filter by the already authorized instrument set;
+-    // none of the unfiltered documents are ever returned to the browser.
++    // Enquanto a migração histórica ainda não terminou, mantemos o filtro legado
++    // no servidor para não esconder certificados/RNCs antigos. Após o marcador
++    // clientLinksV1, as leituras passam a usar clientId diretamente e deixam de
++    // varrer as coleções completas.
++    const indexedClientLinks = await isClientLinkMigrationComplete();
++    const reportsQuery = indexedClientLinks
++      ? firestoreDb.collection('calibrationReports').where('clientId', '==', clientId)
++      : firestoreDb.collection('calibrationReports');
++    const rncQuery = indexedClientLinks
++      ? firestoreDb.collection('rncReports').where('clientId', '==', clientId)
++      : firestoreDb.collection('rncReports');
++
+     const [reportsSnap, rncSnap, intakesSnap] = await Promise.all([
+-      firestoreDb.collection('calibrationReports').get(),
+-      firestoreDb.collection('rncReports').get(),
++      reportsQuery.get(),
++      rncQuery.get(),
+       firestoreDb.collection('savedIntakes').where('clientId', '==', clientId).get(),
+     ]);
+ 
++    // Mesmo no modo indexado, confirme o instrumento autorizado como defesa adicional
++    // contra algum registro historicamente vinculado ao cliente incorreto.
+     const reports = reportsSnap.docs
+       .map((doc) => ({ id: doc.id, ...doc.data() }))
+       .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
+@@ -1216,6 +1346,7 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
+       clientIntakes,
+       rncReports,
+       fieldServiceRecords,
++      dataMode: indexedClientLinks ? 'clientId-indexed' : 'legacy-fallback',
+     });
+   } catch (error: any) {
+     if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
+@@ -1568,6 +1699,7 @@ app.post("/api/calibrations", (req, res) => {
+   const newReport = {
+     id: "r_" + Date.now(),
+     instrumentId,
++    clientId: inst.clientId,
+     technicianName: technicianName || "Técnico Geral",
+     date: new Date().toISOString().split("T")[0],
+     points: processedPoints,
+@@ -2107,8 +2239,10 @@ Required JSON format:
+     });
+   }
+ 
+-  // Start server
++  // Start server. Security cleanups/migrations run asynchronously and never
++  // block the public site from listening.
+   void scrubLegacyInternalPasswordFields();
++  void backfillClientLinks();
+ 
+   app.listen(PORT, "0.0.0.0", () => {
+     console.log(`Servidor COMANINS rodando na porta ${PORT}`);
+diff --git a/src/lib/firebase.ts b/src/lib/firebase.ts
+index e1bd763..533b883 100644
+--- a/src/lib/firebase.ts
++++ b/src/lib/firebase.ts
+@@ -918,6 +918,7 @@ export async function saveCalibrationDoc(data: {
+   const generatedAuthKey = generateAuthKey();
+   const report: CalibrationReport = {
+     id: reportId,
++    clientId: activeInst.clientId,
+     certNumber: data.certNumber,
+     authKey: generatedAuthKey,
+     instrumentId: data.instrumentId,
+@@ -1942,7 +1943,20 @@ export async function syncRncReports(callback: (reports: RncReport[]) => void) {
+ }
+ 
+ export async function saveRncReportDoc(data: RncReport): Promise<void> {
+-  await setDoc(doc(db, 'rncReports', data.id), data);
++  let clientId = String(data.clientId || '').trim();
++
++  // Registros novos devem sempre carregar o vínculo do cliente. Para chamadas
++  // antigas/restaurações que ainda não enviem clientId, resolvemos pelo
++  // instrumento antes de gravar.
++  if (!clientId && data.instrumentId) {
++    const instrumentSnap = await getDoc(doc(db, 'instruments', data.instrumentId));
++    if (instrumentSnap.exists()) {
++      clientId = String(instrumentSnap.data()?.clientId || '').trim();
++    }
++  }
++
++  const payload: RncReport = clientId ? { ...data, clientId } : data;
++  await setDoc(doc(db, 'rncReports', data.id), payload);
+ }
+ 
+ export async function deleteRncDoc(id: string): Promise<void> {
+diff --git a/src/types.ts b/src/types.ts
+index c570cf2..6702bba 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -74,6 +74,7 @@ export interface Instrument {
+ 
+ export interface RncReport {
+   id: string;
++  clientId?: string;
+   rncNumber: string;
+   instrumentId: string;
+   instrumentTag: string;
+@@ -139,6 +140,7 @@ export interface ReferenceStandard {
+ 
+ export interface CalibrationReport {
+   certNumber?: string;
++  clientId?: string;
+   authKey?: string;
+   id: string;
+   instrumentId: string;

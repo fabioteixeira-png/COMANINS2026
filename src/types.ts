@@ -74,6 +74,7 @@ export interface Instrument {
 
 export interface RncReport {
   id: string;
+  clientId?: string;
   rncNumber: string;
   instrumentId: string;
   instrumentTag: string;
@@ -139,6 +140,7 @@ export interface ReferenceStandard {
 
 export interface CalibrationReport {
   certNumber?: string;
+  clientId?: string;
   authKey?: string;
   id: string;
   instrumentId: string;

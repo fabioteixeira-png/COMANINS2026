@@ -18,7 +18,8 @@ export default defineConfig(() => {
     },
     build: { 
       outDir: 'dist',
-      target: 'es2022'
+      target: 'es2022',
+      emptyOutDir: false,
     },
     esbuild: {
       target: 'es2022'
