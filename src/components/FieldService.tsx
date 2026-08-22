@@ -12,7 +12,7 @@ import {
   bulkUpsertFieldServiceRecords,
   clearAllFieldServiceRecords, deleteFieldServiceRecord, syncInstruments
 } from '../lib/firebase';
-import { verifyAdminCredentials } from '../utils/authApi';
+import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 
 const parseDateForSort = (dString: string) => {
   if (!dString) return 0;
@@ -399,7 +399,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
         });
       }
 
-      const response = await fetch('/api/parse-field-service-image', {
+      const response = await authJsonFetch('/api/parse-field-service-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: base64 })

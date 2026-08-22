@@ -1,3 +1,5 @@
+import { auth } from '../lib/firebase';
+
 /**
  * Utility for API requests with:
  * - Rate Limiter / Concurrency Control (max 3 concurrent requests)
@@ -108,12 +110,21 @@ export async function safeFetch<T = any>(
 
       while (attempt <= maxRetries) {
         try {
+          const requestHeaders = new Headers(headers || {});
+          if (!requestHeaders.has('Content-Type')) {
+            requestHeaders.set('Content-Type', 'application/json');
+          }
+
+          // Attach Firebase ID token only to this application's API routes.
+          // Never forward COMANINS credentials to third-party URLs (e.g. api.ipify.org).
+          if (url.startsWith('/api/') && auth.currentUser && !requestHeaders.has('Authorization')) {
+            const token = await auth.currentUser.getIdToken();
+            requestHeaders.set('Authorization', `Bearer ${token}`);
+          }
+
           const res = await fetch(url, {
             method,
-            headers: {
-              'Content-Type': 'application/json',
-              ...headers,
-            },
+            headers: requestHeaders,
             body,
             ...restInit,
           });

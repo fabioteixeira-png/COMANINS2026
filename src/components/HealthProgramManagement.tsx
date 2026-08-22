@@ -29,7 +29,7 @@ import {
   updateHealthProgramDoc, 
   deleteHealthProgramDoc 
 } from '../lib/firebase';
-import { verifyAdminCredentials } from '../utils/authApi';
+import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 
 interface HealthProgramManagementProps {
   currentUser?: {
@@ -378,7 +378,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
     setAlertFeedback(null);
 
     try {
-      const response = await fetch('/api/send-health-program-alert', {
+      const response = await authJsonFetch('/api/send-health-program-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ docs: urgentDocs })

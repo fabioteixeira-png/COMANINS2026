@@ -636,7 +636,7 @@ export default function InternalPortal({
       if (today.getMonth() + 1 === parseInt(month) && today.getDate() === parseInt(day)) {
         const hasSeen = sessionStorage.getItem(`bday_${currentUser.id}_${today.getFullYear()}`);
         if (!hasSeen) {
-          fetch("/api/generate-birthday-message", {
+          authJsonFetch("/api/generate-birthday-message", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: currentUser.name }),
@@ -945,7 +945,7 @@ export default function InternalPortal({
   const [intakeRows, setIntakeRows] = useState<any>([]);
   const [intakeSearchTerm, setIntakeSearchTerm] = useState<any>("");
   const [inventoryCategoryFilter, setInventoryCategoryFilter] =
-    useState<any>("");
+    useState<any>("Todos");
   const [isCatalogOpen, setIsCatalogOpen] = useState<any>(false);
   const [labBenchName, setLabBenchName] = useState<any>("");
   const [labBenchSuccessMessage, setLabBenchSuccessMessage] = useState<any>("");

@@ -1,4 +1,5 @@
 import express from "express";
+import type { NextFunction, Response } from "express";
 import path from "path";
 import dotenv from "dotenv";
 dotenv.config();
@@ -51,7 +52,95 @@ const isRhProfile = (profile: any): boolean => {
   ].includes(role);
 };
 
-const findPortalUserForAuth = async (decoded: any) => {
+const isFinanceProfile = (profile: any): boolean => {
+  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
+  const role = normalizeAccessValue(profile?.role);
+  return ['financeiro', 'financeira', 'finance'].includes(permissionLevel) ||
+    ['financeiro', 'financeira', 'finance'].includes(role);
+};
+
+const isInternalDecodedToken = (decoded: any): boolean => {
+  const accountType = normalizeAccessValue(decoded?.accountType);
+  const email = String(decoded?.email || '').trim().toLowerCase();
+  return accountType === 'internal' && email.endsWith('@comanins.internal');
+};
+
+const requireInternalAccount = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || !isInternalDecodedToken(req.user)) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
+  next();
+};
+
+const requireAdministratorAccount = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || !isInternalDecodedToken(req.user) || !isAdministratorProfile(req.user)) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
+  next();
+};
+
+const requireAdminOrRhAccount = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (
+    !req.user ||
+    !isInternalDecodedToken(req.user) ||
+    (!isAdministratorProfile(req.user) && !isRhProfile(req.user))
+  ) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
+  next();
+};
+
+type RateLimitBucket = { count: number; resetAt: number };
+const apiRateLimitBuckets = new Map<string, RateLimitBucket>();
+
+const createRateLimiter = (scope: string, windowMs: number, maxRequests: number) =>
+  (req: AuthRequest, res: Response, next: NextFunction) => {
+    const now = Date.now();
+    if (apiRateLimitBuckets.size > 5000) {
+      for (const [key, bucket] of apiRateLimitBuckets) {
+        if (bucket.resetAt <= now) apiRateLimitBuckets.delete(key);
+      }
+    }
+
+    const identity = req.user?.uid || req.ip || req.socket.remoteAddress || 'unknown';
+    const key = `${scope}:${identity}`;
+    const current = apiRateLimitBuckets.get(key);
+    if (!current || current.resetAt <= now) {
+      apiRateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+
+    if (current.count >= maxRequests) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({ error: 'RATE_LIMITED', retryAfterSeconds });
+    }
+
+    current.count += 1;
+    apiRateLimitBuckets.set(key, current);
+    next();
+  };
+
+const aiApiRateLimit = createRateLimiter('ai-api', 5 * 60 * 1000, 30);
+const emailApiRateLimit = createRateLimiter('email-api', 10 * 60 * 1000, 30);
+const adminApiRateLimit = createRateLimiter('admin-api', 5 * 60 * 1000, 30);
+const publicContactRateLimit = createRateLimiter('public-contact', 15 * 60 * 1000, 5);
+
+const asLimitedString = (value: unknown, maxLength: number): string =>
+  String(value ?? '').trim().slice(0, maxLength);
+
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const isValidEmailAddress = (value: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
+
+const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   if (!firestoreDb) {
     throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
   }
@@ -598,13 +687,22 @@ const scrubLegacyInternalPasswordFields = async (): Promise<void> => {
 
 
 const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 
 // Temporary migration/admin seed routes removed after Firebase Auth rollout.
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "8mb" }));
+app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
@@ -1082,7 +1180,7 @@ COMANINS Metrology Suite`;
 
 cron.schedule('0 8 * * *', runDailyNotifications);
 
-app.post("/api/send-health-program-alert", async (req, res) => {
+app.post("/api/send-health-program-alert", requireAuth, requireAdminOrRhAccount, emailApiRateLimit, async (req: AuthRequest, res) => {
   const { docs } = req.body;
   const HEALTH_RECIPIENTS = "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br";
 
@@ -1182,13 +1280,20 @@ app.post("/api/send-health-program-alert", async (req, res) => {
 });
 
 
-app.post("/api/test-notifications", async (req, res) => {
+app.post("/api/test-notifications", requireAuth, requireAdministratorAccount, adminApiRateLimit, async (_req: AuthRequest, res) => {
   await runDailyNotifications();
   res.json({ success: true, message: "Notificações verificadas." });
 });
 
-app.post("/api/generate-birthday-message", async (req, res) => {
-  const { name } = req.body;
+app.post("/api/generate-birthday-message", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
+  let name = asLimitedString(req.body?.name, 120);
+  try {
+    const requesterProfile = await findPortalUserForAuth(req.user);
+    name = asLimitedString(requesterProfile?.name || name, 120);
+  } catch {
+    // The signed internal token already passed authorization; keep the supplied
+    // display name only as a fallback if Firestore is temporarily unavailable.
+  }
   if (!name) return res.status(400).json({ error: "Nome não fornecido" });
   
   const genAI = getGeminiClient();
@@ -1443,7 +1548,7 @@ app.post('/api/auth/complete-client-password-change', requireAuth, async (_req: 
   return res.status(410).json({ error: 'CLIENT_PASSWORD_CHANGE_DISABLED' });
 });
 
-app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => {
+app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   try {
     if (!adminAuth || !firestoreDb) {
       return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
@@ -1494,7 +1599,7 @@ app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => 
   }
 });
 
-app.post("/api/auth/verify-admin", requireAuth, async (req: AuthRequest, res) => {
+app.post("/api/auth/verify-admin", requireAuth, requireInternalAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   try {
     if (!adminAuth || !firestoreDb) {
       return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
@@ -1573,7 +1678,7 @@ app.post("/api/auth/legacy-login", async (req, res) => {
   }
 });
 
-app.post("/api/clients", (req, res) => {
+app.post("/api/clients", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
   const { name, cnpj, email, phone, city, password } = req.body;
   if (!name || !cnpj) {
     return res.status(400).json({ error: "Nome e CNPJ são obrigatórios." });
@@ -1592,7 +1697,7 @@ app.post("/api/clients", (req, res) => {
   res.status(201).json(newClient);
 });
 
-app.post("/api/clients/bulk", (req, res) => {
+app.post("/api/clients/bulk", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
   const { list } = req.body;
   if (!list || !Array.isArray(list)) {
     return res.status(400).json({ error: "Lista de clientes inválida ou vazia." });
@@ -1622,7 +1727,7 @@ app.post("/api/clients/bulk", (req, res) => {
   res.status(201).json({ success: true, count: added.length, list: added });
 });
 
-app.delete("/api/clients/:id", (req, res) => {
+app.delete("/api/clients/:id", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
   const { id } = req.params;
   const index = clients.findIndex(item => item.id === id);
   if (index === -1) {
@@ -1637,11 +1742,11 @@ app.delete("/api/clients/:id", (req, res) => {
 });
 
 // Instruments endpoints
-app.get("/api/instruments", (req, res) => {
+app.get("/api/instruments", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   res.json(instruments);
 });
 
-app.post("/api/instruments", (req, res) => {
+app.post("/api/instruments", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { tag, description, brand, model, serialNumber, category, rangeMin, rangeMax, unit, mpe, clientId } = req.body;
   if (!tag || !description || !category || clientId === undefined) {
     return res.status(400).json({ error: "Tag, descrição, grandeza e cliente são obrigatórios." });
@@ -1668,7 +1773,7 @@ app.post("/api/instruments", (req, res) => {
   res.status(201).json(newInstrument);
 });
 
-app.post("/api/instruments/bulk", (req, res) => {
+app.post("/api/instruments/bulk", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { list } = req.body;
   if (!list || !Array.isArray(list)) {
     return res.status(400).json({ error: "Lista de instrumentos inválida." });
@@ -1707,7 +1812,7 @@ app.post("/api/instruments/bulk", (req, res) => {
   res.status(201).json({ success: true, count: added.length, list: added });
 });
 
-app.put("/api/instruments/:id", (req, res) => {
+app.put("/api/instruments/:id", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { id } = req.params;
   const index = instruments.findIndex(item => item.id === id);
   if (index === -1) {
@@ -1729,7 +1834,7 @@ app.put("/api/instruments/:id", (req, res) => {
   res.json(updated);
 });
 
-app.delete("/api/instruments/:id", (req, res) => {
+app.delete("/api/instruments/:id", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { id } = req.params;
   const index = instruments.findIndex(item => item.id === id);
   if (index === -1) {
@@ -1741,11 +1846,11 @@ app.delete("/api/instruments/:id", (req, res) => {
 });
 
 // Calibration reports endpoints
-app.get("/api/calibrations", (req, res) => {
+app.get("/api/calibrations", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   res.json(calibrationReports);
 });
 
-app.post("/api/calibrations", (req, res) => {
+app.post("/api/calibrations", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { instrumentId, technicianName, points, observations } = req.body;
   if (!instrumentId || !points || !Array.isArray(points)) {
     return res.status(400).json({ error: "Dados de calibração incompletos." });
@@ -1805,11 +1910,11 @@ app.post("/api/calibrations", (req, res) => {
 });
 
 // Contact / Quote requests endpoints
-app.get("/api/contacts", (req, res) => {
+app.get("/api/contacts", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   res.json(contactMessages);
 });
 
-app.post("/api/contacts", (req, res) => {
+app.post("/api/contacts", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { name, company, email, phone, message, category } = req.body;
   if (!name || !email || !message) {
     return res.status(400).json({ error: "Nome, e-mail e mensagem são campos obrigatórios." });
@@ -1832,7 +1937,7 @@ app.post("/api/contacts", (req, res) => {
   res.status(201).json(newMessage);
 });
 
-app.put("/api/contacts/:id", (req, res) => {
+app.put("/api/contacts/:id", requireAuth, requireInternalAccount, (req: AuthRequest, res) => {
   const { id } = req.params;
   const msg = contactMessages.find(item => item.id === id);
   if (!msg) {
@@ -1872,9 +1977,16 @@ async function callGeminiWithRetry(fn: () => Promise<any>, maxRetries = 3, initi
 }
 
 // AI Portal Assistant - Using Gemini API
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
   const { messages } = req.body;
-  if (!messages || !Array.isArray(messages)) {
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 30) {
+    return res.status(400).json({ error: "Mensagens inválidas." });
+  }
+  const normalizedMessages = messages.map((message: any) => ({
+    sender: message?.sender === 'assistant' ? 'assistant' : 'user',
+    text: asLimitedString(message?.text, 4000),
+  })).filter((message: any) => message.text);
+  if (normalizedMessages.length === 0) {
     return res.status(400).json({ error: "Mensagens inválidas." });
   }
 
@@ -1882,7 +1994,7 @@ app.post("/api/chat", async (req, res) => {
 
   if (!gemini) {
     // Elegant Offline Fallback
-    const lastUserMessage = messages[messages.length - 1]?.text || "";
+    const lastUserMessage = normalizedMessages[normalizedMessages.length - 1]?.text || "";
     let reply = "";
 
     // Simulated technician responses based on query
@@ -1902,7 +2014,7 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     // Prepare prompt with background guidelines so Gemini responds exactly as a Metrology Expert
-    const promptHistory = messages.map(m => {
+    const promptHistory = normalizedMessages.map((m: any) => {
       return `${m.sender === "user" ? "Usuário" : "Assistente"}: ${m.text}`;
     }).join("\n");
 
@@ -1939,8 +2051,15 @@ Suas diretrizes:
 });
 
 // Endpoint para Gerar Análise de Não Conformidade (RNC) com IA
-app.post("/api/generate-rnc", async (req, res) => {
-  const { instrumentTag, instrumentDescription, coma, clientName, reason, technicianName, range } = req.body;
+app.post("/api/generate-rnc", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
+  const instrumentTag = asLimitedString(req.body?.instrumentTag, 120);
+  const instrumentDescription = asLimitedString(req.body?.instrumentDescription, 240);
+  const coma = asLimitedString(req.body?.coma, 120);
+  const clientName = asLimitedString(req.body?.clientName, 240);
+  const reason = asLimitedString(req.body?.reason, 3000);
+  const technicianName = asLimitedString(req.body?.technicianName, 160);
+  const range = asLimitedString(req.body?.range, 160);
+  if (!reason) return res.status(400).json({ error: 'Motivo da RNC é obrigatório.' });
   const gemini = getGeminiClient();
 
   if (!gemini) {
@@ -2003,10 +2122,13 @@ Sua resposta deve ser entregue em texto contínuo bem formatado, utilizando jarg
 
 // Endpoint to send contact emails
 // Generic email endpoint
-app.post("/api/send-email", async (req, res) => {
-  const { to, subject, html } = req.body;
-  if (!to || !subject || !html) {
-    return res.status(400).json({ error: "Dados incompletos para envio de e-mail." });
+app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLimit, async (req: AuthRequest, res) => {
+  const to = asLimitedString(req.body?.to, 2000);
+  const subject = asLimitedString(req.body?.subject, 200);
+  const html = String(req.body?.html || '');
+  const recipients = to.split(/[;,]/).map((value) => value.trim()).filter(Boolean);
+  if (!subject || !html || html.length > 200000 || recipients.length === 0 || recipients.length > 20 || !recipients.every(isValidEmailAddress)) {
+    return res.status(400).json({ error: "Dados inválidos para envio de e-mail." });
   }
 
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
@@ -2039,16 +2161,28 @@ app.post("/api/send-email", async (req, res) => {
   }
 });
 
-app.post("/api/send-contact-email", async (req, res) => {
-  const { name, company, email, phone, message, category } = req.body;
+app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequest, res) => {
+  const name = asLimitedString(req.body?.name, 120);
+  const company = asLimitedString(req.body?.company, 160);
+  const email = asLimitedString(req.body?.email, 254).toLowerCase();
+  const phone = asLimitedString(req.body?.phone, 40);
+  const message = asLimitedString(req.body?.message, 5000);
+  const category = asLimitedString(req.body?.category, 80);
 
-  if (!name || !email || !message) {
-    return res.status(400).json({ error: "Dados incompletos para envio de e-mail de contato." });
+  if (!name || !isValidEmailAddress(email) || !message) {
+    return res.status(400).json({ error: "Dados inválidos para envio de e-mail de contato." });
   }
+
+  const safeName = escapeHtml(name);
+  const safeCompany = escapeHtml(company || 'Não informada');
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone || 'Não informado');
+  const safeCategory = escapeHtml(category || 'Outros');
+  const safeMessage = escapeHtml(message);
 
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
 
-  const emailSubject = `[SITE COMANINS] Contato: ${category || 'Geral'} - ${company || name}`;
+  const emailSubject = `[SITE COMANINS] Contato: ${asLimitedString(category || 'Geral', 80)} - ${asLimitedString(company || name, 160)}`;
   
   const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #1e293b;">
@@ -2060,30 +2194,30 @@ app.post("/api/send-contact-email", async (req, res) => {
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-weight: bold; width: 35%;">Nome:</td>
-            <td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${name}</td>
+            <td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${safeName}</td>
           </tr>
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Empresa:</td>
-            <td style="padding: 6px 0; color: #0f172a;">${company || 'Não informada'}</td>
+            <td style="padding: 6px 0; color: #0f172a;">${safeCompany}</td>
           </tr>
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-weight: bold;">E-mail:</td>
-            <td style="padding: 6px 0; color: #0f172a;">${email}</td>
+            <td style="padding: 6px 0; color: #0f172a;">${safeEmail}</td>
           </tr>
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Telefone:</td>
-            <td style="padding: 6px 0; color: #0f172a;">${phone || 'Não informado'}</td>
+            <td style="padding: 6px 0; color: #0f172a;">${safePhone}</td>
           </tr>
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Categoria:</td>
-            <td style="padding: 6px 0; color: #0f172a;">${category || 'Outros'}</td>
+            <td style="padding: 6px 0; color: #0f172a;">${safeCategory}</td>
           </tr>
         </table>
       </div>
       
       <div style="margin-top: 20px;">
         <h3 style="color: #64748b; font-size: 14px; margin-bottom: 10px;">Mensagem:</h3>
-        <p style="background-color: #f1f5f9; padding: 16px; border-radius: 6px; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${message}</p>
+        <p style="background-color: #f1f5f9; padding: 16px; border-radius: 6px; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${safeMessage}</p>
       </div>
     </div>
   `;
@@ -2119,8 +2253,30 @@ app.post("/api/send-contact-email", async (req, res) => {
 });
 
 // Endpoint de notificação de visualização de contra-cheque com compliance LGPD
-app.post("/api/send-document-notification", async (req, res) => {
-  const { employeeName, employeeRegister, month, visualizedAt, ip, userAgent, documentType } = req.body;
+app.post("/api/send-document-notification", requireAuth, requireInternalAccount, emailApiRateLimit, async (req: AuthRequest, res) => {
+  let employeeName = asLimitedString(req.body?.employeeName, 160);
+  let employeeRegister = asLimitedString(req.body?.employeeRegister, 100);
+  const month = asLimitedString(req.body?.month, 80);
+  const visualizedAt = asLimitedString(req.body?.visualizedAt, 120);
+  const ip = asLimitedString(req.body?.ip, 80);
+  const userAgent = asLimitedString(req.body?.userAgent, 500);
+  const documentType = asLimitedString(req.body?.documentType, 120);
+
+  try {
+    const requesterProfile = await findPortalUserForAuth(req.user);
+    const canNotifyForOthers = requesterProfile && (
+      isAdministratorProfile(requesterProfile) ||
+      isRhProfile(requesterProfile) ||
+      isFinanceProfile(requesterProfile)
+    );
+    if (requesterProfile && !canNotifyForOthers) {
+      employeeName = asLimitedString(requesterProfile.name, 160);
+      employeeRegister = asLimitedString(requesterProfile.register, 100);
+    }
+  } catch (error) {
+    console.warn('[PAYSLIP COMPLIANCE] Could not resolve requester profile:', error);
+  }
+
   if (!employeeName || !month) {
     return res.status(400).json({ error: "Dados incompletos para envio da notificação." });
   }
@@ -2212,7 +2368,7 @@ app.post("/api/send-document-notification", async (req, res) => {
 });
 
 // Download dist.zip endpoint
-app.get("/api/download-dist", (req, res) => {
+app.get("/api/download-dist", requireAuth, requireAdministratorAccount, adminApiRateLimit, (req: AuthRequest, res) => {
   const zipPath = path.join(process.cwd(), "public", "dist.zip");
   if (fs.existsSync(zipPath)) {
     res.download(zipPath, "comanins-dist.zip");
@@ -2225,11 +2381,17 @@ app.get("/api/download-dist", (req, res) => {
 async function startServer() {
   // Vite Setup (Development vs. Production)
 
-  app.post("/api/parse-field-service-image", async (req, res) => {
+  app.post("/api/parse-field-service-image", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
     try {
-      const { imageBase64 } = req.body;
-      if (!imageBase64) {
-        return res.status(400).json({ error: "No image provided." });
+      const imageBase64 = String(req.body?.imageBase64 || '');
+      const imageMatch = imageBase64.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
+      if (!imageMatch) {
+        return res.status(400).json({ error: "Imagem inválida ou formato não permitido." });
+      }
+      const imageMimeType = imageMatch[1].toLowerCase();
+      const base64Data = imageMatch[2];
+      if (base64Data.length > 6_000_000) {
+        return res.status(413).json({ error: "Imagem excede o limite permitido." });
       }
 
       const aiClient = getGeminiClient();
@@ -2238,8 +2400,6 @@ async function startServer() {
       }
 
       // Prepare image for Gemini Vision
-      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-      
       const prompt = `
 You are an expert data entry assistant. Analyze this image of a handwritten or printed field service form/certificate.
 Extract the following information and return ONLY a JSON object with these keys (no markdown formatting, just pure JSON). If a field is not found or unreadable, set its value to an empty string.
@@ -2271,7 +2431,7 @@ Required JSON format:
         contents: [
           { role: "user", parts: [
               { text: prompt },
-              { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+              { inlineData: { mimeType: imageMimeType, data: base64Data } }
             ] 
           }
         ],
