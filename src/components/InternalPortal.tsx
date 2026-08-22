@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 import { safeFetch } from "../utils/apiClient";
-import { verifyAdminCredentials } from "../utils/authApi";
+import { authJsonFetch, verifyAdminCredentials } from "../utils/authApi";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
 import {
@@ -878,7 +878,6 @@ export default function InternalPortal({
   const [clientIsFieldService, setClientIsFieldService] = useState<boolean>(false);
   const [clientEmail, setClientEmail] = useState<any>("");
   const [clientName, setClientName] = useState<any>("");
-  const [clientPassword, setClientPassword] = useState<any>("");
   const [clientPhone, setClientPhone] = useState<any>("");
   const [clientSearch, setClientSearch] = useState<any>("");
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -1001,6 +1000,9 @@ export default function InternalPortal({
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
   const [selectedInstId, setSelectedInstId] = useState<any>("");
   const [selectedIntakeToPrint, setSelectedIntakeToPrint] = useState<any>("");
+  const [intakePortalCredential, setIntakePortalCredential] = useState<any>(null);
+  const [isLoadingIntakeCredential, setIsLoadingIntakeCredential] = useState(false);
+  const [intakeCredentialError, setIntakeCredentialError] = useState("");
   const [selectedInstLabelToPrint, setSelectedInstLabelToPrint] = useState<any>(null);
   const [instLabelClient, setInstLabelClient] = useState<any>(null);
   const [selectedLabInstId, setSelectedLabInstId] = useState<any>("");
@@ -2575,7 +2577,6 @@ Status atual: ${e.status}.`,
     setClientEmail(c.email || "");
     setClientPhone(c.phone || "");
     setClientCity(c.city || "");
-    setClientPassword(c.password || "123456");
     setShowClientForm(true);
   };
 
@@ -2624,7 +2625,6 @@ Status atual: ${e.status}.`,
             email: clientEmail.trim(),
             phone: clientPhone.trim(),
             city: clientCity.trim(),
-            password: clientPassword.trim() || "123456",
             isFieldService: clientIsFieldService,
           });
         }
@@ -2637,7 +2637,6 @@ Status atual: ${e.status}.`,
       setClientEmail("");
       setClientPhone("");
       setClientCity("");
-      setClientPassword("");
       setEditingClient(null);
       setShowClientForm(false);
     } catch (err) {
@@ -2658,7 +2657,6 @@ Status atual: ${e.status}.`,
           Email: c.email,
           Telefone: c.phone,
           Endereco_Completo: c.city,
-          Senha: c.password || "",
         }));
         filename = "comanins_clientes.xlsx";
       } else {
@@ -2746,7 +2744,6 @@ Status atual: ${e.status}.`,
         Telefone: "(11) 4344-8000",
         Endereco_Completo:
           "Av. Alberto Soares Sampaio, 2122 A - Capuava, Mauá - SP, 09380-120",
-        Senha: "123456",
       },
       {
         Nome: "Cervejaria Ambev - Unidade Jundiaí",
@@ -2755,7 +2752,6 @@ Status atual: ${e.status}.`,
         Telefone: "(11) 4589-9200",
         Endereco_Completo:
           "Rod. Eng. Constâncio Cintra, Km 71,5 - Jundiaí - SP, 13212-000",
-        Senha: "123456",
       },
     ];
     const ws = XLSX.utils.json_to_sheet(data);
@@ -2878,7 +2874,6 @@ Status atual: ${e.status}.`,
         Telefone: "(11) 4344-8000",
         Endereco_Completo:
           "Av. Alberto Soares Sampaio, 2122 A - Capuava, Mauá - SP, 09380-120",
-        Senha: "123456",
       },
     ];
     const stdsData = [
@@ -2962,7 +2957,6 @@ Status atual: ${e.status}.`,
       "E-mail": c.email,
       Telefone: c.phone,
       "Endereço / Cidade": c.address || c.city || "",
-      "Senha do Portal": c.password || "123456",
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -3271,7 +3265,6 @@ Status atual: ${e.status}.`,
               email: c.email || "",
               phone: c.phone || "",
               city: c.city || c.address || "",
-              password: c.password || "123456",
             });
             restoredCount++;
           }
@@ -3477,7 +3470,7 @@ Status atual: ${e.status}.`,
     try {
       for (const row of importRows) {
         if (importType === "clients") {
-          // Fields: nome, cnpj, email, telefone, endereco_completo, senha
+          // Fields: nome, cnpj, email, telefone, endereco_completo
           const name =
             row.nome ||
             row["nome / razao social"] ||
@@ -3502,7 +3495,6 @@ Status atual: ${e.status}.`,
                   row.cidade ||
                   row.location ||
                   "",
-                password: row.senha || "123456",
               });
               successCount++;
             }
@@ -5151,6 +5143,44 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
     }
   };
 
+  const ensureClientPortalCredential = async (clientId: string) => {
+    const response = await authJsonFetch('/api/client-portal/ensure-access', {
+      method: 'POST',
+      body: JSON.stringify({ clientId }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.credential) {
+      const code = data?.error || 'CLIENT_PORTAL_CREDENTIAL_ERROR';
+      if (code === 'CLIENT_PORTAL_CREDENTIAL_SERVICE_UNAVAILABLE') {
+        throw new Error('Serviço de credencial do Portal do Cliente não configurado. Verifique CLIENT_PORTAL_CREDENTIAL_KEY_B64 na Hostinger.');
+      }
+      if (code === 'CLIENT_CNPJ_REQUIRED') {
+        throw new Error('O cliente precisa ter um CNPJ/CPF válido antes de gerar o acesso ao portal.');
+      }
+      if (code === 'CLIENT_AUTH_UID_CONFLICT') {
+        throw new Error('A conta Firebase deste CNPJ está vinculada a outro cadastro de cliente.');
+      }
+      throw new Error('Não foi possível gerar/recuperar a credencial do Portal do Cliente.');
+    }
+    return data.credential;
+  };
+
+  const handleOpenIntakePrint = async (intake: any) => {
+    setSelectedIntakeToPrint(intake);
+    setIntakePortalCredential(null);
+    setIntakeCredentialError('');
+    setIsLoadingIntakeCredential(true);
+    try {
+      const credential = await ensureClientPortalCredential(intake.clientId);
+      setIntakePortalCredential(credential);
+    } catch (error: any) {
+      console.error('Erro ao carregar credencial do Portal do Cliente:', error);
+      setIntakeCredentialError(error?.message || 'Não foi possível carregar a credencial do Portal do Cliente.');
+    } finally {
+      setIsLoadingIntakeCredential(false);
+    }
+  };
+
   const handleSaveIntakeFromModal = async (shouldPrint: boolean) => {
     if (!intakeNum || !intakeClientId || !intakeDate) {
       alert("Preencha o Nº de Entrada, Cliente e Data!");
@@ -5161,6 +5191,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
     const isNew = !editingIntakeId;
 
     try {
+      // A primeira entrada provisiona a credencial fixa do Portal do Cliente.
+      // A senha fica criptografada no servidor e nunca é gravada no documento da entrada.
+      if (isNew) {
+        await ensureClientPortalCredential(intakeClientId);
+      }
+
       const intakeData = {
         numEntrada: intakeNum,
         clientId: intakeClientId,
@@ -5194,9 +5230,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         // Quick trick to print after a tiny delay so the UI updates
         setTimeout(() => window.print(), 500);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Erro ao salvar a Guia de Entrada.");
+      alert(err?.message ? `Erro ao salvar a Guia de Entrada: ${err.message}` : "Erro ao salvar a Guia de Entrada.");
     }
   };
   const handleSendChat = (e?: React.FormEvent) => {
@@ -6325,21 +6361,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     setEditingClient(null);
                     setClientName("");
                     setClientCnpj("");
-      setClientIsFieldService(false);
+                    setClientIsFieldService(false);
                     setClientEmail("");
                     setClientPhone("");
                     setClientCity("");
-                    setClientPassword("");
                   } else {
                     if (!showClientForm) {
                       setEditingClient(null);
                       setClientName("");
                       setClientCnpj("");
-      setClientIsFieldService(false);
+                      setClientIsFieldService(false);
                       setClientEmail("");
                       setClientPhone("");
                       setClientCity("");
-                      setClientPassword("");
                     }
                     setShowClientForm(!showClientForm);
                   }
@@ -6441,21 +6475,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     />
                   </div>
                   {!editingClient && (
-                    <div>
-                      <label className="block text-slate-600 mb-1">
-                        Senha temporária de acesso *
-                      </label>
-                      <input
-                        type="password"
-                        required
-                        value={clientPassword}
-                        onChange={(e) => setClientPassword(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                        placeholder="Senha temporária para o primeiro acesso"
-                      />
-                      <p className="text-[10px] text-slate-500 mt-1">
-                        Após o primeiro acesso, o cliente definirá uma nova senha no Firebase.
-                      </p>
+                    <div className="sm:col-span-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-[11px] leading-relaxed text-blue-800">
+                      <span className="font-bold">Acesso ao Portal do Cliente:</span>{" "}
+                      a senha não é cadastrada manualmente. Ela será gerada automaticamente na primeira Entrada de Material do cliente e permanecerá fixa para as próximas entradas.
                     </div>
                   )}
 
@@ -6493,7 +6515,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         setClientEmail("");
                         setClientPhone("");
                         setClientCity("");
-                        setClientPassword("");
                       }}
                       className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded cursor-pointer transition-colors"
                     >
@@ -8054,7 +8075,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </button>
 
                         <button
-                          onClick={() => setSelectedIntakeToPrint(intake)}
+                          onClick={() => handleOpenIntakePrint(intake)}
                           className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
                           title="Imprimir Guia de Entrada A4"
                         >
@@ -8677,14 +8698,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     </span>
                     <button
                       onClick={() => window.print()}
-                      className="px-4 py-2 bg-royal-blue text-white hover:bg-blue-600 rounded-xl transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer border border-blue-500/30"
-                      title="Imprimir em folha A4 / Salvar como PDF"
+                      disabled={isLoadingIntakeCredential || !intakePortalCredential}
+                      className="px-4 py-2 bg-royal-blue text-white hover:bg-blue-600 disabled:bg-slate-600 disabled:text-slate-300 disabled:cursor-not-allowed rounded-xl transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer border border-blue-500/30"
+                      title={intakePortalCredential ? "Imprimir em folha A4 / Salvar como PDF" : "Aguarde a credencial do Portal do Cliente"}
                     >
                       <Printer className="h-4 w-4" />
                       <span>Imprimir / Salvar PDF</span>
                     </button>
                     <button
-                      onClick={() => setSelectedIntakeToPrint(null)}
+                      onClick={() => {
+                        setSelectedIntakeToPrint(null);
+                        setIntakePortalCredential(null);
+                        setIntakeCredentialError("");
+                      }}
                       className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-900 rounded-xl transition-all flex items-center text-xs font-bold cursor-pointer border border-slate-600"
                       title="Fechar Visualizador"
                     >
@@ -8876,8 +8902,48 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       </p>
                     </div>
 
+                    {/* Portal do Cliente - credencial fixa vinculada ao CNPJ */}
+                    <div className="border-2 border-royal-blue/40 rounded-xl p-3 bg-blue-50/60 print:bg-white">
+                      <div className="flex items-center gap-4">
+                        <div className="shrink-0 bg-white border border-slate-300 rounded-lg p-1.5">
+                          <QRCodeSVG
+                            value={intakePortalCredential?.portalUrl || "https://www.comanins.com.br"}
+                            size={72}
+                            level="M"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-black text-[12px] uppercase tracking-wide text-royal-blue">
+                            Portal do Cliente COMANINS
+                          </h4>
+                          <p className="text-[9px] text-slate-600 mb-1.5">
+                            Aponte a câmera para o QR Code ou acesse www.comanins.com.br
+                          </p>
+                          {isLoadingIntakeCredential ? (
+                            <p className="text-[10px] font-bold text-slate-600">Carregando credencial de acesso...</p>
+                          ) : intakeCredentialError ? (
+                            <p className="text-[10px] font-bold text-rose-700">{intakeCredentialError}</p>
+                          ) : intakePortalCredential ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                              <div>
+                                <span className="font-bold text-slate-700">Login (CNPJ): </span>
+                                <span className="font-mono font-black text-slate-950">{intakePortalCredential.cnpj}</span>
+                              </div>
+                              <div>
+                                <span className="font-bold text-slate-700">Senha: </span>
+                                <span className="font-mono font-black text-slate-950 tracking-wider">{intakePortalCredential.password}</span>
+                              </div>
+                              <p className="sm:col-span-2 text-[8px] text-slate-500 mt-0.5">
+                                Esta senha é fixa para este cliente e será repetida nas próximas Guias de Entrada. Guarde este documento em local seguro.
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Signatures Footer */}
-                    <div className="pt-12 grid grid-cols-2 gap-12 text-center text-xs">
+                    <div className="pt-8 grid grid-cols-2 gap-12 text-center text-xs">
                       <div className="space-y-1">
                         <div className="border-b border-slate-400 w-full mb-1"></div>
                         <p className="font-bold text-slate-900">

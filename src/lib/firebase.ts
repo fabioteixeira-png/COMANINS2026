@@ -644,7 +644,15 @@ export async function getPaginatedDocs<T>(
 
 // 1. Clients
 const sanitizeClientRecord = (client: Client): Client => {
-  const { password, ...safeClient } = client;
+  const {
+    password,
+    portalAccessCredentialEnc,
+    portalAccessVersion,
+    ...safeClient
+  } = client as Client & {
+    portalAccessCredentialEnc?: string;
+    portalAccessVersion?: number;
+  };
   return safeClient as Client;
 };
 

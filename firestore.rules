@@ -95,6 +95,13 @@ service cloud.firestore {
       allow create, update, delete: if isInternalAccount();
     }
 
+    // Credenciais do Portal do Cliente são mantidas em coleção exclusiva do servidor.
+    // Firebase Admin ignora estas regras; nenhum navegador, inclusive cliente autenticado,
+    // pode ler ou alterar o segredo criptografado.
+    match /clientPortalCredentials/{document=**} {
+      allow read, write: if false;
+    }
+
     // Documentos individuais do colaborador: o próprio titular pode ler;
     // RH/Admin gerenciam inclusão, alteração e exclusão.
     match /employeeDocuments/{document=**} {
@@ -157,6 +164,7 @@ service cloud.firestore {
       allow read, write: if request.auth != null &&
         collection != 'portalUsers' &&
         collection != 'clients' &&
+        collection != 'clientPortalCredentials' &&
         collection != 'employeeDocuments' &&
         collection != 'medical_exams' &&
         collection != 'employeeAsos' &&

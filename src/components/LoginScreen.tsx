@@ -3,7 +3,7 @@ import ComaninsLogo from './ComaninsLogo';
 import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge } from 'lucide-react';
 import { Client } from '../types';
 import { auth } from '../lib/firebase';
-import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail, updatePassword } from 'firebase/auth';
 import { maskCpfCnpj } from '../utils/masks';
 import { authJsonFetch } from '../utils/authApi';
 
@@ -60,9 +60,6 @@ export default function LoginScreen({
   // Password Change on First Access states
   const [pendingChangeUser, setPendingChangeUser] = useState<InternalUser | null>(null);
   const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
-  const [pendingUserEmail, setPendingUserEmail] = useState('');
-  const [legacyAuthSuccess, setLegacyAuthSuccess] = useState(false);
-  const [activeTabType, setActiveTabType] = useState<'internal'|'client'>('internal');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPass, setShowNewPass] = useState(false);
@@ -150,8 +147,6 @@ export default function LoginScreen({
       if (needsChange) {
         setPendingChangeUser(userDoc);
         setPasswordChangeRequired(true);
-        setPendingUserEmail(email);
-        setActiveTabType('internal');
         return;
       }
 
@@ -175,19 +170,18 @@ export default function LoginScreen({
     setErrorMsg('');
     const cleanCnpj = cnpj.replace(/\D/g, '');
     const cleanPass = clientPassword.trim();
-    
     const email = `${cleanCnpj}@comanins.client`;
 
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, cleanPass);
-
       const syncResponse = await authJsonFetch('/api/auth/sync-client-profile', {
         method: 'POST',
       });
       const syncData = await syncResponse.json();
+
       if (!syncResponse.ok || !syncData?.client) {
         if (syncResponse.status === 409) {
-          setErrorMsg('Esta conta Firebase está vinculada a outro cliente. Contate o administrador.');
+          setErrorMsg('Esta conta está vinculada a outro cliente. Contate a COMANINS.');
         } else if (syncResponse.status === 404) {
           setErrorMsg('Conta autenticada, mas cadastro do cliente não foi encontrado. Contate a COMANINS.');
         } else {
@@ -197,56 +191,11 @@ export default function LoginScreen({
         return;
       }
 
-      const clientDoc = syncData.client as Client;
       await userCredential.user.getIdToken(true);
-      const tokenResult = await userCredential.user.getIdTokenResult(true);
-      const needsChange = tokenResult.claims.passwordChangeRequired === true ||
-        clientDoc?.passwordChangeRequired === true ||
-        (clientDoc && clientDoc.passwordChangeRequired !== false);
-
-      if (needsChange) {
-        setPendingChangeUser(clientDoc as any);
-        setPasswordChangeRequired(true);
-        setPendingUserEmail(email);
-        setActiveTabType('client');
-        return;
-      }
-
-      onLoginSuccessClient(clientDoc);
+      onLoginSuccessClient(syncData.client as Client);
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        try {
-          const res = await fetch('/api/auth/legacy-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cnpj: cleanCnpj, password: cleanPass, type: 'client' })
-          });
-          
-          if (!res.ok) {
-            setErrorMsg('Não foi possível conectar ao servidor para validar a credencial antiga. Tente novamente ou contate o administrador.');
-            return;
-          }
-          
-          const data = await res.json();
-          if (res.ok && data.valid) {
-            let clientDoc = data.user;
-            if (clientDoc) {
-              setPendingChangeUser(clientDoc as any);
-              setPasswordChangeRequired(true);
-              setPendingUserEmail(email);
-              setLegacyAuthSuccess(true);
-              setActiveTabType('client');
-            } else {
-              setErrorMsg('Cliente não encontrado na base.');
-            }
-          } else if (res.ok && !data.valid) {
-            setErrorMsg('CNPJ ou senha incorretos.');
-          } else {
-            setErrorMsg('Não foi possível validar sua conta antiga para migração. Tente novamente ou contate o administrador.');
-          }
-        } catch (serverErr) {
-          setErrorMsg('Erro ao conectar ao servidor.');
-        }
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        setErrorMsg('CNPJ ou senha do Portal do Cliente incorretos. Consulte a credencial impressa na Guia de Entrada COMANINS.');
       } else {
         setErrorMsg('Erro de autenticação: ' + err.message);
       }
@@ -284,7 +233,7 @@ export default function LoginScreen({
       return;
     }
 
-    const currentTypedPass = activeTabType === 'internal' ? internalPassword.trim() : clientPassword.trim();
+    const currentTypedPass = internalPassword.trim();
     if (newPassword === currentTypedPass) {
       setPassChangeError('A nova senha não pode ser igual à senha atual.');
       return;
@@ -292,17 +241,13 @@ export default function LoginScreen({
 
     setIsSavingPass(true);
     try {
-      if (legacyAuthSuccess) {
-        await createUserWithEmailAndPassword(auth, pendingUserEmail, newPassword);
+      if (auth.currentUser) {
+        await updatePassword(auth.currentUser, newPassword);
       } else {
-        if (auth.currentUser) {
-          await updatePassword(auth.currentUser, newPassword);
-        } else {
-           throw new Error("Usuário não está autenticado para trocar a senha.");
-        }
+        throw new Error("Usuário não está autenticado para trocar a senha.");
       }
-      
-      if (activeTabType === 'internal' && onUpdateInternalUser && pendingChangeUser?.id) {
+
+      if (onUpdateInternalUser && pendingChangeUser?.id) {
         await onUpdateInternalUser(pendingChangeUser.id, { passwordChangeRequired: false, mustChangePassword: false });
 
         const syncResponse = await authJsonFetch('/api/auth/sync-internal-profile', {
@@ -317,26 +262,10 @@ export default function LoginScreen({
           await auth.currentUser.getIdToken(true);
         }
         onLoginSuccessInternal(syncData.user as InternalUser);
-      } else if (activeTabType === 'client' && pendingChangeUser?.id) {
-        const completeResponse = await authJsonFetch('/api/auth/complete-client-password-change', {
-          method: 'POST',
-        });
-        const completeData = await completeResponse.json();
-        if (!completeResponse.ok || !completeData?.client) {
-          throw new Error('Senha atualizada, mas não foi possível concluir a migração segura do cliente.');
-        }
-        if (auth.currentUser) {
-          await auth.currentUser.getIdToken(true);
-        }
-        onLoginSuccessClient(completeData.client as Client);
       }
 
     } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-         setPassChangeError('Esta conta já foi migrada. Por favor, faça login usando sua NOVA senha.');
-      } else {
-         setPassChangeError('Erro ao atualizar senha no Firebase: ' + err.message);
-      }
+      setPassChangeError('Erro ao atualizar senha no Firebase: ' + err.message);
     } finally {
       setIsSavingPass(false);
     }
@@ -575,8 +504,8 @@ export default function LoginScreen({
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              <div className="flex justify-end mt-1">
-                <button type="button" onClick={() => setShowForgotPassword(true)} className="text-[10px] text-royal-blue hover:underline font-semibold">Esqueceu a senha?</button>
+              <div className="mt-1 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-2 text-[10px] leading-relaxed text-blue-800">
+                A senha de acesso é fixa e fornecida pela COMANINS na Guia de Entrada de Material. Para segunda via, solicite uma nova impressão da guia.
               </div>
             </div>
 

@@ -3,6 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 dotenv.config();
 import fs from "fs";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth } from './src/middleware/auth.ts';
 import type { AuthRequest } from './src/middleware/auth.ts';
@@ -96,8 +97,221 @@ const normalizeCnpj = (value: unknown) => String(value || '').replace(/\D/g, '')
 
 const sanitizeClientForPortal = (profile: any) => {
   if (!profile) return profile;
-  const { password, ...safeProfile } = profile;
+  const {
+    password,
+    portalAccessCredentialEnc,
+    portalAccessVersion,
+    ...safeProfile
+  } = profile;
   return safeProfile;
+};
+
+const CLIENT_PORTAL_URL = 'https://www.comanins.com.br';
+const CLIENT_PORTAL_KEY_B64 = String(process.env.CLIENT_PORTAL_CREDENTIAL_KEY_B64 || '').trim();
+
+const getClientPortalCredentialKey = (): Buffer => {
+  if (!CLIENT_PORTAL_KEY_B64) {
+    throw new Error('CLIENT_PORTAL_CREDENTIAL_KEY_NOT_CONFIGURED');
+  }
+
+  let key: Buffer;
+  try {
+    key = Buffer.from(CLIENT_PORTAL_KEY_B64, 'base64');
+  } catch {
+    throw new Error('CLIENT_PORTAL_CREDENTIAL_KEY_INVALID');
+  }
+
+  if (key.length !== 32) {
+    throw new Error('CLIENT_PORTAL_CREDENTIAL_KEY_INVALID');
+  }
+  return key;
+};
+
+const encryptClientPortalPassword = (password: string): string => {
+  const key = getClientPortalCredentialKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(password, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [
+    'v1',
+    iv.toString('base64url'),
+    tag.toString('base64url'),
+    encrypted.toString('base64url'),
+  ].join('.');
+};
+
+const decryptClientPortalPassword = (payload: string): string => {
+  const [version, ivB64, tagB64, encryptedB64] = String(payload || '').split('.');
+  if (version !== 'v1' || !ivB64 || !tagB64 || !encryptedB64) {
+    throw new Error('CLIENT_PORTAL_CREDENTIAL_INVALID');
+  }
+
+  const key = getClientPortalCredentialKey();
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(encryptedB64, 'base64url')),
+    decipher.final(),
+  ]);
+  return decrypted.toString('utf8');
+};
+
+const generateClientPortalPassword = (): string => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const all = upper + lower + digits;
+  const pick = (chars: string) => chars[randomBytes(1)[0] % chars.length];
+
+  const raw = [
+    pick(upper),
+    pick(lower),
+    pick(digits),
+    ...Array.from({ length: 9 }, () => pick(all)),
+  ];
+
+  // Shuffle with cryptographically secure random bytes, then group for easier typing.
+  for (let i = raw.length - 1; i > 0; i -= 1) {
+    const j = randomBytes(1)[0] % (i + 1);
+    [raw[i], raw[j]] = [raw[j], raw[i]];
+  }
+  return `${raw.slice(0, 4).join('')}-${raw.slice(4, 8).join('')}-${raw.slice(8, 12).join('')}`;
+};
+
+const requireInternalPortalRequester = async (decoded: any) => {
+  const accountType = String(decoded?.accountType || '').trim().toLowerCase();
+  const email = String(decoded?.email || '').trim().toLowerCase();
+  if (accountType !== 'internal' || !email.endsWith('@comanins.internal')) {
+    throw new Error('NOT_INTERNAL_ACCOUNT');
+  }
+  const profile = await findPortalUserForAuth(decoded);
+  if (!profile) throw new Error('INTERNAL_PROFILE_NOT_FOUND');
+  return profile;
+};
+
+const ensureClientPortalAccess = async (clientId: string) => {
+  if (!adminAuth || !firestoreDb) {
+    throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  }
+
+  const clientRef = firestoreDb.collection('clients').doc(String(clientId || '').trim());
+  const clientSnap = await clientRef.get();
+  if (!clientSnap.exists) throw new Error('CLIENT_PROFILE_NOT_FOUND');
+
+  const client: any = { id: clientSnap.id, ...clientSnap.data() };
+  const cleanCnpj = normalizeCnpj(client.cnpj);
+  if (!cleanCnpj) throw new Error('CLIENT_CNPJ_REQUIRED');
+  const authEmail = `${cleanCnpj}@comanins.client`;
+
+  const credentialRef = firestoreDb.collection('clientPortalCredentials').doc(client.id);
+  const credentialSnap = await credentialRef.get();
+  const credentialData: any = credentialSnap.exists ? credentialSnap.data() : null;
+
+  if (credentialData?.encryptedPassword) {
+    const password = decryptClientPortalPassword(credentialData.encryptedPassword);
+    let authUser;
+    try {
+      authUser = client.authUid
+        ? await adminAuth.getUser(String(client.authUid))
+        : await adminAuth.getUserByEmail(authEmail);
+    } catch (error: any) {
+      if (error?.code !== 'auth/user-not-found') throw error;
+      authUser = await adminAuth.createUser({ email: authEmail, password });
+    }
+
+    const uid = authUser.uid;
+    if (client.authUid && String(client.authUid) !== uid) {
+      throw new Error('CLIENT_AUTH_UID_CONFLICT');
+    }
+
+    await adminAuth.setCustomUserClaims(uid, {
+      ...(authUser.customClaims || {}),
+      accountType: 'client',
+      clientId: client.id,
+      passwordChangeRequired: false,
+    });
+
+    if (client.authUid !== uid || client.authEmail !== authEmail || client.passwordChangeRequired !== false || client.mustChangePassword === true) {
+      await clientRef.update({
+        authUid: uid,
+        authEmail,
+        passwordChangeRequired: false,
+        mustChangePassword: false,
+        password: FieldValue.delete(),
+      });
+    }
+
+    return {
+      clientId: client.id,
+      cnpj: client.cnpj || cleanCnpj,
+      password,
+      portalUrl: CLIENT_PORTAL_URL,
+      created: false,
+    };
+  }
+
+  const password = generateClientPortalPassword();
+  let authUser;
+  try {
+    if (client.authUid) {
+      authUser = await adminAuth.getUser(String(client.authUid));
+      if (String(authUser.email || '').trim().toLowerCase() !== authEmail) {
+        authUser = await adminAuth.updateUser(authUser.uid, { email: authEmail, password });
+      } else {
+        authUser = await adminAuth.updateUser(authUser.uid, { password });
+      }
+    } else {
+      try {
+        authUser = await adminAuth.getUserByEmail(authEmail);
+        const bound = await firestoreDb.collection('clients').where('authUid', '==', authUser.uid).limit(1).get();
+        if (!bound.empty && bound.docs[0].id !== client.id) {
+          throw new Error('CLIENT_AUTH_UID_CONFLICT');
+        }
+        authUser = await adminAuth.updateUser(authUser.uid, { password });
+      } catch (error: any) {
+        if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') throw error;
+        if (error?.code !== 'auth/user-not-found') throw error;
+        authUser = await adminAuth.createUser({ email: authEmail, password });
+      }
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  const encrypted = encryptClientPortalPassword(password);
+  await adminAuth.setCustomUserClaims(authUser.uid, {
+    ...(authUser.customClaims || {}),
+    accountType: 'client',
+    clientId: client.id,
+    passwordChangeRequired: false,
+  });
+
+  await Promise.all([
+    credentialRef.set({
+      encryptedPassword: encrypted,
+      version: 1,
+      clientId: client.id,
+      authUid: authUser.uid,
+      createdAt: new Date().toISOString(),
+    }),
+    clientRef.update({
+      authUid: authUser.uid,
+      authEmail,
+      portalAccessProvisionedAt: new Date().toISOString(),
+      passwordChangeRequired: false,
+      mustChangePassword: false,
+      password: FieldValue.delete(),
+    }),
+  ]);
+
+  return {
+    clientId: client.id,
+    cnpj: client.cnpj || cleanCnpj,
+    password,
+    portalUrl: CLIENT_PORTAL_URL,
+    created: true,
+  };
 };
 
 const findClientForAuth = async (decoded: any) => {
@@ -134,8 +348,7 @@ const findClientForAuth = async (decoded: any) => {
 const buildClientClaims = (profile: any) => ({
   accountType: 'client',
   clientId: String(profile.id),
-  passwordChangeRequired:
-    profile?.passwordChangeRequired !== false || profile?.mustChangePassword === true,
+  passwordChangeRequired: false,
 });
 
 const syncClientAuthProfile = async (decoded: any) => {
@@ -866,6 +1079,40 @@ app.post("/api/auth/sync-internal-profile", requireAuth, async (req: AuthRequest
   }
 });
 
+app.post('/api/client-portal/ensure-access', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    await requireInternalPortalRequester(req.user);
+    const clientId = String(req.body?.clientId || '').trim();
+    if (!clientId) return res.status(400).json({ error: 'CLIENT_ID_REQUIRED' });
+
+    const credential = await ensureClientPortalAccess(clientId);
+    return res.json({ success: true, credential });
+  } catch (error: any) {
+    if (error?.message === 'FIREBASE_ADMIN_NOT_CONFIGURED' ||
+        error?.message === 'CLIENT_PORTAL_CREDENTIAL_KEY_NOT_CONFIGURED' ||
+        error?.message === 'CLIENT_PORTAL_CREDENTIAL_KEY_INVALID') {
+      return res.status(503).json({ error: 'CLIENT_PORTAL_CREDENTIAL_SERVICE_UNAVAILABLE' });
+    }
+    if (error?.message === 'NOT_INTERNAL_ACCOUNT' || error?.message === 'INTERNAL_PROFILE_NOT_FOUND') {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+    if (error?.message === 'CLIENT_PROFILE_NOT_FOUND') {
+      return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
+    }
+    if (error?.message === 'CLIENT_CNPJ_REQUIRED') {
+      return res.status(400).json({ error: 'CLIENT_CNPJ_REQUIRED' });
+    }
+    if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
+      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
+    }
+    if (error?.message === 'CLIENT_PORTAL_CREDENTIAL_INVALID') {
+      return res.status(500).json({ error: 'CLIENT_PORTAL_CREDENTIAL_INVALID' });
+    }
+    console.error('Ensure client portal access error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.post('/api/auth/sync-client-profile', requireAuth, async (req: AuthRequest, res) => {
   try {
     const profile = await syncClientAuthProfile(req.user);
@@ -893,53 +1140,8 @@ app.post('/api/auth/sync-client-profile', requireAuth, async (req: AuthRequest, 
   }
 });
 
-app.post('/api/auth/complete-client-password-change', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    if (!adminAuth || !firestoreDb) {
-      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
-    }
-
-    const profile: any = await findClientForAuth(req.user);
-    if (!profile) {
-      return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
-    }
-
-    await firestoreDb.collection('clients').doc(profile.id).update({
-      passwordChangeRequired: false,
-      mustChangePassword: false,
-      password: FieldValue.delete(),
-      authUid: req.user?.uid,
-      authEmail: String(req.user?.email || '').trim().toLowerCase(),
-    });
-
-    const updatedProfile = {
-      ...profile,
-      passwordChangeRequired: false,
-      mustChangePassword: false,
-      authUid: req.user?.uid,
-      authEmail: String(req.user?.email || '').trim().toLowerCase(),
-    };
-    delete updatedProfile.password;
-
-    const authUser = await adminAuth.getUser(req.user!.uid);
-    await adminAuth.setCustomUserClaims(req.user!.uid, {
-      ...(authUser.customClaims || {}),
-      ...buildClientClaims(updatedProfile),
-      passwordChangeRequired: false,
-    });
-
-    return res.json({
-      success: true,
-      client: sanitizeClientForPortal(updatedProfile),
-      claims: { ...buildClientClaims(updatedProfile), passwordChangeRequired: false },
-    });
-  } catch (error: any) {
-    if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') {
-      return res.status(409).json({ error: 'CLIENT_AUTH_UID_CONFLICT' });
-    }
-    console.error('Complete client password change error:', error);
-    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
-  }
+app.post('/api/auth/complete-client-password-change', requireAuth, async (_req: AuthRequest, res) => {
+  return res.status(410).json({ error: 'CLIENT_PASSWORD_CHANGE_DISABLED' });
 });
 
 app.post("/api/auth/create-user", requireAuth, async (req: AuthRequest, res) => {
@@ -1060,23 +1262,9 @@ app.post("/api/auth/legacy-login", async (req, res) => {
     }
 
     if (type === 'client') {
-      if (!firestoreDb) {
-        return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
-      }
-      const snap = await firestoreDb.collection('clients').get();
-      const cleanCnpj = normalizeCnpj(cnpj);
-      const client = snap.docs.find((d) => normalizeCnpj(d.data()?.cnpj) === cleanCnpj);
-
-      if (!client) return res.json({ valid: false });
-
-      const clientData = client.data();
-      if (clientData.password === password) {
-        return res.json({
-          valid: true,
-          user: sanitizeClientForPortal({ id: client.id, ...clientData }),
-        });
-      }
-      return res.json({ valid: false });
+      // Etapa 1H: clientes usam somente a credencial fixa criada pela COMANINS
+      // na primeira Entrada de Material. Senhas legadas do Firestore não autenticam mais.
+      return res.status(410).json({ error: 'CLIENT_LEGACY_AUTH_DISABLED' });
     }
 
     return res.json({ valid: false });
