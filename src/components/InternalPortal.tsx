@@ -752,6 +752,7 @@ export default function InternalPortal({
   const [afterHoursJustification, setAfterHoursJustification] = useState("");
   const [afterHoursBypass, setAfterHoursBypass] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const cancelActiveCalibrationRef = React.useRef<((instIdToCancel?: string) => Promise<void>) | null>(null);
 
   const setActiveTab = (t: any) => {
     if (currentUser && !isUserAdmin) {
@@ -767,6 +768,18 @@ export default function InternalPortal({
         setActivePayslipTab("meus");
         setIsMobileMenuOpen(false);
         return;
+      }
+    }
+
+    // Se o técnico estiver na bancada de calibração e sair da tela para outra aba sem salvar a ficha,
+    // o instrumento sai de 'Em Calibração', retorna à condição anterior e o contador em auditoria para imediatamente
+    if (
+      (activeTab === "bench" || activeTab === "registro_calibracao") &&
+      t !== "bench" &&
+      t !== "registro_calibracao"
+    ) {
+      if (cancelActiveCalibrationRef.current) {
+        cancelActiveCalibrationRef.current();
       }
     }
     
@@ -1689,7 +1702,7 @@ export default function InternalPortal({
   // Calibration Audit Logs & Timing State
   const [auditLogs, setAuditLogs] = useState<CalibrationAuditLog[]>([]);
   const [calibrationStartTimes, setCalibrationStartTimes] = useState<
-    Record<string, { startTime: string; technicianName: string }>
+    Record<string, { startTime: string; technicianName: string; previousStatus?: string }>
   >(() => {
     try {
       const saved = localStorage.getItem("comanins_calibration_start_times");
@@ -1728,34 +1741,48 @@ export default function InternalPortal({
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const recordCalibrationStart = (instId: string) => {
+  const recordCalibrationStart = (instId: string, customPrevStatus?: string) => {
     if (!instId) return;
     const nowIso = new Date().toISOString();
     const techName =
       benchTechnician || currentUser?.name || currentUser?.username || "Técnico Responsável";
+    const inst = instruments.find((i) => i.id === instId);
+    const prevStatus =
+      customPrevStatus ||
+      (inst && inst.status && inst.status !== "Em Calibração"
+        ? inst.status
+        : "Aguardando Calibração");
+
     setCalibrationStartTimes((prev) => {
-      if (prev[instId]) {
-        if (
-          (prev[instId].technicianName === "Técnico Responsável" || !prev[instId].technicianName) &&
-          techName !== "Técnico Responsável"
-        ) {
-          const updated = {
-            ...prev,
-            [instId]: { ...prev[instId], technicianName: techName },
-          };
-          try {
-            localStorage.setItem(
-              "comanins_calibration_start_times",
-              JSON.stringify(updated),
-            );
-          } catch (e) {}
-          return updated;
-        }
-        return prev;
+      const existing = prev[instId];
+      if (existing) {
+        const updated = {
+          ...prev,
+          [instId]: {
+            ...existing,
+            technicianName:
+              (existing.technicianName === "Técnico Responsável" || !existing.technicianName) &&
+              techName !== "Técnico Responsável"
+                ? techName
+                : existing.technicianName,
+            previousStatus: existing.previousStatus || prevStatus,
+          },
+        };
+        try {
+          localStorage.setItem(
+            "comanins_calibration_start_times",
+            JSON.stringify(updated),
+          );
+        } catch (e) {}
+        return updated;
       }
       const updated = {
         ...prev,
-        [instId]: { startTime: nowIso, technicianName: techName },
+        [instId]: {
+          startTime: nowIso,
+          technicianName: techName,
+          previousStatus: prevStatus,
+        },
       };
       try {
         localStorage.setItem(
@@ -1766,6 +1793,62 @@ export default function InternalPortal({
       return updated;
     });
   };
+
+  const cancelActiveCalibration = async (instIdToCancel?: string) => {
+    const targetId = instIdToCancel || selectedInstId;
+    if (!targetId) return;
+
+    const startInfo = calibrationStartTimes[targetId];
+    const targetInst = instruments.find((i) => i.id === targetId);
+    const prevStatus =
+      startInfo?.previousStatus ||
+      (targetInst && targetInst.status && targetInst.status !== "Em Calibração"
+        ? targetInst.status
+        : "Aguardando Calibração");
+
+    // 1. Reverter o status do instrumento no Firestore e estado local se estiver 'Em Calibração'
+    if (
+      onUpdateInstrumentStatus &&
+      targetInst &&
+      (targetInst.status === "Em Calibração" || !targetInst.status)
+    ) {
+      try {
+        await onUpdateInstrumentStatus(targetId, prevStatus as any);
+      } catch (err) {
+        console.error("Erro ao reverter status do instrumento na saída da tela:", err);
+      }
+    }
+
+    // 2. Limpar o cronômetro do estado e do localStorage
+    setCalibrationStartTimes((prev) => {
+      const next = { ...prev };
+      delete next[targetId];
+      try {
+        localStorage.setItem(
+          "comanins_calibration_start_times",
+          JSON.stringify(next),
+        );
+      } catch (e) {}
+      return next;
+    });
+
+    // 3. Resetar o formulário da bancada se o instrumento cancelado era o selecionado
+    if (!instIdToCancel || instIdToCancel === selectedInstId) {
+      setSelectedInstId("");
+      setBenchPoints([]);
+      setBenchTransmitterPoints([]);
+      setBenchSwitchPoints([]);
+      setBenchObs("");
+      setBenchStandardA("");
+      setBenchStandardB("");
+      setBenchStandardC("");
+      setBenchErrorMessage("");
+    }
+  };
+
+  useEffect(() => {
+    cancelActiveCalibrationRef.current = cancelActiveCalibration;
+  });
 
   useEffect(() => {
     let unsubs = [];
@@ -7944,8 +8027,18 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 )
                                   return;
 
+                                // Se já havia outro instrumento em calibração não finalizada, reverte-o
+                                if (selectedInstId && selectedInstId !== inst.id) {
+                                  cancelActiveCalibration(selectedInstId);
+                                }
+
+                                const prevStatus =
+                                  inst.status && inst.status !== "Em Calibração"
+                                    ? inst.status
+                                    : "Aguardando Calibração";
+
                                 setSelectedInstId(inst.id);
-                                recordCalibrationStart(inst.id);
+                                recordCalibrationStart(inst.id, prevStatus);
                                 if (
                                   onUpdateInstrumentStatus &&
                                   inst.status !== "Calibrado"
@@ -11291,6 +11384,26 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 <ShieldAlert className="h-4 w-4" />
                                 <span>Gravar Registro e Emitir RNC</span>
                               </button>
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (
+                                    window.confirm(
+                                      "Deseja cancelar esta calibração e sair? O instrumento retornará à condição anterior e o contador em auditoria será interrompido."
+                                    )
+                                  ) {
+                                    await cancelActiveCalibration(selectedInstId);
+                                    setActiveTab("instruments");
+                                  }
+                                }}
+                                disabled={benchSubmitting}
+                                className="py-3 px-4 font-bold rounded-lg text-xs tracking-wider uppercase shadow-sm flex items-center justify-center space-x-2 transition-all bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 cursor-pointer"
+                                title="Cancelar calibração, interromper contador e retornar à condição anterior"
+                              >
+                                <RotateCcw className="h-4 w-4 text-slate-500" />
+                                <span>Cancelar e Sair</span>
+                              </button>
                             </div>
                           );
                         })()}
@@ -11545,7 +11658,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 const activeInsts = instruments.filter(
                   (i) =>
                     i.status === "Em Calibração" ||
-                    activeStartKeys.includes(i.id),
+                    (activeStartKeys.includes(i.id) &&
+                      i.status !== "Calibrado" &&
+                      i.status !== "Aguardando Emissão de Certificado" &&
+                      i.status !== "RNC"),
                 );
 
                 if (activeInsts.length === 0) return null;
@@ -11594,9 +11710,28 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   {inst.description}
                                 </p>
                               </div>
-                              <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold text-[10px] rounded-md border border-amber-300 shrink-0">
-                                Em bancada
-                              </span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold text-[10px] rounded-md border border-amber-300">
+                                  Em bancada
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (
+                                      window.confirm(
+                                        `Deseja interromper a calibração do instrumento [${inst.coma || inst.tag}] e retornar o instrumento à condição anterior?`
+                                      )
+                                    ) {
+                                      await cancelActiveCalibration(inst.id);
+                                    }
+                                  }}
+                                  className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[10px] rounded border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                  title="Interromper calibração, parar contador e liberar instrumento"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  <span>Liberar</span>
+                                </button>
+                              </div>
                             </div>
 
                             {/* Live Timer Counter */}
