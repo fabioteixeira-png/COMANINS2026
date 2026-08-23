@@ -5,5 +5,8 @@
       "database": "ai-studio-comaninsexcelnci-f5355530-a4e5-4359-8c99-de3da14e5882",
       "rules": "firestore.rules"
     }
-  ]
+  ],
+  "storage": {
+    "rules": "storage.rules"
+  }
 }

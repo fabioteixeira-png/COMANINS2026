@@ -8076,17 +8076,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               <span>Certificado</span>
                             </button>
 
-                            {/* Etiqueta 40x40 Button */}
+                            {/* Etiqueta de Calibração Button */}
                             <button
                               onClick={() => {
                                 setSelectedInstLabelToPrint(inst);
                                 setInstLabelClient(client);
                               }}
                               className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors bg-teal-600 hover:bg-teal-700 text-white border-teal-600 cursor-pointer"
-                              title="Imprimir Etiqueta de Identificação (40x40mm)"
+                              title="Imprimir Etiqueta de Calibração"
                             >
                               <Printer className="h-3 w-3" />
-                              <span>Etiqueta 40x40</span>
+                              <span>Etiqueta de Calibração</span>
                             </button>
 
 

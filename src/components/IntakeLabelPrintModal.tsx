@@ -29,7 +29,7 @@ export default function IntakeLabelPrintModal({ instrument, client, onClose }: I
       <div className="w-full max-w-[400px] bg-slate-800 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center justify-between border border-slate-700 print:hidden absolute top-10 z-30">
         <div className="flex items-center space-x-3">
           <div className="bg-teal-600 text-white font-mono text-[10px] font-black px-2 py-0.5 rounded tracking-widest uppercase">
-            ETIQUETA 40x40
+            ETIQUETA DE CALIBRAÇÃO
           </div>
           <div className="hidden sm:block">
             <span className="text-xs font-bold text-slate-100 block">
