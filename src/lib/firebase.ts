@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   getFirestore,
   where,
@@ -310,6 +310,11 @@ export interface SavedIntake {
   deliveryFinalizedAt?: string;
   deliveryFinalizedBy?: string;
   deliveryLocked?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
+  updatedAt?: string;
   rows: {
     quant: number;
     descricao: string;
@@ -1001,7 +1006,9 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
     (onData, onError) => {
       const q = query(collection(db, 'calibrationReports'), );
       return onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationReport));
+        const list = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id } as CalibrationReport))
+          .filter(report => report.isDeleted !== true);
         onData(list);
       }, onError);
     },
@@ -1192,7 +1199,7 @@ export async function saveCalibrationDoc(data: {
 }
 
 export async function deleteReportDoc(reportId: string): Promise<void> {
-  await deleteDoc(doc(db, 'calibrationReports', reportId));
+  await archiveCriticalRecord('calibrationReports', reportId);
 }
 
 // 4. Contact Messages / Leads
@@ -1399,39 +1406,26 @@ export async function saveIntakeSequenceConfig(config: IntakeSequenceConfig): Pr
 }
 
 export async function syncIntakes(callback: (intakes: SavedIntake[]) => void) {
-  const cached = getLocalCache<SavedIntake[]>('savedIntakes', []);
+  const cached = getLocalCache<SavedIntake[]>('savedIntakes', [])
+    .filter(intake => intake.isDeleted !== true);
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'savedIntakes'));
   return onSnapshot(q, async (snapshot) => {
-    if (!snapshot.empty) {
-      // Sort in memory by ID descending (which is essentially timestamp descending since IDs are Date.now())
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SavedIntake));
-      list.sort((a, b) => {
-        if (a.id > b.id) return -1;
-        if (a.id < b.id) return 1;
-        return 0;
-      });
-      setLocalCache('savedIntakes', list);
-      callback(list);
-    } else {
-      callback([]);
-    }
+    // Sort in memory by ID descending (which is essentially timestamp descending since IDs are Date.now())
+    const list = snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id } as SavedIntake))
+      .filter(intake => intake.isDeleted !== true);
+    list.sort((a, b) => {
+      if (a.id > b.id) return -1;
+      if (a.id < b.id) return 1;
+      return 0;
+    });
+    setLocalCache('savedIntakes', list);
+    callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<SavedIntake[]>('savedIntakes', []));
+    callback(getLocalCache<SavedIntake[]>('savedIntakes', []).filter(intake => intake.isDeleted !== true));
   });
-}
-
-export async function clearAllSavedIntakes(): Promise<void> {
-  try {
-    const colRef = collection(db, 'savedIntakes');
-    const snapshot = await getDocs(colRef);
-    for (const docSnap of snapshot.docs) {
-      await deleteDoc(docSnap.ref);
-    }
-  } catch (err) {
-    console.error('Error clearing savedIntakes:', err);
-  }
 }
 
 export async function saveIntakeDoc(intake: SavedIntake): Promise<void> {
@@ -1569,27 +1563,7 @@ export async function updateIntakePhotosDoc(id: string, photos: string[]): Promi
 }
 
 export async function deleteIntakeDoc(id: string): Promise<void> {
-  const intakeRef = doc(db, 'savedIntakes', id);
-  try {
-    const snapshot = await getDoc(intakeRef);
-    if (snapshot.exists()) {
-      const data = snapshot.data() as SavedIntake;
-      const deliveryUrls = [
-        ...(data.deliveryInstrumentPhotos || []),
-        ...(data.deliveryFormPhotos || []),
-      ];
-      for (const url of deliveryUrls) {
-        try {
-          await deleteObject(ref(storage, url));
-        } catch (error) {
-          console.warn('Não foi possível remover uma evidência do Storage durante a exclusão da entrada:', error);
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Não foi possível carregar as evidências da entrada antes da exclusão:', error);
-  }
-  await deleteDoc(intakeRef);
+  await archiveCriticalRecord('savedIntakes', id);
 }
 
 // 6. Portal Users
@@ -2037,16 +2011,19 @@ export async function moveInventoryAtomically(input: {
 
 // Reference Standards (Padrões de Referência)
 export function syncReferenceStandards(callback: (standards: ReferenceStandard[]) => void) {
-  const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
+  const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', [])
+    .filter(standard => standard.isDeleted !== true);
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'referenceStandards'), limit(500));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ReferenceStandard));
+    const list = snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id } as ReferenceStandard))
+      .filter(standard => standard.isDeleted !== true);
     setLocalCache('referenceStandards', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<ReferenceStandard[]>('referenceStandards', []));
+    callback(getLocalCache<ReferenceStandard[]>('referenceStandards', []).filter(standard => standard.isDeleted !== true));
   });
 }
 
@@ -2071,7 +2048,7 @@ export async function updateReferenceStandardDoc(id: string, updates: Partial<Re
 }
 
 export async function deleteReferenceStandardDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'referenceStandards', id));
+  await archiveCriticalRecord('referenceStandards', id);
   
   const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
   const updated = cached.filter(s => s.id !== id);
@@ -2168,17 +2145,20 @@ export async function deletePayslipDoc(id: string): Promise<void> {
 
 // 9. Calibration Audit Logs (Auditoria de Tempo de Calibração)
 export async function syncCalibrationAuditLogs(callback: (logs: CalibrationAuditLog[]) => void) {
-  const cached = getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []);
+  const cached = getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', [])
+    .filter(log => log.isDeleted !== true);
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'calibrationAuditLogs'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog));
+    const list = snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog))
+      .filter(log => log.isDeleted !== true);
     list.sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
     setLocalCache('calibrationAuditLogs', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []));
+    callback(getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []).filter(log => log.isDeleted !== true));
   });
 }
 
@@ -2190,21 +2170,24 @@ export async function addCalibrationAuditLogDoc(data: Omit<CalibrationAuditLog, 
 }
 
 export async function deleteCalibrationAuditLogDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'calibrationAuditLogs', id));
+  await archiveCriticalRecord('calibrationAuditLogs', id);
 }
 
 // 10. RNC Reports (Relatórios de Não Conformidade)
 export async function syncRncReports(callback: (reports: RncReport[]) => void) {
-  const cached = getLocalCache<RncReport[]>('rncReports', []);
+  const cached = getLocalCache<RncReport[]>('rncReports', [])
+    .filter(report => report.isDeleted !== true);
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'rncReports'), orderBy('date', 'desc'), limit(25));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as RncReport));
+    const list = snapshot.docs
+      .map(d => ({ ...d.data(), id: d.id } as RncReport))
+      .filter(report => report.isDeleted !== true);
     setLocalCache('rncReports', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<RncReport[]>('rncReports', []));
+    callback(getLocalCache<RncReport[]>('rncReports', []).filter(report => report.isDeleted !== true));
   });
 }
 
@@ -2226,7 +2209,7 @@ export async function saveRncReportDoc(data: RncReport): Promise<void> {
 }
 
 export async function deleteRncDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'rncReports', id));
+  await archiveCriticalRecord('rncReports', id);
 }
 
 
@@ -2387,20 +2370,23 @@ export const deleteFinanceDoc = async (collectionName: string, id: string) => {
 
 export async function syncInternalTickets(callback: (tickets: InternalTicket[]) => void) {
   try {
-    const cached = getLocalCache<InternalTicket[]>('internal_tickets', []);
+    const cached = getLocalCache<InternalTicket[]>('internal_tickets', [])
+      .filter(ticket => ticket.isDeleted !== true);
     if (cached.length > 0) callback(cached);
     const q = query(collection(db, "internal_tickets"));
     return onSnapshot(
       q,
       (snapshot) => {
-        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as InternalTicket));
+        const list = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id } as InternalTicket))
+          .filter(ticket => ticket.isDeleted !== true);
         list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setLocalCache('internal_tickets', list);
         callback(list);
       },
       (error) => {
         handleQuotaOrError(error);
-        callback(getLocalCache<InternalTicket[]>('internal_tickets', []));
+        callback(getLocalCache<InternalTicket[]>('internal_tickets', []).filter(ticket => ticket.isDeleted !== true));
       }
     );
   } catch (err) {
@@ -2421,9 +2407,9 @@ export async function saveInternalTicket(ticket: InternalTicket): Promise<void> 
 
 export async function deleteInternalTicket(id: string): Promise<void> {
   try {
-    await deleteDoc(doc(db, "internal_tickets", id));
+    await archiveCriticalRecord('internal_tickets', id);
   } catch (err) {
-    console.error("Error deleting internal ticket:", err);
+    console.error("Error archiving internal ticket:", err);
     throw err;
   }
 }
@@ -2679,4 +2665,3 @@ export async function updateHealthProgramDoc(id: string, updates: Partial<Health
 export async function deleteHealthProgramDoc(id: string): Promise<void> {
   await archiveCriticalRecord('health_program_docs', id);
 }
-

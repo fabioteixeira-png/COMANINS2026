@@ -403,8 +403,8 @@ export default function App() {
 
   const handleDeleteReport = async (reportId: string) => {
     try {
-      setReports(prev => prev.filter(r => r.id !== reportId));
       await deleteReportDoc(reportId);
+      setReports(prev => prev.filter(r => r.id !== reportId));
     } catch (err) {
       console.error('Error deleting calibration report from Firestore:', err);
 

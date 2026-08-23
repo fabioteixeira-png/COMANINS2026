@@ -77,6 +77,12 @@ service cloud.firestore {
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
         ]);
     }
+
+    function archiveFieldsAbsentOnCreate() {
+      return !request.resource.data.keys().hasAny([
+        'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
+      ]);
+    }
     match /systemSettings/{documentId} {
       // Only presentation settings are public. Operational sequences/catalogs require login.
       allow read: if isInternalAccount() || documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos'];
@@ -229,23 +235,26 @@ service cloud.firestore {
     }
     match /calibrationReports/{reportId} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount();
+      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
       // Certificados associados a instrumento já entregue não podem ser
-      // regravados. Exclusão extraordinária continua restrita ao Administrador.
-      allow update: if isInternalAccount() && (
-        resource.data.get('instrumentId', null) == null ||
-        get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
-      );
-      allow delete: if isAdministrator();
+      // regravados. Campos de arquivamento são exclusivos do backend.
+      allow update: if isInternalAccount()
+        && archiveFieldsUntouched()
+        && (
+          resource.data.get('instrumentId', null) == null ||
+          get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
+        );
+      allow delete: if false;
     }
     match /savedIntakes/{intakeId} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount();
+      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
 
       // A entrada pode ser atualizada enquanto a entrega não foi finalizada.
       // A mesma gravação que conclui a entrega precisa conter as duas classes
       // de evidência e ativa o bloqueio imutável do registro.
       allow update: if isInternalAccount()
+        && archiveFieldsUntouched()
         && resource.data.get('deliveryLocked', false) != true
         && resource.data.get('deliveryFinalizedAt', null) == null
         && (
@@ -261,17 +270,19 @@ service cloud.firestore {
         );
 
       // Após a conclusão ninguém altera o documento, inclusive Administrador.
-      // Exclusão integral permanece disponível somente ao Administrador.
-      allow delete: if isAdministrator();
+      // O registro é arquivado pelo backend e as evidências são preservadas.
+      allow delete: if false;
     }
     match /rncReports/{rncId} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount();
-      allow update: if isInternalAccount() && (
-        resource.data.get('instrumentId', null) == null ||
-        get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
-      );
-      allow delete: if isAdministrator();
+      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      allow update: if isInternalAccount()
+        && archiveFieldsUntouched()
+        && (
+          resource.data.get('instrumentId', null) == null ||
+          get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
+        );
+      allow delete: if false;
     }
     match /fieldServiceRecords/{recordId} {
       allow read: if isInternalAccount();
@@ -335,18 +346,28 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
     match /referenceStandards/{document=**} {
-      allow read, write: if isInternalAccount();
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      allow update: if isInternalAccount() && archiveFieldsUntouched();
+      allow delete: if false;
     }
     match /calibrationAuditLogs/{document=**} {
-      allow read, write: if isInternalAccount();
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      // Registros de tempo são append-only no navegador. O backend pode
+      // arquivá-los com Admin SDK após autorização administrativa.
+      allow update, delete: if false;
     }
     match /internal_tickets/{document=**} {
-      allow read, write: if isInternalAccount();
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      allow update: if isInternalAccount() && archiveFieldsUntouched();
+      allow delete: if false;
     }
     match /accessAuditLogs/{document=**} {
       allow read, create: if isInternalAccount();
       allow update: if false;
-      allow delete: if isAdministrator();
+      allow delete: if false;
     }
     match /employeeBirthdays/{document=**} {
       allow read: if isInternalAccount();

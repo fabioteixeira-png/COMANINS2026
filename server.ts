@@ -1379,7 +1379,7 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
 });
 
 
-const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance'; label: string }> = {
+const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance' | 'operations'; label: string }> = {
   employeeDocuments: { area: 'rh', label: 'Documento do colaborador' },
   employeeAsos: { area: 'rh', label: 'ASO' },
   employeeTrainings: { area: 'rh', label: 'Treinamento do colaborador' },
@@ -1393,6 +1393,12 @@ const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance
   financeMeasurements: { area: 'finance', label: 'Medição financeira' },
   financeBankAccounts: { area: 'finance', label: 'Conta bancária' },
   financeCategories: { area: 'finance', label: 'Categoria financeira' },
+  calibrationReports: { area: 'operations', label: 'Certificado de calibração' },
+  savedIntakes: { area: 'operations', label: 'Entrada de material' },
+  rncReports: { area: 'operations', label: 'Relatório de não conformidade' },
+  referenceStandards: { area: 'operations', label: 'Padrão de referência' },
+  calibrationAuditLogs: { area: 'operations', label: 'Registro de tempo de calibração' },
+  internal_tickets: { area: 'operations', label: 'Chamado interno' },
 };
 
 app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
@@ -1445,7 +1451,20 @@ app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, wr
         summary: `${config.label} arquivado`,
         metadata: {
           collectionName,
-          previousName: asLimitedString(before.name || before.title || before.employeeName || before.description || before.contractNumber, 180),
+          previousName: asLimitedString(
+            before.name ||
+            before.title ||
+            before.employeeName ||
+            before.description ||
+            before.contractNumber ||
+            before.certNumber ||
+            before.numEntrada ||
+            before.rncNumber ||
+            before.identification,
+            180,
+          ),
+          clientId: asLimitedString(before.clientId, 160),
+          instrumentId: asLimitedString(before.instrumentId, 160),
         },
       });
     });
@@ -2274,13 +2293,17 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
     // contra algum registro historicamente vinculado ao cliente incorreto.
     const reports = reportsSnap.docs
       .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => item?.isDeleted !== true)
       .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
 
     const rncReports = rncSnap.docs
       .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => item?.isDeleted !== true)
       .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
 
-    const clientIntakes = intakesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const clientIntakes = intakesSnap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => item?.isDeleted !== true);
 
     let fieldServiceRecords: any[] = [];
     if (profile?.isFieldService === true) {

@@ -97,6 +97,11 @@ export interface RncReport {
   calibrationReportId?: string;
   certNumber?: string;
   pointsRecorded?: any[];
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
+  updatedAt?: string;
 }
 
 export interface CalibrationPoint {
@@ -144,6 +149,11 @@ export interface ReferenceStandard {
   rbcLab: string;
   identification?: string;
   range?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
+  updatedAt?: string;
 }
 
 export interface CalibrationReport {
@@ -180,6 +190,11 @@ export interface CalibrationReport {
   referenceStandards?: ReferenceStandard[];
   rncNumber?: string;
   rncData?: RncReport;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
+  updatedAt?: string;
 }
 
 export interface CalibrationAuditLog {
@@ -195,6 +210,11 @@ export interface CalibrationAuditLog {
   durationSeconds: number;
   durationFormatted: string;
   date: string; // YYYY-MM-DD
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
+  updatedAt?: string;
 }
 
 export interface ContactMessage {
@@ -462,6 +482,10 @@ export interface InternalTicket {
   updatedAt: string;
   attachments?: string[];
   messages: TicketMessage[];
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
 }
 
 export interface TicketMessage {
@@ -516,4 +540,3 @@ export interface HealthProgramDocument {
   deletedAt?: string;
   deletedBy?: string;
 }
-

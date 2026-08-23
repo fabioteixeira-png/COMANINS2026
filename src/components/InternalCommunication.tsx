@@ -432,13 +432,13 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
 
   const handleDeleteTicket = async () => {
     if (!selectedTicket || !isUserAdmin) return;
-    if (window.confirm("Tem certeza que deseja excluir este chamado permanentemente? Essa ação não pode ser desfeita.")) {
+    if (window.confirm("Tem certeza que deseja arquivar este chamado? Ele sairá da lista, mas será preservado para auditoria.")) {
       try {
         await deleteInternalTicket(selectedTicket.id);
         setSelectedTicket(null);
       } catch (err) {
-        console.error("Erro ao excluir", err);
-        alert("Falha ao excluir chamado.");
+        console.error("Erro ao arquivar", err);
+        alert("Falha ao arquivar chamado.");
       }
     }
   };
@@ -623,10 +623,10 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
                   <button 
                     onClick={handleDeleteTicket}
                     className="px-4 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 font-semibold text-sm rounded-lg flex items-center space-x-2 transition-colors"
-                    title="Excluir Chamado (Apenas Administrador)"
+                    title="Arquivar Chamado (Apenas Administrador)"
                   >
                     <Trash2 className="h-4 w-4" />
-                    <span>Excluir</span>
+                    <span>Arquivar</span>
                   </button>
                 )}
                 {selectedTicket.status !== 'finalizado' && (

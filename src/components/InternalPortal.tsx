@@ -27,7 +27,6 @@ import {
   uploadInstrumentPhotoToStorage,
   uploadInventoryAttachment,
   deleteIntakeDoc,
-  clearAllSavedIntakes,
   syncIntakeSequenceConfig,
   saveIntakeSequenceConfig,
   SavedIntake,
@@ -212,6 +211,27 @@ import FinanceManagement from "./FinanceManagement";
 import MySignature from "./MySignature";
 import InternalCommunication from "./InternalCommunication";
 import { generateAuthKey, getReportAuthKey } from "../utils/authKey";
+
+const ARCHIVE_ACTION_TYPES = new Set([
+  "instrument",
+  "report",
+  "standard",
+  "birthday",
+  "intake",
+  "inventory",
+  "training",
+  "employee_training",
+  "employee_aso",
+  "audit_log",
+  "payslip",
+  "exam",
+  "rnc",
+  "finance_transaction",
+  "finance_contract",
+  "finance_measurement",
+  "finance_bank",
+  "finance_category",
+]);
 
 export const parseExcelDate = (val: any): string => {
   if (!val) return "";
@@ -1414,7 +1434,6 @@ export default function InternalPortal({
       | "finance_measurement"
       | "finance_bank"
       | "finance_category"
-      | "intake_devolution"
       | "intake_devolution";
     id: string;
     name: string;
@@ -1434,6 +1453,7 @@ export default function InternalPortal({
       | "inventory"
       | "training"
       | "employee_training"
+      | "employee_aso"
       | "message"
       | "audit_log"
       | "payslip"
@@ -1457,6 +1477,10 @@ export default function InternalPortal({
     setAdminPasswordError("");
     setShowAdminDeleteModal(true);
   };
+
+  const deleteActionIsArchive = Boolean(
+    deleteTarget && ARCHIVE_ACTION_TYPES.has(deleteTarget.type),
+  );
 
   const handleConfirmAdminDelete = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1502,6 +1526,8 @@ export default function InternalPortal({
           await deleteEmployeeAsoDoc(deleteTarget.id);
         } else if (deleteTarget.type === "audit_log") {
           await deleteCalibrationAuditLogDoc(deleteTarget.id);
+        } else if (deleteTarget.type === "rnc") {
+          await deleteRncDoc(deleteTarget.id);
         } else if (deleteTarget.type === "payslip") {
           await deletePayslipDoc(deleteTarget.id);
           setPayslips(prev => prev.filter(r => r.id !== deleteTarget.id));
@@ -1547,10 +1573,17 @@ export default function InternalPortal({
         }
       }
       setShowAdminDeleteModal(false);
-      setDeleteTarget({ type: "client", id: "", name: "" } as any);
-      alert("✓ Registro excluído com sucesso pelo Administrador do Sistema.");
+      const completedAsArchive = Boolean(
+        deleteTarget && ARCHIVE_ACTION_TYPES.has(deleteTarget.type),
+      );
+      setDeleteTarget(null);
+      alert(
+        completedAsArchive
+          ? "✓ Registro arquivado com sucesso e mantido na trilha de auditoria."
+          : "✓ Registro removido com sucesso pelo Administrador do Sistema.",
+      );
     } catch (err: any) {
-      setAdminPasswordError("Erro ao efetuar exclusão: " + (err.message || err.toString()));
+      setAdminPasswordError("Erro ao concluir a ação: " + (err.message || err.toString()));
     }
   };
 
@@ -18512,7 +18545,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     Autenticação do Administrador
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Exclusão restrita de calibração / equipamento
+                    Ação administrativa restrita e auditada
                   </p>
                 </div>
               </div>
@@ -18531,12 +18564,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-900 space-y-1">
               <p className="font-bold flex items-center gap-1.5">
                 <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
-                <span>
-                  Atenção: Apenas o Administrador do Sistema pode excluir!
-                </span>
+                <span>Atenção: Apenas o Administrador do Sistema pode confirmar!</span>
               </p>
               <p className="text-[11px] text-rose-700">
-                Você está prestes a excluir permanentemente:{" "}
+                {deleteActionIsArchive
+                  ? "Você está prestes a arquivar, ocultar das listas operacionais e preservar para auditoria: "
+                  : "Você está prestes a remover: "}
                 <strong>{deleteTarget?.name}</strong>.
               </p>
             </div>
