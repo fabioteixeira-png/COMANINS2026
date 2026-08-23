@@ -1297,7 +1297,18 @@ export const DEFAULT_DROPDOWN_OPTIONS: DropdownOptions = {
   estoqueCategoria: ["EPI", "Uniforme", "Material de Escritório", "Ferramenta", "Outros"],
   fabricante: ["Wika", "Ashcroft", "Novus", "Salcas", "Outro"],
   tiposExame: ["Admissional", "Demissional", "Periódico", "Retorno ao Trabalho", "Mudança de Função", "Audiometria", "Outros"],
-  cargos: ["Administrador", "Técnico de Laboratório", "Técnico de Instrumentação", "Financeiro", "Recursos Humanos (RH)", "Comercial"]
+  cargos: [
+    "Administrador",
+    "Técnico de Laboratório",
+    "Técnico de Instrumentação",
+    "Instrumentista Júnior",
+    "Instrumentista Pleno",
+    "Instrumentista Sênior",
+    "Instrumentista",
+    "Financeiro",
+    "Recursos Humanos (RH)",
+    "Comercial"
+  ]
 };
 
 export function ensureArray(val: any): string[] {

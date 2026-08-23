@@ -233,6 +233,26 @@ const ARCHIVE_ACTION_TYPES = new Set([
   "finance_category",
 ]);
 
+export const isCalibrationTechnicianRole = (role?: string): boolean => {
+  if (!role) return false;
+  const norm = role
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+  const allowedRoles = [
+    "tecnico de laboratorio",
+    "tecnico de instrumentacao",
+    "instrumentista junior",
+    "instrumentista pleno",
+    "instrumentista senior",
+    "instrumentista",
+  ];
+
+  return allowedRoles.includes(norm);
+};
+
 export const parseExcelDate = (val: any): string => {
   if (!val) return "";
   if (val instanceof Date) {
@@ -636,8 +656,7 @@ export default function InternalPortal({
   const isLimitedRole =
     currentUser?.permissionLevel === "Limitado" ||
     (!currentUser?.permissionLevel &&
-      (currentUser?.role === "Técnico de Laboratório" ||
-        currentUser?.role === "Técnico de Instrumentação" ||
+      (isCalibrationTechnicianRole(currentUser?.role) ||
         currentUser?.role === "Comercial"));
 
   const [showBirthdayModal, setShowBirthdayModal] = React.useState(false);
@@ -648,7 +667,7 @@ export default function InternalPortal({
   React.useEffect(() => {
     if (
       currentUser && 
-      (currentUser.role === 'Técnico de Laboratório' || currentUser.role === 'Técnico de Instrumentação') && 
+      isCalibrationTechnicianRole(currentUser.role) && 
       !currentUser.signaturePath
     ) {
       const hasSeen = sessionStorage.getItem(`sig_alert_${currentUser.id}`);
@@ -1725,7 +1744,7 @@ export default function InternalPortal({
   }, []);
 
   useEffect(() => {
-    if (currentUser?.name && !benchTechnician && (currentUser.role === 'Técnico de Laboratório' || currentUser.role === 'Técnico de Instrumentação')) {
+    if (currentUser?.name && !benchTechnician && isCalibrationTechnicianRole(currentUser.role)) {
       setBenchTechnician(currentUser.name);
     }
   }, [currentUser, benchTechnician]);
@@ -5921,7 +5940,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               Laboratório
             </span>
           </div>
-          {(currentUser?.role === 'Técnico de Laboratório' || currentUser?.role === 'Técnico de Instrumentação' || currentUser?.role === 'Administrador' || currentUser?.role === 'admin' || currentUser?.role === 'Admin') && (
+          {(isCalibrationTechnicianRole(currentUser?.role) || currentUser?.role === 'Administrador' || currentUser?.role === 'admin' || currentUser?.role === 'Admin') && (
             <button
               onClick={() => setActiveTab("minha_assinatura")}
               className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
@@ -7893,7 +7912,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         userRole === "admin" ||
                         userRole === "master" ||
                         userRole === "Diretor";
-                      const isTechLab = userRole === "Técnico de Laboratório";
+                      const isTechLab = isCalibrationTechnicianRole(userRole);
                       const canAccessCalibrarRole = isUserAdmin || isTechLab;
 
                       // Para administrador, as fotos não são obrigatórias para abrir calibração ou certificado
@@ -8063,7 +8082,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   : isRncIssued
                                     ? "Relatório de Não Conformidade (RNC) emitido. O processo de calibração para este instrumento está finalizado e inativo."
                                     : !canAccessCalibrarRole
-                                      ? "Acesso permitido apenas para Técnico de Laboratório ou Administrador."
+                                      ? "Acesso permitido apenas para Técnicos de Calibração/Instrumentistas ou Administrador."
                                       : !hasRegPhoto
                                         ? "Atenção: Anexe a foto do cadastro do instrumento para liberar o botão de calibração."
                                         : "Lançar Calibração"
@@ -9921,12 +9940,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       >
                         <option value="">Selecione o Técnico...</option>
                         {internalUsers
-                          .filter(
-                            (u) =>
-                              u.role === "Técnico de Laboratório" ||
-                              u.role === "Técnico de Instrumentação" ||
-                              u.role === "Administrador" ||
-                              u.role === "admin"
+                          .filter((u) =>
+                            isCalibrationTechnicianRole(u.role || u.Cargo_Funcao)
                           )
                           .map((u) => (
                             <option key={u.id} value={u.name}>
