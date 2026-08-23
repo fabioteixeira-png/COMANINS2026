@@ -9,6 +9,7 @@ import {
   addDoc,
   getDoc,
   getDocs,
+  getCountFromServer,
   onSnapshot,
   updateDoc,
   deleteDoc,
@@ -545,15 +546,53 @@ export async function syncInstruments(callback: (instruments: Instrument[]) => v
     'instruments',
     [],
     (onData, onError) => {
-      const q = query(collection(db, 'instruments'), limit(25));
+      const q = query(collection(db, 'instruments'));
       return onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Instrument));
+        const list = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id } as Instrument))
+          .sort((a, b) => String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true }));
         onData(list);
       }, onError);
     },
     { persistCache: false }
   );
   return shared(callback);
+}
+
+
+export async function countInstrumentsForIntake(intakeNumber: string): Promise<number> {
+  const normalized = String(intakeNumber || '').trim();
+  if (!normalized) return 0;
+
+  const q = query(
+    collection(db, 'instruments'),
+    where('numeroDaEntrada', '==', normalized),
+  );
+  const snapshot = await getCountFromServer(q);
+  return snapshot.data().count;
+}
+
+export async function instrumentCertificateExists(certificateNumber: string): Promise<boolean> {
+  const normalized = String(certificateNumber || '').trim().toUpperCase();
+  if (!normalized) return false;
+
+  const byCertificate = await getDocs(
+    query(
+      collection(db, 'instruments'),
+      where('certificateNumber', '==', normalized),
+      limit(1),
+    ),
+  );
+  if (!byCertificate.empty) return true;
+
+  const byComa = await getDocs(
+    query(
+      collection(db, 'instruments'),
+      where('coma', '==', normalized),
+      limit(1),
+    ),
+  );
+  return !byComa.empty;
 }
 
 export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'> & Partial<Pick<Instrument, 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'>>): Promise<Instrument> {
@@ -1028,7 +1067,7 @@ export async function saveIntakeSequenceConfig(config: IntakeSequenceConfig): Pr
 export async function syncIntakes(callback: (intakes: SavedIntake[]) => void) {
   const cached = getLocalCache<SavedIntake[]>('savedIntakes', []);
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'savedIntakes'), limit(50));
+  const q = query(collection(db, 'savedIntakes'));
   return onSnapshot(q, async (snapshot) => {
     if (!snapshot.empty) {
       // Sort in memory by ID descending (which is essentially timestamp descending since IDs are Date.now())

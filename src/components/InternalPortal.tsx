@@ -59,6 +59,8 @@ import {
   CertSequenceConfig,
   addInstrumentDoc,
   updateInstrumentDoc,
+  countInstrumentsForIntake,
+  instrumentCertificateExists,
   syncReferenceStandards,
   addReferenceStandardDoc,
   updateReferenceStandardDoc,
@@ -4322,11 +4324,10 @@ Status atual: ${e.status}.`,
             (acc: number, r: any) => acc + (Number(r.quant) || 0),
             0,
           );
-          const currentCount = instruments.filter(
-            (i) =>
-              (i.numeroDaEntrada || "").trim().toLowerCase() ===
-              instNumeroDaEntrada.trim().toLowerCase(),
-          ).length;
+          // Never rely only on the currently rendered inventory to enforce the
+          // intake capacity. Query Firestore so a delayed/stale listener cannot
+          // allow more instruments than the Entrada de Material permits.
+          const currentCount = await countInstrumentsForIntake(instNumeroDaEntrada);
 
           if (currentCount >= totalAllowed) {
             setInstFormError(
@@ -4336,12 +4337,10 @@ Status atual: ${e.status}.`,
           }
         }
       }
-      const certToMatch = instCertNumber.trim().toLowerCase();
-      const isDuplicate = instruments.some(
-        (i) =>
-          (i.certificateNumber || "").trim().toLowerCase() === certToMatch ||
-          (i.coma || "").trim().toLowerCase() === certToMatch,
-      );
+      // Certificate uniqueness is validated against Firestore itself instead
+      // of the local table. This prevents a second browser/tab or a temporarily
+      // stale listener from registering an already-used certificate number.
+      const isDuplicate = await instrumentCertificateExists(instCertNumber);
       if (isDuplicate) {
         setInstFormError("Este Número de Certificado já está cadastrado.");
         return;
