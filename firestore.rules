@@ -193,9 +193,15 @@ service cloud.firestore {
       allow read: if isInternalAccount();
       allow create: if isInternalAccount();
       // A transição para Entregue é permitida; depois disso o cadastro se torna
-      // imutável para preservar a rastreabilidade da devolução.
-      allow update: if isInternalAccount() && resource.data.status != 'Entregue';
-      allow delete: if isAdministrator();
+      // imutável para preservar a rastreabilidade da devolução. Campos de
+      // arquivamento só podem ser escritos pelo backend (Admin SDK).
+      allow update: if isInternalAccount()
+        && resource.data.status != 'Entregue'
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
+        ]);
+      // Exclusão física foi substituída por arquivamento administrativo.
+      allow delete: if false;
     }
     match /calibrationReports/{reportId} {
       allow read: if isInternalAccount();
@@ -243,8 +249,16 @@ service cloud.firestore {
       );
       allow delete: if isAdministrator();
     }
-    match /fieldServiceRecords/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /fieldServiceRecords/{recordId} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount();
+      allow update: if isInternalAccount() && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
+        ]) || isAdministrator()
+      );
+      // Sem exclusão física pelo portal. O Administrador arquiva pelo backend.
+      allow delete: if false;
     }
 
     // Financeiro: acesso somente para Financeiro e Administradores.
@@ -265,11 +279,21 @@ service cloud.firestore {
     }
 
     // Remaining operational collections explicitly allowed to internal accounts.
-    match /inventoryItems/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /inventoryItems/{itemId} {
+      // Cadastro, edição, saldo e arquivamento passam pelo backend para que
+      // estoque + movimentação + auditoria sejam consistentes e atômicos.
+      allow read: if isInternalAccount();
+      allow create, update, delete: if false;
     }
-    match /inventoryTransactions/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /inventoryTransactions/{transactionId} {
+      // Movimentações são gravadas somente pelo backend em transação atômica.
+      allow read: if isInternalAccount();
+      allow create, update, delete: if false;
+    }
+    match /systemAuditLogs/{auditId} {
+      // Trilha autoritativa: escrita somente pelo Admin SDK do backend.
+      allow read: if isAdministrator();
+      allow create, update, delete: if false;
     }
     match /referenceStandards/{document=**} {
       allow read, write: if isInternalAccount();

@@ -44,6 +44,28 @@ service firebase.storage {
         && request.resource.contentType.matches('image/(png|jpeg|webp)');
     }
 
+    function isValidOperationalImage() {
+      return request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/(png|jpeg|webp)');
+    }
+
+    function isValidInventoryAttachment() {
+      return request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType != null
+        && (
+          request.resource.contentType.matches('image/(png|jpeg|webp|gif)') ||
+          request.resource.contentType == 'application/pdf' ||
+          request.resource.contentType == 'text/plain' ||
+          request.resource.contentType == 'application/msword' ||
+          request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          request.resource.contentType == 'application/vnd.ms-excel' ||
+          request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+    }
+
     // Assinaturas digitais dos técnicos.
     // Leitura: somente usuários autenticados (internos ou clientes).
     // Escrita: somente o próprio colaborador vinculado ao portalUserId.
@@ -64,6 +86,32 @@ service firebase.storage {
         && isValidDeliveryImage();
       allow update: if false;
       allow delete: if isAdministrator();
+    }
+
+    // Fotos operacionais novas passam a ser armazenadas como objetos imutáveis.
+    // O Firestore mantém apenas URL/path; fotos legadas em Base64 continuam legíveis
+    // durante a migração gradual e não são apagadas automaticamente.
+    match /instrument-photos/{instrumentId}/{category}/{fileName} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount()
+        && category in ['registration', 'calibrated']
+        && isValidOperationalImage();
+      allow update, delete: if false;
+    }
+
+    match /intake-entry-photos/{intakeId}/{fileName} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount() && isValidOperationalImage();
+      allow update, delete: if false;
+    }
+
+    match /inventory-attachments/{userUid}/{category}/{fileName} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount()
+        && request.auth.uid == userUid
+        && category in ['item', 'transaction']
+        && isValidInventoryAttachment();
+      allow update, delete: if false;
     }
 
     // Nenhum outro caminho do Storage fica exposto por padrão.

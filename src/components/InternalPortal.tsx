@@ -23,6 +23,9 @@ import {
   updateIntakeDevolutionDraft,
   finalizeIntakeDelivery,
   uploadIntakeDeliveryImage,
+  uploadIntakeEntryImage,
+  uploadInstrumentPhotoToStorage,
+  uploadInventoryAttachment,
   deleteIntakeDoc,
   clearAllSavedIntakes,
   syncIntakeSequenceConfig,
@@ -45,7 +48,7 @@ import {
   updateInventoryItemDoc,
   deleteInventoryItemDoc,
   syncInventoryTransactions,
-  addInventoryTransactionDoc,
+  moveInventoryAtomically,
   syncCompanySettings,
   saveCompanySettings,
   syncHeaderLogo,
@@ -4079,8 +4082,13 @@ Status atual: ${e.status}.`,
         alert("Nenhuma foto válida foi processada. Tente selecionar novamente no seu dispositivo.");
         return;
       }
+      const uploadedPhotos = await Promise.all(
+        compressedPhotos.map((photo, index) =>
+          uploadIntakeEntryImage(selectedIntakeForPhotos.id, photo, index),
+        ),
+      );
       const existingPhotos = selectedIntakeForPhotos.photos || [];
-      const updatedPhotos = [...existingPhotos, ...compressedPhotos];
+      const updatedPhotos = [...existingPhotos, ...uploadedPhotos.map((item) => item.url)];
 
       if (selectedIntakeForPhotos.id) {
         await updateIntakePhotosDoc(selectedIntakeForPhotos.id, updatedPhotos);
@@ -4189,9 +4197,19 @@ Status atual: ${e.status}.`,
         photoModalType === "registration"
           ? "photoRegistration"
           : "photoCalibrated";
+      const pathFieldToUpdate =
+        photoModalType === "registration"
+          ? "photoRegistrationPath"
+          : "photoCalibratedPath";
+      const uploadedPhoto = await uploadInstrumentPhotoToStorage(
+        photoModalInstrument.id,
+        photoModalType,
+        photoDataUrl,
+      );
 
       let updatePayload: any = {
-        [fieldToUpdate]: photoDataUrl,
+        [fieldToUpdate]: uploadedPhoto.url,
+        [pathFieldToUpdate]: uploadedPhoto.path,
       };
 
       let finalStatus = photoModalInstrument.status;
@@ -4215,7 +4233,7 @@ Status atual: ${e.status}.`,
 
       setPhotoModalInstrument((prev) =>
         prev
-          ? { ...prev, [fieldToUpdate]: photoDataUrl, status: finalStatus }
+          ? { ...prev, [fieldToUpdate]: uploadedPhoto.url, [pathFieldToUpdate]: uploadedPhoto.path, status: finalStatus }
           : null,
       );
     } catch (err: any) {
@@ -4269,12 +4287,17 @@ Status atual: ${e.status}.`,
           ? "photoRegistration"
           : "photoCalibrated";
 
+      const pathFieldToUpdate =
+        photoModalType === "registration"
+          ? "photoRegistrationPath"
+          : "photoCalibratedPath";
       await updateInstrumentDoc(photoModalInstrument.id, {
         [fieldToUpdate]: "",
-      });
+        [pathFieldToUpdate]: "",
+      } as any);
 
       setPhotoModalInstrument((prev) =>
-        prev ? { ...prev, [fieldToUpdate]: "" } : null,
+        prev ? { ...prev, [fieldToUpdate]: "", [pathFieldToUpdate]: "" } : null,
       );
     } catch (err) {
       console.error("Error deleting instrument photo:", err);
@@ -5503,23 +5526,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       }
 
       try {
-        if (file.type.startsWith('image/')) {
-          const compressed = await compressImageToWebResolution(file, 1200, 1200, 0.7);
-          newAttachments.push(compressed);
-        } else {
-          const reader = new FileReader();
-          const base64Promise = new Promise<string>((resolve) => {
-            reader.onload = (evt) => {
-              const base64 = evt.target?.result as string;
-              resolve(`${file.name}||${base64}`);
-            };
-            reader.readAsDataURL(file);
-          });
-          const res = await base64Promise;
-          newAttachments.push(res);
-        }
-      } catch (err) {
-        console.error("Erro ao processar arquivo de estoque:", err);
+        const uploadedUrl = await uploadInventoryAttachment(
+          file,
+          isTransaction ? 'transaction' : 'item',
+        );
+        newAttachments.push(uploadedUrl);
+      } catch (err: any) {
+        console.error("Erro ao enviar arquivo de estoque:", err);
+        alert(err?.message || `Não foi possível enviar ${file.name}.`);
       }
     }
 
@@ -17696,10 +17710,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <input
                     type="number"
                     name="quantity"
+                    min="0"
                     defaultValue={editingInventoryItem?.quantity ?? 0}
                     required
-                    className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
+                    readOnly={!!editingInventoryItem}
+                    className={`w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue ${editingInventoryItem ? "bg-slate-100 text-slate-500 cursor-not-allowed" : ""}`}
                   />
+                  {editingInventoryItem && (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      O saldo é alterado somente por Movimentar Estoque, preservando o histórico.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
@@ -17799,34 +17820,25 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 const type = formData.get("type") as "entrada" | "saida";
                 const quantity = Number(formData.get("quantity"));
 
-                const transactionData = {
-                  itemId,
-                  type,
-                  quantity,
-                  date: new Date().toISOString(),
-                  reason: formData.get("reason") as string,
-                  responsible: currentUser?.name || "Desconhecido",
-                  employeeId: formData.get("employeeId") as string,
-                  attachments: transactionAttachments,
-                };
-
-                const item = inventoryItems.find((i) => i.id === itemId);
-                if (item) {
-                  const newQuantity =
-                    type === "entrada"
-                      ? item.quantity + quantity
-                      : item.quantity - quantity;
-                  if (newQuantity < 0) {
-                    alert(
-                      "Atenção: A quantidade em estoque não pode ficar negativa.",
-                    );
-                    return;
-                  }
-                  await updateInventoryItemDoc(itemId, {
-                    quantity: newQuantity,
+                try {
+                  const result = await moveInventoryAtomically({
+                    itemId,
+                    type,
+                    quantity,
+                    reason: formData.get("reason") as string,
+                    employeeId: formData.get("employeeId") as string,
+                    attachments: transactionAttachments,
                   });
-                  await addInventoryTransactionDoc(transactionData);
+                  setInventoryItems((prev) =>
+                    prev.map((item) =>
+                      item.id === itemId ? { ...item, quantity: result.newQuantity } : item,
+                    ),
+                  );
+                  setTransactionAttachments([]);
                   setShowInventoryTransactionForm(false);
+                } catch (err: any) {
+                  console.error("Erro ao movimentar estoque:", err);
+                  alert(err?.message || "Não foi possível concluir a movimentação.");
                 }
               }}
               className="space-y-4"

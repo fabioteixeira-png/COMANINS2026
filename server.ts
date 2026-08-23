@@ -121,6 +121,7 @@ const createRateLimiter = (scope: string, windowMs: number, maxRequests: number)
 const aiApiRateLimit = createRateLimiter('ai-api', 5 * 60 * 1000, 30);
 const emailApiRateLimit = createRateLimiter('email-api', 10 * 60 * 1000, 30);
 const adminApiRateLimit = createRateLimiter('admin-api', 5 * 60 * 1000, 30);
+const writeApiRateLimit = createRateLimiter('write-api', 60 * 1000, 120);
 const publicContactRateLimit = createRateLimiter('public-contact', 15 * 60 * 1000, 5);
 
 const asLimitedString = (value: unknown, maxLength: number): string =>
@@ -682,6 +683,115 @@ const backfillClientLinks = async (): Promise<void> => {
   return migrationPromise;
 };
 
+const FIELD_SERVICE_LINK_MIGRATION_ID = 'fieldServiceClientLinksV1';
+let fieldServiceLinkMigrationReady = false;
+let fieldServiceLinkMigrationPromise: Promise<void> | null = null;
+
+const isFieldServiceLinkMigrationComplete = async (): Promise<boolean> => {
+  if (fieldServiceLinkMigrationReady) return true;
+  if (!firestoreDb) return false;
+  try {
+    const marker = await firestoreDb.collection('securityMigrations').doc(FIELD_SERVICE_LINK_MIGRATION_ID).get();
+    fieldServiceLinkMigrationReady = marker.exists && marker.data()?.completed === true;
+    return fieldServiceLinkMigrationReady;
+  } catch (error) {
+    console.error('[MIGRATION] Could not read field service link migration status:', error);
+    return false;
+  }
+};
+
+const backfillFieldServiceClientLinks = async (): Promise<void> => {
+  if (!firestoreDb) return;
+  if (fieldServiceLinkMigrationPromise) return fieldServiceLinkMigrationPromise;
+
+  const migrationPromise = (async () => {
+    const markerRef = firestoreDb.collection('securityMigrations').doc(FIELD_SERVICE_LINK_MIGRATION_ID);
+    const marker = await markerRef.get();
+    if (marker.exists && marker.data()?.completed === true) {
+      fieldServiceLinkMigrationReady = true;
+      return;
+    }
+
+    console.log('[MIGRATION] Starting clientId backfill for fieldServiceRecords...');
+    const [instrumentSnap, fieldServiceSnap] = await Promise.all([
+      firestoreDb.collection('instruments').select('clientId', 'certificateNumber', 'coma', 'tag').get(),
+      firestoreDb.collection('fieldServiceRecords').select('clientId', 'certificate', 'tag').get(),
+    ]);
+
+    const byCertificate = new Map<string, string>();
+    const byTag = new Map<string, string | null>();
+    const normalize = (value: unknown) => String(value || '').trim().toUpperCase();
+
+    for (const instrumentDoc of instrumentSnap.docs) {
+      const data: any = instrumentDoc.data();
+      const clientId = String(data?.clientId || '').trim();
+      if (!clientId) continue;
+      const certificate = normalize(data?.certificateNumber || data?.coma);
+      const coma = normalize(data?.coma);
+      const tag = normalize(data?.tag);
+      if (certificate) byCertificate.set(certificate, clientId);
+      if (coma) byCertificate.set(coma, clientId);
+      if (tag) {
+        const previous = byTag.get(tag);
+        if (previous === undefined) byTag.set(tag, clientId);
+        else if (previous !== clientId) byTag.set(tag, null);
+      }
+    }
+
+    let batch = firestoreDb.batch();
+    let pendingWrites = 0;
+    let updated = 0;
+    let orphaned = 0;
+
+    const flush = async () => {
+      if (!pendingWrites) return;
+      await batch.commit();
+      batch = firestoreDb.batch();
+      pendingWrites = 0;
+    };
+
+    for (const recordDoc of fieldServiceSnap.docs) {
+      const data: any = recordDoc.data();
+      const currentClientId = String(data?.clientId || '').trim();
+      if (currentClientId) continue;
+      const certificate = normalize(data?.certificate);
+      const tag = normalize(data?.tag);
+      const resolvedClientId = (certificate && byCertificate.get(certificate)) || (tag ? byTag.get(tag) : undefined);
+      if (!resolvedClientId) {
+        orphaned += 1;
+        continue;
+      }
+      batch.update(recordDoc.ref, { clientId: resolvedClientId });
+      pendingWrites += 1;
+      updated += 1;
+      if (pendingWrites >= 400) await flush();
+    }
+    await flush();
+
+    await markerRef.set({
+      completed: true,
+      version: 1,
+      completedAt: new Date().toISOString(),
+      updated,
+      orphaned,
+      totalScanned: fieldServiceSnap.size,
+    }, { merge: true });
+
+    fieldServiceLinkMigrationReady = true;
+    console.log(`[MIGRATION] fieldService clientId backfill complete. updated=${updated}, orphaned=${orphaned}`);
+  })()
+    .catch((error) => {
+      fieldServiceLinkMigrationReady = false;
+      console.error('[MIGRATION] fieldService clientId backfill failed; legacy filtering remains active:', error);
+    })
+    .finally(() => {
+      fieldServiceLinkMigrationPromise = null;
+    });
+
+  fieldServiceLinkMigrationPromise = migrationPromise;
+  return migrationPromise;
+};
+
 const scrubLegacyInternalPasswordFields = async (): Promise<void> => {
   if (!firestoreDb) return;
   try {
@@ -725,6 +835,369 @@ app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
+});
+
+app.post('/api/inventory/items', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+
+  const name = asLimitedString(req.body?.name, 180);
+  const description = asLimitedString(req.body?.description, 1000);
+  const category = asLimitedString(req.body?.category, 120);
+  const quantity = Number(req.body?.quantity ?? 0);
+  const minQuantity = Number(req.body?.minQuantity ?? 0);
+  const unit = asLimitedString(req.body?.unit, 50);
+  const location = asLimitedString(req.body?.location, 180);
+  const attachments = Array.isArray(req.body?.attachments)
+    ? req.body.attachments.slice(0, 20).map((value: unknown) => asLimitedString(value, 2048)).filter(Boolean)
+    : [];
+
+  if (!name || !category || !unit || !Number.isFinite(quantity) || quantity < 0 || !Number.isFinite(minQuantity) || minQuantity < 0) {
+    return res.status(400).json({ error: 'INVALID_INVENTORY_ITEM' });
+  }
+
+  try {
+    const itemRef = firestoreDb.collection('inventoryItems').doc();
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const initialTransactionRef = quantity > 0 ? firestoreDb.collection('inventoryTransactions').doc() : null;
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      transaction.set(itemRef, {
+        name, description, category, quantity, minQuantity, unit, location, attachments,
+        createdAt: nowIso, createdBy: actorName, createdByUid: actorUid,
+        updatedAt: nowIso, updatedBy: actorName, updatedByUid: actorUid,
+        isDeleted: false,
+      });
+
+      if (initialTransactionRef) {
+        transaction.set(initialTransactionRef, {
+          itemId: itemRef.id, type: 'entrada', quantity, date: nowIso,
+          reason: 'Saldo inicial do cadastro', responsible: actorName, responsibleUid: actorUid,
+          employeeId: '', attachments: [], previousQuantity: 0, resultingQuantity: quantity, createdAt: nowIso,
+        });
+      }
+
+      transaction.set(auditRef, {
+        action: 'INVENTORY_ITEM_CREATED', entityType: 'inventoryItem', entityId: itemRef.id,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Item de estoque criado: ${name}`,
+        metadata: { category, initialQuantity: quantity, minQuantity, unit, initialTransactionId: initialTransactionRef?.id || null },
+      });
+    });
+
+    return res.status(201).json({ success: true, id: itemRef.id });
+  } catch (error) {
+    console.error('Inventory item creation failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const itemId = asLimitedString(req.params.id, 160);
+  if (!itemId) return res.status(400).json({ error: 'INVALID_ITEM_ID' });
+
+  const updates: Record<string, unknown> = {};
+  if (req.body?.name !== undefined) updates.name = asLimitedString(req.body.name, 180);
+  if (req.body?.description !== undefined) updates.description = asLimitedString(req.body.description, 1000);
+  if (req.body?.category !== undefined) updates.category = asLimitedString(req.body.category, 120);
+  if (req.body?.minQuantity !== undefined) {
+    const value = Number(req.body.minQuantity);
+    if (!Number.isFinite(value) || value < 0) return res.status(400).json({ error: 'INVALID_MIN_QUANTITY' });
+    updates.minQuantity = value;
+  }
+  if (req.body?.unit !== undefined) updates.unit = asLimitedString(req.body.unit, 50);
+  if (req.body?.location !== undefined) updates.location = asLimitedString(req.body.location, 180);
+  if (req.body?.attachments !== undefined) {
+    updates.attachments = Array.isArray(req.body.attachments)
+      ? req.body.attachments.slice(0, 20).map((value: unknown) => asLimitedString(value, 2048)).filter(Boolean)
+      : [];
+  }
+
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'NO_ALLOWED_UPDATES' });
+  if (updates.name === '' || updates.category === '' || updates.unit === '') return res.status(400).json({ error: 'INVALID_INVENTORY_ITEM' });
+
+  try {
+    const itemRef = firestoreDb.collection('inventoryItems').doc(itemId);
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const itemSnap = await transaction.get(itemRef);
+      if (!itemSnap.exists || itemSnap.data()?.isDeleted === true) {
+        const error: any = new Error('ITEM_NOT_FOUND'); error.code = 'ITEM_NOT_FOUND'; throw error;
+      }
+      transaction.update(itemRef, { ...updates, updatedAt: nowIso, updatedBy: actorName, updatedByUid: actorUid });
+      transaction.set(auditRef, {
+        action: 'INVENTORY_ITEM_UPDATED', entityType: 'inventoryItem', entityId: itemId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Cadastro de item de estoque atualizado`,
+        metadata: { changedFields: Object.keys(updates) },
+      });
+    });
+    return res.json({ success: true, updates });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('ITEM_NOT_FOUND')) return res.status(404).json({ error: 'ITEM_NOT_FOUND' });
+    console.error('Inventory item update failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/inventory/move', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+
+  const itemId = asLimitedString(req.body?.itemId, 160);
+  const type = req.body?.type === 'entrada' || req.body?.type === 'saida' ? req.body.type : '';
+  const quantity = Number(req.body?.quantity);
+  const reason = asLimitedString(req.body?.reason, 500);
+  const employeeId = asLimitedString(req.body?.employeeId, 160);
+  const attachments = Array.isArray(req.body?.attachments)
+    ? req.body.attachments
+        .slice(0, 20)
+        .map((value: unknown) => asLimitedString(value, 2048))
+        .filter(Boolean)
+    : [];
+
+  if (!itemId || !type || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1_000_000 || !reason) {
+    return res.status(400).json({ error: 'INVALID_INVENTORY_MOVEMENT' });
+  }
+
+  try {
+    const itemRef = firestoreDb.collection('inventoryItems').doc(itemId);
+    const transactionRef = firestoreDb.collection('inventoryTransactions').doc();
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const nowIso = new Date().toISOString();
+    let resultingQuantity = 0;
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const itemSnap = await transaction.get(itemRef);
+      if (!itemSnap.exists || itemSnap.data()?.isDeleted === true) {
+        const error: any = new Error('ITEM_NOT_FOUND');
+        error.code = 'ITEM_NOT_FOUND';
+        throw error;
+      }
+
+      const itemData: any = itemSnap.data() || {};
+      const currentQuantity = Number(itemData.quantity || 0);
+      if (!Number.isFinite(currentQuantity)) {
+        const error: any = new Error('INVALID_STOCK_STATE');
+        error.code = 'INVALID_STOCK_STATE';
+        throw error;
+      }
+
+      resultingQuantity = type === 'entrada'
+        ? currentQuantity + quantity
+        : currentQuantity - quantity;
+
+      if (resultingQuantity < 0) {
+        const error: any = new Error('INSUFFICIENT_STOCK');
+        error.code = 'INSUFFICIENT_STOCK';
+        throw error;
+      }
+
+      const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+      const actorUid = asLimitedString(req.user?.uid, 160);
+      const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+      transaction.update(itemRef, {
+        quantity: resultingQuantity,
+        updatedAt: nowIso,
+        updatedByUid: actorUid,
+        updatedBy: actorName,
+      });
+
+      transaction.set(transactionRef, {
+        itemId, type, quantity, date: nowIso, reason,
+        responsible: actorName,
+        responsibleUid: actorUid,
+        employeeId: employeeId || '',
+        attachments,
+        previousQuantity: currentQuantity,
+        resultingQuantity,
+        createdAt: nowIso,
+      });
+
+      transaction.set(auditRef, {
+        action: 'INVENTORY_MOVEMENT',
+        entityType: 'inventoryItem',
+        entityId: itemId,
+        actorUid, actorName, actorRole,
+        createdAt: nowIso,
+        immutable: true,
+        summary: `${type === 'entrada' ? 'Entrada' : 'Saída'} de ${quantity} unidade(s)`,
+        metadata: {
+          transactionId: transactionRef.id,
+          previousQuantity: currentQuantity,
+          resultingQuantity,
+          reason,
+          employeeId: employeeId || null,
+        },
+      });
+    });
+
+    return res.json({ success: true, transactionId: transactionRef.id, newQuantity: resultingQuantity });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('ITEM_NOT_FOUND')) return res.status(404).json({ error: 'ITEM_NOT_FOUND' });
+    if (code.includes('INSUFFICIENT_STOCK')) return res.status(409).json({ error: 'INSUFFICIENT_STOCK' });
+    if (code.includes('INVALID_STOCK_STATE')) return res.status(409).json({ error: 'INVALID_STOCK_STATE' });
+    console.error('Atomic inventory movement failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/inventory/items/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const itemId = asLimitedString(req.params.id, 160);
+  if (!itemId) return res.status(400).json({ error: 'INVALID_ITEM_ID' });
+
+  try {
+    const itemRef = firestoreDb.collection('inventoryItems').doc(itemId);
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const itemSnap = await transaction.get(itemRef);
+      if (!itemSnap.exists) {
+        const error: any = new Error('ITEM_NOT_FOUND');
+        error.code = 'ITEM_NOT_FOUND';
+        throw error;
+      }
+      const before: any = itemSnap.data() || {};
+      if (before.isDeleted === true) return;
+
+      transaction.update(itemRef, {
+        isDeleted: true,
+        deletedAt: nowIso,
+        deletedBy: actorName,
+        deletedByUid: actorUid,
+      });
+      transaction.set(auditRef, {
+        action: 'INVENTORY_ITEM_ARCHIVED',
+        entityType: 'inventoryItem',
+        entityId: itemId,
+        actorUid, actorName, actorRole,
+        createdAt: nowIso,
+        immutable: true,
+        summary: `Item de estoque arquivado: ${asLimitedString(before.name, 160)}`,
+        metadata: { quantity: Number(before.quantity || 0), category: asLimitedString(before.category, 120) },
+      });
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('ITEM_NOT_FOUND')) return res.status(404).json({ error: 'ITEM_NOT_FOUND' });
+    console.error('Inventory archive failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/instruments/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const instrumentId = asLimitedString(req.params.id, 160);
+  if (!instrumentId) return res.status(400).json({ error: 'INVALID_INSTRUMENT_ID' });
+
+  try {
+    const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const instrumentSnap = await transaction.get(instrumentRef);
+      if (!instrumentSnap.exists) {
+        const error: any = new Error('INSTRUMENT_NOT_FOUND'); error.code = 'INSTRUMENT_NOT_FOUND'; throw error;
+      }
+      const before: any = instrumentSnap.data() || {};
+      if (before.isDeleted === true) return;
+      transaction.update(instrumentRef, {
+        isDeleted: true,
+        deletedAt: nowIso,
+        deletedBy: actorName,
+        deletedByUid: actorUid,
+        updatedAt: nowIso,
+      });
+      transaction.set(auditRef, {
+        action: 'INSTRUMENT_ARCHIVED',
+        entityType: 'instrument',
+        entityId: instrumentId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Instrumento arquivado: ${asLimitedString(before.certificateNumber || before.coma || before.tag, 160)}`,
+        metadata: {
+          certificateNumber: asLimitedString(before.certificateNumber || before.coma, 160),
+          tag: asLimitedString(before.tag, 160),
+          clientId: asLimitedString(before.clientId, 160),
+          status: asLimitedString(before.status, 120),
+        },
+      });
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('INSTRUMENT_NOT_FOUND')) return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+    console.error('Instrument archive failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const recordId = asLimitedString(req.params.id, 160);
+  if (!recordId) return res.status(400).json({ error: 'INVALID_RECORD_ID' });
+
+  try {
+    const recordRef = firestoreDb.collection('fieldServiceRecords').doc(recordId);
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const recordSnap = await transaction.get(recordRef);
+      if (!recordSnap.exists) {
+        const error: any = new Error('RECORD_NOT_FOUND'); error.code = 'RECORD_NOT_FOUND'; throw error;
+      }
+      const before: any = recordSnap.data() || {};
+      if (before.isDeleted === true) return;
+      transaction.update(recordRef, {
+        isDeleted: true,
+        deletedAt: nowIso,
+        deletedBy: actorName,
+        deletedByUid: actorUid,
+      });
+      transaction.set(auditRef, {
+        action: 'FIELD_SERVICE_RECORD_ARCHIVED',
+        entityType: 'fieldServiceRecord',
+        entityId: recordId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Registro de serviço de campo arquivado`,
+        metadata: {
+          certificate: asLimitedString(before.certificate, 160),
+          tag: asLimitedString(before.tag, 160),
+          clientId: asLimitedString(before.clientId, 160),
+        },
+      });
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('RECORD_NOT_FOUND')) return res.status(404).json({ error: 'RECORD_NOT_FOUND' });
+    console.error('Field service archive failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
 });
 
 // Firestore/Firebase Admin are the only production data stores.
@@ -1316,7 +1789,9 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
       .where('clientId', '==', clientId)
       .get();
 
-    const instruments = instrumentsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const instruments = instrumentsSnap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => item?.isDeleted !== true);
     const instrumentIdSet = new Set(instruments.map((item: any) => String(item.id)).filter(Boolean));
 
     // Enquanto a migração histórica ainda não terminou, mantemos o filtro legado
@@ -1358,13 +1833,26 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
       );
 
       if (certificateKeys.size > 0) {
-        const fieldServiceSnap = await firestoreDb.collection('fieldServiceRecords').get();
-        fieldServiceRecords = fieldServiceSnap.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((item: any) => {
-            const certificateKey = String(item?.certificate || '').replace(/\D/g, '');
-            return Boolean(certificateKey) && certificateKeys.has(certificateKey);
-          });
+        const fieldServiceIndexed = await isFieldServiceLinkMigrationComplete();
+        if (fieldServiceIndexed) {
+          const fieldServiceSnap = await firestoreDb
+            .collection('fieldServiceRecords')
+            .where('clientId', '==', clientId)
+            .get();
+          fieldServiceRecords = fieldServiceSnap.docs
+            .map((doc) => ({ id: doc.id, ...doc.data() }))
+            .filter((item: any) => item?.isDeleted !== true);
+        } else {
+          // Compatibilidade temporária enquanto o backfill histórico é concluído.
+          const fieldServiceSnap = await firestoreDb.collection('fieldServiceRecords').get();
+          fieldServiceRecords = fieldServiceSnap.docs
+            .map((doc) => ({ id: doc.id, ...doc.data() }))
+            .filter((item: any) => {
+              if (item?.isDeleted === true) return false;
+              const certificateKey = String(item?.certificate || '').replace(/\D/g, '');
+              return Boolean(certificateKey) && certificateKeys.has(certificateKey);
+            });
+        }
       }
     }
 
@@ -2084,6 +2572,7 @@ Required JSON format:
   // block the public site from listening.
   void scrubLegacyInternalPasswordFields();
   void backfillClientLinks();
+  void backfillFieldServiceClientLinks();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor COMANINS rodando na porta ${PORT}`);

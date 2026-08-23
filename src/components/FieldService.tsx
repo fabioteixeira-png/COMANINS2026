@@ -10,7 +10,7 @@ import {
   updateFieldServiceRecord, 
   bulkAddFieldServiceRecords,
   bulkUpsertFieldServiceRecords,
-  clearAllFieldServiceRecords, deleteFieldServiceRecord, syncInstruments
+  deleteFieldServiceRecord, syncInstruments
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 
@@ -164,6 +164,30 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
 
   const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+  const resolveClientId = (record: Partial<FieldServiceRecord>): string => {
+    const cert = String(record.certificate || '').trim().toUpperCase();
+    const tag = String(record.tag || '').trim().toUpperCase();
+
+    if (cert) {
+      const certificateMatch = instruments.find((instrument) => {
+        const certificateNumber = String(instrument.certificateNumber || '').trim().toUpperCase();
+        const coma = String(instrument.coma || '').trim().toUpperCase();
+        return certificateNumber === cert || coma === cert;
+      });
+      if (certificateMatch?.clientId) return String(certificateMatch.clientId).trim();
+    }
+
+    if (tag) {
+      const tagMatches = instruments.filter(
+        (instrument) => String(instrument.tag || '').trim().toUpperCase() === tag,
+      );
+      const clientIds = Array.from(new Set(tagMatches.map((instrument) => String(instrument.clientId || '').trim()).filter(Boolean)));
+      if (clientIds.length === 1) return clientIds[0];
+    }
+
+    return String(record.clientId || '').trim();
+  };
+
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([{
       'Certificado': '',
@@ -245,6 +269,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
           const formattedInterventionDate = dateMask(interventionDateRaw);
 
           const parsedRecord = {
+            clientId: '',
             cliente: String(normalizedRow['cliente'] || ''),
             tag: strTag,
             equipamento: String(normalizedRow['equipamento'] || normalizedRow['descrio'] || ''),
@@ -263,6 +288,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
             observacao: String(normalizedRow['observacao'] || normalizedRow['observao'] || normalizedRow['notas'] || ''),
             unidade: String(normalizedRow['unidade'] || normalizedRow['und'] || '')
           };
+          parsedRecord.clientId = resolveClientId(parsedRecord);
 
           // Find existing match
           let existingMatch = null;
@@ -349,36 +375,6 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ServicoCampo");
     XLSX.writeFile(wb, "Servico_de_Campo_Export.xlsx");
-  };
-
-  const handleClearAll = async () => {
-    const adminUsername = prompt("Digite o usuário do administrador:");
-    if (adminUsername === null) return;
-    const pwd = prompt("Digite a senha do administrador para limpar todos os dados:");
-    if (pwd === null) return;
-
-    try {
-      const isAdminValid = await verifyAdminCredentials(adminUsername, pwd);
-      if (!isAdminValid) {
-        alert("Credencial administrativa inválida.");
-        return;
-      }
-      if (confirm("Tem certeza absoluta? Isso apagará TODOS os registros!")) {
-        setIsLoading(true);
-        try {
-          await clearAllFieldServiceRecords();
-          alert("Dados limpos com sucesso.");
-        } catch (e) {
-          console.error(e);
-          alert("Erro ao limpar dados.");
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message || "Erro ao validar autorização administrativa.");
-    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -471,10 +467,14 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
     }
 
     try {
+      const recordToSave: Partial<FieldServiceRecord> = {
+        ...formData,
+        clientId: resolveClientId(formData),
+      };
       if (formData.id) {
-        await updateFieldServiceRecord(formData.id, formData);
+        await updateFieldServiceRecord(formData.id, recordToSave);
       } else {
-        await addFieldServiceRecord(formData as any);
+        await addFieldServiceRecord(recordToSave as any);
       }
       setShowAddModal(false);
       setFormData({});
@@ -570,13 +570,6 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
             <span>Exportar Excel</span>
           </button>
 
-          <button 
-            onClick={handleClearAll}
-            className="flex items-center space-x-2 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 font-semibold rounded-lg transition-colors text-sm"
-          >
-            <Trash2 className="h-4 w-4" />
-            <span>Limpar Todos</span>
-          </button>
 
           <button 
             onClick={() => fileInputRef.current?.click()}

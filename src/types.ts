@@ -61,7 +61,15 @@ export interface Instrument {
   materialDeRetorno?: string;
   dataDeRetorno?: string;
   photoRegistration?: string;
+  photoRegistrationPath?: string;
   photoCalibrated?: string;
+  photoCalibratedPath?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
   hasRnc?: boolean;
   rncNumber?: string;
   rncDate?: string;
@@ -266,6 +274,11 @@ export interface InventoryItem {
   accuracyClass?: string;
   location: string;
   attachments?: string[];
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface InventoryTransaction {
@@ -278,6 +291,10 @@ export interface InventoryTransaction {
   responsible: string;
   employeeId?: string;
   attachments?: string[];
+  previousQuantity?: number;
+  resultingQuantity?: number;
+  responsibleUid?: string;
+  createdAt?: string;
 }
 
 export interface ExamTypeItem {

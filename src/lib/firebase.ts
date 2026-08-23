@@ -14,6 +14,7 @@ import {
   updateDoc,
   deleteDoc,
   deleteField,
+  documentId,
   query,
   orderBy,
   limit,
@@ -37,6 +38,28 @@ export const db = firebaseConfig.firestoreDatabaseId
   : getFirestore(app);
 
 export const storage = getStorage(app);
+
+const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
+  const response = await fetch(dataUrl);
+  if (!response.ok) throw new Error('Não foi possível preparar o arquivo para upload.');
+  return await response.blob();
+};
+
+const extensionFromContentType = (contentType: string): string => {
+  const normalized = String(contentType || '').toLowerCase();
+  if (normalized.includes('png')) return 'png';
+  if (normalized.includes('webp')) return 'webp';
+  if (normalized.includes('pdf')) return 'pdf';
+  if (normalized.includes('spreadsheetml')) return 'xlsx';
+  if (normalized.includes('ms-excel')) return 'xls';
+  if (normalized.includes('wordprocessingml')) return 'docx';
+  if (normalized.includes('msword')) return 'doc';
+  if (normalized.includes('text/plain')) return 'txt';
+  return 'jpg';
+};
+
+const safeStorageSegment = (value: string): string =>
+  String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
 
 export enum OperationType {
   CREATE = 'create',
@@ -540,25 +563,95 @@ export async function updateClientDoc(client: Client): Promise<Client> {
 }
 
 // 2. Instruments
-export async function syncInstruments(callback: (instruments: Instrument[]) => void) {
-  const shared = createSharedSync<Instrument[]>(
-    'instruments',
-    'instruments',
-    [],
-    (onData, onError) => {
-      const q = query(collection(db, 'instruments'));
-      return onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs
-          .map(d => ({ ...d.data(), id: d.id } as Instrument))
-          .sort((a, b) => String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true }));
-        onData(list);
-      }, onError);
-    },
-    { persistCache: false }
-  );
-  return shared(callback);
-}
+const INSTRUMENT_PAGE_SIZE = 1000;
+const instrumentCache = new Map<string, Instrument>();
+let instrumentLoadPromise: Promise<void> | null = null;
+let instrumentLiveUnsubscribe: (() => void) | null = null;
+const instrumentSubscribers = new Set<(instruments: Instrument[]) => void>();
 
+const notifyInstrumentSubscribers = () => {
+  const snapshot = Array.from(instrumentCache.values())
+    .filter((instrument) => (instrument as any).isDeleted !== true)
+    .sort((a, b) => String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true }));
+  instrumentSubscribers.forEach((subscriber) => subscriber(snapshot));
+};
+
+const mergeInstrumentIntoCache = (instrument: Instrument) => {
+  instrumentCache.set(instrument.id, instrument);
+};
+
+const ensureInstrumentLiveListener = (fromIso: string) => {
+  if (instrumentLiveUnsubscribe) return;
+  const liveQuery = query(
+    collection(db, 'instruments'),
+    where('updatedAt', '>=', fromIso),
+    orderBy('updatedAt', 'asc'),
+  );
+  instrumentLiveUnsubscribe = onSnapshot(liveQuery, (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === 'removed') {
+        instrumentCache.delete(change.doc.id);
+        return;
+      }
+      mergeInstrumentIntoCache({ id: change.doc.id, ...change.doc.data() } as Instrument);
+    });
+    notifyInstrumentSubscribers();
+  }, (error) => {
+    console.error('Instrument incremental listener error:', error);
+  });
+};
+
+const loadInstrumentsInPages = async (): Promise<void> => {
+  if (instrumentLoadPromise) return instrumentLoadPromise;
+  const liveStartIso = new Date(Date.now() - 5000).toISOString();
+  ensureInstrumentLiveListener(liveStartIso);
+
+  const task = (async () => {
+    let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
+    while (true) {
+      const pageQuery = cursor
+        ? query(
+            collection(db, 'instruments'),
+            orderBy(documentId()),
+            startAfter(cursor),
+            limit(INSTRUMENT_PAGE_SIZE),
+          )
+        : query(
+            collection(db, 'instruments'),
+            orderBy(documentId()),
+            limit(INSTRUMENT_PAGE_SIZE),
+          );
+      const page = await getDocs(pageQuery);
+      page.docs.forEach((instrumentDoc) => {
+        const instrument = { id: instrumentDoc.id, ...instrumentDoc.data() } as Instrument;
+        if ((instrument as any).isDeleted !== true) mergeInstrumentIntoCache(instrument);
+      });
+
+      // Mescla com alterações capturadas pelo listener incremental durante a carga.
+      notifyInstrumentSubscribers();
+
+      if (page.size < INSTRUMENT_PAGE_SIZE) break;
+      cursor = page.docs[page.docs.length - 1] || null;
+      if (!cursor) break;
+    }
+  })().finally(() => {
+    if (instrumentLoadPromise === task) instrumentLoadPromise = null;
+  });
+
+  instrumentLoadPromise = task;
+  return task;
+};
+
+export async function syncInstruments(callback: (instruments: Instrument[]) => void) {
+  instrumentSubscribers.add(callback);
+  if (instrumentCache.size > 0) notifyInstrumentSubscribers();
+  loadInstrumentsInPages().catch((error) => {
+    console.error('Error loading instruments in pages:', error);
+  });
+  return () => {
+    instrumentSubscribers.delete(callback);
+  };
+}
 
 export async function countInstrumentsForIntake(intakeNumber: string): Promise<number> {
   const normalized = String(intakeNumber || '').trim();
@@ -601,13 +694,16 @@ export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 
   if (data.serialNumber) data.serialNumber = data.serialNumber.toUpperCase();
 
   const newId = 'i_' + Date.now();
+  const nowIso = new Date().toISOString();
   const inst: Instrument = {
     status: 'Aguardando Calibração',
     lastCalibrationDate: '',
     nextCalibrationDate: '',
     ...data,
-    id: newId
-  };
+    id: newId,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  } as Instrument;
   const cleaned: Record<string, any> = {};
   for (const [key, val] of Object.entries(inst)) {
     if (val !== undefined && !Number.isNaN(val)) {
@@ -615,6 +711,8 @@ export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 
     }
   }
   await setDoc(doc(db, 'instruments', newId), cleaned);
+  mergeInstrumentIntoCache(inst);
+  notifyInstrumentSubscribers();
   return inst;
 }
 
@@ -627,13 +725,16 @@ export async function addInstrumentsBulkDocs(list: Omit<Instrument, 'id' | 'stat
     if (data.serialNumber) data.serialNumber = data.serialNumber.toUpperCase();
 
     const newId = 'i_' + (Date.now() + i);
+    const nowIso = new Date().toISOString();
     const item: Instrument = {
       ...data,
       id: newId,
       status: 'Aguardando Calibração',
       lastCalibrationDate: '',
-      nextCalibrationDate: ''
-    };
+      nextCalibrationDate: '',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    } as Instrument;
     const cleaned: Record<string, any> = {};
     for (const [key, val] of Object.entries(item)) {
       if (val !== undefined && !Number.isNaN(val)) {
@@ -642,7 +743,9 @@ export async function addInstrumentsBulkDocs(list: Omit<Instrument, 'id' | 'stat
     }
     await setDoc(doc(db, 'instruments', newId), cleaned);
     result.push(item);
+    mergeInstrumentIntoCache(item);
   }
+  notifyInstrumentSubscribers();
   return result;
 }
 
@@ -663,11 +766,27 @@ export async function updateInstrumentDoc(id: string, updates: Partial<Instrumen
       cleaned[key] = val;
     }
   }
+  cleaned.updatedAt = new Date().toISOString();
   await updateDoc(doc(db, 'instruments', id), cleaned);
+  const existing = instrumentCache.get(id);
+  if (existing) {
+    mergeInstrumentIntoCache({ ...existing, ...cleaned, id } as Instrument);
+    notifyInstrumentSubscribers();
+  }
 }
 
 export async function deleteInstrumentDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'instruments', id));
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/instruments/${encodeURIComponent(id)}/archive`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o instrumento.');
+  instrumentCache.delete(id);
+  notifyInstrumentSubscribers();
 }
 
 // 3. Calibration Reports
@@ -1155,6 +1274,65 @@ export async function uploadIntakeDeliveryImage(
   return await getDownloadURL(storageRef);
 }
 
+export async function uploadIntakeEntryImage(
+  intakeId: string,
+  imageDataUrl: string,
+  sequence: number,
+): Promise<{ url: string; path: string }> {
+  const blob = await dataUrlToBlob(imageDataUrl);
+  const contentType = blob.type || 'image/jpeg';
+  if (!contentType.match(/^image\/(jpeg|png|webp)$/i)) {
+    throw new Error('Formato de imagem não permitido.');
+  }
+  if (blob.size > 5 * 1024 * 1024) {
+    throw new Error('A imagem ultrapassa o limite de 5 MB.');
+  }
+  const extension = extensionFromContentType(contentType);
+  const path = `intake-entry-photos/${safeStorageSegment(intakeId)}/${Date.now()}_${sequence}.${extension}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, blob, { contentType });
+  return { url: await getDownloadURL(storageRef), path };
+}
+
+export async function uploadInstrumentPhotoToStorage(
+  instrumentId: string,
+  category: 'registration' | 'calibrated',
+  imageDataUrl: string,
+): Promise<{ url: string; path: string }> {
+  const blob = await dataUrlToBlob(imageDataUrl);
+  const contentType = blob.type || 'image/jpeg';
+  if (!contentType.match(/^image\/(jpeg|png|webp)$/i)) {
+    throw new Error('Formato de imagem não permitido.');
+  }
+  if (blob.size > 5 * 1024 * 1024) {
+    throw new Error('A imagem ultrapassa o limite de 5 MB.');
+  }
+  const extension = extensionFromContentType(contentType);
+  const path = `instrument-photos/${safeStorageSegment(instrumentId)}/${category}/${Date.now()}.${extension}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, blob, { contentType });
+  return { url: await getDownloadURL(storageRef), path };
+}
+
+export async function uploadInventoryAttachment(
+  file: File,
+  category: 'item' | 'transaction',
+): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error(`O arquivo ${file.name} excede o limite de 10 MB.`);
+  }
+  const safeName = safeStorageSegment(file.name.replace(/\.[^.]+$/, '')) || 'arquivo';
+  const extension = file.name.includes('.')
+    ? file.name.split('.').pop()!.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)
+    : extensionFromContentType(file.type);
+  const path = `inventory-attachments/${safeStorageSegment(user.uid)}/${category}/${Date.now()}_${safeName}.${extension || 'bin'}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'application/octet-stream' });
+  return await getDownloadURL(storageRef);
+}
+
 export async function updateIntakePhotosDoc(id: string, photos: string[]): Promise<void> {
   await updateDoc(doc(db, 'savedIntakes', id), { photos });
 }
@@ -1492,12 +1670,15 @@ export async function saveSitePhotosConfig(list: any[]): Promise<void> {
 
 // Inventory Items
 export const syncInventoryItems = (callback: (items: InventoryItem[]) => void) => {
-  const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
+  const cached = getLocalCache<InventoryItem[]>('inventoryItems', []).filter((item) => item.isDeleted !== true);
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'inventoryItems'), limit(500));
   return onSnapshot(q, (snapshot) => {
     const items: InventoryItem[] = [];
-    snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() } as InventoryItem));
+    snapshot.forEach(doc => {
+      const item = { id: doc.id, ...doc.data() } as InventoryItem;
+      if (item.isDeleted !== true) items.push(item);
+    });
     setLocalCache('inventoryItems', items);
     callback(items);
   }, (err) => {
@@ -1507,24 +1688,57 @@ export const syncInventoryItems = (callback: (items: InventoryItem[]) => void) =
 };
 
 export const addInventoryItemDoc = async (item: Omit<InventoryItem, 'id'>) => {
-  const newRef = doc(collection(db, 'inventoryItems'));
-  const newItem = { id: newRef.id, ...item } as InventoryItem;
-  await setDoc(newRef, item);
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/inventory/items', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(item),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível cadastrar o item.');
+  const newItem = { id: String(payload.id || ''), ...item } as InventoryItem;
   const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
-  const updated = [newItem, ...cached.filter(i => i.id !== newRef.id)];
+  const updated = [newItem, ...cached.filter(i => i.id !== newItem.id)];
   setLocalCache('inventoryItems', updated);
 };
 
 export const updateInventoryItemDoc = async (id: string, updates: Partial<InventoryItem>) => {
-  const docRef = doc(db, 'inventoryItems', id);
-  await updateDoc(docRef, updates);
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/inventory/items/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(updates),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível atualizar o item.');
+  const appliedUpdates = payload?.updates || updates;
   const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
-  const updated = cached.map(i => i.id === id ? { ...i, ...updates } : i);
+  const updated = cached.map(i => i.id === id ? { ...i, ...appliedUpdates } : i);
   setLocalCache('inventoryItems', updated);
 };
 
 export const deleteInventoryItemDoc = async (id: string) => {
-  await deleteDoc(doc(db, 'inventoryItems', id));
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/inventory/items/${encodeURIComponent(id)}/archive`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o item.');
+  }
   const cached = getLocalCache<InventoryItem[]>('inventoryItems', []);
   const updated = cached.filter(i => i.id !== id);
   setLocalCache('inventoryItems', updated);
@@ -1554,6 +1768,41 @@ export const addInventoryTransactionDoc = async (transaction: Omit<InventoryTran
   const updated = [newTx, ...cached.filter(t => t.id !== newRef.id)];
   setLocalCache('inventoryTransactions', updated);
 };
+
+export async function moveInventoryAtomically(input: {
+  itemId: string;
+  type: 'entrada' | 'saida';
+  quantity: number;
+  reason: string;
+  employeeId?: string;
+  attachments?: string[];
+}): Promise<{ transactionId: string; newQuantity: number }> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/inventory/move', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (payload?.error === 'INSUFFICIENT_STOCK') {
+      throw new Error('A quantidade em estoque não pode ficar negativa.');
+    }
+    if (payload?.error === 'ITEM_NOT_FOUND') {
+      throw new Error('Item de estoque não encontrado ou inativo.');
+    }
+    throw new Error(payload?.message || payload?.error || 'Não foi possível registrar a movimentação.');
+  }
+  return {
+    transactionId: String(payload.transactionId || ''),
+    newQuantity: Number(payload.newQuantity || 0),
+  };
+}
 
 // Reference Standards (Padrões de Referência)
 export function syncReferenceStandards(callback: (standards: ReferenceStandard[]) => void) {
@@ -1993,6 +2242,7 @@ export async function syncClientIntakes(clientId: string, callback: (intakes: Sa
 
 export interface FieldServiceRecord {
   id: string;
+  clientId?: string;
   cliente: string;
   tag: string;
   equipamento: string;
@@ -2010,94 +2260,167 @@ export interface FieldServiceRecord {
   tipoServico: string;
   observacao: string;
   unidade: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
 }
 
-export async function syncFieldServiceRecords(callback: (records: FieldServiceRecord[]) => void) {
-  const colRef = collection(db, 'fieldServiceRecords');
-  return onSnapshot(colRef, (snapshot) => {
-    const list: FieldServiceRecord[] = [];
-    snapshot.forEach(doc => {
-      list.push({ id: doc.id, ...doc.data() } as FieldServiceRecord);
-    });
-    callback(list);
-  }, (err) => {
-    console.error("Error syncing field service records:", err);
+const FIELD_SERVICE_PAGE_SIZE = 1000;
+let fieldServiceCache: FieldServiceRecord[] = [];
+let fieldServiceLoadPromise: Promise<void> | null = null;
+const fieldServiceSubscribers = new Set<(records: FieldServiceRecord[]) => void>();
+
+const notifyFieldServiceSubscribers = () => {
+  const snapshot = [...fieldServiceCache];
+  fieldServiceSubscribers.forEach((subscriber) => subscriber(snapshot));
+};
+
+const loadFieldServiceRecordsInPages = async (force = false): Promise<void> => {
+  if (fieldServiceLoadPromise && !force) return fieldServiceLoadPromise;
+
+  const task = (async () => {
+    const loaded: FieldServiceRecord[] = [];
+    let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
+
+    while (true) {
+      const pageQuery = cursor
+        ? query(
+            collection(db, 'fieldServiceRecords'),
+            orderBy(documentId()),
+            startAfter(cursor),
+            limit(FIELD_SERVICE_PAGE_SIZE),
+          )
+        : query(
+            collection(db, 'fieldServiceRecords'),
+            orderBy(documentId()),
+            limit(FIELD_SERVICE_PAGE_SIZE),
+          );
+      const page = await getDocs(pageQuery);
+      page.docs.forEach((recordDoc) => {
+        const record = { id: recordDoc.id, ...recordDoc.data() } as FieldServiceRecord;
+        if (record.isDeleted !== true) loaded.push(record);
+      });
+
+      // Publica progressivamente para a tela não ficar bloqueada esperando 20k+ registros.
+      fieldServiceCache = [...loaded];
+      notifyFieldServiceSubscribers();
+
+      if (page.size < FIELD_SERVICE_PAGE_SIZE) break;
+      cursor = page.docs[page.docs.length - 1] || null;
+      if (!cursor) break;
+    }
+  })().finally(() => {
+    if (fieldServiceLoadPromise === task) fieldServiceLoadPromise = null;
   });
+
+  fieldServiceLoadPromise = task;
+  return task;
+};
+
+export async function syncFieldServiceRecords(callback: (records: FieldServiceRecord[]) => void) {
+  fieldServiceSubscribers.add(callback);
+  if (fieldServiceCache.length > 0) callback([...fieldServiceCache]);
+  loadFieldServiceRecordsInPages().catch((err) => {
+    console.error('Error loading field service records in pages:', err);
+  });
+  return () => {
+    fieldServiceSubscribers.delete(callback);
+  };
 }
 
 export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {
   const colRef = collection(db, 'fieldServiceRecords');
   const docRef = await addDoc(colRef, data);
-  return { id: docRef.id, ...data };
+  const created = { id: docRef.id, ...data };
+  fieldServiceCache = [created, ...fieldServiceCache.filter((record) => record.id !== docRef.id)];
+  notifyFieldServiceSubscribers();
+  return created;
 }
 
 export async function updateFieldServiceRecord(id: string, data: Partial<FieldServiceRecord>): Promise<void> {
   const docRef = doc(db, 'fieldServiceRecords', id);
   await updateDoc(docRef, data);
+  fieldServiceCache = fieldServiceCache.map((record) =>
+    record.id === id ? { ...record, ...data } : record,
+  );
+  notifyFieldServiceSubscribers();
 }
 
 export async function deleteFieldServiceRecord(id: string): Promise<void> {
-  const docRef = doc(db, 'fieldServiceRecords', id);
-  await deleteDoc(docRef);
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/field-service/${encodeURIComponent(id)}/archive`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o registro.');
+  fieldServiceCache = fieldServiceCache.filter((record) => record.id !== id);
+  notifyFieldServiceSubscribers();
 }
 
 export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecord, 'id'>[]): Promise<void> {
   const colRef = collection(db, 'fieldServiceRecords');
+  const createdRecords: FieldServiceRecord[] = [];
   const chunks = [];
-  for (let i = 0; i < records.length; i += 500) {
-    chunks.push(records.slice(i, i + 500));
+  for (let i = 0; i < records.length; i += 400) {
+    chunks.push(records.slice(i, i + 400));
   }
   for (const chunk of chunks) {
     const batch = writeBatch(db);
     for (const record of chunk) {
       const docRef = doc(colRef);
       batch.set(docRef, record);
+      createdRecords.push({ id: docRef.id, ...record });
     }
     await batch.commit();
   }
+  fieldServiceCache = [...createdRecords, ...fieldServiceCache];
+  notifyFieldServiceSubscribers();
 }
 
 export async function clearAllFieldServiceRecords(): Promise<void> {
-  const colRef = collection(db, 'fieldServiceRecords');
-  const snapshot = await getDocs(colRef);
-  const chunks = [];
-  for (let i = 0; i < snapshot.docs.length; i += 500) {
-    chunks.push(snapshot.docs.slice(i, i + 500));
-  }
-  for (const chunk of chunks) {
-    const batch = writeBatch(db);
-    for (const d of chunk) {
-      batch.delete(d.ref);
-    }
-    await batch.commit();
-  }
+  throw new Error('Exclusão em massa de Serviço de Campo foi desativada para proteção dos dados.');
 }
 
-export async function bulkUpsertFieldServiceRecords(updates: {id: string, data: Partial<FieldServiceRecord>}[], adds: Omit<FieldServiceRecord, 'id'>[]): Promise<void> {
+export async function bulkUpsertFieldServiceRecords(
+  updates: { id: string; data: Partial<FieldServiceRecord> }[],
+  adds: Omit<FieldServiceRecord, 'id'>[],
+): Promise<void> {
   const colRef = collection(db, 'fieldServiceRecords');
-  const allOps = [];
-  
-  updates.forEach(u => allOps.push({ type: 'update', ...u }));
-  adds.forEach(a => allOps.push({ type: 'add', data: a }));
+  const allOps: Array<
+    | { type: 'update'; id: string; data: Partial<FieldServiceRecord> }
+    | { type: 'add'; data: Omit<FieldServiceRecord, 'id'> }
+  > = [];
 
-  const chunks = [];
-  for (let i = 0; i < allOps.length; i += 500) {
-    chunks.push(allOps.slice(i, i + 500));
-  }
+  updates.forEach((update) => allOps.push({ type: 'update', ...update }));
+  adds.forEach((data) => allOps.push({ type: 'add', data }));
 
-  for (const chunk of chunks) {
+  const createdRecords: FieldServiceRecord[] = [];
+  for (let i = 0; i < allOps.length; i += 400) {
+    const chunk = allOps.slice(i, i + 400);
     const batch = writeBatch(db);
     for (const op of chunk) {
       if (op.type === 'update') {
-        const docRef = doc(db, 'fieldServiceRecords', op.id);
-        batch.update(docRef, op.data);
+        batch.update(doc(db, 'fieldServiceRecords', op.id), op.data);
       } else {
         const docRef = doc(colRef);
         batch.set(docRef, op.data);
+        createdRecords.push({ id: docRef.id, ...op.data });
       }
     }
     await batch.commit();
   }
+
+  const updatesById = new Map(updates.map((update) => [update.id, update.data]));
+  fieldServiceCache = fieldServiceCache.map((record) => {
+    const patch = updatesById.get(record.id);
+    return patch ? { ...record, ...patch } : record;
+  });
+  fieldServiceCache = [...createdRecords, ...fieldServiceCache];
+  notifyFieldServiceSubscribers();
 }
 
 export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocument[]) => void) {
