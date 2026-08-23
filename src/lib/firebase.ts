@@ -29,9 +29,19 @@ import { trackFirebaseOp } from './firebaseTelemetry';
 
 import { getAuth } from 'firebase/auth';
 
-// Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Initialize Firebase.
+// The internal portal and the client portal deliberately use different named
+// Firebase Auth app instances. Firebase Auth persistence is keyed by app name,
+// so a client login in another tab can no longer replace the authenticated
+// internal employee session (and vice versa) on the same browser/origin.
+const app = getApps().some((existing) => existing.name === '[DEFAULT]')
+  ? getApp()
+  : initializeApp(firebaseConfig);
+const clientAuthApp = getApps().find((existing) => existing.name === 'clientPortalAuth')
+  ?? initializeApp(firebaseConfig, 'clientPortalAuth');
+
 export const auth = getAuth(app);
+export const clientAuth = getAuth(clientAuthApp);
 
 export const db = firebaseConfig.firestoreDatabaseId
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)

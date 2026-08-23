@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import ComaninsLogo from './ComaninsLogo';
 import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge } from 'lucide-react';
 import { Client } from '../types';
-import { auth } from '../lib/firebase';
+import { auth, clientAuth } from '../lib/firebase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail, updatePassword } from 'firebase/auth';
 import { maskCpfCnpj } from '../utils/masks';
-import { authJsonFetch } from '../utils/authApi';
+import { authJsonFetch, clientAuthJsonFetch } from '../utils/authApi';
 
 export interface InternalUser {
   id?: string;
@@ -173,8 +173,8 @@ export default function LoginScreen({
     const email = `${cleanCnpj}@comanins.client`;
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, cleanPass);
-      const syncResponse = await authJsonFetch('/api/auth/sync-client-profile', {
+      const userCredential = await signInWithEmailAndPassword(clientAuth, email, cleanPass);
+      const syncResponse = await clientAuthJsonFetch('/api/auth/sync-client-profile', {
         method: 'POST',
       });
       const syncData = await syncResponse.json();
@@ -187,7 +187,7 @@ export default function LoginScreen({
         } else {
           setErrorMsg('Não foi possível sincronizar o cadastro do cliente. Contate a COMANINS.');
         }
-        await auth.signOut();
+        await clientAuth.signOut();
         return;
       }
 

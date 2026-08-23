@@ -1,7 +1,7 @@
 import React, { Component, useState, useEffect } from 'react';
 import { deleteField } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
-import { authJsonFetch } from './utils/authApi';
+import { authJsonFetch, clientAuthJsonFetch } from './utils/authApi';
 import PublicSite from './components/PublicSite';
 import InternalPortal from './components/InternalPortal';
 import ClientPortal from './components/ClientPortal';
@@ -36,7 +36,8 @@ import {
   updatePortalUserDoc,
   deletePortalUserDoc,
   PortalUser,
-  auth
+  auth,
+  clientAuth
 } from './lib/firebase';
 import type { SavedIntake, FieldServiceRecord } from './lib/firebase';
 
@@ -172,7 +173,7 @@ export default function App() {
             localStorage.removeItem('comanins_cache_rncReports');
           } catch (e) {}
 
-          const response = await authJsonFetch('/api/client-portal/data');
+          const response = await clientAuthJsonFetch('/api/client-portal/data');
           const data = await response.json();
           if (!response.ok || data?.success !== true) {
             throw new Error(data?.error || 'CLIENT_PORTAL_DATA_UNAVAILABLE');
@@ -630,7 +631,7 @@ Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
             customLogo={activeLogo}
             onLogout={async () => {
               try {
-                await signOut(auth);
+                await signOut(clientAuth);
               } finally {
                 setCurrentClient(null);
                 setClientIntakes([]);

@@ -10,4 +10,3 @@ coverage
 *.patch
 *.rej
 db.json
-public/dist.zip

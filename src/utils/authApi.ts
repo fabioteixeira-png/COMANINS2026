@@ -1,10 +1,12 @@
-import { auth } from '../lib/firebase';
+import type { Auth } from 'firebase/auth';
+import { auth, clientAuth } from '../lib/firebase';
 
-export async function authJsonFetch(
+async function authenticatedJsonFetch(
+  authInstance: Auth,
   input: RequestInfo | URL,
   init: RequestInit = {},
 ): Promise<Response> {
-  const currentUser = auth.currentUser;
+  const currentUser = authInstance.currentUser;
   if (!currentUser) {
     throw new Error('Sessão expirada. Faça login novamente.');
   }
@@ -17,6 +19,22 @@ export async function authJsonFetch(
   }
 
   return fetch(input, { ...init, headers });
+}
+
+/** Internal employee/API session. */
+export function authJsonFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  return authenticatedJsonFetch(auth, input, init);
+}
+
+/** Client Portal/API session, isolated from the employee session. */
+export function clientAuthJsonFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  return authenticatedJsonFetch(clientAuth, input, init);
 }
 
 export async function verifyAdminCredentials(
