@@ -13,12 +13,31 @@ service firebase.storage {
       return isSignedIn() && request.auth.token.accountType == 'client';
     }
 
+    function isAdministrator() {
+      return isInternalAccount() && (
+        request.auth.token.permissionLevel == 'Administrador' ||
+        request.auth.token.role == 'Administrador' ||
+        request.auth.token.role == 'Admin' ||
+        request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'master' ||
+        request.auth.token.role == 'Diretor' ||
+        request.auth.token.role == 'Diretoria'
+      );
+    }
+
     function isSignatureOwner(userId) {
       return isInternalAccount()
         && request.auth.token.portalUserId == userId;
     }
 
     function isValidSignatureImage() {
+      return request.resource != null
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/(png|jpeg|webp)');
+    }
+
+    function isValidDeliveryImage() {
       return request.resource != null
         && request.resource.size <= 2 * 1024 * 1024
         && request.resource.contentType != null
@@ -33,6 +52,18 @@ service firebase.storage {
       allow read: if isInternalAccount() || isClientAccount();
       allow create: if isSignatureOwner(userId) && isValidSignatureImage();
       allow update, delete: if false;
+    }
+
+    // Evidências fotográficas da entrega vinculadas à Entrada de Material.
+    // Somente contas internas podem criar/ler. Arquivos são imutáveis após upload;
+    // exclusão física fica restrita ao Administrador.
+    match /intake-deliveries/{intakeId}/{category}/{fileName} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount()
+        && category in ['instruments', 'signed-form']
+        && isValidDeliveryImage();
+      allow update: if false;
+      allow delete: if isAdministrator();
     }
 
     // Nenhum outro caminho do Storage fica exposto por padrão.

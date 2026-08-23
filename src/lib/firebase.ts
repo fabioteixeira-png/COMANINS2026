@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
   getFirestore,
   where,
@@ -68,6 +68,22 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Production data is loaded exclusively from Firestore; no demo seed data is embedded.
 
+export interface IntakeDevolutionRow {
+  instrumentId: string;
+  tag: string;
+  certificateNumber: string;
+  documentType: "Certificado" | "RNC";
+  description: string;
+  brand?: string;
+  model?: string;
+  serialNumber?: string;
+  range?: string;
+  service: string;
+  result: string;
+  calibrationDate?: string;
+  nextCalibrationDate?: string;
+}
+
 export interface SavedIntake {
   id: string;
   numEntrada: string;
@@ -76,7 +92,16 @@ export interface SavedIntake {
   dataPrevistaSaida: string;
   contato: string;
   photos?: string[];
+  // Legacy single photo retained only for viewing old records.
   photoDevolution?: string;
+  devolutionGeneratedAt?: string;
+  devolutionGeneratedBy?: string;
+  devolutionRows?: IntakeDevolutionRow[];
+  deliveryInstrumentPhotos?: string[];
+  deliveryFormPhotos?: string[];
+  deliveryFinalizedAt?: string;
+  deliveryFinalizedBy?: string;
+  deliveryLocked?: boolean;
   rows: {
     quant: number;
     descricao: string;
@@ -1049,12 +1074,74 @@ export async function updateIntakeDevolutionPhoto(id: string, photoBase64: strin
   }
 }
 
+export async function updateIntakeDevolutionDraft(
+  id: string,
+  updates: Pick<SavedIntake, 'devolutionGeneratedAt' | 'devolutionGeneratedBy' | 'devolutionRows'>,
+): Promise<void> {
+  await updateDoc(doc(db, 'savedIntakes', id), updates);
+}
+
+export async function finalizeIntakeDelivery(
+  id: string,
+  updates: Pick<
+    SavedIntake,
+    | 'deliveryInstrumentPhotos'
+    | 'deliveryFormPhotos'
+    | 'deliveryFinalizedAt'
+    | 'deliveryFinalizedBy'
+    | 'deliveryLocked'
+  >,
+): Promise<void> {
+  await updateDoc(doc(db, 'savedIntakes', id), updates);
+}
+
+export async function uploadIntakeDeliveryImage(
+  intakeId: string,
+  category: 'instruments' | 'signed-form',
+  imageDataUrl: string,
+  sequence: number,
+): Promise<string> {
+  const response = await fetch(imageDataUrl);
+  const blob = await response.blob();
+  const contentType = blob.type || 'image/jpeg';
+  const extension = contentType.includes('png')
+    ? 'png'
+    : contentType.includes('webp')
+      ? 'webp'
+      : 'jpg';
+  const safeIntakeId = String(intakeId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filePath = `intake-deliveries/${safeIntakeId}/${category}/${Date.now()}_${sequence}.${extension}`;
+  const storageRef = ref(storage, filePath);
+  await uploadBytes(storageRef, blob, { contentType });
+  return await getDownloadURL(storageRef);
+}
+
 export async function updateIntakePhotosDoc(id: string, photos: string[]): Promise<void> {
   await updateDoc(doc(db, 'savedIntakes', id), { photos });
 }
 
 export async function deleteIntakeDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'savedIntakes', id));
+  const intakeRef = doc(db, 'savedIntakes', id);
+  try {
+    const snapshot = await getDoc(intakeRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data() as SavedIntake;
+      const deliveryUrls = [
+        ...(data.deliveryInstrumentPhotos || []),
+        ...(data.deliveryFormPhotos || []),
+      ];
+      for (const url of deliveryUrls) {
+        try {
+          await deleteObject(ref(storage, url));
+        } catch (error) {
+          console.warn('Não foi possível remover uma evidência do Storage durante a exclusão da entrada:', error);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Não foi possível carregar as evidências da entrada antes da exclusão:', error);
+  }
+  await deleteDoc(intakeRef);
 }
 
 // 6. Portal Users

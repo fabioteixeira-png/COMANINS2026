@@ -189,17 +189,59 @@ service cloud.firestore {
     // /api/client-portal/data, que usa o UID autenticado para localizar o cliente
     // e filtra os registros no servidor. Isso evita que regras virem apenas
     // filtros visuais e impede consulta cruzada entre clientes.
-    match /instruments/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /instruments/{instrumentId} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount();
+      // A transição para Entregue é permitida; depois disso o cadastro se torna
+      // imutável para preservar a rastreabilidade da devolução.
+      allow update: if isInternalAccount() && resource.data.status != 'Entregue';
+      allow delete: if isAdministrator();
     }
-    match /calibrationReports/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /calibrationReports/{reportId} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount();
+      // Certificados associados a instrumento já entregue não podem ser
+      // regravados. Exclusão extraordinária continua restrita ao Administrador.
+      allow update: if isInternalAccount() && (
+        resource.data.get('instrumentId', null) == null ||
+        get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
+      );
+      allow delete: if isAdministrator();
     }
-    match /savedIntakes/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /savedIntakes/{intakeId} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount();
+
+      // A entrada pode ser atualizada enquanto a entrega não foi finalizada.
+      // A mesma gravação que conclui a entrega precisa conter as duas classes
+      // de evidência e ativa o bloqueio imutável do registro.
+      allow update: if isInternalAccount()
+        && resource.data.get('deliveryLocked', false) != true
+        && resource.data.get('deliveryFinalizedAt', null) == null
+        && (
+          request.resource.data.get('deliveryFinalizedAt', null) == null ||
+          (
+            request.resource.data.get('deliveryLocked', false) == true &&
+            request.resource.data.deliveryFinalizedAt is string &&
+            request.resource.data.deliveryInstrumentPhotos is list &&
+            request.resource.data.deliveryInstrumentPhotos.size() > 0 &&
+            request.resource.data.deliveryFormPhotos is list &&
+            request.resource.data.deliveryFormPhotos.size() > 0
+          )
+        );
+
+      // Após a conclusão ninguém altera o documento, inclusive Administrador.
+      // Exclusão integral permanece disponível somente ao Administrador.
+      allow delete: if isAdministrator();
     }
-    match /rncReports/{document=**} {
-      allow read, write: if isInternalAccount();
+    match /rncReports/{rncId} {
+      allow read: if isInternalAccount();
+      allow create: if isInternalAccount();
+      allow update: if isInternalAccount() && (
+        resource.data.get('instrumentId', null) == null ||
+        get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
+      );
+      allow delete: if isAdministrator();
     }
     match /fieldServiceRecords/{document=**} {
       allow read, write: if isInternalAccount();

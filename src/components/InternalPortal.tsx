@@ -20,6 +20,9 @@ import {
   saveIntakeDoc,
   updateIntakePhotosDoc,
   updateIntakeDevolutionPhoto,
+  updateIntakeDevolutionDraft,
+  finalizeIntakeDelivery,
+  uploadIntakeDeliveryImage,
   deleteIntakeDoc,
   clearAllSavedIntakes,
   syncIntakeSequenceConfig,
@@ -998,6 +1001,7 @@ export default function InternalPortal({
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
   const [selectedInstId, setSelectedInstId] = useState<any>("");
   const [selectedIntakeToPrint, setSelectedIntakeToPrint] = useState<any>("");
+  const [selectedDevolutionToPrint, setSelectedDevolutionToPrint] = useState<any>(null);
   const [intakePortalCredential, setIntakePortalCredential] = useState<any>(null);
   const [isLoadingIntakeCredential, setIsLoadingIntakeCredential] = useState(false);
   const [intakeCredentialError, setIntakeCredentialError] = useState("");
@@ -1015,7 +1019,10 @@ export default function InternalPortal({
   const [showPhotosModal, setShowPhotosModal] = useState<boolean>(false);
   const [showDevolutionModal, setShowDevolutionModal] = useState<boolean>(false);
   const [selectedIntakeForDevolution, setSelectedIntakeForDevolution] = useState<any>(null);
+  const [deliveryInstrumentPhotosDraft, setDeliveryInstrumentPhotosDraft] = useState<string[]>([]);
+  const [deliveryFormPhotosDraft, setDeliveryFormPhotosDraft] = useState<string[]>([]);
   const [isUploadingDevolution, setIsUploadingDevolution] = useState(false);
+  const [isFinalizingDelivery, setIsFinalizingDelivery] = useState(false);
   const [selectedIntakeForPhotos, setSelectedIntakeForPhotos] = useState<
     any | null
   >(null);
@@ -1098,6 +1105,105 @@ export default function InternalPortal({
     }
   });
 
+  const buildDevolutionRowsForIntake = (intake: any, justIssuedId?: string) => {
+    const numEntrada = String(intake?.numEntrada || "").trim().toLowerCase();
+    if (!numEntrada) return [];
+
+    return instruments
+      .filter((instrument: any) =>
+        String(instrument.numeroDaEntrada || "").trim().toLowerCase() === numEntrada,
+      )
+      .filter((instrument: any) => {
+        const status = instrument.id === justIssuedId
+          ? "Disponível para Retirada"
+          : instrument.status;
+        return (
+          status === "Disponível para Retirada" ||
+          status === "Entregue" ||
+          status === "Não Conforme"
+        );
+      })
+      .map((instrument: any) => {
+        const isRnc =
+          instrument.status === "Não Conforme" ||
+          instrument.hasRnc ||
+          rncReports.some((r: any) => r.instrumentId === instrument.id);
+        const report = reports.find(
+          (r: any) => r.instrumentId === instrument.id && r.approved === true,
+        );
+        const rnc = rncReports.find((r: any) => r.instrumentId === instrument.id);
+        const range = [
+          instrument.rangeMin,
+          instrument.rangeMax,
+        ].every((value) => value !== undefined && value !== null && value !== "")
+          ? `${instrument.rangeMin} a ${instrument.rangeMax} ${instrument.unit || ""}`.trim()
+          : instrument.escala || "";
+
+        return {
+          instrumentId: instrument.id,
+          tag: instrument.tag || "N/A",
+          certificateNumber: isRnc
+            ? rnc?.rncNumber || instrument.rncNumber || "RNC"
+            : report?.certNumber || instrument.certificateNumber || instrument.coma || "N/A",
+          documentType: isRnc ? "RNC" : "Certificado",
+          description: instrument.description || "Instrumento",
+          brand: instrument.brand || "",
+          model: instrument.model || "",
+          serialNumber: instrument.serialNumber || "",
+          range,
+          service: isRnc ? "Calibração / Avaliação de Não Conformidade" : "Calibração",
+          result: isRnc ? "Não Conforme" : "Aprovado",
+          calibrationDate: report?.date || instrument.lastCalibrationDate || rnc?.date || "",
+          nextCalibrationDate: instrument.nextCalibrationDate || "",
+        };
+      })
+      .sort((a: any, b: any) =>
+        String(a.certificateNumber || "").localeCompare(String(b.certificateNumber || ""), "pt-BR", { numeric: true }),
+      );
+  };
+
+  const ensureIntakeDevolutionDraft = async (instId: string) => {
+    const inst = instruments.find((i: any) => i.id === instId);
+    if (!inst?.numeroDaEntrada) return;
+
+    const intake = savedIntakes.find(
+      (item: any) =>
+        String(item.numEntrada || "").trim().toLowerCase() ===
+        String(inst.numeroDaEntrada || "").trim().toLowerCase(),
+    );
+    if (!intake || intake.deliveryFinalizedAt || intake.deliveryLocked) return;
+
+    const devolutionRows = buildDevolutionRowsForIntake(intake, instId);
+    if (devolutionRows.length === 0) return;
+
+    const devolutionGeneratedAt =
+      intake.devolutionGeneratedAt || new Date().toISOString();
+    const devolutionGeneratedBy =
+      intake.devolutionGeneratedBy ||
+      currentUser?.name ||
+      currentUser?.username ||
+      "Usuário interno";
+
+    await updateIntakeDevolutionDraft(intake.id, {
+      devolutionGeneratedAt,
+      devolutionGeneratedBy,
+      devolutionRows,
+    });
+
+    setSavedIntakes((prev) =>
+      prev.map((item) =>
+        item.id === intake.id
+          ? {
+              ...item,
+              devolutionGeneratedAt,
+              devolutionGeneratedBy,
+              devolutionRows,
+            }
+          : item,
+      ),
+    );
+  };
+
   const markCertificateIssued = async (instId: string) => {
     if (!instId) return;
     setIssuedCertificates((prev) => {
@@ -1115,6 +1221,8 @@ export default function InternalPortal({
         await onUpdateInstrumentStatus(instId, "Disponível para Retirada");
       }
     }
+
+    await ensureIntakeDevolutionDraft(instId);
   };
 
   const [editingInstrumentData, setEditingInstrumentData] = useState<
@@ -3738,10 +3846,18 @@ Status atual: ${e.status}.`,
   };
 
   const handleDeleteIntake = (id: string, num?: string) => {
+    if (!isUserAdmin) {
+      alert("Somente usuários com perfil Administrador podem excluir uma entrada.");
+      return;
+    }
     requestAdminDelete("intake", id, `Guia de Entrada ${num || ""}`);
   };
 
   const handleEditIntakeModal = (intake: any) => {
+    if (intake?.deliveryFinalizedAt || intake?.deliveryLocked) {
+      alert("Esta entrada foi finalizada na entrega e está bloqueada para alterações. Utilize os botões de visualização dos documentos.");
+      return;
+    }
     setEditingIntakeId(intake.id);
     setIntakeNum(intake.numEntrada);
     setIntakeClientId(intake.clientId);
@@ -3752,57 +3868,188 @@ Status atual: ${e.status}.`,
     setShowIntakeModal(true);
   };
 
-  const handleOpenDevolutionModal = (intake: any) => {
-    setSelectedIntakeForDevolution(intake);
+  const handleOpenDevolutionModal = async (intake: any) => {
+    let resolvedIntake = intake;
+
+    if (!intake.deliveryFinalizedAt && !intake.deliveryLocked) {
+      const devolutionRows = buildDevolutionRowsForIntake(intake);
+      if (devolutionRows.length > 0) {
+        const devolutionGeneratedAt = intake.devolutionGeneratedAt || new Date().toISOString();
+        const devolutionGeneratedBy =
+          intake.devolutionGeneratedBy ||
+          currentUser?.name ||
+          currentUser?.username ||
+          "Usuário interno";
+        await updateIntakeDevolutionDraft(intake.id, {
+          devolutionGeneratedAt,
+          devolutionGeneratedBy,
+          devolutionRows,
+        });
+        resolvedIntake = {
+          ...intake,
+          devolutionGeneratedAt,
+          devolutionGeneratedBy,
+          devolutionRows,
+        };
+        setSavedIntakes((prev) =>
+          prev.map((item) => (item.id === intake.id ? resolvedIntake : item)),
+        );
+      }
+    }
+
+    setSelectedIntakeForDevolution(resolvedIntake);
+    setDeliveryInstrumentPhotosDraft([]);
+    setDeliveryFormPhotosDraft([]);
     setShowDevolutionModal(true);
   };
 
-  const handleUploadDevolutionPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0 || !selectedIntakeForDevolution) return;
+  const handleAddDeliveryPhotos = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    kind: "instruments" | "form",
+  ) => {
+    if (!e.target.files || e.target.files.length === 0) return;
     try {
       setIsUploadingDevolution(true);
-      const file = e.target.files[0];
-      const compressed = await compressImage(file, 800, 800, 0.7);
-      
-      await updateIntakeDevolutionPhoto(selectedIntakeForDevolution.id, compressed);
-      
-      // Encontrar instrumentos dessa entrada e mudar para Entregue
-      const numEntrada = (selectedIntakeForDevolution.numEntrada || "").trim().toLowerCase();
-      const matchingInstruments = instruments.filter(
-          (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada
-      );
-      
-      if (onUpdateInstrumentStatus) {
-        for (const inst of matchingInstruments) {
-          if (inst.status !== "Entregue") {
-            await onUpdateInstrumentStatus(inst.id, "Entregue");
-          }
-        }
+      const compressedPhotos = await compressMultipleImages(e.target.files);
+      if (compressedPhotos.length === 0) {
+        alert("Nenhuma foto válida foi processada.");
+        return;
       }
-
-      setSelectedIntakeForDevolution({
-        ...selectedIntakeForDevolution,
-        photoDevolution: compressed,
-      });
-
-      setSavedIntakes((prev) =>
-        prev.map((item) =>
-          item.id === selectedIntakeForDevolution.id
-            ? { ...item, photoDevolution: compressed }
-            : item,
-        ),
-      );
+      if (kind === "instruments") {
+        setDeliveryInstrumentPhotosDraft((prev) => [...prev, ...compressedPhotos]);
+      } else {
+        setDeliveryFormPhotosDraft((prev) => [...prev, ...compressedPhotos]);
+      }
     } catch (err) {
-      console.error("Error uploading devolution photo:", err);
+      console.error("Erro ao preparar fotos da entrega:", err);
+      alert("Não foi possível processar as fotos selecionadas.");
     } finally {
       setIsUploadingDevolution(false);
       e.target.value = "";
     }
   };
 
+  const handleRemoveDeliveryDraftPhoto = (
+    kind: "instruments" | "form",
+    index: number,
+  ) => {
+    if (kind === "instruments") {
+      setDeliveryInstrumentPhotosDraft((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      setDeliveryFormPhotosDraft((prev) => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const handleFinalizeDelivery = async () => {
+    const intake = selectedIntakeForDevolution;
+    if (!intake || intake.deliveryFinalizedAt || intake.deliveryLocked) return;
+
+    if (!intake.devolutionGeneratedAt || !(intake.devolutionRows || []).length) {
+      alert("O Formulário de Devolução ainda não foi gerado. Abra o certificado dos instrumentos antes de concluir a entrega.");
+      return;
+    }
+
+    const statusInfo = getIntakeStatus(intake, instruments);
+    if (statusInfo.label !== "Disponível para Retirada" && statusInfo.label !== "Entregue") {
+      alert("A entrega só pode ser concluída quando todos os itens da entrada estiverem disponíveis para retirada.");
+      return;
+    }
+
+    if (deliveryInstrumentPhotosDraft.length === 0) {
+      alert("Anexe pelo menos uma foto dos instrumentos/material entregue.");
+      return;
+    }
+    if (deliveryFormPhotosDraft.length === 0) {
+      alert("Anexe pelo menos uma foto do Formulário de Devolução assinado.");
+      return;
+    }
+
+    try {
+      setIsFinalizingDelivery(true);
+
+      const instrumentPhotoUrls: string[] = [];
+      for (let i = 0; i < deliveryInstrumentPhotosDraft.length; i++) {
+        instrumentPhotoUrls.push(
+          await uploadIntakeDeliveryImage(
+            intake.id,
+            "instruments",
+            deliveryInstrumentPhotosDraft[i],
+            i + 1,
+          ),
+        );
+      }
+
+      const formPhotoUrls: string[] = [];
+      for (let i = 0; i < deliveryFormPhotosDraft.length; i++) {
+        formPhotoUrls.push(
+          await uploadIntakeDeliveryImage(
+            intake.id,
+            "signed-form",
+            deliveryFormPhotosDraft[i],
+            i + 1,
+          ),
+        );
+      }
+
+      const deliveryFinalizedAt = new Date().toISOString();
+      const deliveryFinalizedBy =
+        currentUser?.name || currentUser?.username || "Usuário interno";
+
+      const numEntrada = String(intake.numEntrada || "").trim().toLowerCase();
+      const matchingInstruments = instruments.filter(
+        (instrument: any) =>
+          String(instrument.numeroDaEntrada || "").trim().toLowerCase() === numEntrada,
+      );
+
+      // Primeiro conclui o status dos instrumentos. Se houver falha antes do
+      // bloqueio da entrada, o processo ainda pode ser retomado pelo usuário.
+      if (onUpdateInstrumentStatus) {
+        for (const instrument of matchingInstruments) {
+          if (instrument.status !== "Entregue") {
+            await onUpdateInstrumentStatus(instrument.id, "Entregue");
+          }
+        }
+      }
+
+      await finalizeIntakeDelivery(intake.id, {
+        deliveryInstrumentPhotos: instrumentPhotoUrls,
+        deliveryFormPhotos: formPhotoUrls,
+        deliveryFinalizedAt,
+        deliveryFinalizedBy,
+        deliveryLocked: true,
+      });
+
+      const finalizedIntake = {
+        ...intake,
+        deliveryInstrumentPhotos: instrumentPhotoUrls,
+        deliveryFormPhotos: formPhotoUrls,
+        deliveryFinalizedAt,
+        deliveryFinalizedBy,
+        deliveryLocked: true,
+      };
+
+      setSelectedIntakeForDevolution(finalizedIntake);
+      setSavedIntakes((prev) =>
+        prev.map((item) => (item.id === intake.id ? finalizedIntake : item)),
+      );
+      setDeliveryInstrumentPhotosDraft([]);
+      setDeliveryFormPhotosDraft([]);
+      alert("Entrega concluída e bloqueada com sucesso. A entrada agora está disponível apenas para visualização.");
+    } catch (err: any) {
+      console.error("Erro ao concluir entrega:", err);
+      alert("Não foi possível concluir a entrega: " + (err?.message || "erro inesperado"));
+    } finally {
+      setIsFinalizingDelivery(false);
+    }
+  };
+
   const handleDeleteDevolutionPhoto = () => {
-    if (selectedIntakeForDevolution) {
-      requestAdminDelete("intake_devolution", selectedIntakeForDevolution.id, `Foto Devolução (Entrada ${selectedIntakeForDevolution.numEntrada})`);
+    if (selectedIntakeForDevolution && isUserAdmin && !selectedIntakeForDevolution.deliveryFinalizedAt) {
+      requestAdminDelete(
+        "intake_devolution",
+        selectedIntakeForDevolution.id,
+        `Foto Devolução (Entrada ${selectedIntakeForDevolution.numEntrada})`,
+      );
     }
   };
 
@@ -3818,6 +4065,11 @@ Status atual: ${e.status}.`,
       !selectedIntakeForPhotos
     )
       return;
+    if (selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) {
+      alert("Esta entrada já foi entregue e está bloqueada para alterações.");
+      e.target.value = "";
+      return;
+    }
     try {
       setIsUploadingPhotos(true);
       const compressedPhotos = await compressMultipleImages(e.target.files);
@@ -3854,6 +4106,10 @@ Status atual: ${e.status}.`,
 
   const handleDeletePhoto = async (photoIndex: number) => {
     if (!selectedIntakeForPhotos) return;
+    if (selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) {
+      alert("Esta entrada já foi entregue e está bloqueada para alterações.");
+      return;
+    }
     if (!confirm("Deseja realmente remover esta foto?")) return;
     try {
       const existingPhotos = selectedIntakeForPhotos.photos || [];
@@ -3886,13 +4142,20 @@ Status atual: ${e.status}.`,
     if (!e.target.files || e.target.files.length === 0 || !photoModalInstrument)
       return;
 
+    const currentStatus = photoModalInstrument.status as string;
+    if (currentStatus === "Entregue") {
+      alert("Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
+      e.target.value = "";
+      return;
+    }
+
     // Constraint: completed calibration registration photo cannot be edited except by admin
     const isConcluded =
-      photoModalInstrument.status === "Calibrado" ||
-      photoModalInstrument.status === "Aguardando Emissão de Certificado" ||
-      photoModalInstrument.status === "Disponível para Retirada" ||
-      photoModalInstrument.status === "Entregue" ||
-      photoModalInstrument.status === "Não Conforme";
+      currentStatus === "Calibrado" ||
+      currentStatus === "Aguardando Emissão de Certificado" ||
+      currentStatus === "Disponível para Retirada" ||
+      currentStatus === "Entregue" ||
+      currentStatus === "Não Conforme";
     const isRegPhoto = photoModalType === "registration";
     if (isConcluded && isRegPhoto && !isUserAdmin) {
       alert(
@@ -3932,8 +4195,8 @@ Status atual: ${e.status}.`,
       let finalStatus = photoModalInstrument.status;
       if (photoModalType === "calibrated") {
         if (
-          photoModalInstrument.status !== "Entregue" &&
-          photoModalInstrument.status !== "Não Conforme"
+          currentStatus !== "Entregue" &&
+          currentStatus !== "Não Conforme"
         ) {
           updatePayload.status = "Aguardando Emissão de Certificado";
           finalStatus = "Aguardando Emissão de Certificado";
@@ -3965,13 +4228,19 @@ Status atual: ${e.status}.`,
   const handleDeleteInstrumentPhoto = async () => {
     if (!photoModalInstrument) return;
 
+    const currentStatus = photoModalInstrument.status as string;
+    if (currentStatus === "Entregue") {
+      alert("Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
+      return;
+    }
+
     // Constraint: completed calibration registration photo cannot be deleted except by admin
     const isConcluded =
-      photoModalInstrument.status === "Calibrado" ||
-      photoModalInstrument.status === "Aguardando Emissão de Certificado" ||
-      photoModalInstrument.status === "Disponível para Retirada" ||
-      photoModalInstrument.status === "Entregue" ||
-      photoModalInstrument.status === "Não Conforme";
+      currentStatus === "Calibrado" ||
+      currentStatus === "Aguardando Emissão de Certificado" ||
+      currentStatus === "Disponível para Retirada" ||
+      currentStatus === "Entregue" ||
+      currentStatus === "Não Conforme";
     const isRegPhoto = photoModalType === "registration";
     if (isConcluded && isRegPhoto && !isUserAdmin) {
       alert(
@@ -5105,10 +5374,40 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
     }
   };
 
+  const handleOpenDevolutionPrint = async (intake: any) => {
+    if (!intake?.devolutionGeneratedAt || !(intake?.devolutionRows || []).length) {
+      alert("O Formulário de Devolução ainda não foi gerado para esta entrada.");
+      return;
+    }
+    setSelectedDevolutionToPrint(intake);
+    setIntakePortalCredential(null);
+    setIntakeCredentialError("");
+    setIsLoadingIntakeCredential(true);
+    try {
+      const credential = await ensureClientPortalCredential(intake.clientId);
+      setIntakePortalCredential(credential);
+    } catch (error: any) {
+      console.error("Erro ao carregar credencial do Portal do Cliente:", error);
+      setIntakeCredentialError(
+        error?.message || "Não foi possível carregar a credencial do Portal do Cliente.",
+      );
+    } finally {
+      setIsLoadingIntakeCredential(false);
+    }
+  };
+
   const handleSaveIntakeFromModal = async (shouldPrint: boolean) => {
     if (!intakeNum || !intakeClientId || !intakeDate) {
       alert("Preencha o Nº de Entrada, Cliente e Data!");
       return;
+    }
+
+    if (editingIntakeId) {
+      const existingIntake = savedIntakes.find((item) => item.id === editingIntakeId);
+      if (existingIntake?.deliveryFinalizedAt || existingIntake?.deliveryLocked) {
+        alert("Esta entrada foi finalizada na entrega e não pode mais ser alterada.");
+        return;
+      }
     }
 
     // Check if new or edit
@@ -7636,7 +7935,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 !hasCalPhoto ||
                                 !hasRegPhoto
                               }
-                              onClick={() => {
+                              onClick={async () => {
                                 if (
                                   !isCalibrated ||
                                   isRncIssued ||
@@ -7645,7 +7944,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 )
                                   return;
                                 setSelectedCertificateId(inst.id);
-                                markCertificateIssued(inst.id);
+                                await markCertificateIssued(inst.id);
                                 setActiveTab("certificados");
                               }}
                               className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors ${
@@ -7937,6 +8236,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           >
                             {statusInfo.label} ({statusInfo.registeredCount}/
                             {statusInfo.totalAllowed})
+                            {intake.deliveryFinalizedAt || intake.deliveryLocked ? " • Bloqueada" : ""}
                           </span>
                         </div>
 
@@ -7971,14 +8271,16 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       </div>
 
                       {/* Action Buttons */}
-                      <div className="flex items-center space-x-2 shrink-0 pt-2 md:pt-0">
-                        <button
-                          onClick={() => handleEditIntakeModal(intake)}
-                          className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer border border-slate-200"
-                        >
-                          <Eye className="h-3.5 w-3.5 text-slate-600" />
-                          <span>Ver / Editar</span>
-                        </button>
+                      <div className="flex items-center flex-wrap justify-end gap-2 shrink-0 pt-2 md:pt-0">
+                        {!intake.deliveryFinalizedAt && !intake.deliveryLocked && (
+                          <button
+                            onClick={() => handleEditIntakeModal(intake)}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer border border-slate-200"
+                          >
+                            <Edit className="h-3.5 w-3.5 text-slate-600" />
+                            <span>Ver / Editar</span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => handleOpenPhotosModal(intake)}
@@ -7987,11 +8289,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               ? "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 shadow-xs font-bold"
                               : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
                           }`}
-                          title="Fotos referentes à entrada de material"
+                          title={intake.deliveryFinalizedAt ? "Visualizar fotos da entrada" : "Fotos referentes à entrada de material"}
                         >
                           <Camera className="h-3.5 w-3.5 text-blue-600" />
                           <span>
-                            Fotos{" "}
+                            Fotos Entrada{" "}
                             {intake.photos && intake.photos.length > 0
                               ? `(${intake.photos.length})`
                               : ""}
@@ -8001,35 +8303,58 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <button
                           onClick={() => handleOpenIntakePrint(intake)}
                           className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
-                          title="Imprimir Guia de Entrada A4"
+                          title="Visualizar / Imprimir Guia de Entrada A4"
                         >
-                          <Printer className="h-3.5 w-3.5" />
-                          <span>Imprimir Entrada</span>
+                          <FileText className="h-3.5 w-3.5" />
+                          <span>Entrada</span>
                         </button>
 
-                        {(statusInfo.label === "Disponível para Retirada" || statusInfo.label === "Entregue") && (
+                        {intake.devolutionGeneratedAt && (intake.devolutionRows || []).length > 0 && (
                           <button
-                            onClick={() => handleOpenDevolutionModal(intake)}
-                            className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
-                            title={statusInfo.label === "Entregue" ? "Ver Protocolo de Devolução" : "Entregar / Anexar Protocolo"}
+                            onClick={() => handleOpenDevolutionPrint(intake)}
+                            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                            title="Visualizar / Imprimir Formulário de Devolução"
                           >
-                            <CheckCircle className="h-3.5 w-3.5" />
-                            <span>{statusInfo.label === "Entregue" ? "Ver Devolução" : "Entregar"}</span>
+                            <Printer className="h-3.5 w-3.5" />
+                            <span>Devolução</span>
                           </button>
                         )}
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteIntake(intake.id, intake.numEntrada);
-                          }}
-                          className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Excluir entrada"
-                          
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {statusInfo.label === "Disponível para Retirada" && !intake.deliveryFinalizedAt && !intake.deliveryLocked && (
+                          <button
+                            onClick={() => handleOpenDevolutionModal(intake)}
+                            className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                            title="Concluir entrega e anexar evidências"
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            <span>Entregar</span>
+                          </button>
+                        )}
+
+                        {(intake.deliveryFinalizedAt || intake.deliveryLocked || statusInfo.label === "Entregue") && (
+                          <button
+                            onClick={() => handleOpenDevolutionModal(intake)}
+                            className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                            title="Visualizar fotos e comprovantes da entrega"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>Ver Entrega</span>
+                          </button>
+                        )}
+
+                        {isUserAdmin && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteIntake(intake.id, intake.numEntrada);
+                            }}
+                            className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Excluir entrada (somente Administrador)"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -8430,7 +8755,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
                   {/* Modal Footer */}
                   <div className="bg-slate-100 p-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-                    {editingIntakeId ? (
+                    {editingIntakeId && isUserAdmin ? (
                       <div className="flex items-center space-x-2 w-full sm:w-auto">
                         <button
                           type="button"
@@ -8905,6 +9230,224 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* MODAL / VISUALIZAÇÃO: Formulário de Devolução A4 */}
+        {selectedDevolutionToPrint && (
+          <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-50 overflow-y-auto flex flex-col items-center p-0 sm:p-6 print:static print:block print:overflow-visible print:p-0 print:bg-white print:text-black print:backdrop-blur-none animate-fade-in">
+            <div className="w-full max-w-[210mm] bg-slate-800 text-white px-4 py-3 rounded-t-2xl shadow-xl flex items-center justify-between border-b border-slate-700 print:hidden sticky top-0 z-30">
+              <div className="flex items-center space-x-3">
+                <div className="bg-indigo-600 text-white font-mono text-[10px] font-black px-2 py-0.5 rounded tracking-widest uppercase">
+                  DEVOLUÇÃO A4
+                </div>
+                <div className="hidden sm:block">
+                  <span className="text-xs font-bold text-slate-100 block">
+                    Devolucao_Entrada_{selectedDevolutionToPrint.numEntrada}.pdf
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    Documento vinculado à Guia de Entrada
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => window.print()}
+                  disabled={isLoadingIntakeCredential || !intakePortalCredential}
+                  className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-slate-600 disabled:text-slate-300 disabled:cursor-not-allowed rounded-xl flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>Imprimir / Salvar PDF</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedDevolutionToPrint(null);
+                    setIntakePortalCredential(null);
+                    setIntakeCredentialError("");
+                  }}
+                  className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl cursor-pointer"
+                  title="Fechar"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="printable-area bg-white w-full max-w-[210mm] min-h-[297mm] p-6 sm:p-10 shadow-2xl rounded-b-2xl border-x border-b border-slate-200 text-slate-900 font-sans print:shadow-none print:border-none print:w-full print:max-w-none print:p-0 print:m-0 print:rounded-none print:min-h-0">
+              <div className="space-y-5">
+                <div className="border-b-2 border-royal-blue pb-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    {customLogo ? (
+                      <img src={customLogo} alt="COMANINS" className="h-14 max-w-[180px] object-contain" />
+                    ) : (
+                      <div className="font-black text-xl text-royal-blue">COMANINS</div>
+                    )}
+                    <div>
+                      <h2 className="text-base font-black uppercase tracking-wide text-slate-950">
+                        Formulário de Devolução de Material
+                      </h2>
+                      <p className="text-[10px] text-slate-600">
+                        Conclusão de Serviços / Liberação para Retirada
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[9px] uppercase text-slate-500 font-bold">Entrada vinculada</div>
+                    <div className="font-mono font-black text-lg text-royal-blue">{selectedDevolutionToPrint.numEntrada}</div>
+                  </div>
+                </div>
+
+                {(() => {
+                  const client = clients.find((c) => c.id === selectedDevolutionToPrint.clientId);
+                  return (
+                    <div className="grid grid-cols-2 gap-x-5 gap-y-2 bg-slate-50 border border-slate-300 rounded-xl p-4 text-xs">
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Cliente / Razão Social</span>
+                        <span className="font-bold text-slate-950">{client?.name || "Cliente não identificado"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">CNPJ / CPF</span>
+                        <span className="font-mono font-bold">{client?.cnpj || "N/A"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Data de Entrada</span>
+                        <span className="font-bold">{selectedDevolutionToPrint.dataEntrada || "N/A"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Formulário gerado em</span>
+                        <span className="font-bold">
+                          {selectedDevolutionToPrint.devolutionGeneratedAt
+                            ? new Date(selectedDevolutionToPrint.devolutionGeneratedAt).toLocaleString("pt-BR")
+                            : "N/A"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Contato</span>
+                        <span className="font-bold">{selectedDevolutionToPrint.contato || "Não informado"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Situação</span>
+                        <span className="font-bold text-emerald-700">
+                          {selectedDevolutionToPrint.deliveryFinalizedAt ? "Entregue" : "Disponível para Retirada"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="space-y-2">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1">
+                    Relação dos Serviços Concluídos e Materiais para Devolução
+                  </h3>
+                  <table className="w-full text-left text-[9px] border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 uppercase font-black text-slate-700">
+                        <th className="p-1.5 border border-slate-300 text-center">Item</th>
+                        <th className="p-1.5 border border-slate-300">TAG</th>
+                        <th className="p-1.5 border border-slate-300">Documento</th>
+                        <th className="p-1.5 border border-slate-300">Instrumento</th>
+                        <th className="p-1.5 border border-slate-300">Série / Faixa</th>
+                        <th className="p-1.5 border border-slate-300">Serviço / Resultado</th>
+                        <th className="p-1.5 border border-slate-300">Calibração / Validade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedDevolutionToPrint.devolutionRows || []).map((row: any, index: number) => (
+                        <tr key={`${row.instrumentId}-${index}`}>
+                          <td className="p-1.5 border border-slate-300 text-center font-bold">{index + 1}</td>
+                          <td className="p-1.5 border border-slate-300 font-mono font-bold">{row.tag || "N/A"}</td>
+                          <td className="p-1.5 border border-slate-300">
+                            <span className="font-bold">{row.documentType}: </span>
+                            <span className="font-mono">{row.certificateNumber || "N/A"}</span>
+                          </td>
+                          <td className="p-1.5 border border-slate-300">
+                            <div className="font-bold">{row.description}</div>
+                            <div className="text-[8px] text-slate-500">{[row.brand, row.model].filter(Boolean).join(" ")}</div>
+                          </td>
+                          <td className="p-1.5 border border-slate-300">
+                            <div>{row.serialNumber || "S/N"}</div>
+                            <div className="text-[8px] text-slate-500">{row.range || "-"}</div>
+                          </td>
+                          <td className="p-1.5 border border-slate-300">
+                            <div>{row.service}</div>
+                            <div className={`font-black ${row.result === "Aprovado" ? "text-emerald-700" : "text-rose-700"}`}>{row.result}</div>
+                          </td>
+                          <td className="p-1.5 border border-slate-300 font-mono">
+                            <div>{row.calibrationDate || "-"}</div>
+                            <div className="text-[8px] text-slate-500">{row.nextCalibrationDate ? `Val.: ${row.nextCalibrationDate}` : ""}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="border-2 border-royal-blue/40 rounded-xl p-3 bg-blue-50/60 print:bg-white">
+                  <div className="flex items-center gap-4">
+                    <div className="shrink-0 bg-white border border-slate-300 rounded-lg p-1.5">
+                      <QRCodeSVG
+                        value={intakePortalCredential?.portalUrl || "https://www.comanins.com.br"}
+                        size={72}
+                        level="M"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-black text-[11px] uppercase tracking-wide text-royal-blue">
+                        Acesso aos Certificados — Portal do Cliente COMANINS
+                      </h4>
+                      <p className="text-[9px] text-slate-600 mb-1.5">
+                        Acesse www.comanins.com.br ou utilize o QR Code para visualizar e imprimir os certificados disponíveis.
+                      </p>
+                      {isLoadingIntakeCredential ? (
+                        <p className="text-[10px] font-bold text-slate-600">Carregando credencial...</p>
+                      ) : intakeCredentialError ? (
+                        <p className="text-[10px] font-bold text-rose-700">{intakeCredentialError}</p>
+                      ) : intakePortalCredential ? (
+                        <div className="grid grid-cols-2 gap-3 text-[10px]">
+                          <div>
+                            <span className="font-bold">Login (CNPJ): </span>
+                            <span className="font-mono font-black">{intakePortalCredential.cnpj}</span>
+                          </div>
+                          <div>
+                            <span className="font-bold">Senha: </span>
+                            <span className="font-mono font-black tracking-wider">{intakePortalCredential.password}</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[9px] text-slate-600">
+                  <span className="font-black uppercase block text-slate-800 mb-1">Termo de Devolução:</span>
+                  <p>
+                    Declaramos que os instrumentos e materiais relacionados neste documento tiveram seus serviços concluídos conforme registros acima e foram disponibilizados para devolução. O recebedor declara ter conferido os materiais no ato da retirada/entrega. Os certificados oficiais devem ser acessados pelo Portal do Cliente utilizando as credenciais constantes neste formulário.
+                  </p>
+                </div>
+
+                <div className="pt-10 grid grid-cols-2 gap-12 text-center text-xs">
+                  <div>
+                    <div className="border-b border-slate-500 mb-1"></div>
+                    <p className="font-bold">COMANINS</p>
+                    <p className="text-[9px] text-slate-500">Responsável pela Devolução</p>
+                  </div>
+                  <div>
+                    <div className="border-b border-slate-500 mb-1"></div>
+                    <p className="font-bold">CLIENTE / TRANSPORTADOR</p>
+                    <p className="text-[9px] text-slate-500">Nome Legível, Documento e Assinatura</p>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-200 flex justify-between text-[8px] text-slate-500 font-mono">
+                  <span>COMANINS — Formulário de Devolução vinculado à Entrada {selectedDevolutionToPrint.numEntrada}</span>
+                  <span>
+                    {selectedDevolutionToPrint.deliveryFinalizedAt
+                      ? `Entrega finalizada: ${new Date(selectedDevolutionToPrint.deliveryFinalizedAt).toLocaleString("pt-BR")}`
+                      : "Documento de liberação para retirada"}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -17995,10 +18538,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       )}
 
       
-      {/* MODAL: FOTO DE DEVOLUÇÃO (ENTREGAR) */}
+      {/* MODAL: ENTREGA / EVIDÊNCIAS DE DEVOLUÇÃO */}
       {showDevolutionModal && selectedIntakeForDevolution && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 space-y-0 text-slate-900">
+          <div className="bg-white w-full max-w-4xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
             <div className="bg-slate-900 text-white p-5 sm:p-6 flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 bg-emerald-600/20 rounded-xl border border-emerald-500/30 text-emerald-400">
@@ -18006,12 +18549,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-white">
-                    Devolução da Entrada #{selectedIntakeForDevolution.numEntrada}
+                    {selectedIntakeForDevolution.deliveryFinalizedAt
+                      ? "Entrega Finalizada"
+                      : "Concluir Entrega"}{" "}
+                    — Entrada #{selectedIntakeForDevolution.numEntrada}
                   </h3>
                   <p className="text-xs text-slate-400">
                     {clients.find(
                       (c) => c.id === selectedIntakeForDevolution.clientId,
-                    )?.name || "Cliente"}{" "}
+                    )?.name || "Cliente"}
                   </p>
                 </div>
               </div>
@@ -18020,6 +18566,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 onClick={() => {
                   setShowDevolutionModal(false);
                   setSelectedIntakeForDevolution(null);
+                  setDeliveryInstrumentPhotosDraft([]);
+                  setDeliveryFormPhotosDraft([]);
                 }}
                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
               >
@@ -18028,77 +18576,251 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             </div>
 
             <div className="p-5 sm:p-6 space-y-6">
-              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex gap-3 text-sm text-blue-800 leading-relaxed">
-                <ShieldCheck className="h-5 w-5 text-blue-600 flex-shrink-0" />
-                <div>
-                  <p>
-                    Anexe a foto do documento ou protocolo de devolução assinado pelo cliente.
-                    <strong> Isso marcará todos os instrumentos desta guia como Entregue.</strong>
-                  </p>
-                </div>
-              </div>
+              {selectedIntakeForDevolution.deliveryFinalizedAt || selectedIntakeForDevolution.deliveryLocked ? (
+                <>
+                  <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex gap-3 text-sm text-emerald-900 leading-relaxed">
+                    <ShieldCheck className="h-5 w-5 text-emerald-700 flex-shrink-0" />
+                    <div>
+                      <p className="font-bold">Entrega concluída e registro bloqueado.</p>
+                      <p className="text-xs mt-1">
+                        Finalizada em {selectedIntakeForDevolution.deliveryFinalizedAt
+                          ? new Date(selectedIntakeForDevolution.deliveryFinalizedAt).toLocaleString("pt-BR")
+                          : "data não informada"}
+                        {selectedIntakeForDevolution.deliveryFinalizedBy
+                          ? ` por ${selectedIntakeForDevolution.deliveryFinalizedBy}`
+                          : ""}.
+                        Nenhum dado, foto ou formulário desta entrada pode mais ser alterado.
+                      </p>
+                    </div>
+                  </div>
 
-              {!selectedIntakeForDevolution.photoDevolution ? (
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors">
-                  <Camera className="h-10 w-10 text-slate-400 mb-3" />
-                  <p className="text-sm font-semibold text-slate-700 mb-1">
-                    Anexar Foto de Devolução
-                  </p>
-                  <p className="text-xs text-slate-500 mb-4 max-w-xs">
-                    Tire uma foto ou selecione do seu dispositivo.
-                  </p>
-                  <label className="px-4 py-2 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-lg cursor-pointer shadow-sm transition-colors text-sm flex items-center space-x-2">
-                    {isUploadingDevolution ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Camera className="h-4 w-4" />
-                    )}
-                    <span>
-                      {isUploadingDevolution
-                        ? "Processando..."
-                        : "Selecionar Foto (Celular ou Computador)"}
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*,.heic,.heif"
-                      onChange={handleUploadDevolutionPhoto}
-                      className="hidden"
-                      disabled={isUploadingDevolution}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <div className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center h-64">
-                  <img
-                    src={selectedIntakeForDevolution.photoDevolution}
-                    alt="Devolução"
-                    className="max-h-full max-w-full object-contain"
-                  />
-                  <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
-                    <a
-                      href={selectedIntakeForDevolution.photoDevolution}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 bg-white text-slate-900 rounded-lg font-bold text-xs flex items-center space-x-1 hover:bg-slate-100 shadow"
-                    >
-                      <Eye className="h-4 w-4" />
-                      <span>Ampliar</span>
-                    </a>
+                  <div className="flex flex-wrap gap-2">
                     <button
-                      onClick={handleDeleteDevolutionPhoto}
-                      className="p-2 bg-rose-500 text-white rounded-lg font-bold text-xs flex items-center space-x-1 hover:bg-rose-600 shadow"
+                      type="button"
+                      onClick={() => handleOpenIntakePrint(selectedIntakeForDevolution)}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
                     >
-                      <Trash2 className="h-4 w-4" />
-                      <span>Excluir</span>
+                      <FileText className="h-4 w-4" />
+                      Formulário de Entrada
+                    </button>
+                    {selectedIntakeForDevolution.devolutionGeneratedAt && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDevolutionPrint(selectedIntakeForDevolution)}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
+                      >
+                        <Printer className="h-4 w-4" />
+                        Formulário de Devolução
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPhotosModal(selectedIntakeForDevolution)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
+                    >
+                      <Camera className="h-4 w-4" />
+                      Fotos da Entrada
                     </button>
                   </div>
-                </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                        Fotos dos Instrumentos / Material Entregue
+                      </h4>
+                      {(selectedIntakeForDevolution.deliveryInstrumentPhotos || []).length > 0 ? (
+                        <div className="grid grid-cols-2 gap-3">
+                          {(selectedIntakeForDevolution.deliveryInstrumentPhotos || []).map((photo: string, index: number) => (
+                            <button
+                              type="button"
+                              key={`delivered-inst-${index}`}
+                              onClick={() => setFullscreenPhoto(photo)}
+                              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square cursor-pointer"
+                              title="Ampliar foto"
+                            >
+                              <img src={photo} alt={`Instrumentos entregues ${index + 1}`} className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 bg-slate-50 border rounded-xl p-4">Nenhuma foto de instrumentos registrada.</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                        Formulário de Devolução Assinado
+                      </h4>
+                      {(selectedIntakeForDevolution.deliveryFormPhotos || []).length > 0 ? (
+                        <div className="grid grid-cols-2 gap-3">
+                          {(selectedIntakeForDevolution.deliveryFormPhotos || []).map((photo: string, index: number) => (
+                            <button
+                              type="button"
+                              key={`delivered-form-${index}`}
+                              onClick={() => setFullscreenPhoto(photo)}
+                              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square cursor-pointer"
+                              title="Ampliar comprovante"
+                            >
+                              <img src={photo} alt={`Formulário assinado ${index + 1}`} className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : selectedIntakeForDevolution.photoDevolution ? (
+                        <button
+                          type="button"
+                          onClick={() => setFullscreenPhoto(selectedIntakeForDevolution.photoDevolution)}
+                          className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 w-full max-w-sm aspect-video cursor-pointer"
+                        >
+                          <img src={selectedIntakeForDevolution.photoDevolution} alt="Comprovante legado de devolução" className="w-full h-full object-contain" />
+                        </button>
+                      ) : (
+                        <p className="text-xs text-slate-500 bg-slate-50 border rounded-xl p-4">Nenhum formulário assinado registrado.</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 flex gap-3 text-sm text-blue-900 leading-relaxed">
+                    <ShieldCheck className="h-5 w-5 text-blue-700 flex-shrink-0" />
+                    <div>
+                      <p className="font-bold">Registro obrigatório para concluir a entrega.</p>
+                      <p className="text-xs mt-1">
+                        Anexe pelo menos uma foto dos instrumentos/material sendo entregues e uma foto do Formulário de Devolução assinado pelo cliente ou transportador.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
+                    <strong>Atenção:</strong> ao clicar em “Concluir Entrega”, todos os instrumentos desta entrada serão marcados como Entregue e a entrada será bloqueada definitivamente para edição. Depois disso será permitida apenas a visualização dos documentos. A exclusão da entrada continuará restrita ao perfil Administrador.
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDevolutionPrint(selectedIntakeForDevolution)}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
+                    >
+                      <Printer className="h-4 w-4" />
+                      Imprimir Formulário de Devolução
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-5 space-y-4">
+                      <div>
+                        <h4 className="font-bold text-slate-800 text-sm">1. Fotos dos instrumentos/material entregue</h4>
+                        <p className="text-xs text-slate-500 mt-1">Registre o estado e o conjunto de materiais no momento da retirada/entrega.</p>
+                      </div>
+                      <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer text-xs">
+                        <Camera className="h-4 w-4" />
+                        Adicionar Fotos
+                        <input
+                          type="file"
+                          accept="image/*,.heic,.heif"
+                          multiple
+                          disabled={isUploadingDevolution || isFinalizingDelivery}
+                          onChange={(e) => handleAddDeliveryPhotos(e, "instruments")}
+                          className="hidden"
+                        />
+                      </label>
+                      {deliveryInstrumentPhotosDraft.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2">
+                          {deliveryInstrumentPhotosDraft.map((photo, index) => (
+                            <div key={`draft-inst-${index}`} className="relative rounded-lg overflow-hidden aspect-square bg-slate-100 border">
+                              <img src={photo} alt={`Foto instrumento ${index + 1}`} className="w-full h-full object-cover" />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveDeliveryDraftPhoto("instruments", index)}
+                                className="absolute top-1 right-1 p-1.5 bg-rose-600 text-white rounded-md"
+                                title="Remover antes de concluir"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-5 space-y-4">
+                      <div>
+                        <h4 className="font-bold text-slate-800 text-sm">2. Formulário de Devolução assinado</h4>
+                        <p className="text-xs text-slate-500 mt-1">Após imprimir e colher a assinatura, fotografe todas as páginas assinadas.</p>
+                      </div>
+                      <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl cursor-pointer text-xs">
+                        <FileCheck className="h-4 w-4" />
+                        Adicionar Fotos do Formulário
+                        <input
+                          type="file"
+                          accept="image/*,.heic,.heif"
+                          multiple
+                          disabled={isUploadingDevolution || isFinalizingDelivery}
+                          onChange={(e) => handleAddDeliveryPhotos(e, "form")}
+                          className="hidden"
+                        />
+                      </label>
+                      {deliveryFormPhotosDraft.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2">
+                          {deliveryFormPhotosDraft.map((photo, index) => (
+                            <div key={`draft-form-${index}`} className="relative rounded-lg overflow-hidden aspect-square bg-slate-100 border">
+                              <img src={photo} alt={`Foto formulário ${index + 1}`} className="w-full h-full object-cover" />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveDeliveryDraftPhoto("form", index)}
+                                className="absolute top-1 right-1 p-1.5 bg-rose-600 text-white rounded-md"
+                                title="Remover antes de concluir"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDevolutionModal(false);
+                        setSelectedIntakeForDevolution(null);
+                        setDeliveryInstrumentPhotosDraft([]);
+                        setDeliveryFormPhotosDraft([]);
+                      }}
+                      disabled={isFinalizingDelivery}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleFinalizeDelivery}
+                      disabled={
+                        isUploadingDevolution ||
+                        isFinalizingDelivery ||
+                        deliveryInstrumentPhotosDraft.length === 0 ||
+                        deliveryFormPhotosDraft.length === 0
+                      }
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2"
+                    >
+                      {isFinalizingDelivery ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4" />
+                      )}
+                      {isFinalizingDelivery ? "Finalizando..." : "Concluir Entrega e Bloquear"}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
         </div>
       )}
-\n      {/* MODAL: FOTOS DA ENTRADA DE MATERIAL */}
+
+      {/* MODAL: FOTOS DA ENTRADA DE MATERIAL */}
       {showPhotosModal && selectedIntakeForPhotos && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
           <div className="bg-white w-full max-w-3xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 space-y-0 text-slate-900">
@@ -18134,7 +18856,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
             {/* Upload & Gallery Body */}
             <div className="p-6 space-y-6">
-              {/* Upload Action Box */}
+              {/* Upload Action Box - entradas finalizadas ficam somente leitura */}
+              {!selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
               <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center space-y-3 hover:border-blue-500 transition-colors">
                 <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
                   {isUploadingPhotos ? (
@@ -18169,6 +18892,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   />
                 </label>
               </div>
+              )}
+
+              {(selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4" />
+                  Entrada finalizada: fotos disponíveis somente para visualização.
+                </div>
+              )}
 
               {/* Photo Gallery Grid */}
               <div className="space-y-3">
@@ -18207,15 +18938,16 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             >
                               <Eye className="h-4 w-4" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeletePhoto(index)}
-                              className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition-transform hover:scale-105 cursor-pointer"
-                              title="Excluir foto"
-                              
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {!selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePhoto(index)}
+                                className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition-transform hover:scale-105 cursor-pointer"
+                                title="Excluir foto"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       ),
@@ -18352,9 +19084,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
                 // Registration: cannot edit if calibration completed and non-admin
                 // Laboratory: once inserted, can only be changed/deleted by admin
-                const cannotModify = isRegPhoto
+                const isDeliveredLocked = photoModalInstrument.status === "Entregue";
+                const cannotModify = isDeliveredLocked || (isRegPhoto
                   ? isConcluded && !isUserAdmin
-                  : !!currentPhoto && !isUserAdmin;
+                  : !!currentPhoto && !isUserAdmin);
 
                 if (currentPhoto) {
                   return (
@@ -18386,10 +19119,18 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           <div className="flex items-center gap-2 font-bold text-amber-900">
                             <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
                             <span>
-                              Alteração Restrita (Somente Administrador)
+                              {isDeliveredLocked
+                                ? "Registro Bloqueado após Entrega"
+                                : "Alteração Restrita (Somente Administrador)"}
                             </span>
                           </div>
-                          {isRegPhoto ? (
+                          {isDeliveredLocked ? (
+                            <p>
+                              A entrega desta entrada foi concluída. Este registro
+                              fotográfico é imutável e permanece disponível apenas
+                              para visualização e rastreabilidade.
+                            </p>
+                          ) : isRegPhoto ? (
                             <p>
                               Como a calibração já está concluída e o
                               certificado foi emitido, a foto de cadastro não
