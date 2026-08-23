@@ -4,7 +4,7 @@ import path from "path";
 import dotenv from "dotenv";
 dotenv.config();
 import fs from "fs";
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth } from './src/middleware/auth.ts';
 import type { AuthRequest } from './src/middleware/auth.ts';
@@ -157,6 +157,98 @@ const decodeOperationalDataUrl = (value: unknown): { buffer: Buffer; contentType
 
 const safeStorageSegmentServer = (value: unknown): string =>
   String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+
+const safeStorageFileNameServer = (value: unknown): string => {
+  const decoded = (() => {
+    try { return decodeURIComponent(String(value || 'arquivo')); } catch { return String(value || 'arquivo'); }
+  })();
+  const normalized = decoded
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 180);
+  return normalized || 'arquivo';
+};
+
+const CORPORATE_FILE_MAX_BYTES = 20 * 1024 * 1024;
+const CORPORATE_FILE_PURPOSES = new Set([
+  'employee-document',
+  'employee-aso',
+  'employee-training',
+  'payslip',
+  'health-program',
+  'finance-document',
+]);
+const CORPORATE_FILE_CONTENT_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
+const decodeUploadHeader = (value: unknown): string => {
+  const raw = String(value || '');
+  try { return decodeURIComponent(raw); } catch { return raw; }
+};
+
+const resolveCorporateContentType = (reportedType: string, fileName: string): string => {
+  const reported = reportedType.split(';')[0].trim().toLowerCase();
+  if (CORPORATE_FILE_CONTENT_TYPES.has(reported)) return reported;
+  const extension = path.extname(fileName).toLowerCase();
+  const byExtension: Record<string, string> = {
+    '.pdf': 'application/pdf',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
+    '.txt': 'text/plain',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
+  return byExtension[extension] || reported;
+};
+
+const isOwnEmployeeId = (decoded: any, employeeId: unknown): boolean => {
+  const normalized = String(employeeId || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return [decoded?.portalUserId, decoded?.username]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .includes(normalized);
+};
+
+const canUploadCorporatePurpose = (decoded: any, purpose: string): boolean => {
+  if (isAdministratorProfile(decoded)) return true;
+  if (purpose === 'payslip') return isRhProfile(decoded) || isFinanceProfile(decoded);
+  if (purpose === 'finance-document') return isFinanceProfile(decoded);
+  return isRhProfile(decoded);
+};
+
+const canDownloadCorporatePurpose = (decoded: any, metadata: Record<string, any>): boolean => {
+  if (isAdministratorProfile(decoded)) return true;
+  const purpose = String(metadata?.purpose || '');
+  const employeeId = String(metadata?.employeeId || '');
+  if (purpose === 'finance-document') return isFinanceProfile(decoded);
+  if (purpose === 'health-program' || purpose === 'employee-aso') return isRhProfile(decoded);
+  if (purpose === 'payslip') return isRhProfile(decoded) || isFinanceProfile(decoded) || isOwnEmployeeId(decoded, employeeId);
+  if (purpose === 'employee-document' || purpose === 'employee-training') {
+    return isRhProfile(decoded) || isOwnEmployeeId(decoded, employeeId);
+  }
+  return false;
+};
+
+const corporateFileFolder = (purpose: string, entityId: string): string => {
+  if (purpose === 'finance-document') return `secure-documents/finance/${entityId}`;
+  if (purpose === 'health-program') return `secure-documents/hr/health-programs/${entityId}`;
+  return `secure-documents/hr/employees/${entityId}/${purpose}`;
+};
 
 const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   if (!firestoreDb) {
@@ -1286,6 +1378,87 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
   }
 });
 
+
+const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance'; label: string }> = {
+  employeeDocuments: { area: 'rh', label: 'Documento do colaborador' },
+  employeeAsos: { area: 'rh', label: 'ASO' },
+  employeeTrainings: { area: 'rh', label: 'Treinamento do colaborador' },
+  trainings: { area: 'rh', label: 'Treinamento' },
+  employeeBirthdays: { area: 'rh', label: 'Aniversário do colaborador' },
+  medical_exams: { area: 'rh', label: 'Exame ocupacional' },
+  health_program_docs: { area: 'rh', label: 'Documento de programa de saúde' },
+  payslips: { area: 'payslip', label: 'Documento de folha' },
+  financeTransactions: { area: 'finance', label: 'Lançamento financeiro' },
+  financeContracts: { area: 'finance', label: 'Contrato financeiro' },
+  financeMeasurements: { area: 'finance', label: 'Medição financeira' },
+  financeBankAccounts: { area: 'finance', label: 'Conta bancária' },
+  financeCategories: { area: 'finance', label: 'Categoria financeira' },
+};
+
+app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb || !req.user) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const collectionName = String(req.body?.collectionName || '').trim();
+  const recordId = asLimitedString(req.body?.recordId, 180);
+  const config = ARCHIVABLE_COLLECTIONS[collectionName];
+  if (!config || !recordId) return res.status(400).json({ error: 'INVALID_ARCHIVE_TARGET' });
+
+  const allowed = isAdministratorProfile(req.user) ||
+    (config.area === 'rh' && isRhProfile(req.user)) ||
+    (config.area === 'payslip' && (isRhProfile(req.user) || isFinanceProfile(req.user))) ||
+    (config.area === 'finance' && isFinanceProfile(req.user));
+  if (!allowed) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  try {
+    const recordRef = firestoreDb.collection(collectionName).doc(recordId);
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(recordRef);
+      if (!snapshot.exists) {
+        const error: any = new Error('RECORD_NOT_FOUND');
+        error.code = 'RECORD_NOT_FOUND';
+        throw error;
+      }
+      const before: any = snapshot.data() || {};
+      if (before.isDeleted === true) return;
+
+      transaction.update(recordRef, {
+        isDeleted: true,
+        deletedAt: nowIso,
+        deletedBy: actorName,
+        deletedByUid: actorUid,
+        updatedAt: nowIso,
+      });
+      transaction.set(auditRef, {
+        action: 'CRITICAL_RECORD_ARCHIVED',
+        entityType: collectionName,
+        entityId: recordId,
+        actorUid,
+        actorName,
+        actorRole,
+        createdAt: nowIso,
+        immutable: true,
+        summary: `${config.label} arquivado`,
+        metadata: {
+          collectionName,
+          previousName: asLimitedString(before.name || before.title || before.employeeName || before.description || before.contractNumber, 180),
+        },
+      });
+    });
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('RECORD_NOT_FOUND')) return res.status(404).json({ error: 'RECORD_NOT_FOUND' });
+    console.error('Critical record archive failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 // Firestore/Firebase Admin are the only production data stores.
 
 // Lazy initialize Gemini API to handle missing keys gracefully
@@ -1850,6 +2023,140 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     if (error?.message === 'IMAGE_TOO_LARGE') return res.status(413).json({ error: 'IMAGE_TOO_LARGE' });
     console.error('Operational image upload error:', error);
     return res.status(500).json({ error: 'UPLOAD_FAILED' });
+  }
+});
+
+
+const corporateFileRawBody = express.raw({ type: () => true, limit: '20mb' });
+
+app.post('/api/internal/corporate-files', requireAuth, requireInternalAccount, writeApiRateLimit, corporateFileRawBody, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !adminStorage || !adminStorageBucketName || !firestoreDb) {
+      return res.status(503).json({ error: 'STORAGE_SERVICE_UNAVAILABLE' });
+    }
+    const purpose = String(req.headers['x-upload-purpose'] || '').trim();
+    if (!CORPORATE_FILE_PURPOSES.has(purpose)) {
+      return res.status(400).json({ error: 'INVALID_UPLOAD_PURPOSE' });
+    }
+    if (!canUploadCorporatePurpose(req.user, purpose)) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const entityId = safeStorageSegmentServer(req.headers['x-entity-id']);
+    const documentType = asLimitedString(decodeUploadHeader(req.headers['x-document-type']), 120) || 'documento';
+    const originalFileName = safeStorageFileNameServer(req.headers['x-file-name']);
+    const contentType = resolveCorporateContentType(String(req.headers['content-type'] || ''), originalFileName);
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
+
+    if (!entityId || entityId === 'unknown') return res.status(400).json({ error: 'ENTITY_ID_REQUIRED' });
+    if (!CORPORATE_FILE_CONTENT_TYPES.has(contentType)) return res.status(415).json({ error: 'UNSUPPORTED_FILE_TYPE' });
+    if (!body.length) return res.status(400).json({ error: 'EMPTY_FILE' });
+    if (body.length > CORPORATE_FILE_MAX_BYTES) return res.status(413).json({ error: 'FILE_TOO_LARGE' });
+
+    const nowIso = new Date().toISOString();
+    const version = Date.now();
+    const sha256 = createHash('sha256').update(body).digest('hex');
+    const suffix = randomBytes(5).toString('hex');
+    const storagePath = `${corporateFileFolder(purpose, entityId)}/${version}_${suffix}_${originalFileName}`;
+    const bucket = adminStorage.bucket(adminStorageBucketName);
+    const file = bucket.file(storagePath);
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    await file.save(body, {
+      resumable: false,
+      validation: 'crc32c',
+      metadata: {
+        contentType,
+        cacheControl: 'private,no-store,max-age=0',
+        metadata: {
+          purpose,
+          employeeId: purpose === 'health-program' || purpose === 'finance-document' ? '' : entityId,
+          entityId,
+          documentType,
+          originalFileName,
+          sha256,
+          version: String(version),
+          uploadedByUid: actorUid,
+          uploadedBy: actorName,
+          uploadedAt: nowIso,
+        },
+      },
+    });
+
+    await firestoreDb.collection('systemAuditLogs').add({
+      action: 'CORPORATE_FILE_UPLOADED',
+      entityType: purpose,
+      entityId,
+      actorUid,
+      actorName,
+      actorRole,
+      createdAt: nowIso,
+      immutable: true,
+      summary: `Arquivo corporativo enviado: ${originalFileName}`,
+      metadata: {
+        storagePath,
+        documentType,
+        contentType,
+        size: body.length,
+        sha256,
+        version,
+      },
+    });
+
+    return res.json({
+      success: true,
+      storagePath,
+      fileName: originalFileName,
+      contentType,
+      size: body.length,
+      sha256,
+      version,
+    });
+  } catch (error) {
+    console.error('Corporate file upload error:', error);
+    return res.status(500).json({ error: 'UPLOAD_FAILED' });
+  }
+});
+
+app.post('/api/internal/corporate-files/download', requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !adminStorage || !adminStorageBucketName) {
+      return res.status(503).json({ error: 'STORAGE_SERVICE_UNAVAILABLE' });
+    }
+    const storagePath = String(req.body?.storagePath || '').trim();
+    if (!storagePath.startsWith('secure-documents/')) {
+      return res.status(400).json({ error: 'INVALID_STORAGE_PATH' });
+    }
+
+    const bucket = adminStorage.bucket(adminStorageBucketName);
+    const file = bucket.file(storagePath);
+    const [metadata] = await file.getMetadata();
+    const customMetadata = (metadata?.metadata || {}) as Record<string, any>;
+    if (!canDownloadCorporatePurpose(req.user, customMetadata)) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const [buffer] = await file.download();
+    const expectedSha256 = String(customMetadata.sha256 || '').trim().toLowerCase();
+    const actualSha256 = createHash('sha256').update(buffer).digest('hex');
+    if (expectedSha256 && expectedSha256 !== actualSha256) {
+      console.error('Corporate file integrity mismatch:', { storagePath, expectedSha256, actualSha256 });
+      return res.status(500).json({ error: 'FILE_INTEGRITY_CHECK_FAILED' });
+    }
+    const contentType = String(metadata.contentType || 'application/octet-stream');
+    const originalFileName = safeStorageFileNameServer(customMetadata.originalFileName || path.basename(storagePath));
+    res.setHeader('X-Content-SHA256', actualSha256);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('Cache-Control', 'private,no-store,max-age=0');
+    res.setHeader('Content-Disposition', `inline; filename="${originalFileName.replace(/"/g, '')}"`);
+    return res.send(buffer);
+  } catch (error: any) {
+    if (error?.code === 404) return res.status(404).json({ error: 'FILE_NOT_FOUND' });
+    console.error('Corporate file download error:', error);
+    return res.status(500).json({ error: 'DOWNLOAD_FAILED' });
   }
 });
 

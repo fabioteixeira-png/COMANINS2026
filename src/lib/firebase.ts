@@ -96,6 +96,141 @@ const uploadOperationalImageViaBackend = async (
   return { url: String(data.url), path: String(data.path) };
 };
 
+
+export type CorporateFilePurpose =
+  | 'employee-document'
+  | 'employee-aso'
+  | 'employee-training'
+  | 'payslip'
+  | 'health-program'
+  | 'finance-document';
+
+export interface CorporateFileUploadResult {
+  storagePath: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+  sha256: string;
+  version: number;
+}
+
+const corporateFileAuthHeaders = async (): Promise<Record<string, string>> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  return { Authorization: `Bearer ${await user.getIdToken()}` };
+};
+
+export async function uploadCorporateFile(
+  file: Blob,
+  purpose: CorporateFilePurpose,
+  entityId: string,
+  documentType: string,
+  fileName?: string,
+): Promise<CorporateFileUploadResult> {
+  const headers = await corporateFileAuthHeaders();
+  const finalFileName = fileName || (file instanceof File ? file.name : 'arquivo');
+  const response = await fetch('/api/internal/corporate-files', {
+    method: 'POST',
+    headers: {
+      ...headers,
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Upload-Purpose': purpose,
+      'X-Entity-Id': entityId,
+      'X-Document-Type': encodeURIComponent(documentType || 'documento'),
+      'X-File-Name': encodeURIComponent(finalFileName || 'arquivo'),
+    },
+    body: file,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success !== true) {
+    const code = String(payload?.error || 'UPLOAD_FAILED');
+    if (code === 'FILE_TOO_LARGE') throw new Error('O arquivo excede o limite de 20 MB.');
+    if (code === 'UNSUPPORTED_FILE_TYPE') throw new Error('Tipo de arquivo não permitido.');
+    if (code === 'FORBIDDEN') throw new Error('Seu perfil não possui permissão para anexar este documento.');
+    throw new Error('Não foi possível enviar o documento ao Storage.');
+  }
+  return {
+    storagePath: String(payload.storagePath || ''),
+    fileName: String(payload.fileName || finalFileName),
+    contentType: String(payload.contentType || file.type || ''),
+    size: Number(payload.size || file.size || 0),
+    sha256: String(payload.sha256 || ''),
+    version: Number(payload.version || Date.now()),
+  };
+}
+
+export async function uploadCorporateDataUrl(
+  dataUrl: string,
+  purpose: CorporateFilePurpose,
+  entityId: string,
+  documentType: string,
+  fileName: string,
+): Promise<CorporateFileUploadResult> {
+  const blob = await dataUrlToBlob(dataUrl);
+  return uploadCorporateFile(blob, purpose, entityId, documentType, fileName);
+}
+
+export async function fetchCorporateFileBlobUrl(storagePath: string): Promise<string> {
+  const headers = await corporateFileAuthHeaders();
+  const response = await fetch('/api/internal/corporate-files/download', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storagePath }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    if (payload?.error === 'FORBIDDEN') {
+      throw new Error('Você não possui permissão para visualizar este documento.');
+    }
+    if (payload?.error === 'FILE_INTEGRITY_CHECK_FAILED') {
+      throw new Error('A verificação de integridade do arquivo falhou. O documento não foi aberto.');
+    }
+    throw new Error('Não foi possível carregar o documento.');
+  }
+  return URL.createObjectURL(await response.blob());
+}
+
+export async function openCorporateFile(storagePath: string): Promise<void> {
+  const popup = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+  try {
+    const blobUrl = await fetchCorporateFileBlobUrl(storagePath);
+    if (popup) popup.location.href = blobUrl;
+    else window.open(blobUrl, '_blank');
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 5 * 60 * 1000);
+  } catch (error) {
+    if (popup) popup.close();
+    throw error;
+  }
+}
+
+export async function downloadCorporateFile(storagePath: string, fileName: string): Promise<void> {
+  const blobUrl = await fetchCorporateFileBlobUrl(storagePath);
+  try {
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName || 'documento';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  }
+}
+
+async function archiveCriticalRecord(collectionName: string, recordId: string): Promise<void> {
+  const headers = await corporateFileAuthHeaders();
+  const response = await fetch('/api/internal/archive-record', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ collectionName, recordId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (payload?.error === 'FORBIDDEN') throw new Error('Seu perfil não possui permissão para arquivar este registro.');
+    throw new Error(payload?.error === 'RECORD_NOT_FOUND' ? 'Registro não encontrado.' : 'Não foi possível arquivar o registro.');
+  }
+}
+
 const stripUndefinedDeep = (value: any): any => {
   if (Array.isArray(value)) {
     return value.map(stripUndefinedDeep).filter((item) => item !== undefined);
@@ -216,7 +351,16 @@ export interface AsoContractItem {
   validityDate: string;
   status?: 'Apto' | 'Apto com Restrições' | 'Inapto' | 'Pendente';
   clinicDoctor?: string;
-  docUrl?: string;
+  docUrl?: string; // legado: Base64 ou URL externa
+  docStoragePath?: string;
+  docFileName?: string;
+  docContentType?: string;
+  docSize?: number;
+  docSha256?: string;
+  docVersion?: number;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
   notes?: string;
 }
 
@@ -335,7 +479,16 @@ export interface EmployeeDocument {
   userId: string;
   name: string;
   type: string;
-  url: string;
+  url: string; // legado: Base64/URL externa
+  storagePath?: string;
+  fileName?: string;
+  contentType?: string;
+  size?: number;
+  sha256?: string;
+  fileVersion?: number;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
   date: string;
 }
 
@@ -352,7 +505,8 @@ export async function getEmployeeDocuments(userId: string, username?: string, cp
     const addUniqueDocs = (snapshot: any) => {
       snapshot.forEach((docSnap: any) => {
         if (!docs.some(d => d.id === docSnap.id)) {
-          docs.push({ id: docSnap.id, ...docSnap.data() } as EmployeeDocument);
+          const item = { id: docSnap.id, ...docSnap.data() } as EmployeeDocument;
+          if (item.isDeleted !== true) docs.push(item);
         }
       });
     };
@@ -381,7 +535,7 @@ export async function getEmployeeDocuments(userId: string, username?: string, cp
 
 export async function deleteEmployeeDocument(docId: string): Promise<void> {
   if (!db) throw new Error("Firebase não inicializado.");
-  await deleteDoc(doc(db, 'employeeDocuments', docId));
+  await archiveCriticalRecord('employeeDocuments', docId);
 }
 
 // Helper Firestore CRUD & Sync Functions
@@ -1488,7 +1642,7 @@ export async function syncEmployeeBirthdays(callback: (birthdays: EmployeeBirthd
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'employeeBirthdays'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeBirthday));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeBirthday)).filter((item: any) => item.isDeleted !== true);
     setLocalCache('employeeBirthdays', list);
     callback(list);
   }, (err) => {
@@ -1505,7 +1659,7 @@ export async function addEmployeeBirthdayDoc(data: Omit<EmployeeBirthday, 'id'>)
 }
 
 export async function deleteEmployeeBirthdayDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'employeeBirthdays', id));
+  await archiveCriticalRecord('employeeBirthdays', id);
 }
 
 
@@ -1514,7 +1668,7 @@ export async function deleteEmployeeBirthdayDoc(id: string): Promise<void> {
 export async function syncTrainings(callback: (trainings: Training[]) => void) {
   const colRef = collection(db, 'trainings');
   return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Training));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Training)).filter((item: any) => item.isDeleted !== true);
     callback(list);
   }, (err) => {
     console.error('Firestore syncTrainings error:', err);
@@ -1533,14 +1687,14 @@ export async function updateTrainingDoc(id: string, data: Partial<Training>): Pr
 }
 
 export async function deleteTrainingDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'trainings', id));
+  await archiveCriticalRecord('trainings', id);
 }
 
 // 8.5 Employee ASOs
 export async function syncEmployeeAsos(callback: (records: EmployeeAsoRecord[]) => void) {
   const colRef = collection(db, 'employeeAsos');
   return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeAsoRecord));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeAsoRecord)).filter((item: any) => item.isDeleted !== true);
     callback(list);
   }, (err) => {
     console.error('Firestore syncEmployeeAsos error:', err);
@@ -1562,14 +1716,14 @@ export async function updateEmployeeAsoDoc(id: string, data: Partial<EmployeeAso
 }
 
 export async function deleteEmployeeAsoDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'employeeAsos', id));
+  await archiveCriticalRecord('employeeAsos', id);
 }
 
 // 9. Employee Trainings
 export async function syncEmployeeTrainings(callback: (records: EmployeeTrainingRecord[]) => void) {
   const colRef = collection(db, 'employeeTrainings');
   return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeTrainingRecord));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeTrainingRecord)).filter((item: any) => item.isDeleted !== true);
     callback(list);
   }, (err) => {
     console.error('Firestore syncEmployeeTrainings error:', err);
@@ -1594,7 +1748,7 @@ export async function updateEmployeeTrainingDoc(id: string, data: Partial<Employ
 }
 
 export async function deleteEmployeeTrainingDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'employeeTrainings', id));
+  await archiveCriticalRecord('employeeTrainings', id);
 }
 
 export async function syncCustomLogo(callback: (logoUrl: string) => void) {
@@ -1930,7 +2084,7 @@ export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void)
   } catch (e) {}
   const q = query(collection(db, 'medical_exams'), limit(25));
   return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam)).filter((item: any) => item.isDeleted !== true);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
@@ -1950,7 +2104,7 @@ export async function updateMedicalExamDoc(id: string, updates: Partial<MedicalE
 }
 
 export async function deleteMedicalExamDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'medical_exams', id));
+  await archiveCriticalRecord('medical_exams', id);
 }
 
 export async function syncExamTypes(callback: (types: ExamTypeItem[]) => void) {
@@ -1989,7 +2143,7 @@ export async function syncPayslips(callback: (payslips: Payslip[]) => void, empl
     ? query(collection(db, 'payslips'), where('employeeId', '==', employeeId))
     : query(collection(db, 'payslips'));
   return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip)).filter((item: any) => item.isDeleted !== true);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
@@ -2009,7 +2163,7 @@ export async function updatePayslipDoc(id: string, updates: Partial<Payslip>): P
 }
 
 export async function deletePayslipDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'payslips', id));
+  await archiveCriticalRecord('payslips', id);
 }
 
 // 9. Calibration Audit Logs (Auditoria de Tempo de Calibração)
@@ -2090,7 +2244,7 @@ export const syncFinanceTransactions = (callback: (transactions: FinanceTransact
     (onData, onError) => {
       const q = query(collection(db, 'financeTransactions'), orderBy('date', 'desc'), limit(25));
       return onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction));
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction)).filter((item: any) => item.isDeleted !== true);
         onData(items);
       }, onError);
     },
@@ -2118,8 +2272,7 @@ export const updateFinanceTransaction = async (id: string, updates: Partial<Fina
 };
 
 export const deleteFinanceTransaction = async (id: string) => {
-  const docRef = doc(db, 'financeTransactions', id);
-  await deleteDoc(docRef);
+  await archiveCriticalRecord('financeTransactions', id);
 };
 
 export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) => void) => {
@@ -2130,7 +2283,7 @@ export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) =>
     (onData, onError) => {
       const q = query(collection(db, 'financeContracts'), limit(25));
       return onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract));
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract)).filter((item: any) => item.isDeleted !== true);
         onData(items);
       }, onError);
     },
@@ -2150,8 +2303,7 @@ export const updateFinanceContract = async (id: string, updates: Partial<Finance
 };
 
 export const deleteFinanceContract = async (id: string) => {
-  const docRef = doc(db, 'financeContracts', id);
-  await deleteDoc(docRef);
+  await archiveCriticalRecord('financeContracts', id);
 };
 
 export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurement[]) => void) => {
@@ -2162,7 +2314,7 @@ export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurem
     (onData, onError) => {
       const q = query(collection(db, 'financeMeasurements'), orderBy('createdAt', 'desc'), limit(25));
       return onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement));
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement)).filter((item: any) => item.isDeleted !== true);
         onData(items);
       }, onError);
     },
@@ -2190,8 +2342,7 @@ export const updateFinanceMeasurement = async (id: string, updates: Partial<Fina
 };
 
 export const deleteFinanceMeasurement = async (id: string) => {
-  const docRef = doc(db, 'financeMeasurements', id);
-  await deleteDoc(docRef);
+  await archiveCriticalRecord('financeMeasurements', id);
 };
 
 // Generic Finance Operations
@@ -2203,7 +2354,7 @@ export const syncFinanceCollection = <T>(collectionName: string, callback: (data
     (onData, onError) => {
       const q = query(collection(db, collectionName), limit(25));
       return onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T));
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T)).filter((item: any) => item?.isDeleted !== true);
         onData(items);
       }, onError);
     },
@@ -2230,8 +2381,7 @@ export const updateFinanceDoc = async (collectionName: string, id: string, updat
 };
 
 export const deleteFinanceDoc = async (collectionName: string, id: string) => {
-  const docRef = doc(db, collectionName, id);
-  await deleteDoc(docRef);
+  await archiveCriticalRecord(collectionName, id);
 };
 
 
@@ -2506,7 +2656,7 @@ export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocume
   } catch (e) {}
   const q = query(collection(db, 'health_program_docs'), limit(100));
   return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument)).filter((item: any) => item.isDeleted !== true);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
@@ -2514,8 +2664,8 @@ export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocume
   });
 }
 
-export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'>): Promise<HealthProgramDocument> {
-  const newId = 'hpdoc_' + Date.now();
+export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'>, idOverride?: string): Promise<HealthProgramDocument> {
+  const newId = idOverride || ('hpdoc_' + Date.now());
   const docData: HealthProgramDocument = { ...data, id: newId };
   await setDoc(doc(db, 'health_program_docs', newId), docData);
 
@@ -2527,6 +2677,6 @@ export async function updateHealthProgramDoc(id: string, updates: Partial<Health
 }
 
 export async function deleteHealthProgramDoc(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'health_program_docs', id));
+  await archiveCriticalRecord('health_program_docs', id);
 }
 

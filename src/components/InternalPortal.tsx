@@ -88,6 +88,10 @@ import {
   deleteRncDoc,
   getEmployeeDocuments,
   EmployeeDocument,
+  uploadCorporateFile,
+  fetchCorporateFileBlobUrl,
+  openCorporateFile,
+  downloadCorporateFile,
 } from "../lib/firebase";
 import {
   compressMultipleImages,
@@ -854,7 +858,8 @@ export default function InternalPortal({
   const [newPayslipMonth, setNewPayslipMonth] = useState<string>("");
   const [newPayslipDocumentType, setNewPayslipDocumentType] = useState<"holerite" | "alimentacao" | "transporte" | "espelho_ponto">("holerite");
   const [newPayslipCpf, setNewPayslipCpf] = useState<string>("");
-  const [newPayslipPdfBase64, setNewPayslipPdfBase64] = useState<string>("");
+  const [newPayslipPdfBase64, setNewPayslipPdfBase64] = useState<string>(""); // legado: mantido apenas para documentos existentes
+  const [newPayslipPdfFile, setNewPayslipPdfFile] = useState<File | null>(null);
   const [newPayslipPdfName, setNewPayslipPdfName] = useState<string>("");
   const [payslipSubmitting, setPayslipSubmitting] = useState<boolean>(false);
   const [isPdfDragOver, setIsPdfDragOver] = useState<boolean>(false);
@@ -4620,8 +4625,8 @@ Status atual: ${e.status}.`,
       alert("Por favor, informe o mês de referência.");
       return;
     }
-    if (!newPayslipPdfBase64) {
-      alert("Por favor, faça o upload do PDF do contra-cheque.");
+    if (!newPayslipPdfFile) {
+      alert("Por favor, faça o upload do PDF do documento.");
       return;
     }
 
@@ -4634,22 +4639,37 @@ Status atual: ${e.status}.`,
       emp?.register ||
       "MAT_" + String(Math.floor(Math.random() * 90000 + 10000));
 
-    const payload = {
-      employeeId: newPayslipEmployeeId,
-      employeeName,
-      employeeRegister,
-      employeeCpf,
-      employeeRole,
-      month: newPayslipMonth,
-      createdAt: new Date().toISOString(),
-      lgpdConsentAccepted: false,
-      visualized: false,
-      documentType: newPayslipDocumentType,
-      pdfBase64: newPayslipPdfBase64,
-      pdfName: newPayslipPdfName,
-    };
-
     try {
+      // Novos documentos de folha ficam em Storage privado. O Firestore guarda
+      // apenas metadados e o caminho; pdfBase64 permanece suportado somente
+      // para documentos legados já existentes.
+      const uploaded = await uploadCorporateFile(
+        newPayslipPdfFile,
+        "payslip",
+        newPayslipEmployeeId,
+        `${newPayslipDocumentType}:${newPayslipMonth}`,
+        newPayslipPdfName || newPayslipPdfFile.name,
+      );
+
+      const payload = {
+        employeeId: newPayslipEmployeeId,
+        employeeName,
+        employeeRegister,
+        employeeCpf,
+        employeeRole,
+        month: newPayslipMonth,
+        createdAt: new Date().toISOString(),
+        lgpdConsentAccepted: false,
+        visualized: false,
+        documentType: newPayslipDocumentType,
+        pdfName: uploaded.fileName,
+        pdfStoragePath: uploaded.storagePath,
+        pdfContentType: uploaded.contentType,
+        pdfSize: uploaded.size,
+        pdfSha256: uploaded.sha256,
+        pdfVersion: uploaded.version,
+      };
+
       await addPayslipDoc(payload);
       setShowCreatePayslipModal(false);
       // Reset states
@@ -4657,6 +4677,7 @@ Status atual: ${e.status}.`,
       setNewPayslipMonth("");
       setNewPayslipDocumentType("holerite");
       setNewPayslipPdfBase64("");
+      setNewPayslipPdfFile(null);
       setNewPayslipPdfName("");
     } catch (error: any) {
       console.error("Erro ao cadastrar contra-cheque PDF:", error);
@@ -4666,27 +4687,33 @@ Status atual: ${e.status}.`,
     }
   };
 
+  const validatePayslipPdf = (file: File): boolean => {
+    if (file.size > 20 * 1024 * 1024) {
+      alert(`O arquivo PDF excede o limite de 20MB (${(file.size / (1024 * 1024)).toFixed(1)}MB).`);
+      return false;
+    }
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+      alert("Por favor, selecione um arquivo no formato PDF.");
+      return false;
+    }
+    return true;
+  };
+
+  const selectPayslipPdf = (file: File) => {
+    if (!validatePayslipPdf(file)) return;
+    setNewPayslipPdfFile(file);
+    setNewPayslipPdfName(file.name);
+    setNewPayslipPdfBase64("");
+  };
+
   const handlePdfUploadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
-    // File size limit (approx 700KB to fit well within Firestore 1MB document limit after base64 encoding)
-    if (file.size > 700 * 1024) {
-      alert("O arquivo PDF é muito grande (" + (file.size / 1024).toFixed(1) + "KB). O tamanho máximo permitido é 700KB para armazenamento direto no banco de dados.");
-      e.target.value = ''; // Reset input
+    if (!validatePayslipPdf(file)) {
+      e.target.value = "";
       return;
     }
-    
-    if (file.type !== "application/pdf") {
-      alert("Por favor, selecione um arquivo no formato PDF.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewPayslipPdfBase64(reader.result as string);
-      setNewPayslipPdfName(file.name);
-    };
-    reader.readAsDataURL(file);
+    selectPayslipPdf(file);
   };
 
   const handlePdfDragOver = (e: React.DragEvent) => {
@@ -4703,29 +4730,25 @@ Status atual: ${e.status}.`,
     setIsPdfDragOver(false);
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
-
-    if (file.size > 700 * 1024) {
-      alert("O arquivo PDF é muito grande (" + (file.size / 1024).toFixed(1) + "KB). O tamanho máximo permitido é 700KB.");
-      return;
-    }
-
-    if (file.type !== "application/pdf") {
-      alert("Por favor, envie um arquivo no formato PDF.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewPayslipPdfBase64(reader.result as string);
-      setNewPayslipPdfName(file.name);
-    };
-    reader.readAsDataURL(file);
+    selectPayslipPdf(file);
   };
 
   const handleViewPayslip = async (payslip: Payslip) => {
     setSelectedPayslip(payslip);
     setShowPayslipModal(true);
-    if (payslip.pdfBase64) {
-      setPdfBlobUrl(base64ToBlobUrl(payslip.pdfBase64));
+    if (pdfBlobUrl) {
+      URL.revokeObjectURL(pdfBlobUrl);
+      setPdfBlobUrl("");
+    }
+    try {
+      if (payslip.pdfStoragePath) {
+        setPdfBlobUrl(await fetchCorporateFileBlobUrl(payslip.pdfStoragePath));
+      } else if (payslip.pdfBase64) {
+        setPdfBlobUrl(base64ToBlobUrl(payslip.pdfBase64));
+      }
+    } catch (error) {
+      console.error("Erro ao carregar documento privado:", error);
+      alert("Não foi possível carregar o documento. Verifique sua sessão e tente novamente.");
     }
 
     const isOwner =
@@ -15423,69 +15446,52 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             </td>
                             <td className="px-6 py-4 text-center">
                               <div className="flex justify-center space-x-2">
-                                {record.certificateUrl && (
+                                {(record.certificateStoragePath || record.certificateUrl) && (
                                   <>
-                                  <button
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      if (
-                                        record.certificateUrl?.startsWith(
-                                          "data:",
-                                        )
-                                      ) {
-                                        try {
-                                          const byteString = atob(
-                                            record.certificateUrl.split(",")[1],
-                                          );
-                                          const mimeString =
-                                            record.certificateUrl
-                                              .split(",")[0]
-                                              .split(":")[1]
-                                              .split(";")[0];
-                                          const ab = new ArrayBuffer(
-                                            byteString.length,
-                                          );
-                                          const ia = new Uint8Array(ab);
-                                          for (
-                                            let i = 0;
-                                            i < byteString.length;
-                                            i++
-                                          ) {
-                                            ia[i] = byteString.charCodeAt(i);
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        if (record.certificateStoragePath) {
+                                          void openCorporateFile(record.certificateStoragePath);
+                                        } else if (record.certificateUrl?.startsWith("data:")) {
+                                          try {
+                                            const byteString = atob(record.certificateUrl.split(",")[1]);
+                                            const mimeString = record.certificateUrl.split(",")[0].split(":")[1].split(";")[0];
+                                            const bytes = new Uint8Array(byteString.length);
+                                            for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+                                            window.open(URL.createObjectURL(new Blob([bytes], { type: mimeString })), "_blank");
+                                          } catch (err) {
+                                            console.error("Erro ao abrir certificado", err);
+                                            alert("Erro ao abrir o certificado.");
                                           }
-                                          const blob = new Blob([ab], {
-                                            type: mimeString,
-                                          });
-                                          const blobUrl =
-                                            URL.createObjectURL(blob);
-                                          window.open(blobUrl, "_blank");
-                                        } catch (err) {
-                                          console.error(
-                                            "Erro ao abrir PDF",
-                                            err,
-                                          );
-                                          alert("Erro ao abrir o PDF.");
+                                        } else if (record.certificateUrl) {
+                                          window.open(record.certificateUrl, "_blank", "noopener,noreferrer");
                                         }
-                                      } else {
-                                        window.open(
-                                          record.certificateUrl,
-                                          "_blank",
-                                        );
-                                      }
-                                    }}
-                                    className="p-1 text-slate-400 hover:text-royal-blue transition-colors"
-                                    title="Ver Certificado"
-                                  >
-                                    <FileText className="h-4 w-4" />
-                                  </button>
-                                  <a
-                                    href={record.certificateUrl}
-                                    download={`Certificado_${(user?.name || record.employeeId).replace(/\s+/g, '_')}`}
-                                    className="p-1 text-emerald-600 hover:text-emerald-700 transition-colors cursor-pointer"
-                                    title="Baixar Certificado"
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </a>
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-royal-blue transition-colors"
+                                      title="Ver Certificado"
+                                    >
+                                      <FileText className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const name = record.certificateFileName || `Certificado_${(user?.name || record.employeeId).replace(/\s+/g, "_")}`;
+                                        if (record.certificateStoragePath) {
+                                          void downloadCorporateFile(record.certificateStoragePath, name);
+                                        } else if (record.certificateUrl) {
+                                          const link = document.createElement("a");
+                                          link.href = record.certificateUrl;
+                                          link.download = name;
+                                          link.click();
+                                        }
+                                      }}
+                                      className="p-1 text-emerald-600 hover:text-emerald-700 transition-colors cursor-pointer"
+                                      title="Baixar Certificado"
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </button>
                                   </>
                                 )}
                                 <button
@@ -20168,18 +20174,25 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </span>
               </div>
               <div className="flex space-x-2">
-                {selectedPayslip.pdfBase64 ? (
-                  <a
-                    href={pdfBlobUrl || selectedPayslip.pdfBase64}
-                    download={
-                      selectedPayslip.pdfName ||
-                      `contra_cheque_${selectedPayslip.month.replace("/", "_")}.pdf`
-                    }
+                {(selectedPayslip.pdfStoragePath || selectedPayslip.pdfBase64) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = selectedPayslip.pdfName || `contra_cheque_${selectedPayslip.month.replace("/", "_")}.pdf`;
+                      if (selectedPayslip.pdfStoragePath) {
+                        void downloadCorporateFile(selectedPayslip.pdfStoragePath, name);
+                        return;
+                      }
+                      const link = document.createElement("a");
+                      link.href = pdfBlobUrl || selectedPayslip.pdfBase64 || "";
+                      link.download = name;
+                      link.click();
+                    }}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors flex items-center space-x-1.5 shadow-sm"
                   >
                     <Download className="h-4 w-4" />
                     <span>Baixar PDF</span>
-                  </a>
+                  </button>
                 ) : (
                   <button
                     type="button"
@@ -20209,11 +20222,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
             {/* Modal Body */}
             <div className="p-6 bg-slate-100 overflow-y-auto max-h-[85vh] print:p-0 print:max-h-full">
-              {selectedPayslip.pdfBase64 ? (
+              {(selectedPayslip.pdfStoragePath || selectedPayslip.pdfBase64) ? (
                 <div className="space-y-4">
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-[70vh]">
                     <iframe
-                      src={pdfBlobUrl || selectedPayslip.pdfBase64}
+                      src={pdfBlobUrl || selectedPayslip.pdfBase64 || ""}
                       className="w-full h-full border-0"
                       title={selectedPayslip.pdfName || "Contra-cheque PDF"}
                     />
@@ -20599,7 +20612,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   Arquivo do Documento (PDF)
                 </label>
 
-                {!newPayslipPdfBase64 ? (
+                {!newPayslipPdfFile ? (
                   <div
                     onDragOver={handlePdfDragOver}
                     onDragLeave={handlePdfDragLeave}
@@ -20649,6 +20662,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       type="button"
                       onClick={() => {
                         setNewPayslipPdfBase64("");
+                        setNewPayslipPdfFile(null);
                         setNewPayslipPdfName("");
                       }}
                       className="text-xs font-bold text-slate-500 hover:text-red-600 hover:underline px-2"

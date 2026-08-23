@@ -27,7 +27,10 @@ import {
   syncHealthProgramDocs, 
   addHealthProgramDoc, 
   updateHealthProgramDoc, 
-  deleteHealthProgramDoc 
+  deleteHealthProgramDoc,
+  uploadCorporateFile,
+  fetchCorporateFileBlobUrl,
+  downloadCorporateFile,
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 
@@ -83,13 +86,16 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
   const [formCompany, setFormCompany] = useState<string>('');
   const [formTechnical, setFormTechnical] = useState<string>('');
   const [formNotes, setFormNotes] = useState<string>('');
-  const [formFileUrl, setFormFileUrl] = useState<string>('');
+  const [formFileUrl, setFormFileUrl] = useState<string>(''); // legado: arquivos antigos em Base64/URL
+  const [formFile, setFormFile] = useState<File | null>(null);
   const [formFileName, setFormFileName] = useState<string>('');
   const [formFileType, setFormFileType] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   // Preview Modal
   const [previewDoc, setPreviewDoc] = useState<HealthProgramDocument | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string>('');
+  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
 
   // Email Alert Feedback State
   const [sendingAlert, setSendingAlert] = useState<boolean>(false);
@@ -113,6 +119,32 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       if (unsubscribe) unsubscribe();
     };
   }, []);
+
+  // Documentos novos são privados no Storage; para visualizar usamos uma URL
+  // temporária em memória obtida pelo backend autenticado.
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl = '';
+    const loadPreview = async () => {
+      setPreviewBlobUrl('');
+      if (!previewDoc?.fileStoragePath) return;
+      setPreviewLoading(true);
+      try {
+        createdUrl = await fetchCorporateFileBlobUrl(previewDoc.fileStoragePath);
+        if (!cancelled) setPreviewBlobUrl(createdUrl);
+      } catch (error) {
+        console.error('Erro ao carregar documento privado de SST:', error);
+        if (!cancelled) alert('Não foi possível carregar o arquivo anexo. Verifique sua sessão e tente novamente.');
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    };
+    void loadPreview();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [previewDoc?.id, previewDoc?.fileStoragePath]);
 
   // Calculate days remaining helper
   const getDaysRemaining = (expDateStr: string): number => {
@@ -222,6 +254,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       setFormTechnical(docToEdit.responsibleTechnical || '');
       setFormNotes(docToEdit.notes || '');
       setFormFileUrl(docToEdit.fileUrl || '');
+      setFormFile(null);
       setFormFileName(docToEdit.fileName || '');
       setFormFileType(docToEdit.fileType || '');
     } else {
@@ -237,6 +270,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       setFormTechnical('');
       setFormNotes('');
       setFormFileUrl('');
+      setFormFile(null);
       setFormFileName('');
       setFormFileType('');
     }
@@ -248,18 +282,29 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 15 * 1024 * 1024) {
-      alert("O arquivo selecionado deve ter no máximo 15MB.");
+    if (file.size > 20 * 1024 * 1024) {
+      alert("O arquivo selecionado deve ter no máximo 20MB.");
+      e.target.value = '';
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFormFileUrl(reader.result as string);
-      setFormFileName(file.name);
-      setFormFileType(file.type);
-    };
-    reader.readAsDataURL(file);
+    const allowed = new Set([
+      'application/pdf',
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+      'text/plain', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]);
+    if (file.type && !allowed.has(file.type)) {
+      alert('Tipo de arquivo não suportado. Utilize PDF, imagem, Word, Excel ou TXT.');
+      e.target.value = '';
+      return;
+    }
+
+    setFormFile(file);
+    setFormFileName(file.name);
+    setFormFileType(file.type || 'application/octet-stream');
   };
 
   // Submit Handler
@@ -273,66 +318,108 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
+      const targetId = editingDoc?.id || `hpdoc_${Date.now()}`;
+      let fileFields: Partial<HealthProgramDocument> = {};
+
+      if (formFile) {
+        const uploaded = await uploadCorporateFile(
+          formFile,
+          'health-program',
+          targetId,
+          `${formDocType}:${formTitle.trim()}`,
+          formFile.name,
+        );
+        const fileHistory = [...(editingDoc?.fileHistory || [])];
+        if (editingDoc?.fileStoragePath) {
+          fileHistory.push({
+            storagePath: editingDoc.fileStoragePath,
+            fileName: editingDoc.fileName,
+            fileType: editingDoc.fileType,
+            fileSize: editingDoc.fileSize,
+            fileSha256: editingDoc.fileSha256,
+            fileVersion: editingDoc.fileVersion,
+            replacedAt: now,
+          });
+        }
+        fileFields = {
+          // A versão anterior do Storage entra no histórico. Se o registro for
+          // legado em Base64/URL, fileUrl não é tocado no update e permanece
+          // preservado até a migração histórica controlada.
+          fileName: uploaded.fileName,
+          fileType: uploaded.contentType,
+          fileStoragePath: uploaded.storagePath,
+          fileSize: uploaded.size,
+          fileSha256: uploaded.sha256,
+          fileVersion: uploaded.version,
+          fileHistory,
+        };
+      }
+
+      const commonFields = {
+        title: formTitle.trim(),
+        docType: formDocType,
+        issueDate: formIssueDate,
+        expirationDate: formExpirationDate,
+        responsibleCompany: formCompany.trim(),
+        responsibleTechnical: formTechnical.trim(),
+        notes: formNotes.trim(),
+        updatedAt: now,
+        ...fileFields,
+      };
+
       if (editingDoc) {
-        await updateHealthProgramDoc(editingDoc.id, {
-          title: formTitle.trim(),
-          docType: formDocType,
-          issueDate: formIssueDate,
-          expirationDate: formExpirationDate,
-          responsibleCompany: formCompany.trim(),
-          responsibleTechnical: formTechnical.trim(),
-          notes: formNotes.trim(),
-          fileUrl: formFileUrl,
-          fileName: formFileName,
-          fileType: formFileType,
-          updatedAt: now,
-        });
+        await updateHealthProgramDoc(editingDoc.id, commonFields);
       } else {
         await addHealthProgramDoc({
-          title: formTitle.trim(),
-          docType: formDocType,
-          issueDate: formIssueDate,
-          expirationDate: formExpirationDate,
-          responsibleCompany: formCompany.trim(),
-          responsibleTechnical: formTechnical.trim(),
-          notes: formNotes.trim(),
-          fileUrl: formFileUrl,
+          ...commonFields,
+          // Nenhum arquivo novo => campos legados ficam vazios.
+          fileUrl: formFile ? '' : formFileUrl,
           fileName: formFileName,
           fileType: formFileType,
           createdAt: now,
-          updatedAt: now,
           createdBy: currentUser?.name || currentUser?.username || 'Usuário do Portal'
-        });
+        } as Omit<HealthProgramDocument, 'id'>, targetId);
       }
       setShowModal(false);
+      setFormFile(null);
     } catch (err) {
       console.error("Erro ao salvar documento de programa de saúde:", err);
-      alert("Ocorreu um erro ao salvar o documento. Tente novamente.");
+      alert("Ocorreu um erro ao salvar o documento. O registro não foi concluído; tente novamente.");
     } finally {
       setSubmitting(false);
     }
   };
 
   // Download Attached File Helper
-  const handleDownloadFile = (fileUrl: string, fileName: string) => {
-    if (!fileUrl) return;
+  const handleDownloadFile = async (doc: HealthProgramDocument) => {
+    const fileName = doc.fileName || `${doc.title}.pdf`;
+    if (doc.fileStoragePath) {
+      try {
+        await downloadCorporateFile(doc.fileStoragePath, fileName);
+      } catch (error) {
+        console.error('Erro ao baixar documento privado:', error);
+        alert('Não foi possível baixar o arquivo.');
+      }
+      return;
+    }
+    if (!doc.fileUrl) return;
     try {
       const link = document.createElement('a');
-      link.href = fileUrl;
-      link.download = fileName || 'documento_SST.pdf';
+      link.href = doc.fileUrl;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      console.error("Erro ao baixar arquivo:", err);
-      window.open(fileUrl, '_blank');
+      console.error("Erro ao baixar arquivo legado:", err);
+      window.open(doc.fileUrl, '_blank', 'noopener,noreferrer');
     }
   };
 
   // Request Delete Handler (Admin check)
   const handleRequestDelete = (doc: HealthProgramDocument) => {
     if (!isUserAdmin) {
-      alert("Apenas usuários com perfil Administrador podem excluir documentos de Programas de Saúde (PGR/PCMSO).");
+      alert("Apenas usuários com perfil Administrador podem arquivar documentos de Programas de Saúde (PGR/PCMSO).");
       return;
     }
     setDeleteConfirmDoc(doc);
@@ -354,7 +441,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
     try {
       const isValid = await verifyAdminCredentials(currentUser?.username || '', pwd);
       if (!isValid) {
-        setDeleteError("Credencial administrativa inválida. A exclusão foi cancelada.");
+        setDeleteError("Credencial administrativa inválida. O arquivamento foi cancelado.");
         return;
       }
     } catch (error: any) {
@@ -367,8 +454,8 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       setDeleteConfirmDoc(null);
       setDeletePasswordInput('');
     } catch (err) {
-      console.error("Erro ao excluir documento:", err);
-      setDeleteError("Falha ao excluir o documento no banco de dados.");
+      console.error("Erro ao arquivar documento:", err);
+      setDeleteError("Falha ao arquivar o documento no banco de dados.");
     }
   };
 
@@ -713,7 +800,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
                       {/* Attachment */}
                       <td className="py-3 px-4 text-center whitespace-nowrap">
-                        {doc.fileUrl ? (
+                        {(doc.fileStoragePath || doc.fileUrl) ? (
                           <div className="flex items-center justify-center space-x-1.5">
                             <button
                               onClick={() => setPreviewDoc(doc)}
@@ -724,7 +811,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
                               <span>Visualizar</span>
                             </button>
                             <button
-                              onClick={() => handleDownloadFile(doc.fileUrl!, doc.fileName || `${doc.title}.pdf`)}
+                              onClick={() => void handleDownloadFile(doc)}
                               className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-xs font-semibold border border-slate-300 transition"
                               title="Baixar arquivo"
                             >
@@ -756,7 +843,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
                                 ? 'text-slate-600 hover:text-red-600 hover:bg-red-50 cursor-pointer' 
                                 : 'text-slate-300 cursor-not-allowed opacity-40'
                             }`}
-                            title={isUserAdmin ? "Excluir Documento (Requer senha de Administrador)" : "Apenas usuários com perfil Administrador podem excluir"}
+                            title={isUserAdmin ? "Arquivar Documento (Requer senha de Administrador)" : "Apenas usuários com perfil Administrador podem arquivar"}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -998,26 +1085,39 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
                 )}
               </div>
 
-              {previewDoc.fileUrl ? (
+              {(previewDoc.fileStoragePath || previewDoc.fileUrl) ? (
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-100 flex flex-col items-center justify-center min-h-[300px]">
-                  {previewDoc.fileUrl.startsWith('data:image/') ? (
-                    <img src={previewDoc.fileUrl} alt={previewDoc.title} className="max-h-[500px] object-contain" />
-                  ) : previewDoc.fileUrl.startsWith('data:application/pdf') ? (
-                    <iframe src={previewDoc.fileUrl} className="w-full h-[500px]" title={previewDoc.title} />
-                  ) : (
-                    <div className="text-center p-6 space-y-3">
-                      <FileText className="h-12 w-12 text-slate-400 mx-auto" />
-                      <p className="text-sm font-semibold text-slate-700">{previewDoc.fileName || 'Arquivo Anexado'}</p>
-                      <a
-                        href={previewDoc.fileUrl}
-                        download={previewDoc.fileName || 'documento.pdf'}
-                        className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-500 transition shadow"
-                      >
-                        <Download className="h-4 w-4" />
-                        <span>Baixar Arquivo</span>
-                      </a>
+                  {previewLoading ? (
+                    <div className="text-center p-8 text-slate-500 text-sm">
+                      <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2" />
+                      Carregando arquivo protegido...
                     </div>
-                  )}
+                  ) : (() => {
+                    const resolvedUrl = previewDoc.fileStoragePath ? previewBlobUrl : (previewDoc.fileUrl || '');
+                    const mime = previewDoc.fileType || '';
+                    const isImage = mime.startsWith('image/') || resolvedUrl.startsWith('data:image/');
+                    const isPdf = mime === 'application/pdf' || resolvedUrl.startsWith('data:application/pdf');
+                    if (resolvedUrl && isImage) {
+                      return <img src={resolvedUrl} alt={previewDoc.title} className="max-h-[500px] object-contain" />;
+                    }
+                    if (resolvedUrl && isPdf) {
+                      return <iframe src={resolvedUrl} className="w-full h-[500px]" title={previewDoc.title} />;
+                    }
+                    return (
+                      <div className="text-center p-6 space-y-3">
+                        <FileText className="h-12 w-12 text-slate-400 mx-auto" />
+                        <p className="text-sm font-semibold text-slate-700">{previewDoc.fileName || 'Arquivo Anexado'}</p>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownloadFile(previewDoc)}
+                          className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-500 transition shadow"
+                        >
+                          <Download className="h-4 w-4" />
+                          <span>Baixar Arquivo</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="text-center py-8 text-slate-400 italic text-sm">
@@ -1027,9 +1127,9 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
             </div>
 
             <div className="bg-slate-100 p-4 border-t border-slate-200 flex items-center justify-between shrink-0">
-              {previewDoc.fileUrl ? (
+              {(previewDoc.fileStoragePath || previewDoc.fileUrl) ? (
                 <button
-                  onClick={() => handleDownloadFile(previewDoc.fileUrl!, previewDoc.fileName || `${previewDoc.title}.pdf`)}
+                  onClick={() => void handleDownloadFile(previewDoc)}
                   className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-xs hover:bg-blue-700 transition flex items-center space-x-1.5 shadow-sm"
                 >
                   <Download className="h-4 w-4" />
@@ -1054,7 +1154,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
             <div className="bg-red-600 text-white p-4 flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Trash2 className="h-5 w-5" />
-                <h3 className="font-bold text-base">Confirmar Exclusão com Senha</h3>
+                <h3 className="font-bold text-base">Confirmar Arquivamento com Senha</h3>
               </div>
               <button
                 onClick={() => setDeleteConfirmDoc(null)}
@@ -1066,7 +1166,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
             <form onSubmit={handleConfirmDelete} className="p-6 space-y-4">
               <p className="text-xs text-slate-700">
-                Você está prestes a excluir permanentemente o documento de saúde:
+                Você está prestes a arquivar este documento de saúde. Ele sairá da lista operacional, mas permanecerá preservado no banco e na trilha de auditoria:
               </p>
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs font-bold text-red-900">
                 {deleteConfirmDoc.title}

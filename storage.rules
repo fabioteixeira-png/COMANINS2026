@@ -114,6 +114,13 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    // RH/Financeiro: objetos sensíveis nunca são entregues por URL pública nem
+    // acessados diretamente pelo SDK do navegador. Upload/download passam pelo
+    // backend autenticado, que usa Admin SDK e aplica autorização por finalidade.
+    match /secure-documents/{allPaths=**} {
+      allow read, write: if false;
+    }
+
     // Nenhum outro caminho do Storage fica exposto por padrão.
     match /{allPaths=**} {
       allow read, write: if false;

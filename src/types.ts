@@ -242,7 +242,16 @@ export interface EmployeeTrainingRecord {
   completionDate?: string;
   expirationDate?: string;
   result?: string;
-  certificateUrl?: string; // We can just store a text string or file link
+  certificateUrl?: string; // legado: Base64 ou URL externa
+  certificateStoragePath?: string;
+  certificateFileName?: string;
+  certificateContentType?: string;
+  certificateSize?: number;
+  certificateSha256?: string;
+  certificateVersion?: number;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
   status: TrainingStatus;
   scheduledDate?: string;
 }
@@ -312,6 +321,9 @@ export interface MedicalExam {
   status: 'Apto' | 'Inapto' | 'Pendente';
   nextExamDate?: string;
   notes?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface PayslipItem {
@@ -348,6 +360,9 @@ export interface FinanceTransaction {
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface FinanceContract {
@@ -361,6 +376,9 @@ export interface FinanceContract {
   endDate: string;
   status: 'ativo' | 'encerrado' | 'suspenso';
   costCenter: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface FinanceCostCenter {
@@ -389,8 +407,13 @@ export interface Payslip {
   createdAt: string;
   items?: PayslipItem[];
   
-  pdfBase64?: string;       // Base64 string of the uploaded PDF file
-  pdfName?: string;         // Name of the uploaded PDF file
+  pdfBase64?: string;       // legado: Base64 do PDF
+  pdfStoragePath?: string;  // novo: caminho privado no Storage
+  pdfName?: string;         // nome do arquivo
+  pdfContentType?: string;
+  pdfSize?: number;
+  pdfSha256?: string;
+  pdfVersion?: number;
   documentType?: "holerite" | "alimentacao" | "transporte" | "espelho_ponto";
   
   // LGPD audit trails
@@ -402,6 +425,9 @@ export interface Payslip {
   emailSent10Days?: boolean;
   visualizedIp?: string;
   visualizedUserAgent?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 
@@ -418,6 +444,9 @@ export interface FinanceMeasurement {
   invoiceNumber?: string;
   createdAt: string;
   updatedAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 
@@ -463,12 +492,28 @@ export interface HealthProgramDocument {
   expirationDate: string;     // YYYY-MM-DD
   responsibleCompany?: string; // e.g. "SST Consultoria & Engenharia"
   responsibleTechnical?: string; // e.g. "Eng. Responsável - CREA/MTE"
-  fileUrl?: string;           // Base64 data or external link
+  fileUrl?: string;           // legado: Base64 ou link externo
+  fileStoragePath?: string;   // novo: caminho privado no Storage
   fileName?: string;
   fileType?: string;
+  fileSize?: number;
+  fileSha256?: string;
+  fileVersion?: number;
+  fileHistory?: Array<{
+    storagePath: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    fileSha256?: string;
+    fileVersion?: number;
+    replacedAt?: string;
+  }>;
   notes?: string;
   createdAt: string;
   updatedAt: string;
   createdBy?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 

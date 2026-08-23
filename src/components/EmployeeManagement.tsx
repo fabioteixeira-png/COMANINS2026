@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc,
   addEmployeeAsoDoc,
-  deleteEmployeeAsoDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument } from '../lib/firebase';
+  deleteEmployeeAsoDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument,
+  uploadCorporateFile, uploadCorporateDataUrl, openCorporateFile, downloadCorporateFile } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { verifyAdminCredentials } from '../utils/authApi';
@@ -94,6 +95,49 @@ export default function EmployeeManagement({
   const [newNrCertificateFile, setNewNrCertificateFile] = useState<File | null>(null);
   const [isSavingNrTraining, setIsSavingNrTraining] = useState(false);
 
+  const openLegacyOrStoredDocument = async (storagePath?: string, legacyUrl?: string) => {
+    if (storagePath) {
+      try {
+        await openCorporateFile(storagePath);
+      } catch (error: any) {
+        alert(error?.message || 'Não foi possível abrir o documento.');
+      }
+      return;
+    }
+    if (!legacyUrl) return;
+    if (legacyUrl.startsWith('data:')) {
+      try {
+        const response = await fetch(legacyUrl);
+        const blobUrl = URL.createObjectURL(await response.blob());
+        window.open(blobUrl, '_blank');
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 5 * 60 * 1000);
+      } catch (error) {
+        console.error('Erro ao abrir documento legado:', error);
+        alert('Não foi possível abrir o documento.');
+      }
+      return;
+    }
+    window.open(legacyUrl, '_blank');
+  };
+
+  const downloadLegacyOrStoredDocument = async (storagePath: string | undefined, legacyUrl: string | undefined, fileName: string) => {
+    if (storagePath) {
+      try {
+        await downloadCorporateFile(storagePath, fileName);
+      } catch (error: any) {
+        alert(error?.message || 'Não foi possível baixar o documento.');
+      }
+      return;
+    }
+    if (!legacyUrl) return;
+    const link = document.createElement('a');
+    link.href = legacyUrl;
+    link.download = fileName || 'documento';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
   const standardNrOptions = [
     'NR-06 (EPI)',
     'NR-10 (Seg. em Eletricidade)',
@@ -136,24 +180,26 @@ export default function EmployeeManagement({
         expDate = compDate.toISOString().split('T')[0];
       }
 
-      let fileDataUrl = newNrCertificateUrl;
+      let certificateMeta: any = {};
       if (newNrCertificateFile) {
         const isImage = newNrCertificateFile.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(newNrCertificateFile.name || '');
-        if (isImage) {
-          fileDataUrl = await compressImageToWebResolution(newNrCertificateFile, 1200, 1200, 0.7);
-        } else {
-          if (newNrCertificateFile.size > 500 * 1024) {
-            alert("O arquivo do certificado (PDF) é muito grande (" + (newNrCertificateFile.size / 1024).toFixed(1) + "KB). O tamanho máximo permitido para salvar no banco é de 500KB. Reduza o arquivo e tente novamente.");
-            setIsSavingNrTraining(false);
-            return;
-          }
-          fileDataUrl = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.onerror = (e) => reject(new Error("Erro ao ler o arquivo."));
-            reader.readAsDataURL(newNrCertificateFile);
-          });
-        }
+        const uploaded = isImage
+          ? await uploadCorporateDataUrl(
+              await compressImageToWebResolution(newNrCertificateFile, 1200, 1200, 0.7),
+              'employee-training',
+              empId,
+              courseName,
+              `${newNrCertificateFile.name.replace(/\.[^.]+$/, '') || 'certificado'}.webp`,
+            )
+          : await uploadCorporateFile(newNrCertificateFile, 'employee-training', empId, courseName, newNrCertificateFile.name);
+        certificateMeta = {
+          certificateStoragePath: uploaded.storagePath,
+          certificateFileName: uploaded.fileName,
+          certificateContentType: uploaded.contentType,
+          certificateSize: uploaded.size,
+          certificateSha256: uploaded.sha256,
+          certificateVersion: uploaded.version,
+        };
       }
 
       const payload: any = {
@@ -165,7 +211,8 @@ export default function EmployeeManagement({
         expirationDate: expDate,
         status: newNrStatus,
         result: newNrResult,
-        certificateUrl: fileDataUrl,
+        certificateUrl: newNrCertificateFile ? '' : newNrCertificateUrl,
+        ...certificateMeta,
         institution: newNrInstitution,
       };
 
@@ -197,12 +244,12 @@ export default function EmployeeManagement({
   };
 
   const handleRemoveNrTraining = async (id: string) => {
-    if (!confirm('Deseja realmente remover este registro de treinamento de NR?')) return;
+    if (!confirm('Deseja arquivar este registro de treinamento de NR? O histórico será preservado.')) return;
     try {
       await deleteEmployeeTrainingDoc(id);
     } catch (err) {
-      console.error('Erro ao remover treinamento:', err);
-      alert('Erro ao remover o treinamento.');
+      console.error('Erro ao arquivar treinamento:', err);
+      alert('Erro ao arquivar o treinamento.');
     }
   };
 
@@ -299,6 +346,12 @@ export default function EmployeeManagement({
       return;
     }
 
+    const empId = selectedUser?.id || formData.id || formData.username;
+    if (!empId) {
+      alert('Por favor, primeiro salve o colaborador usando o botão "Salvar Alterações" no final da página (Aba 1) antes de registrar um ASO.');
+      return;
+    }
+
     const newAsoItem: AsoContractItem = {
       id: `aso_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       contractName: newAsoContractName.trim(),
@@ -309,88 +362,76 @@ export default function EmployeeManagement({
       status: newAsoStatus,
       clinicDoctor: newAsoClinicDoctor.trim(),
       notes: newAsoNotes.trim(),
-      docUrl: ''
+      docUrl: '',
     };
 
-    const processAdd = async (docUrl: string) => {
-      newAsoItem.docUrl = docUrl;
-      
-      const empId = selectedUser?.id || formData.id || formData.username;
-      if (!empId) {
-        alert('Por favor, primeiro salve o colaborador usando o botão "Salvar Alterações" no final da página (Aba 1) antes de registrar um ASO.');
-        return;
+    try {
+      if (newAsoDocFile) {
+        const isImage = newAsoDocFile.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(newAsoDocFile.name || '');
+        const uploaded = isImage
+          ? await uploadCorporateDataUrl(
+              await compressImageToWebResolution(newAsoDocFile, 1200, 1200, 0.7),
+              'employee-aso',
+              empId,
+              `${newAsoExamType} - ${newAsoContractName.trim()}`,
+              `${newAsoDocFile.name.replace(/\.[^.]+$/, '') || 'aso'}.webp`,
+            )
+          : await uploadCorporateFile(
+              newAsoDocFile,
+              'employee-aso',
+              empId,
+              `${newAsoExamType} - ${newAsoContractName.trim()}`,
+              newAsoDocFile.name,
+            );
+        newAsoItem.docStoragePath = uploaded.storagePath;
+        newAsoItem.docFileName = uploaded.fileName;
+        newAsoItem.docContentType = uploaded.contentType;
+        newAsoItem.docSize = uploaded.size;
+        newAsoItem.docSha256 = uploaded.sha256;
+        newAsoItem.docVersion = uploaded.version;
       }
-      
-      try {
-        const savedAso = await addEmployeeAsoDoc({
-          employeeId: empId,
-          employeeName: formData.name || selectedUser?.name || 'Desconhecido',
-          ...newAsoItem
-        });
-        
-        alert('ASO registrado com sucesso!');
 
-        // Update validity date in formData just for display/logic sync
-        setFormData((prev) => {
-          const currentList = prev.asoContracts || [];
-          const updatedList = [...currentList, savedAso];
-          updatedList.sort((a, b) => new Date(a.validityDate).getTime() - new Date(b.validityDate).getTime());
-          return {
-            ...prev,
-            asoContracts: updatedList,
-            asoValidity: updatedList[0]?.validityDate || prev.asoValidity
-          };
-        });
+      const savedAso = await addEmployeeAsoDoc({
+        employeeId: empId,
+        employeeName: formData.name || selectedUser?.name || 'Desconhecido',
+        ...newAsoItem,
+      });
 
-        // Reset sub-form
-        setNewAsoContractName('');
-        setNewAsoUnitArea('');
-        setNewAsoExamType('Periódico');
-        setNewAsoExamDate('');
-        setNewAsoValidityDate('');
-        setNewAsoStatus('Apto');
-        setNewAsoClinicDoctor('');
-        setNewAsoNotes('');
-        setNewAsoDocFile(null);
-      } catch (err) {
-        alert('Erro ao salvar ASO: ' + err);
-      }
-    };
-
-    if (newAsoDocFile) {
-      const isImage = newAsoDocFile.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(newAsoDocFile.name || '');
-      if (isImage) {
-        try {
-          const compressed = await compressImageToWebResolution(newAsoDocFile, 1200, 1200, 0.7);
-          processAdd(compressed);
-        } catch (err) {
-          console.error("Erro ao comprimir imagem:", err);
-          alert("Erro ao processar imagem.");
-        }
-      } else {
-        if (newAsoDocFile.size > 500 * 1024) {
-          alert("O arquivo do ASO (PDF) é muito grande (" + (newAsoDocFile.size / 1024).toFixed(1) + "KB). O limite é de 500KB.");
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          processAdd((e.target?.result as string) || '');
+      alert('ASO registrado com sucesso!');
+      setFormData((prev) => {
+        const currentList = prev.asoContracts || [];
+        const updatedList = [...currentList, savedAso];
+        updatedList.sort((a, b) => new Date(a.validityDate).getTime() - new Date(b.validityDate).getTime());
+        return {
+          ...prev,
+          asoContracts: updatedList,
+          asoValidity: updatedList[0]?.validityDate || prev.asoValidity,
         };
-        reader.readAsDataURL(newAsoDocFile);
-      }
-    } else {
-      processAdd('');
+      });
+
+      setNewAsoContractName('');
+      setNewAsoUnitArea('');
+      setNewAsoExamType('Periódico');
+      setNewAsoExamDate('');
+      setNewAsoValidityDate('');
+      setNewAsoStatus('Apto');
+      setNewAsoClinicDoctor('');
+      setNewAsoNotes('');
+      setNewAsoDocFile(null);
+    } catch (err: any) {
+      console.error('Erro ao salvar ASO:', err);
+      alert('Erro ao salvar ASO: ' + (err?.message || String(err)));
     }
   };
 
     const handleRemoveAsoContract = async (asoId: string) => {
     if (currentUser?.role !== 'Administrador' && currentUser?.role !== 'Admin' && currentUser?.role !== 'admin' && currentUser?.role !== 'master' && currentUser?.role !== 'Diretor') {
-      alert("Apenas administradores podem excluir ASOs.");
+      alert("Apenas administradores podem arquivar ASOs.");
       return;
     }
-    const pwd = window.prompt("Digite sua senha de administrador para confirmar a exclusão deste ASO:");
+    const pwd = window.prompt("Digite sua senha de administrador para confirmar o arquivamento deste ASO:");
     if (pwd === null) return;
-    
+
     try {
       const valid = await verifyAdminCredentials(currentUser?.username || '', pwd);
       if (!valid) {
@@ -403,26 +444,32 @@ export default function EmployeeManagement({
     }
 
     try {
-      // Execute the database delete unconditionally since 'easo_' constraint causes bugs for old migrated records
-      if (asoId) {
-         await deleteEmployeeAsoDoc(asoId);
-      }
-      // Always remove from local formData as well, whether it's legacy or newly added to local state
-      const updatedList = (formData.asoContracts || []).filter((item: any) => item.id !== asoId);
-      
-      // Se for um ASO legado salvo diretamente no cadastro do colaborador (não no employeeAsos), precisamos forçar a atualização no Firebase imediatamente.
-      if (asoId && !asoId.startsWith('easo_') && selectedUser && onUpdateInternalUser) {
-        onUpdateInternalUser(selectedUser.id, { asoContracts: updatedList });
+      const now = new Date().toISOString();
+      const actor = currentUser?.name || currentUser?.username || 'Administrador';
+
+      if (asoId.startsWith('easo_')) {
+        // Registros novos vivem em employeeAsos e são arquivados pelo backend.
+        await deleteEmployeeAsoDoc(asoId);
+      } else if (selectedUser && onUpdateInternalUser) {
+        // Registros legados ainda embutidos no portalUsers nunca são removidos do
+        // array: apenas marcados como arquivados para preservar o histórico.
+        const archivedLegacy = (formData.asoContracts || []).map((item: any) =>
+          item.id === asoId
+            ? { ...item, isDeleted: true, deletedAt: now, deletedBy: actor }
+            : item
+        );
+        onUpdateInternalUser(selectedUser.id, { asoContracts: archivedLegacy });
       }
 
+      const visibleList = (formData.asoContracts || []).filter((item: any) => item.id !== asoId && item.isDeleted !== true);
       setFormData((prev: any) => ({
         ...prev,
-        asoContracts: updatedList,
-        asoValidity: updatedList.length > 0 ? (updatedList[0]?.validityDate || '') : ''
+        asoContracts: visibleList,
+        asoValidity: visibleList.length > 0 ? (visibleList[0]?.validityDate || '') : ''
       }));
     } catch (err) {
-      console.error("Erro ao remover ASO:", err);
-      alert("Erro ao remover ASO.");
+      console.error("Erro ao arquivar ASO:", err);
+      alert("Erro ao arquivar ASO.");
     }
   };
 
@@ -444,8 +491,8 @@ export default function EmployeeManagement({
 
     internalUsers.forEach((u) => {
       // 1. ASO (Suporta Múltiplos Contratos e Áreas)
-      if (u.asoContracts && u.asoContracts.length > 0) {
-        u.asoContracts.forEach((asoItem) => {
+      if (u.asoContracts && u.asoContracts.some((asoItem: any) => asoItem.isDeleted !== true)) {
+        u.asoContracts.filter((asoItem: any) => asoItem.isDeleted !== true).forEach((asoItem) => {
           if (asoItem.validityDate) {
             const valDate = new Date(asoItem.validityDate);
             const diffDays = Math.ceil((valDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
@@ -694,10 +741,12 @@ export default function EmployeeManagement({
         auditLogs: logs
       };
       
-      // Force scrub legacy bloated fields to prevent 1MB limit errors
-      updatePayload.attachedDocs = null;
-      updatePayload.asoContracts = null;
-      updatePayload.employeeTrainings = null;
+      // Não regravar campos legados volumosos e, principalmente, não apagá-los.
+      // A ausência da chave no update preserva o valor existente no Firestore
+      // enquanto a migração histórica para coleções/Storage é feita em lotes.
+      delete updatePayload.attachedDocs;
+      delete updatePayload.asoContracts;
+      delete updatePayload.employeeTrainings;
       
       onUpdateInternalUser(selectedUser.id, updatePayload);
       alert('Cadastro do colaborador atualizado com sucesso!');
@@ -1797,7 +1846,7 @@ export default function EmployeeManagement({
                           </div>
                         </div>
                         <span className="text-[11px] font-mono font-bold bg-royal-blue text-white px-2.5 py-1 rounded-full">
-                          {((employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username)).length + (formData.asoContracts || []).length)} ASO(s) Registrado(s)
+                          {((employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username)).length + (formData.asoContracts || []).filter((a: any) => a.isDeleted !== true).length)} ASO(s) Registrado(s)
                         </span>
                       </div>
 
@@ -1927,7 +1976,7 @@ export default function EmployeeManagement({
                       {/* LISTA DE ASOs CADASTRADOS POR CONTRATO */}
                       {(() => {
                         const asoRecords = [
-                          ...(formData.asoContracts || []),
+                          ...(formData.asoContracts || []).filter((a: any) => a.isDeleted !== true),
                           ...(employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username))
                         ].filter((v,i,a) => a.findIndex(t=>(t.id === v.id))===i);
                         
@@ -1996,51 +2045,37 @@ export default function EmployeeManagement({
                                     </div>
 
                                     <div className="flex items-center space-x-1.5">
-                                      {asoItem.docUrl && (
+                                      {(asoItem.docStoragePath || asoItem.docUrl) && (
                                         <div className="flex items-center space-x-1">
                                           <button
                                             onClick={(e) => {
                                               e.preventDefault();
-                                              if (asoItem.docUrl?.startsWith("data:")) {
-                                                try {
-                                                  const byteString = atob(asoItem.docUrl.split(",")[1]);
-                                                  const mimeString = asoItem.docUrl.split(",")[0].split(":")[1].split(";")[0];
-                                                  const ab = new ArrayBuffer(byteString.length);
-                                                  const ia = new Uint8Array(ab);
-                                                  for (let i = 0; i < byteString.length; i++) {
-                                                    ia[i] = byteString.charCodeAt(i);
-                                                  }
-                                                  const blob = new Blob([ab], { type: mimeString });
-                                                  const blobUrl = URL.createObjectURL(blob);
-                                                  window.open(blobUrl, "_blank");
-                                                } catch (err) {
-                                                  console.error("Erro ao abrir ASO", err);
-                                                  alert("Erro ao abrir o ASO.");
-                                                }
-                                              } else {
-                                                window.open(asoItem.docUrl, "_blank");
-                                              }
+                                              void openLegacyOrStoredDocument(asoItem.docStoragePath, asoItem.docUrl);
                                             }}
                                             className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors cursor-pointer"
                                             title="Visualizar Anexo ASO"
                                           >
                                             <Eye className="h-4 w-4" />
                                           </button>
-                                          <a
-                                            href={asoItem.docUrl}
-                                            download={`ASO_${(formData.name || 'Colaborador').replace(/\s+/g, '_')}_${asoItem.validityDate}`}
+                                          <button
+                                            type="button"
+                                            onClick={() => void downloadLegacyOrStoredDocument(
+                                              asoItem.docStoragePath,
+                                              asoItem.docUrl,
+                                              asoItem.docFileName || `ASO_${(formData.name || 'Colaborador').replace(/\s+/g, '_')}_${asoItem.validityDate}`,
+                                            )}
                                             className="p-1 text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
                                             title="Baixar ASO"
                                           >
                                             <Download className="h-4 w-4" />
-                                          </a>
+                                          </button>
                                         </div>
                                       )}
                                       <button
                                         type="button"
                                         onClick={() => handleRemoveAsoContract(asoItem.id)}
                                         className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                                        title="Excluir ASO"
+                                        title="Arquivar ASO"
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </button>
@@ -2269,44 +2304,30 @@ export default function EmployeeManagement({
                                       </div>
 
                                       <div className="flex items-center space-x-1.5">
-                                        {rec.certificateUrl && (
+                                        {(rec.certificateStoragePath || rec.certificateUrl) && (
                                           <div className="flex items-center space-x-1">
                                             <button
                                               onClick={(e) => {
                                                 e.preventDefault();
-                                                if (rec.certificateUrl?.startsWith("data:")) {
-                                                  try {
-                                                    const byteString = atob(rec.certificateUrl.split(",")[1]);
-                                                    const mimeString = rec.certificateUrl.split(",")[0].split(":")[1].split(";")[0];
-                                                    const ab = new ArrayBuffer(byteString.length);
-                                                    const ia = new Uint8Array(ab);
-                                                    for (let i = 0; i < byteString.length; i++) {
-                                                      ia[i] = byteString.charCodeAt(i);
-                                                    }
-                                                    const blob = new Blob([ab], { type: mimeString });
-                                                    const blobUrl = URL.createObjectURL(blob);
-                                                    window.open(blobUrl, "_blank");
-                                                  } catch (err) {
-                                                    console.error("Erro ao abrir certificado", err);
-                                                    alert("Erro ao abrir o certificado.");
-                                                  }
-                                                } else {
-                                                  window.open(rec.certificateUrl, "_blank");
-                                                }
+                                                void openLegacyOrStoredDocument(rec.certificateStoragePath, rec.certificateUrl);
                                               }}
                                               className="p-1 text-royal-blue hover:bg-blue-50 rounded transition-colors cursor-pointer"
                                               title="Ver Certificado"
                                             >
                                               <Eye className="h-4 w-4" />
                                             </button>
-                                            <a
-                                              href={rec.certificateUrl}
-                                              download={`Certificado_${name.replace(/\s+/g, '_')}_${currentEmpName?.replace(/\s+/g, '_') || 'Colaborador'}`}
+                                            <button
+                                              type="button"
+                                              onClick={() => void downloadLegacyOrStoredDocument(
+                                                rec.certificateStoragePath,
+                                                rec.certificateUrl,
+                                                rec.certificateFileName || `Certificado_${name.replace(/\s+/g, '_')}_${currentEmpName?.replace(/\s+/g, '_') || 'Colaborador'}`,
+                                              )}
                                               className="p-1 text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
                                               title="Baixar Certificado"
                                             >
                                               <Download className="h-4 w-4" />
-                                            </a>
+                                            </button>
                                           </div>
                                         )}
                                         {isUserAdmin && (
@@ -2794,27 +2815,31 @@ export default function EmployeeManagement({
                                 const savedDocs = [];
                                 for (let i = 0; i < newDocFiles.length; i++) {
                                   const f = newDocFiles[i];
-                                  let fileUrl = "";
-                                  const isImage = f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || '');
-                                  if (isImage) {
-                                    fileUrl = await compressImageToWebResolution(f, 1200, 1200, 0.7);
-                                  } else {
-                                    fileUrl = await new Promise((resolve) => {
-                                      const reader = new FileReader();
-                                      reader.onloadend = () => resolve(reader.result as string);
-                                      reader.readAsDataURL(f);
-                                    });
-                                  }
-
                                   const docName = newDocFiles.length > 1 ? `${newDocType} - ${newDocName.trim()} (${i+1})` : `${newDocType} - ${newDocName.trim()}`;
+                                  const isImage = f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || '');
+                                  const uploaded = isImage
+                                    ? await uploadCorporateDataUrl(
+                                        await compressImageToWebResolution(f, 1600, 1600, 0.78),
+                                        'employee-document',
+                                        empId,
+                                        docName,
+                                        `${f.name.replace(/\.[^.]+$/, '') || 'documento'}.webp`,
+                                      )
+                                    : await uploadCorporateFile(f, 'employee-document', empId, docName, f.name);
                                   const newDoc = {
                                     userId: empId,
                                     name: docName,
                                     type: newDocType,
-                                    url: fileUrl,
+                                    url: '',
+                                    storagePath: uploaded.storagePath,
+                                    fileName: uploaded.fileName,
+                                    contentType: uploaded.contentType,
+                                    size: uploaded.size,
+                                    sha256: uploaded.sha256,
+                                    fileVersion: uploaded.version,
                                     date: new Date().toLocaleDateString('pt-BR')
                                   };
-                                  
+
                                   const savedDoc = await addEmployeeDocument(newDoc);
                                   savedDocs.push(savedDoc);
                                 }
@@ -2863,31 +2888,13 @@ export default function EmployeeManagement({
                                 </div>
 
                                 <div className="flex items-center space-x-1 shrink-0">
-                                  {docItem.url && (
+                                  {(docItem.storagePath || docItem.url) && (
                                     <>
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.preventDefault();
-                                          if (docItem.url?.startsWith("data:")) {
-                                            try {
-                                              const byteString = atob(docItem.url.split(",")[1]);
-                                              const mimeString = docItem.url.split(",")[0].split(":")[1].split(";")[0];
-                                              const ab = new ArrayBuffer(byteString.length);
-                                              const ia = new Uint8Array(ab);
-                                              for (let i = 0; i < byteString.length; i++) {
-                                                ia[i] = byteString.charCodeAt(i);
-                                              }
-                                              const blob = new Blob([ab], { type: mimeString });
-                                              const blobUrl = URL.createObjectURL(blob);
-                                              window.open(blobUrl, "_blank");
-                                            } catch (err) {
-                                              console.error("Erro ao abrir documento", err);
-                                              alert("Erro ao abrir o documento.");
-                                            }
-                                          } else {
-                                            window.open(docItem.url, "_blank");
-                                          }
+                                          void openLegacyOrStoredDocument(docItem.storagePath, docItem.url);
                                         }}
                                         className="p-1.5 text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
                                         title="Visualizar Documento"
@@ -2896,14 +2903,11 @@ export default function EmployeeManagement({
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          const link = document.createElement('a');
-                                          link.href = docItem.url;
-                                          link.download = docItem.name || 'documento';
-                                          document.body.appendChild(link);
-                                          link.click();
-                                          document.body.removeChild(link);
-                                        }}
+                                        onClick={() => void downloadLegacyOrStoredDocument(
+                                          docItem.storagePath,
+                                          docItem.url,
+                                          docItem.fileName || docItem.name || 'documento',
+                                        )}
                                         className="p-1.5 text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
                                         title="Baixar Documento"
                                       >
@@ -2914,7 +2918,7 @@ export default function EmployeeManagement({
                                   <button
                                     type="button"
                                     onClick={async () => {
-                                      if (confirm('Deseja realmente excluir este anexo definitivamente?')) {
+                                      if (confirm('Deseja arquivar este anexo? O arquivo e o histórico serão preservados.')) {
                                         try {
                                           await deleteEmployeeDocument(docItem.id);
                                           setUserDocuments(userDocuments.filter(d => d.id !== docItem.id));
@@ -3206,30 +3210,12 @@ export default function EmployeeManagement({
                                     </span>
                                   </td>
                                   <td className="p-1.5 text-center">
-                                    {rec.certificateUrl ? (
+                                    {(rec.certificateStoragePath || rec.certificateUrl) ? (
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.preventDefault();
-                                          if (rec.certificateUrl?.startsWith("data:")) {
-                                            try {
-                                              const byteString = atob(rec.certificateUrl.split(",")[1]);
-                                              const mimeString = rec.certificateUrl.split(",")[0].split(":")[1].split(";")[0];
-                                              const ab = new ArrayBuffer(byteString.length);
-                                              const ia = new Uint8Array(ab);
-                                              for (let i = 0; i < byteString.length; i++) {
-                                                ia[i] = byteString.charCodeAt(i);
-                                              }
-                                              const blob = new Blob([ab], { type: mimeString });
-                                              const blobUrl = URL.createObjectURL(blob);
-                                              window.open(blobUrl, "_blank");
-                                            } catch (err) {
-                                              console.error("Erro ao abrir certificado", err);
-                                              alert("Erro ao abrir certificado.");
-                                            }
-                                          } else {
-                                            window.open(rec.certificateUrl, "_blank");
-                                          }
+                                          void openLegacyOrStoredDocument(rec.certificateStoragePath, rec.certificateUrl);
                                         }}
                                         className="bg-royal-blue/10 hover:bg-royal-blue/20 text-royal-blue px-2 py-0.5 rounded font-bold text-[9px] inline-flex items-center gap-1 print:hidden"
                                       >
@@ -3253,7 +3239,7 @@ export default function EmployeeManagement({
                 {/* TABELA DE ASOs POR CONTRATO */}
                 {(() => {
                   const asoRecords = [
-                    ...(selectedUser.asoContracts || []),
+                    ...(selectedUser.asoContracts || []).filter((a: any) => a.isDeleted !== true),
                     ...(employeeAsos || []).filter(a => a.employeeId === selectedUser?.id || a.employeeId === selectedUser?.username)
                   ].filter((v,i,a) => a.findIndex(t=>(t.id === v.id))===i);
                   
@@ -3349,16 +3335,15 @@ export default function EmployeeManagement({
                           <FileText className="h-4 w-4 text-royal-blue shrink-0" />
                           <span className="font-semibold text-slate-800 truncate">{docItem.name}</span>
                         </div>
-                        {docItem.url && (
-                          <a
-                            href={docItem.url}
-                            target="_blank"
-                            rel="noreferrer"
+                        {(docItem.storagePath || docItem.url) && (
+                          <button
+                            type="button"
+                            onClick={() => void openLegacyOrStoredDocument(docItem.storagePath, docItem.url)}
                             className="bg-blue-50 hover:bg-blue-100 text-royal-blue px-2 py-1 rounded text-[10px] font-bold flex items-center space-x-1 shrink-0 print:hidden"
                           >
                             <Eye className="h-3 w-3" />
                             <span>Abrir</span>
-                          </a>
+                          </button>
                         )}
                       </div>
                     ))}
