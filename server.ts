@@ -346,12 +346,90 @@ const requireInternalPortalRequester = async (decoded: any) => {
   return profile;
 };
 
+const ensureOfficialClientAuthUser = async (
+  clientRef: any,
+  client: any,
+  authEmail: string,
+  password: string,
+) => {
+  if (!adminAuth || !firestoreDb) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+
+  let authUser: any = null;
+  const staleUid = String(client?.authUid || '').trim();
+
+  if (staleUid) {
+    try {
+      authUser = await adminAuth.getUser(staleUid);
+    } catch (error: any) {
+      if (error?.code !== 'auth/user-not-found') throw error;
+      console.warn(`Client ${client.id}: stale authUid ${staleUid}; recovering by official email.`);
+    }
+  }
+
+  if (!authUser) {
+    try {
+      const emailUser = await adminAuth.getUserByEmail(authEmail);
+      const bound = await firestoreDb
+        .collection('clients')
+        .where('authUid', '==', emailUser.uid)
+        .limit(1)
+        .get();
+
+      if (!bound.empty && bound.docs[0].id !== client.id) {
+        throw new Error('CLIENT_AUTH_UID_CONFLICT');
+      }
+
+      if (bound.empty) {
+        // CNPJ-based Firebase emails are predictable. An unbound account is not
+        // trusted as the official client identity; replace it with one created
+        // by the COMANINS backend using the persisted fixed credential.
+        await adminAuth.deleteUser(emailUser.uid);
+        authUser = await adminAuth.createUser({ email: authEmail, password });
+      } else {
+        authUser = emailUser;
+      }
+    } catch (error: any) {
+      if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') throw error;
+      if (error?.code !== 'auth/user-not-found') throw error;
+      authUser = await adminAuth.createUser({ email: authEmail, password });
+    }
+  }
+
+  // The encrypted credential is the source of truth. Re-applying it here makes
+  // recovery deterministic if an Auth user was recreated, partially migrated,
+  // or had a stale UID in the client document.
+  authUser = await adminAuth.updateUser(authUser.uid, {
+    email: authEmail,
+    password,
+  });
+
+  await adminAuth.setCustomUserClaims(authUser.uid, {
+    ...(authUser.customClaims || {}),
+    accountType: 'client',
+    clientId: client.id,
+    passwordChangeRequired: false,
+  });
+
+  await clientRef.update({
+    authUid: authUser.uid,
+    authEmail,
+    passwordChangeRequired: false,
+    mustChangePassword: false,
+    password: FieldValue.delete(),
+  });
+
+  return authUser;
+};
+
 const ensureClientPortalAccess = async (clientId: string) => {
   if (!adminAuth || !firestoreDb) {
     throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
   }
 
-  const clientRef = firestoreDb.collection('clients').doc(String(clientId || '').trim());
+  const normalizedClientId = String(clientId || '').trim();
+  if (!normalizedClientId) throw new Error('CLIENT_PROFILE_NOT_FOUND');
+
+  const clientRef = firestoreDb.collection('clients').doc(normalizedClientId);
   const clientSnap = await clientRef.get();
   if (!clientSnap.exists) throw new Error('CLIENT_PROFILE_NOT_FOUND');
 
@@ -364,118 +442,50 @@ const ensureClientPortalAccess = async (clientId: string) => {
   const credentialSnap = await credentialRef.get();
   const credentialData: any = credentialSnap.exists ? credentialSnap.data() : null;
 
+  let password: string;
+  let created = false;
+
   if (credentialData?.encryptedPassword) {
-    const password = decryptClientPortalPassword(credentialData.encryptedPassword);
-    let authUser;
-    try {
-      authUser = client.authUid
-        ? await adminAuth.getUser(String(client.authUid))
-        : await adminAuth.getUserByEmail(authEmail);
-    } catch (error: any) {
-      if (error?.code !== 'auth/user-not-found') throw error;
-      authUser = await adminAuth.createUser({ email: authEmail, password });
-    }
-
-    const uid = authUser.uid;
-    if (client.authUid && String(client.authUid) !== uid) {
-      throw new Error('CLIENT_AUTH_UID_CONFLICT');
-    }
-
-    await adminAuth.setCustomUserClaims(uid, {
-      ...(authUser.customClaims || {}),
-      accountType: 'client',
-      clientId: client.id,
-      passwordChangeRequired: false,
-    });
-
-    if (client.authUid !== uid || client.authEmail !== authEmail || client.passwordChangeRequired !== false || client.mustChangePassword === true) {
-      await clientRef.update({
-        authUid: uid,
-        authEmail,
-        passwordChangeRequired: false,
-        mustChangePassword: false,
-        password: FieldValue.delete(),
-      });
-    }
-
-    return {
-      clientId: client.id,
-      cnpj: client.cnpj || cleanCnpj,
-      password,
-      portalUrl: CLIENT_PORTAL_URL,
-      created: false,
-    };
+    password = decryptClientPortalPassword(credentialData.encryptedPassword);
+  } else {
+    password = generateClientPortalPassword();
+    created = true;
   }
 
-  const password = generateClientPortalPassword();
-  let authUser;
-  try {
-    if (client.authUid) {
-      authUser = await adminAuth.getUser(String(client.authUid));
-      if (String(authUser.email || '').trim().toLowerCase() !== authEmail) {
-        authUser = await adminAuth.updateUser(authUser.uid, { email: authEmail, password });
-      } else {
-        authUser = await adminAuth.updateUser(authUser.uid, { password });
-      }
-    } else {
-      try {
-        authUser = await adminAuth.getUserByEmail(authEmail);
-        const bound = await firestoreDb.collection('clients').where('authUid', '==', authUser.uid).limit(1).get();
-        if (!bound.empty && bound.docs[0].id !== client.id) {
-          throw new Error('CLIENT_AUTH_UID_CONFLICT');
-        }
+  const authUser = await ensureOfficialClientAuthUser(
+    clientRef,
+    client,
+    authEmail,
+    password,
+  );
 
-        if (bound.empty) {
-          // A public Firebase sign-up may have pre-registered this predictable
-          // CNPJ-based email. Replace the unbound account so the old UID cannot
-          // become the official client identity.
-          await adminAuth.deleteUser(authUser.uid);
-          authUser = await adminAuth.createUser({ email: authEmail, password });
-        } else {
-          authUser = await adminAuth.updateUser(authUser.uid, { password });
-        }
-      } catch (error: any) {
-        if (error?.message === 'CLIENT_AUTH_UID_CONFLICT') throw error;
-        if (error?.code !== 'auth/user-not-found') throw error;
-        authUser = await adminAuth.createUser({ email: authEmail, password });
-      }
-    }
-  } catch (error) {
-    throw error;
-  }
-
-  const encrypted = encryptClientPortalPassword(password);
-  await adminAuth.setCustomUserClaims(authUser.uid, {
-    ...(authUser.customClaims || {}),
-    accountType: 'client',
-    clientId: client.id,
-    passwordChangeRequired: false,
-  });
-
-  await Promise.all([
-    credentialRef.set({
+  if (created) {
+    const encrypted = encryptClientPortalPassword(password);
+    await credentialRef.set({
       encryptedPassword: encrypted,
       version: 1,
       clientId: client.id,
       authUid: authUser.uid,
       createdAt: new Date().toISOString(),
-    }),
-    clientRef.update({
-      authUid: authUser.uid,
-      authEmail,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await clientRef.update({
       portalAccessProvisionedAt: new Date().toISOString(),
-      passwordChangeRequired: false,
-      mustChangePassword: false,
-      password: FieldValue.delete(),
-    }),
-  ]);
+    });
+  } else if (credentialData?.authUid !== authUser.uid) {
+    await credentialRef.set({
+      authUid: authUser.uid,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
 
   return {
     clientId: client.id,
     cnpj: client.cnpj || cleanCnpj,
     password,
     portalUrl: CLIENT_PORTAL_URL,
-    created: true,
+    created,
   };
 };
 

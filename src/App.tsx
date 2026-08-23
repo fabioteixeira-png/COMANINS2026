@@ -378,8 +378,22 @@ export default function App() {
   const handleSaveCalibration = async (sessionData: any) => {
     try {
       const activeInst = instruments.find(item => item.id === sessionData.instrumentId);
-      if (!activeInst) return;
-      await saveCalibrationDoc(sessionData, activeInst);
+      if (!activeInst) throw new Error('INSTRUMENT_NOT_FOUND');
+
+      const result = await saveCalibrationDoc(sessionData, activeInst);
+
+      // Do not wait for realtime listeners before allowing the certificate to
+      // be opened. The atomic write already succeeded, so reflect that result
+      // immediately in the application state.
+      setReports(prev => [
+        result.report,
+        ...prev.filter(report => report.id !== result.report.id),
+      ]);
+      setInstruments(prev => prev.map(item =>
+        item.id === result.instrument.id ? result.instrument : item,
+      ));
+
+      return result;
     } catch (err) {
       console.error('Error saving calibration to Firestore:', err);
       throw err;

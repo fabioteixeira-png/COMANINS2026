@@ -1211,6 +1211,19 @@ export default function InternalPortal({
 
   const markCertificateIssued = async (instId: string) => {
     if (!instId) return;
+
+    const inst = instruments.find((i: any) => i.id === instId);
+    if (!inst) throw new Error("Instrumento não encontrado para emissão do certificado.");
+
+    // The status transition is the critical operation tied to issuing/opening
+    // the certificate. Persist it first and only then mark the local issue flag.
+    if (inst.status !== "Entregue" && inst.status !== "Não Conforme") {
+      await updateInstrumentDoc(instId, { status: "Disponível para Retirada" });
+      if (onUpdateInstrumentStatus) {
+        await onUpdateInstrumentStatus(instId, "Disponível para Retirada");
+      }
+    }
+
     setIssuedCertificates((prev) => {
       const updated = { ...prev, [instId]: true };
       try {
@@ -1219,15 +1232,13 @@ export default function InternalPortal({
       return updated;
     });
 
-    const inst = instruments.find((i: any) => i.id === instId);
-    if (inst && inst.status !== "Entregue" && inst.status !== "Não Conforme") {
-      await updateInstrumentDoc(instId, { status: "Disponível para Retirada" });
-      if (onUpdateInstrumentStatus) {
-        await onUpdateInstrumentStatus(instId, "Disponível para Retirada");
-      }
+    // Generating/updating the intake devolution draft is important, but it must
+    // never make an already valid calibration certificate impossible to view.
+    try {
+      await ensureIntakeDevolutionDraft(instId);
+    } catch (error) {
+      console.error("Certificado emitido, mas não foi possível atualizar o rascunho de devolução:", error);
     }
-
-    await ensureIntakeDevolutionDraft(instId);
   };
 
   const [editingInstrumentData, setEditingInstrumentData] = useState<
@@ -5378,7 +5389,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       if (code === 'CLIENT_AUTH_UID_CONFLICT') {
         throw new Error('A conta Firebase deste CNPJ está vinculada a outro cadastro de cliente.');
       }
-      throw new Error('Não foi possível gerar/recuperar a credencial do Portal do Cliente.');
+      if (response.status === 429) {
+        throw new Error('Muitas solicitações de credencial em sequência. Aguarde alguns instantes e tente novamente.');
+      }
+      throw new Error(`Não foi possível gerar/recuperar a credencial do Portal do Cliente (${code}).`);
     }
     return data.credential;
   };
@@ -5439,12 +5453,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
     const isNew = !editingIntakeId;
 
     try {
-      // A primeira entrada provisiona a credencial fixa do Portal do Cliente.
-      // A senha fica criptografada no servidor e nunca é gravada no documento da entrada.
-      if (isNew) {
-        await ensureClientPortalCredential(intakeClientId);
-      }
-
       const intakeData = {
         numEntrada: intakeNum,
         clientId: intakeClientId,
@@ -5458,14 +5466,28 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         ...intakeData,
         id: editingIntakeId || Date.now().toString(),
       };
+
+      // The operational receipt is the primary business record and must never be
+      // lost because the auxiliary Portal credential service is temporarily
+      // unavailable. Persist the intake first; provision/recover access after it
+      // is safely stored. Printing retries credential provisioning as well.
       await saveIntakeDoc(intakeToSave);
 
       if (isNew) {
-        // Increment sequence
         await saveIntakeSequenceConfig({
           prefix: intakePrefix,
           nextNumber: Number(intakeNextNumber) + 1,
         });
+      }
+
+      let credentialWarning = "";
+      if (isNew) {
+        try {
+          await ensureClientPortalCredential(intakeClientId);
+        } catch (credentialError: any) {
+          console.error("Entrada salva, mas a credencial do Portal do Cliente ficou pendente:", credentialError);
+          credentialWarning = credentialError?.message || "Não foi possível provisionar a credencial do Portal do Cliente neste momento.";
+        }
       }
 
       setShowIntakeModal(false);
@@ -5474,8 +5496,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       );
       setTimeout(() => setIntakeSuccessMessage(""), 4000);
 
+      if (credentialWarning) {
+        alert(
+          `A Guia de Entrada ${intakeNum} foi salva com sucesso.\n\nA credencial do Portal do Cliente ficou pendente e será tentada novamente ao abrir/imprimir a Entrada.\n\nDetalhe: ${credentialWarning}`,
+        );
+      }
+
       if (shouldPrint) {
-        // Quick trick to print after a tiny delay so the UI updates
         setTimeout(() => window.print(), 500);
       }
     } catch (err: any) {
@@ -7959,9 +7986,17 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                   !hasRegPhoto
                                 )
                                   return;
+
                                 setSelectedCertificateId(inst.id);
-                                await markCertificateIssued(inst.id);
-                                setActiveTab("certificados");
+                                try {
+                                  await markCertificateIssued(inst.id);
+                                  setActiveTab("certificados");
+                                } catch (error: any) {
+                                  console.error("Erro ao abrir/emitir certificado:", error);
+                                  alert(
+                                    `Não foi possível concluir a emissão do certificado.\n\n${error?.message || "Falha ao atualizar o status do instrumento."}`,
+                                  );
+                                }
                               }}
                               className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors ${
                                 !isCalibrated ||
