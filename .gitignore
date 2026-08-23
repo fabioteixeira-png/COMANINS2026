@@ -10,3 +10,6 @@ coverage
 *.patch
 *.rej
 db.json
+
+# Removido bun do projeto (Hostinger requer npm)
+bun.lock
