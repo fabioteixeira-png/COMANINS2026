@@ -18,7 +18,6 @@ import {
   saveHeaderLogoConfig,
   syncSitePhotosConfig,
   saveSitePhotosConfig,
-  syncClients,
   syncInstruments,
   syncReports,
   syncMessages,
@@ -210,14 +209,13 @@ export default function App() {
     };
   }, [viewMode, currentInternalUser, currentClient]);
 
-  // Client master data must not be downloaded on the public site or login screen.
-  // It is only required by authenticated internal users; client users receive only
-  // their own profile from /api/auth/sync-client-profile.
+  // Client master data is loaded through the authenticated backend. This avoids
+  // leaving a Firestore listener permanently open and makes authorization errors
+  // explicit instead of silently replacing the directory with an empty array.
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
     let cancelled = false;
 
-    const startClientsSync = async () => {
+    const loadClients = async () => {
       if (viewMode !== 'portal' || !currentInternalUser) {
         setClients([]);
         try { localStorage.removeItem('comanins_cache_clients'); } catch (e) {}
@@ -225,21 +223,20 @@ export default function App() {
       }
 
       try {
-        unsubscribe = await syncClients((list) => {
-          if (!cancelled) setClients(list);
-        });
+        const response = await authJsonFetch('/api/internal/clients');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.success !== true || !Array.isArray(data?.clients)) {
+          throw new Error(data?.error || 'CLIENT_DIRECTORY_UNAVAILABLE');
+        }
+        if (!cancelled) setClients(data.clients);
       } catch (err) {
-        console.error('Error initializing authenticated clients sync:', err);
+        console.error('Error loading authenticated clients directory:', err);
         if (!cancelled) setClients([]);
       }
     };
 
-    startClientsSync();
-
-    return () => {
-      cancelled = true;
-      if (unsubscribe) unsubscribe();
-    };
+    loadClients();
+    return () => { cancelled = true; };
   }, [viewMode, currentInternalUser]);
 
   // Employee directory is loaded through the authenticated backend. Admin/RH
@@ -385,7 +382,7 @@ export default function App() {
       await saveCalibrationDoc(sessionData, activeInst);
     } catch (err) {
       console.error('Error saving calibration to Firestore:', err);
-
+      throw err;
     }
   };
 

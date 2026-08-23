@@ -5134,8 +5134,11 @@ Status atual: ${e.status}.`,
           setActiveTab("instruments");
         }, 3000);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Erro ao salvar ficha de calibração:', err);
+      const message = err?.message || 'Não foi possível concluir a gravação da ficha de calibração.';
+      setBenchErrorMessage(`A ficha NÃO foi salva: ${message}`);
+      alert(`A ficha de calibração NÃO foi salva. Nenhum status foi considerado concluído.\n\n${message}`);
     } finally {
       setBenchSubmitting(false);
     }

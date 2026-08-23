@@ -10,8 +10,8 @@ import { requireAuth } from './src/middleware/auth.ts';
 import type { AuthRequest } from './src/middleware/auth.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
-import { adminAuth, adminDb } from './src/lib/firebase-admin.ts';
-import { FieldValue } from 'firebase-admin/firestore';
+import { adminAuth, adminDb, adminStorage, adminStorageBucketName } from './src/lib/firebase-admin.ts';
+import { FieldPath, FieldValue } from 'firebase-admin/firestore';
 
 let firebaseConfig: any = {};
 try {
@@ -137,6 +137,26 @@ const escapeHtml = (value: unknown): string =>
 
 const isValidEmailAddress = (value: string): boolean =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
+
+const sanitizeClientForInternalDirectory = (value: any) => {
+  const { password, portalAccessCredentialEnc, portalAccessVersion, ...safe } = value || {};
+  return safe;
+};
+
+const decodeOperationalDataUrl = (value: unknown): { buffer: Buffer; contentType: string; extension: string } => {
+  const raw = String(value || '');
+  const match = raw.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  if (!match) throw new Error('INVALID_IMAGE_DATA');
+  const format = match[1].toLowerCase();
+  const contentType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
+  const extension = format === 'jpeg' ? 'jpg' : format;
+  const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+  if (!buffer.length || buffer.length > 5 * 1024 * 1024) throw new Error('IMAGE_TOO_LARGE');
+  return { buffer, contentType, extension };
+};
+
+const safeStorageSegmentServer = (value: unknown): string =>
+  String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
 
 const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   if (!firestoreDb) {
@@ -707,16 +727,17 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
   const migrationPromise = (async () => {
     const markerRef = firestoreDb.collection('securityMigrations').doc(FIELD_SERVICE_LINK_MIGRATION_ID);
     const marker = await markerRef.get();
-    if (marker.exists && marker.data()?.completed === true) {
+    const markerData: any = marker.exists ? marker.data() : {};
+    if (markerData?.completed === true) {
       fieldServiceLinkMigrationReady = true;
       return;
     }
 
-    console.log('[MIGRATION] Starting clientId backfill for fieldServiceRecords...');
-    const [instrumentSnap, fieldServiceSnap] = await Promise.all([
-      firestoreDb.collection('instruments').select('clientId', 'certificateNumber', 'coma', 'tag').get(),
-      firestoreDb.collection('fieldServiceRecords').select('clientId', 'certificate', 'tag').get(),
-    ]);
+    console.log('[MIGRATION] Starting/resuming clientId backfill for fieldServiceRecords...');
+    const instrumentSnap = await firestoreDb
+      .collection('instruments')
+      .select('clientId', 'certificateNumber', 'coma', 'tag')
+      .get();
 
     const byCertificate = new Map<string, string>();
     const byTag = new Map<string, string | null>();
@@ -738,51 +759,106 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
       }
     }
 
-    let batch = firestoreDb.batch();
-    let pendingWrites = 0;
-    let updated = 0;
-    let orphaned = 0;
+    let updated = Number(markerData?.updated || 0);
+    let orphaned = Number(markerData?.orphaned || 0);
+    let totalScanned = Number(markerData?.totalScanned || 0);
+    let lastDocumentId = String(markerData?.lastDocumentId || '').trim();
+    const pageSize = 500;
 
-    const flush = async () => {
-      if (!pendingWrites) return;
-      await batch.commit();
-      batch = firestoreDb.batch();
-      pendingWrites = 0;
-    };
+    await markerRef.set({
+      completed: false,
+      status: 'running',
+      startedAt: markerData?.startedAt || new Date().toISOString(),
+      resumedAt: new Date().toISOString(),
+      updated,
+      orphaned,
+      totalScanned,
+      lastDocumentId: lastDocumentId || null,
+    }, { merge: true });
 
-    for (const recordDoc of fieldServiceSnap.docs) {
-      const data: any = recordDoc.data();
-      const currentClientId = String(data?.clientId || '').trim();
-      if (currentClientId) continue;
-      const certificate = normalize(data?.certificate);
-      const tag = normalize(data?.tag);
-      const resolvedClientId = (certificate && byCertificate.get(certificate)) || (tag ? byTag.get(tag) : undefined);
-      if (!resolvedClientId) {
-        orphaned += 1;
-        continue;
+    while (true) {
+      let pageQuery: any = firestoreDb
+        .collection('fieldServiceRecords')
+        .orderBy(FieldPath.documentId())
+        .limit(pageSize);
+      if (lastDocumentId) pageQuery = pageQuery.startAfter(lastDocumentId);
+
+      const page = await pageQuery.select('clientId', 'certificate', 'tag').get();
+      if (page.empty) break;
+
+      let batch = firestoreDb.batch();
+      let pendingWrites = 0;
+      let pageUpdated = 0;
+      let pageOrphaned = 0;
+
+      for (const recordDoc of page.docs) {
+        const data: any = recordDoc.data();
+        const currentClientId = String(data?.clientId || '').trim();
+        if (!currentClientId) {
+          const certificate = normalize(data?.certificate);
+          const tag = normalize(data?.tag);
+          const resolvedClientId =
+            (certificate && byCertificate.get(certificate)) ||
+            (tag ? byTag.get(tag) : undefined);
+          if (resolvedClientId) {
+            batch.update(recordDoc.ref, { clientId: resolvedClientId });
+            pendingWrites += 1;
+            pageUpdated += 1;
+          } else {
+            pageOrphaned += 1;
+          }
+        }
+        lastDocumentId = recordDoc.id;
       }
-      batch.update(recordDoc.ref, { clientId: resolvedClientId });
-      pendingWrites += 1;
-      updated += 1;
-      if (pendingWrites >= 400) await flush();
+
+      if (pendingWrites > 0) await batch.commit();
+      updated += pageUpdated;
+      orphaned += pageOrphaned;
+      totalScanned += page.size;
+
+      await markerRef.set({
+        completed: false,
+        status: 'running',
+        updated,
+        orphaned,
+        totalScanned,
+        lastDocumentId,
+        lastProgressAt: new Date().toISOString(),
+      }, { merge: true });
+
+      if (page.size < pageSize) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    await flush();
 
     await markerRef.set({
       completed: true,
-      version: 1,
+      status: 'completed',
+      version: 2,
       completedAt: new Date().toISOString(),
       updated,
       orphaned,
-      totalScanned: fieldServiceSnap.size,
+      totalScanned,
+      lastDocumentId: lastDocumentId || null,
     }, { merge: true });
 
     fieldServiceLinkMigrationReady = true;
-    console.log(`[MIGRATION] fieldService clientId backfill complete. updated=${updated}, orphaned=${orphaned}`);
+    console.log(`[MIGRATION] fieldService clientId backfill complete. updated=${updated}, orphaned=${orphaned}, scanned=${totalScanned}`);
   })()
-    .catch((error) => {
+    .catch(async (error) => {
       fieldServiceLinkMigrationReady = false;
       console.error('[MIGRATION] fieldService clientId backfill failed; legacy filtering remains active:', error);
+      try {
+        if (firestoreDb) {
+          await firestoreDb.collection('securityMigrations').doc(FIELD_SERVICE_LINK_MIGRATION_ID).set({
+            completed: false,
+            status: 'failed',
+            lastError: error instanceof Error ? error.message : String(error),
+            failedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      } catch (markerError) {
+        console.error('[MIGRATION] Could not persist field service migration failure:', markerError);
+      }
     })
     .finally(() => {
       fieldServiceLinkMigrationPromise = null;
@@ -1699,6 +1775,71 @@ app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res)
     }
     console.error('Internal portal users directory error:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.get('/api/internal/clients', requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    await requireInternalPortalRequester(req.user);
+    const snapshot = await firestoreDb.collection('clients').get();
+    const clients = snapshot.docs
+      .map((doc) => sanitizeClientForInternalDirectory({ id: doc.id, ...doc.data() }))
+      .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR'));
+    return res.json({ success: true, clients });
+  } catch (error: any) {
+    if (error?.message === 'NOT_INTERNAL_ACCOUNT') return res.status(403).json({ error: 'NOT_INTERNAL_ACCOUNT' });
+    if (error?.message === 'INTERNAL_PROFILE_NOT_FOUND') return res.status(404).json({ error: 'INTERNAL_PROFILE_NOT_FOUND' });
+    console.error('Internal clients directory error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/internal/upload-operational-image', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !adminStorage || !adminStorageBucketName) {
+      return res.status(503).json({ error: 'STORAGE_SERVICE_UNAVAILABLE' });
+    }
+    await requireInternalPortalRequester(req.user);
+
+    const purpose = String(req.body?.purpose || '').trim();
+    const entityId = safeStorageSegmentServer(req.body?.entityId);
+    const sequence = Math.max(0, Math.min(9999, Number(req.body?.sequence || 0) || 0));
+    const allowed = new Set(['instrument-registration', 'instrument-calibrated', 'intake-entry']);
+    if (!allowed.has(purpose)) return res.status(400).json({ error: 'INVALID_UPLOAD_PURPOSE' });
+
+    const { buffer, contentType, extension } = decodeOperationalDataUrl(req.body?.imageDataUrl);
+    const timestamp = Date.now();
+    const path = purpose === 'intake-entry'
+      ? `intake-entry-photos/${entityId}/${timestamp}_${sequence}.${extension}`
+      : `instrument-photos/${entityId}/${purpose === 'instrument-registration' ? 'registration' : 'calibrated'}/${timestamp}.${extension}`;
+
+    const bucket = adminStorage.bucket(adminStorageBucketName);
+    const file = bucket.file(path);
+    const downloadToken = randomBytes(16).toString('hex');
+    await file.save(buffer, {
+      resumable: false,
+      validation: 'crc32c',
+      metadata: {
+        contentType,
+        cacheControl: 'private,max-age=3600',
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+          uploadedByUid: req.user.uid,
+          uploadedAt: new Date().toISOString(),
+          purpose,
+        },
+      },
+    });
+    const url = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(path)}?alt=media&token=${downloadToken}`;
+    return res.json({ success: true, url, path });
+  } catch (error: any) {
+    if (error?.message === 'INVALID_IMAGE_DATA') return res.status(400).json({ error: 'INVALID_IMAGE_DATA' });
+    if (error?.message === 'IMAGE_TOO_LARGE') return res.status(413).json({ error: 'IMAGE_TOO_LARGE' });
+    console.error('Operational image upload error:', error);
+    return res.status(500).json({ error: 'UPLOAD_FAILED' });
   }
 });
 

@@ -61,6 +61,45 @@ const extensionFromContentType = (contentType: string): string => {
 const safeStorageSegment = (value: string): string =>
   String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
 
+
+const uploadOperationalImageViaBackend = async (
+  purpose: 'instrument-registration' | 'instrument-calibrated' | 'intake-entry',
+  entityId: string,
+  imageDataUrl: string,
+  sequence = 0,
+): Promise<{ url: string; path: string }> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/internal/upload-operational-image', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ purpose, entityId, imageDataUrl, sequence }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.success !== true || !data?.url || !data?.path) {
+    throw new Error(data?.error || 'Não foi possível enviar a imagem ao Storage.');
+  }
+  return { url: String(data.url), path: String(data.path) };
+};
+
+const stripUndefinedDeep = (value: any): any => {
+  if (Array.isArray(value)) {
+    return value.map(stripUndefinedDeep).filter((item) => item !== undefined);
+  }
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, stripUndefinedDeep(item)]),
+    );
+  }
+  return value;
+};
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -960,20 +999,32 @@ export async function saveCalibrationDoc(data: {
     ...(data.humidity !== undefined ? { humidity: data.humidity } : {})
   };
 
-  await Promise.all([
-    setDoc(doc(db, 'calibrationReports', reportId), report),
-    updateDoc(doc(db, 'instruments', activeInst.id), {
-      status: 'Aguardando Emissão de Certificado',
-      lastCalibrationDate: report.date,
-      nextCalibrationDate: updatedInst.nextCalibrationDate,
-      ...(data.accuracyClass !== undefined ? { accuracyClass: data.accuracyClass } : {}),
-      ...(data.mpe !== undefined ? { mpe: data.mpe } : {}),
-      ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
-      ...(data.humidity !== undefined ? { humidity: data.humidity } : {})
-    })
-  ]);
+  const instrumentUpdates = stripUndefinedDeep({
+    status: 'Aguardando Emissão de Certificado',
+    lastCalibrationDate: report.date,
+    nextCalibrationDate: updatedInst.nextCalibrationDate,
+    accuracyClass: data.accuracyClass,
+    mpe: data.mpe,
+    temperature: data.temperature,
+    humidity: data.humidity,
+    updatedAt: new Date().toISOString(),
+  });
+  const cleanReport = stripUndefinedDeep(report) as CalibrationReport;
 
-  return { report, instrument: updatedInst };
+  // Report + instrument status are committed atomically. The UI only receives
+  // success after both writes have been accepted by Firestore.
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'calibrationReports', reportId), cleanReport);
+  batch.update(doc(db, 'instruments', activeInst.id), instrumentUpdates);
+  await batch.commit();
+
+  const cachedInstrument = instrumentCache.get(activeInst.id);
+  if (cachedInstrument) {
+    mergeInstrumentIntoCache({ ...cachedInstrument, ...instrumentUpdates, id: activeInst.id } as Instrument);
+    notifyInstrumentSubscribers();
+  }
+
+  return { report: cleanReport, instrument: { ...updatedInst, ...instrumentUpdates } as Instrument };
 }
 
 export async function deleteReportDoc(reportId: string): Promise<void> {
@@ -1287,11 +1338,20 @@ export async function uploadIntakeEntryImage(
   if (blob.size > 5 * 1024 * 1024) {
     throw new Error('A imagem ultrapassa o limite de 5 MB.');
   }
-  const extension = extensionFromContentType(contentType);
-  const path = `intake-entry-photos/${safeStorageSegment(intakeId)}/${Date.now()}_${sequence}.${extension}`;
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, blob, { contentType });
-  return { url: await getDownloadURL(storageRef), path };
+
+  // Prefer the authenticated backend. It writes with Admin SDK after validating
+  // the internal identity, so browser Storage-rule/cache timing cannot make an
+  // operational upload disappear. Direct Storage remains as a fallback only.
+  try {
+    return await uploadOperationalImageViaBackend('intake-entry', intakeId, imageDataUrl, sequence);
+  } catch (backendError) {
+    console.warn('Backend intake image upload failed; trying direct Storage fallback:', backendError);
+    const extension = extensionFromContentType(contentType);
+    const path = `intake-entry-photos/${safeStorageSegment(intakeId)}/${Date.now()}_${sequence}.${extension}`;
+    const storageRef = ref(storage, path);
+    await uploadBytes(storageRef, blob, { contentType });
+    return { url: await getDownloadURL(storageRef), path };
+  }
 }
 
 export async function uploadInstrumentPhotoToStorage(
@@ -1307,11 +1367,18 @@ export async function uploadInstrumentPhotoToStorage(
   if (blob.size > 5 * 1024 * 1024) {
     throw new Error('A imagem ultrapassa o limite de 5 MB.');
   }
-  const extension = extensionFromContentType(contentType);
-  const path = `instrument-photos/${safeStorageSegment(instrumentId)}/${category}/${Date.now()}.${extension}`;
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, blob, { contentType });
-  return { url: await getDownloadURL(storageRef), path };
+
+  const purpose = category === 'registration' ? 'instrument-registration' : 'instrument-calibrated';
+  try {
+    return await uploadOperationalImageViaBackend(purpose, instrumentId, imageDataUrl);
+  } catch (backendError) {
+    console.warn('Backend instrument image upload failed; trying direct Storage fallback:', backendError);
+    const extension = extensionFromContentType(contentType);
+    const path = `instrument-photos/${safeStorageSegment(instrumentId)}/${category}/${Date.now()}.${extension}`;
+    const storageRef = ref(storage, path);
+    await uploadBytes(storageRef, blob, { contentType });
+    return { url: await getDownloadURL(storageRef), path };
+  }
 }
 
 export async function uploadInventoryAttachment(
