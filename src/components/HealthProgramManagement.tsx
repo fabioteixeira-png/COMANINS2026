@@ -20,7 +20,8 @@ import {
   FileCheck, 
   Download, 
   RefreshCw,
-  Send
+  Send,
+  Camera
 } from 'lucide-react';
 import { HealthProgramDocument, HealthProgramDocType } from '../types';
 import { 
@@ -290,7 +291,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
     const allowed = new Set([
       'application/pdf',
-      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif',
       'text/plain', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel',
@@ -999,24 +1000,38 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Anexar Arquivo do Documento (PDF / Imagem)
                 </label>
-                <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-4 text-center bg-slate-50 transition cursor-pointer relative">
-                  <input
-                    type="file"
-                    accept=".pdf,image/*"
-                    onChange={handleFileUpload}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                  <Upload className="h-8 w-8 text-slate-400 mx-auto mb-1" />
-                  {formFileName ? (
-                    <div className="text-sm font-semibold text-blue-700">
-                      📄 Arquivo Selecionado: {formFileName}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-slate-600">
-                      <span className="font-bold text-blue-600">Clique para selecionar</span> ou arraste o arquivo PDF/Imagem aqui (máx. 15MB)
-                    </div>
-                  )}
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                  <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-4 text-center bg-slate-50 transition cursor-pointer relative">
+                    <input
+                      type="file"
+                      accept=".pdf,image/*,.heic,.heif"
+                      onChange={handleFileUpload}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <Upload className="h-8 w-8 text-slate-400 mx-auto mb-1" />
+                    {formFileName ? (
+                      <div className="text-sm font-semibold text-blue-700">
+                        📄 Arquivo Selecionado: {formFileName}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-600">
+                        <span className="font-bold text-blue-600">Clique para selecionar</span> ou arraste o arquivo aqui
+                      </div>
+                    )}
+                  </div>
+                  <label className="cursor-pointer px-4 py-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold flex items-center justify-center space-x-2 hover:bg-blue-100 transition-colors">
+                    <Camera className="h-5 w-5" />
+                    <span>Tirar foto</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
+                <p className="mt-1.5 text-[10px] text-slate-500">Formatos aceitos: PDF, JPG, PNG, WEBP, GIF e HEIC/HEIF.</p>
               </div>
 
               {/* Action Buttons */}

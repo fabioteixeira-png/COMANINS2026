@@ -72,6 +72,12 @@ export default function EmployeeManagement({
   const [newDocType, setNewDocType] = useState('RG / CPF');
   const [newDocFiles, setNewDocFiles] = useState<File[]>([]);
 
+  const appendNewDocumentFiles = (files: File[]) => {
+    if (files.length === 0) return;
+    setNewDocFiles(prev => [...prev, ...files]);
+    setNewDocName(prev => prev || files[0].name.replace(/\.[^/.]+$/, ''));
+  };
+
   // ASO per contract local state
   const [newAsoContractName, setNewAsoContractName] = useState('');
   const [newAsoUnitArea, setNewAsoUnitArea] = useState('');
@@ -1203,6 +1209,7 @@ export default function EmployeeManagement({
                           <input
                             type="file"
                             accept="image/*,.heic,.heif"
+                            capture="environment"
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
@@ -1941,12 +1948,26 @@ export default function EmployeeManagement({
 
                           <div>
                             <label className="block font-semibold text-slate-700 mb-1">Anexo ASO (Digitalizado / Foto)</label>
-                            <input
-                              type="file"
-                              accept="image/*,.heic,.heif,application/pdf"
-                              onChange={(e) => setNewAsoDocFile(e.target.files ? e.target.files[0] : null)}
-                              className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-royal-blue hover:file:bg-blue-200 cursor-pointer"
-                            />
+                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                              <input
+                                type="file"
+                                accept=".pdf,image/*,.heic,.heif"
+                                onChange={(e) => setNewAsoDocFile(e.target.files ? e.target.files[0] : null)}
+                                className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-royal-blue hover:file:bg-blue-200 cursor-pointer"
+                              />
+                              <label className="cursor-pointer px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-royal-blue text-xs font-bold flex items-center justify-center space-x-1.5 hover:bg-blue-100 transition-colors">
+                                <Camera className="h-4 w-4" />
+                                <span>Tirar foto</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  className="hidden"
+                                  onChange={(e) => setNewAsoDocFile(e.target.files ? e.target.files[0] : null)}
+                                />
+                              </label>
+                            </div>
+                            <p className="mt-1 text-[10px] text-slate-500">Formatos aceitos: PDF, JPG, PNG, WEBP e HEIC/HEIF.</p>
                           </div>
 
                           <div className="sm:col-span-2 md:col-span-3">
@@ -2217,22 +2238,36 @@ export default function EmployeeManagement({
 
                           <div className="sm:col-span-2">
                             <label className="block font-semibold text-slate-700 mb-1">Anexar Certificado (PDF ou Foto)</label>
-                            <label className="cursor-pointer w-full bg-white border border-slate-300 rounded-lg p-2 flex items-center justify-between text-slate-600 hover:bg-slate-100 transition-colors">
-                              <span className="truncate max-w-[200px] font-mono text-[11px]">
-                                {newNrCertificateFile ? newNrCertificateFile.name : 'Selecionar arquivo...'}
-                              </span>
-                              <Upload className="h-4 w-4 text-amber-700 shrink-0 ml-1" />
-                              <input
-                                type="file"
-                                accept=".pdf,image/*,.heic,.heif"
-                                className="hidden"
-                                onChange={(e) => {
-                                  if (e.target.files && e.target.files[0]) {
-                                    setNewNrCertificateFile(e.target.files[0]);
-                                  }
-                                }}
-                              />
-                            </label>
+                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                              <label className="cursor-pointer w-full bg-white border border-slate-300 rounded-lg p-2 flex items-center justify-between text-slate-600 hover:bg-slate-100 transition-colors">
+                                <span className="truncate max-w-[200px] font-mono text-[11px]">
+                                  {newNrCertificateFile ? newNrCertificateFile.name : 'Selecionar arquivo...'}
+                                </span>
+                                <Upload className="h-4 w-4 text-amber-700 shrink-0 ml-1" />
+                                <input
+                                  type="file"
+                                  accept=".pdf,image/*,.heic,.heif"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    if (e.target.files && e.target.files[0]) {
+                                      setNewNrCertificateFile(e.target.files[0]);
+                                    }
+                                  }}
+                                />
+                              </label>
+                              <label className="cursor-pointer px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center justify-center space-x-1.5 hover:bg-amber-100 transition-colors">
+                                <Camera className="h-4 w-4" />
+                                <span>Tirar foto</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  className="hidden"
+                                  onChange={(e) => setNewNrCertificateFile(e.target.files ? e.target.files[0] : null)}
+                                />
+                              </label>
+                            </div>
+                            <p className="mt-1 text-[10px] text-slate-500">Formatos aceitos: PDF, JPG, PNG, WEBP e HEIC/HEIF.</p>
                           </div>
 
                           <div className="sm:col-span-2 md:col-span-4 flex justify-end pt-1">
@@ -2752,39 +2787,33 @@ export default function EmployeeManagement({
 
                           <div>
                             <label className="block font-semibold mb-1 text-slate-700">Arquivo (PDF, Imagem, Word)</label>
-                            <label className="cursor-pointer w-full bg-white border border-slate-300 rounded-lg p-2 flex items-center justify-between text-slate-600 hover:bg-slate-100 transition-colors">
-                              <span className="truncate max-w-[180px] font-mono text-[11px]">
-                                {newDocFiles.length > 0 ? `${newDocFiles.length} arquivo(s) selecionado(s)` : 'Selecionar arquivo(s).../'}
-                              </span>
-                              <Upload className="h-4 w-4 text-royal-blue shrink-0 ml-1" />
-                              <input
-                                type="file"
-                                accept=".pdf,image/*,.heic,.heif,.doc,.docx"
-                                className="hidden"
-                                multiple
-                                onChange={(e) => {
-                                  const files = Array.from(e.target.files || []) as File[];
-                                  if (files.length > 0) {
-                                    const validFiles = files.filter(f => {
-                                      const isImage = f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || '');
-                                      if (!isImage && f.size > 1000 * 1024) {
-                                        alert('⚠️ ARQUIVO MUITO GRANDE!\n\nO arquivo ' + f.name + ' ultrapassa 1MB e será ignorado.');
-                                        return false;
-                                      }
-                                      return true;
-                                    });
-                                    setNewDocFiles([...newDocFiles, ...validFiles]);
-                                    if (!newDocName && validFiles.length > 0) {
-                                      setNewDocName(validFiles[0].name.replace(/\.[^/.]+$/, ''));
-                                    }
-                                  }
-                                }}
-                              />
-                            </label>
-                            <p className="text-[10px] font-bold text-rose-600 mt-1.5 flex items-start space-x-1">
-                              <span>⚠️</span>
-                              <span>Tamanho máximo: 800KB por arquivo. Arquivos maiores não serão salvos.</span>
-                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                              <label className="cursor-pointer w-full bg-white border border-slate-300 rounded-lg p-2 flex items-center justify-between text-slate-600 hover:bg-slate-100 transition-colors">
+                                <span className="truncate max-w-[180px] font-mono text-[11px]">
+                                  {newDocFiles.length > 0 ? `${newDocFiles.length} arquivo(s) selecionado(s)` : 'Selecionar arquivo(s)...'}
+                                </span>
+                                <Upload className="h-4 w-4 text-royal-blue shrink-0 ml-1" />
+                                <input
+                                  type="file"
+                                  accept=".pdf,image/*,.heic,.heif,.doc,.docx"
+                                  className="hidden"
+                                  multiple
+                                  onChange={(e) => appendNewDocumentFiles(Array.from(e.target.files || []))}
+                                />
+                              </label>
+                              <label className="cursor-pointer px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-royal-blue text-xs font-bold flex items-center justify-center space-x-1.5 hover:bg-blue-100 transition-colors">
+                                <Camera className="h-4 w-4" />
+                                <span>Tirar foto</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  className="hidden"
+                                  onChange={(e) => appendNewDocumentFiles(Array.from(e.target.files || []))}
+                                />
+                              </label>
+                            </div>
+                            <p className="mt-1.5 text-[10px] text-slate-500">Formatos aceitos: PDF, JPG, PNG, WEBP, GIF, HEIC/HEIF e DOC/DOCX.</p>
                           </div>
                         </div>
 

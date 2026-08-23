@@ -307,8 +307,9 @@ export default function LoginScreen({
                 <input
                   type={showNewPass ? 'text' : 'password'}
                   required
-                  minLength={6}
-                  placeholder="Mínimo 6 caracteres"
+                  minLength={10}
+                  autoComplete="new-password"
+                  placeholder="Mínimo 10 caracteres"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-10 py-3 text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-royal-blue font-mono"
@@ -329,7 +330,8 @@ export default function LoginScreen({
                 <input
                   type={showConfirmPass ? 'text' : 'password'}
                   required
-                  minLength={6}
+                  minLength={10}
+                  autoComplete="new-password"
                   placeholder="Repita a nova senha"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -347,7 +349,7 @@ export default function LoginScreen({
 
             <div className="text-[11px] text-slate-500 bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 flex items-center space-x-2">
               <ShieldCheck className="h-4 w-4 text-blue-600 shrink-0" />
-              <span>A senha deve possuir pelo menos 6 caracteres e ser diferente de senhas genéricas.</span>
+              <span>Use no mínimo 10 caracteres, com letra maiúscula, letra minúscula, número e caractere especial.</span>
             </div>
 
             <div className="pt-2 flex flex-col space-y-2">

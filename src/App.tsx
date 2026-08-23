@@ -2,6 +2,7 @@ import React, { Component, useState, useEffect } from 'react';
 import { deleteField } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { authJsonFetch, clientAuthJsonFetch } from './utils/authApi';
+import { downloadInternalAccessCredentialsPdf } from './utils/internalAccessPdf';
 import PublicSite from './components/PublicSite';
 import InternalPortal from './components/InternalPortal';
 import ClientPortal from './components/ClientPortal';
@@ -500,11 +501,25 @@ export default function App() {
       setInternalUsers(prev => [savedUser, ...prev.filter(user => user.id !== savedUser.id)]);
       if (data.alreadyExists) {
         alert('A conta Firebase já existia. O cadastro foi vinculado sem alterar a senha atual dessa conta.');
-      } else if (!newUser.password) {
-        alert(`Usuário criado com senha temporária individual:
-${tempPass}
-
-Oriente o usuário a entrar e definir uma nova senha no primeiro acesso.`);
+      } else {
+        try {
+          const pdfName = await downloadInternalAccessCredentialsPdf({
+            collaboratorName: newUser.name,
+            username: newUser.username.trim().toLowerCase(),
+            temporaryPassword: tempPass,
+            siteUrl: window.location.origin,
+          });
+          alert(`Usuário criado com sucesso.\n\nO PDF de acesso “${pdfName}” foi baixado e já pode ser enviado ao colaborador.`);
+        } catch (pdfError) {
+          console.error('Error generating internal access PDF:', pdfError);
+          try {
+            await navigator.clipboard.writeText(`Usuário: ${newUser.username.trim().toLowerCase()}\nSenha temporária: ${tempPass}\nAcesso: ${window.location.origin}`);
+            alert('Usuário criado com sucesso. Não foi possível gerar o PDF, mas as credenciais foram copiadas para a área de transferência.');
+          } catch (clipboardError) {
+            console.error('Error copying temporary credentials:', clipboardError);
+            window.prompt('Não foi possível gerar o PDF. Copie agora a senha temporária:', tempPass);
+          }
+        }
       }
     } catch (err: any) {
       console.error('Error adding internal user to Firestore:', err);
