@@ -10030,6 +10030,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <CalibrationLabelArtwork
                           certificateNumber={loadedLabelData.certificateNumber}
                           calibrationDate={loadedLabelData.calibrationDate}
+                          calibrationLogo={calibrationLogo}
                           className="w-full shadow-lg"
                         />
 

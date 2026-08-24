@@ -31,10 +31,12 @@ export const formatCalibrationLabelDate = (value: string): string => {
 
 const certificateFontSize = (value: string): number => {
   const length = value.length;
-  if (length > 28) return 32;
-  if (length > 22) return 40;
-  if (length > 16) return 48;
-  return 64;
+  if (length > 16) return 26;
+  if (length > 12) return 30;
+  if (length > 10) return 34;
+  if (length > 8) return 40;
+  if (length > 6) return 46;
+  return 52;
 };
 
 export function CalibrationLabelArtwork({
@@ -62,87 +64,45 @@ export function CalibrationLabelArtwork({
         xmlns="http://www.w3.org/2000/svg"
       >
         <rect className="tze661-tape-background" width="360" height="159.8" fill="#f4cf16" />
-        <rect x="25" y="5" width="310" height="149.8" rx="4" fill="none" stroke="#000" strokeWidth="2" />
 
         <image
           href={calibrationLogo || "/comanins-calibration-label-logo.png"}
-          x="35"
-          y="12"
-          width="150"
-          height="45"
+          x="55"
+          y="4"
+          width="250"
+          height="84"
           preserveAspectRatio="xMidYMid meet"
           style={{}}
         />
         <text
-          x="325"
-          y="28"
-          textAnchor="end"
+          x="215"
+          y="111"
           fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="17"
+          fontSize="18"
           fontWeight="900"
           fill="#000"
         >
           CALIBRADO
         </text>
         <text
-          x="325"
-          y="48"
-          textAnchor="end"
-          fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="10"
-          fontWeight="700"
-          letterSpacing="0.8"
-          fill="#000"
-        >
-          IDENTIFICAÇÃO METROLÓGICA
-        </text>
-
-        <line x1="25" y1="64" x2="335" y2="64" stroke="#000" strokeWidth="2" />
-        <line x1="190" y1="64" x2="190" y2="154.8" stroke="#000" strokeWidth="1.5" />
-
-        <text
-          x="35"
-          y="82"
-          fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="12"
-          fontWeight="800"
-          letterSpacing="1"
-          fill="#000"
-        >
-          Nº CERTIFICADO
-        </text>
-        <text
-          x="35"
-          y="142"
+          x="30"
+          y="141"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize={certificateFontSize(cleanCert)}
           fontWeight="900"
           fill="#000"
-          textLength={cleanCert.length > 18 ? 145 : undefined}
+          textLength={cleanCert.length > 10 ? 170 : undefined}
           lengthAdjust="spacingAndGlyphs"
         >
           {cleanCert}
         </text>
 
         <text
-          x="262.5"
-          y="82"
-          textAnchor="middle"
+          x="215"
+          y="141"
           fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="12"
-          fontWeight="800"
-          letterSpacing="0.7"
-          fill="#000"
-        >
-          DATA CALIB.
-        </text>
-        <text
-          x="262.5"
-          y="136"
-          textAnchor="middle"
-          fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="24"
-          fontWeight="900"
+          fontSize="25"
+          fontWeight="700"
           fill="#000"
         >
           {formattedDate}
