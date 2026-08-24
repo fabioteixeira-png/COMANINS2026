@@ -404,8 +404,18 @@ export default function App() {
 
   const handleDeleteReport = async (reportId: string) => {
     try {
+      const report = reports.find(r => r.id === reportId);
       await deleteReportDoc(reportId);
       setReports(prev => prev.filter(r => r.id !== reportId));
+      
+      if (report && report.instrumentId) {
+        setInstruments(prev => prev.map(i => 
+          i.id === report.instrumentId 
+            ? { ...i, status: 'Aguardando Calibração' } 
+            : i
+        ));
+        await updateInstrumentDoc(report.instrumentId, { status: 'Aguardando Calibração' });
+      }
     } catch (err) {
       console.error('Error deleting calibration report from Firestore:', err);
 

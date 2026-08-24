@@ -801,7 +801,12 @@ const ensureInstrumentLiveListener = (fromIso: string) => {
         instrumentCache.delete(change.doc.id);
         return;
       }
-      mergeInstrumentIntoCache({ id: change.doc.id, ...change.doc.data() } as Instrument);
+      const data = change.doc.data();
+      if (data.isDeleted === true) {
+        instrumentCache.delete(change.doc.id);
+      } else {
+        mergeInstrumentIntoCache({ id: change.doc.id, ...data } as Instrument);
+      }
     });
     notifyInstrumentSubscribers();
   }, (error) => {
@@ -1441,7 +1446,7 @@ export async function syncIntakes(callback: (intakes: SavedIntake[]) => void) {
 }
 
 export async function saveIntakeDoc(intake: SavedIntake): Promise<void> {
-  await setDoc(doc(db, 'savedIntakes', intake.id), intake);
+  await setDoc(doc(db, 'savedIntakes', intake.id), intake, { merge: true });
 }
 
 export async function updateIntakeDevolutionPhoto(id: string, photoBase64: string): Promise<void> {

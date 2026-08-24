@@ -55,7 +55,7 @@ export function CalibrationLabelArtwork({
     >
       <svg
         className="block h-full w-full"
-        viewBox="0 0 360 159.8"
+        viewBox="-10 0 380 159.8"
         role="img"
         aria-hidden="true"
         xmlns="http://www.w3.org/2000/svg"
@@ -178,7 +178,7 @@ export default function CalibrationLabelPrintModal({
       <style>{`
         @media print {
           @page {
-            size: landscape;
+            size: 36mm 15.98mm;
             margin: 0;
           }
 
