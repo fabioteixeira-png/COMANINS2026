@@ -1010,7 +1010,7 @@ app.use((_req, res, next) => {
 
 // Temporary migration/admin seed routes removed after Firebase Auth rollout.
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: "8mb" }));
 app.use(express.urlencoded({ limit: "2mb", extended: true }));
