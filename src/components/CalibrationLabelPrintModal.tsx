@@ -31,10 +31,10 @@ export const formatCalibrationLabelDate = (value: string): string => {
 
 const certificateFontSize = (value: string): number => {
   const length = value.length;
-  if (length > 28) return 18;
-  if (length > 22) return 22;
-  if (length > 16) return 26;
-  return 32;
+  if (length > 28) return 32;
+  if (length > 22) return 40;
+  if (length > 16) return 48;
+  return 64;
 };
 
 export function CalibrationLabelArtwork({
@@ -62,19 +62,19 @@ export function CalibrationLabelArtwork({
         xmlns="http://www.w3.org/2000/svg"
       >
         <rect className="tze661-tape-background" width="360" height="159.8" fill="#f4cf16" />
-        <rect x="3" y="3" width="354" height="153.8" rx="4" fill="none" stroke="#000" strokeWidth="2" />
+        <rect x="25" y="5" width="310" height="149.8" rx="4" fill="none" stroke="#000" strokeWidth="2" />
 
         <image
           href={calibrationLogo || "/comanins-calibration-label-logo.png"}
-          x="10"
-          y="7"
-          width="174"
-          height="51"
+          x="35"
+          y="12"
+          width="150"
+          height="45"
           preserveAspectRatio="xMidYMid meet"
-          style={{ filter: "brightness(0)" }}
+          style={{ imageRendering: "high-quality" }}
         />
         <text
-          x="340"
+          x="325"
           y="28"
           textAnchor="end"
           fontFamily="Arial, Helvetica, sans-serif"
@@ -85,7 +85,7 @@ export function CalibrationLabelArtwork({
           CALIBRADO
         </text>
         <text
-          x="340"
+          x="325"
           y="48"
           textAnchor="end"
           fontFamily="Arial, Helvetica, sans-serif"
@@ -97,12 +97,12 @@ export function CalibrationLabelArtwork({
           IDENTIFICAÇÃO METROLÓGICA
         </text>
 
-        <line x1="9" y1="64" x2="340" y2="64" stroke="#000" strokeWidth="2" />
-        <line x1="210" y1="70" x2="210" y2="150" stroke="#000" strokeWidth="1.5" />
+        <line x1="25" y1="64" x2="335" y2="64" stroke="#000" strokeWidth="2" />
+        <line x1="190" y1="64" x2="190" y2="154.8" stroke="#000" strokeWidth="1.5" />
 
         <text
-          x="12"
-          y="84"
+          x="35"
+          y="82"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize="12"
           fontWeight="800"
@@ -112,21 +112,22 @@ export function CalibrationLabelArtwork({
           Nº CERTIFICADO
         </text>
         <text
-          x="12"
-          y="135"
+          x="35"
+          y="142"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize={certificateFontSize(cleanCert)}
           fontWeight="900"
           fill="#000"
-          textLength={cleanCert.length > 22 ? 185 : undefined}
+          textLength={cleanCert.length > 18 ? 145 : undefined}
           lengthAdjust="spacingAndGlyphs"
         >
           {cleanCert}
         </text>
 
         <text
-          x="220"
-          y="84"
+          x="262.5"
+          y="82"
+          textAnchor="middle"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize="12"
           fontWeight="800"
@@ -136,8 +137,9 @@ export function CalibrationLabelArtwork({
           DATA CALIB.
         </text>
         <text
-          x="220"
-          y="135"
+          x="262.5"
+          y="136"
+          textAnchor="middle"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize="24"
           fontWeight="900"
@@ -260,6 +262,7 @@ export default function CalibrationLabelPrintModal({
             <CalibrationLabelArtwork
               certificateNumber={certificateNumber}
               calibrationDate={calibrationDate}
+              calibrationLogo={calibrationLogo}
               printable
               className="w-full max-w-[720px] shadow-lg"
             />

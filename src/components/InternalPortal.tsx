@@ -13554,12 +13554,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </label>
                         <input
                           type="text"
-                          value={siteHeaderLogoPreview}
+                          value={siteHeaderLogoPreview.startsWith('data:') ? '' : siteHeaderLogoPreview}
                           onChange={(e) =>
                             setSiteHeaderLogoPreview(e.target.value)
                           }
                           className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                          placeholder="https://sua-imagem.com/logo.png"
+                          placeholder={siteHeaderLogoPreview.startsWith('data:') ? 'Imagem local carregada...' : 'https://sua-imagem.com/logo.png'}
                         />
                       </div>
 
@@ -13719,12 +13719,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           </label>
                           <input
                             type="text"
-                            value={calibrationLogoPreview}
+                            value={calibrationLogoPreview.startsWith('data:') ? '' : calibrationLogoPreview}
                             onChange={(e) =>
                               setCalibrationLogoPreview(e.target.value)
                             }
                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                            placeholder="https://sua-imagem.com/logo-etiqueta.png"
+                            placeholder={calibrationLogoPreview.startsWith('data:') ? 'Imagem local carregada...' : 'https://sua-imagem.com/logo-etiqueta.png'}
                           />
                         </div>
 
