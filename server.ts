@@ -1397,13 +1397,226 @@ const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance
   financeMeasurements: { area: 'finance', label: 'Medição financeira' },
   financeBankAccounts: { area: 'finance', label: 'Conta bancária' },
   financeCategories: { area: 'finance', label: 'Categoria financeira' },
-  calibrationReports: { area: 'operations', label: 'Certificado de calibração' },
   savedIntakes: { area: 'operations', label: 'Entrada de material' },
   rncReports: { area: 'operations', label: 'Relatório de não conformidade' },
   referenceStandards: { area: 'operations', label: 'Padrão de referência' },
   calibrationAuditLogs: { area: 'operations', label: 'Registro de tempo de calibração' },
   internal_tickets: { area: 'operations', label: 'Chamado interno' },
 };
+
+const calibrationReopenUpdates = (updatedAt: string) => ({
+  status: 'Aguardando Calibração',
+  lastCalibrationDate: FieldValue.delete(),
+  nextCalibrationDate: FieldValue.delete(),
+  temperature: FieldValue.delete(),
+  humidity: FieldValue.delete(),
+  updatedAt,
+});
+
+const reopenedInstrumentPayload = (
+  instrumentId: string,
+  source: Record<string, any>,
+  updatedAt: string,
+) => {
+  const {
+    lastCalibrationDate: _lastCalibrationDate,
+    nextCalibrationDate: _nextCalibrationDate,
+    temperature: _temperature,
+    humidity: _humidity,
+    ...preserved
+  } = source;
+  return {
+    ...preserved,
+    id: instrumentId,
+    status: 'Aguardando Calibração',
+    updatedAt,
+  };
+};
+
+const getFreshAdministrator = async (req: AuthRequest) => {
+  if (!req.user) return null;
+  const profile = await findPortalUserForAuth(req.user);
+  return profile && isAdministratorProfile(profile) ? profile : null;
+};
+
+app.post(
+  '/api/internal/calibration-reports/:reportId/delete-and-reopen',
+  requireAuth,
+  requireInternalAccount,
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb || !req.user) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+
+    const reportId = asLimitedString(req.params.reportId, 180);
+    if (!reportId) return res.status(400).json({ error: 'INVALID_REPORT_ID' });
+
+    try {
+      const administrator = await getFreshAdministrator(req);
+      if (!administrator) return res.status(403).json({ error: 'FORBIDDEN' });
+
+      const reportRef = firestoreDb.collection('calibrationReports').doc(reportId);
+      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+      const updatedAt = new Date().toISOString();
+
+      const result = await firestoreDb.runTransaction(async (transaction) => {
+        const reportSnapshot = await transaction.get(reportRef);
+        if (!reportSnapshot.exists) throw new Error('REPORT_NOT_FOUND');
+
+        const report: any = reportSnapshot.data() || {};
+        const instrumentId = asLimitedString(report.instrumentId, 180);
+        if (!instrumentId) throw new Error('REPORT_WITHOUT_INSTRUMENT');
+
+        const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+        const instrumentSnapshot = await transaction.get(instrumentRef);
+        if (!instrumentSnapshot.exists) throw new Error('INSTRUMENT_NOT_FOUND');
+
+        const instrument: any = instrumentSnapshot.data() || {};
+        transaction.delete(reportRef);
+        transaction.update(instrumentRef, calibrationReopenUpdates(updatedAt));
+        transaction.set(auditRef, {
+          action: 'CALIBRATION_REPORT_DELETED_FOR_REISSUE',
+          entityType: 'calibrationReport',
+          entityId: reportId,
+          actorUid: asLimitedString(req.user?.uid, 160),
+          actorName: asLimitedString(
+            administrator.name || administrator.username || req.user?.email,
+            160,
+          ) || 'Administrador',
+          actorRole: asLimitedString(
+            administrator.permissionLevel || administrator.role,
+            100,
+          ),
+          createdAt: updatedAt,
+          immutable: true,
+          summary: 'Certificado removido definitivamente e calibração reaberta',
+          metadata: {
+            instrumentId,
+            certNumber: asLimitedString(report.certNumber, 160),
+            previousInstrumentStatus: asLimitedString(instrument.status, 100),
+            reason: 'CERTIFICATE_CORRECTION_AND_REISSUE',
+          },
+        });
+
+        return {
+          reportId,
+          instrumentId,
+          instrument: reopenedInstrumentPayload(instrumentId, instrument, updatedAt),
+        };
+      });
+
+      return res.json({ success: true, ...result });
+    } catch (error: any) {
+      const code = String(error?.message || error?.code || '');
+      if (code.includes('REPORT_NOT_FOUND')) {
+        return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
+      }
+      if (code.includes('REPORT_WITHOUT_INSTRUMENT')) {
+        return res.status(409).json({ error: 'REPORT_WITHOUT_INSTRUMENT' });
+      }
+      if (code.includes('INSTRUMENT_NOT_FOUND')) {
+        return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+      }
+      console.error('Calibration report delete-and-reopen failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.post(
+  '/api/internal/instruments/:instrumentId/recover-archived-calibration',
+  requireAuth,
+  requireInternalAccount,
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb || !req.user) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+
+    const instrumentId = asLimitedString(req.params.instrumentId, 180);
+    if (!instrumentId) {
+      return res.status(400).json({ error: 'INVALID_INSTRUMENT_ID' });
+    }
+
+    try {
+      const administrator = await getFreshAdministrator(req);
+      if (!administrator) return res.status(403).json({ error: 'FORBIDDEN' });
+
+      const reportsSnapshot = await firestoreDb
+        .collection('calibrationReports')
+        .where('instrumentId', '==', instrumentId)
+        .get();
+      const activeReports = reportsSnapshot.docs.filter(
+        (snapshot) => snapshot.data()?.isDeleted !== true,
+      );
+      const archivedReports = reportsSnapshot.docs.filter(
+        (snapshot) => snapshot.data()?.isDeleted === true,
+      );
+
+      if (activeReports.length > 0) {
+        return res.status(409).json({ error: 'ACTIVE_CALIBRATION_REPORT_EXISTS' });
+      }
+      if (archivedReports.length === 0) {
+        return res.json({ success: true, recovered: false, instrumentId });
+      }
+
+      const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+      const updatedAt = new Date().toISOString();
+      const removedReportIds = archivedReports.map((snapshot) => snapshot.id);
+
+      const instrument = await firestoreDb.runTransaction(async (transaction) => {
+        const instrumentSnapshot = await transaction.get(instrumentRef);
+        if (!instrumentSnapshot.exists) throw new Error('INSTRUMENT_NOT_FOUND');
+
+        const instrumentBefore: any = instrumentSnapshot.data() || {};
+        archivedReports.forEach((snapshot) => transaction.delete(snapshot.ref));
+        transaction.update(instrumentRef, calibrationReopenUpdates(updatedAt));
+        transaction.set(auditRef, {
+          action: 'ARCHIVED_CALIBRATION_RECOVERED_FOR_REISSUE',
+          entityType: 'instrument',
+          entityId: instrumentId,
+          actorUid: asLimitedString(req.user?.uid, 160),
+          actorName: asLimitedString(
+            administrator.name || administrator.username || req.user?.email,
+            160,
+          ) || 'Administrador',
+          actorRole: asLimitedString(
+            administrator.permissionLevel || administrator.role,
+            100,
+          ),
+          createdAt: updatedAt,
+          immutable: true,
+          summary: 'Arquivamento legado removido e calibração reaberta',
+          metadata: {
+            instrumentId,
+            removedReportIds: removedReportIds.slice(0, 50),
+            previousInstrumentStatus: asLimitedString(instrumentBefore.status, 100),
+            reason: 'LEGACY_ARCHIVE_RECOVERY_FOR_REISSUE',
+          },
+        });
+
+        return reopenedInstrumentPayload(instrumentId, instrumentBefore, updatedAt);
+      });
+
+      return res.json({
+        success: true,
+        recovered: true,
+        instrumentId,
+        removedReportIds,
+        instrument,
+      });
+    } catch (error: any) {
+      const code = String(error?.message || error?.code || '');
+      if (code.includes('INSTRUMENT_NOT_FOUND')) {
+        return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+      }
+      console.error('Archived calibration recovery failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
 
 app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb || !req.user) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });

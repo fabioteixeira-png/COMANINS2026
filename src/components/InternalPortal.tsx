@@ -221,7 +221,6 @@ import { generateAuthKey, getReportAuthKey } from "../utils/authKey";
 
 const ARCHIVE_ACTION_TYPES = new Set([
   "instrument",
-  "report",
   "standard",
   "birthday",
   "intake",
@@ -691,6 +690,7 @@ export default function InternalPortal({
   onUpdateInstrumentStatus,
   onSaveCalibration,
   onDeleteReport,
+  onPrepareCalibration,
   onUpdateMessageStatus,
 }: InternalPortalProps) {
   const isLimitedRole =
@@ -1104,6 +1104,8 @@ export default function InternalPortal({
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
   const [selectedInstId, setSelectedInstId] = useState<any>("");
+  const [openingCalibrationInstrumentId, setOpeningCalibrationInstrumentId] =
+    useState<string>("");
   const [selectedIntakeToPrint, setSelectedIntakeToPrint] = useState<any>("");
   const [selectedDevolutionToPrint, setSelectedDevolutionToPrint] = useState<any>(null);
   const [intakePortalCredential, setIntakePortalCredential] = useState<any>(null);
@@ -1208,6 +1210,23 @@ export default function InternalPortal({
       return {};
     }
   });
+
+  const clearIssuedCertificateFlag = (instrumentId: string) => {
+    if (!instrumentId) return;
+    setIssuedCertificates((previous) => {
+      const updated = { ...previous };
+      delete updated[instrumentId];
+      try {
+        localStorage.setItem(
+          "comanins_issued_certs",
+          JSON.stringify(updated),
+        );
+      } catch (error) {
+        console.warn("Não foi possível atualizar a trava local do certificado:", error);
+      }
+      return updated;
+    });
+  };
 
   const buildDevolutionRowsForIntake = (intake: any, justIssuedId?: string) => {
     const numEntrada = String(intake?.numEntrada || "").trim().toLowerCase();
@@ -1577,7 +1596,33 @@ export default function InternalPortal({
         if (deleteTarget.type === "instrument") {
           await onDeleteInstrument(deleteTarget.id);
         } else if (deleteTarget.type === "report") {
+          const reportToDelete = reports.find(
+            (report: any) => report.id === deleteTarget.id,
+          );
           if (onDeleteReport) await onDeleteReport(deleteTarget.id);
+          if (reportToDelete?.instrumentId) {
+            const instrumentId = String(reportToDelete.instrumentId);
+            clearIssuedCertificateFlag(instrumentId);
+            setCalibrationStartTimes((previous) => {
+              const updated = { ...previous };
+              delete updated[instrumentId];
+              try {
+                localStorage.setItem(
+                  "comanins_calibration_start_times",
+                  JSON.stringify(updated),
+                );
+              } catch (error) {
+                console.warn(
+                  "Não foi possível limpar o cronômetro local da calibração:",
+                  error,
+                );
+              }
+              return updated;
+            });
+            if (selectedInstId === instrumentId) setSelectedInstId("");
+          }
+          setSelectedCertificateId("");
+          setActiveTab("instruments");
         } else if (deleteTarget.type === "client") {
           if (onDeleteClient) await onDeleteClient(deleteTarget.id);
         } else if (deleteTarget.type === "user") {
@@ -2711,6 +2756,18 @@ Status atual: ${e.status}.`,
     const availableCount = matching.filter(
       (i) => i.status === "Disponível para Retirada" || i.status === "Entregue" || i.status === "Não Conforme",
     ).length;
+
+    if (intake.deliveryFinalizedAt || intake.deliveryLocked) {
+      return {
+        label: "Entregue",
+        badgeClass:
+          "bg-slate-800 text-white border border-slate-900 font-semibold shadow-sm",
+        badgeDarkClass:
+          "bg-slate-700 text-white border border-slate-600 font-semibold shadow-sm",
+        registeredCount,
+        totalAllowed,
+      };
+    }
 
     if (registeredCount === 0) {
       return {
@@ -7972,11 +8029,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
                       const userRole = currentUser?.role || "";
                       const isUserAdmin =
-                        userRole === "Administrador" ||
-                        userRole === "Admin" ||
-                        userRole === "admin" ||
-                        userRole === "master" ||
-                        userRole === "Diretor";
+                        currentUser?.permissionLevel === "Administrador" ||
+                        (!currentUser?.permissionLevel &&
+                          (userRole === "Administrador" ||
+                            userRole === "Admin" ||
+                            userRole === "admin" ||
+                            userRole === "master" ||
+                            userRole === "Diretor" ||
+                            userRole === "Diretoria"));
                       const isTechLab = isCalibrationTechnicianRole(userRole);
                       const canAccessCalibrarRole = isUserAdmin || isTechLab;
 
@@ -8101,43 +8161,85 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               disabled={
                                 isCalibLocked ||
                                 !hasRegPhoto ||
-                                !canAccessCalibrarRole
+                                !canAccessCalibrarRole ||
+                                openingCalibrationInstrumentId === inst.id
                               }
-                              onClick={() => {
+                              onClick={async () => {
                                 if (
                                   isCalibLocked ||
                                   !hasRegPhoto ||
-                                  !canAccessCalibrarRole
+                                  !canAccessCalibrarRole ||
+                                  openingCalibrationInstrumentId === inst.id
                                 )
                                   return;
 
-                                // Se já havia outro instrumento em calibração não finalizada, reverte-o
-                                if (selectedInstId && selectedInstId !== inst.id) {
-                                  cancelActiveCalibration(selectedInstId);
-                                }
-
-                                const prevStatus =
-                                  inst.status && inst.status !== "Em Calibração"
-                                    ? inst.status
-                                    : "Aguardando Calibração";
-
-                                setSelectedInstId(inst.id);
-                                recordCalibrationStart(inst.id, prevStatus);
-                                if (
-                                  onUpdateInstrumentStatus &&
-                                  inst.status !== "Calibrado"
-                                ) {
-                                  onUpdateInstrumentStatus(
-                                    inst.id,
-                                    "Em Calibração",
+                                setOpeningCalibrationInstrumentId(inst.id);
+                                try {
+                                  let instrumentReady = inst;
+                                  const hasActiveCalibrationReport = reports.some(
+                                    (report: any) =>
+                                      report.instrumentId === inst.id &&
+                                      report.isDeleted !== true,
                                   );
+
+                                  if (
+                                    isUserAdmin &&
+                                    !hasActiveCalibrationReport &&
+                                    onPrepareCalibration
+                                  ) {
+                                    const recovery = await onPrepareCalibration(inst.id);
+                                    if (recovery?.instrument) {
+                                      instrumentReady = {
+                                        ...inst,
+                                        ...recovery.instrument,
+                                      };
+                                    }
+                                    if (recovery?.recovered) {
+                                      clearIssuedCertificateFlag(inst.id);
+                                    }
+                                  }
+
+                                  if (selectedInstId && selectedInstId !== inst.id) {
+                                    await cancelActiveCalibration(selectedInstId);
+                                  }
+
+                                  const prevStatus =
+                                    instrumentReady.status &&
+                                    instrumentReady.status !== "Em Calibração"
+                                      ? instrumentReady.status
+                                      : "Aguardando Calibração";
+
+                                  if (
+                                    onUpdateInstrumentStatus &&
+                                    instrumentReady.status !== "Em Calibração"
+                                  ) {
+                                    await onUpdateInstrumentStatus(
+                                      inst.id,
+                                      "Em Calibração",
+                                    );
+                                  }
+
+                                  setSelectedInstId(inst.id);
+                                  recordCalibrationStart(inst.id, prevStatus);
+                                  setActiveTab("bench");
+                                } catch (error: any) {
+                                  console.error(
+                                    "Não foi possível abrir a ficha de calibração:",
+                                    error,
+                                  );
+                                  alert(
+                                    error?.message ||
+                                      "Não foi possível liberar este instrumento para uma nova calibração.",
+                                  );
+                                } finally {
+                                  setOpeningCalibrationInstrumentId("");
                                 }
-                                setActiveTab("bench");
                               }}
                               className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 transition-all ${
                                 isCalibLocked ||
                                 !hasRegPhoto ||
-                                !canAccessCalibrarRole
+                                !canAccessCalibrarRole ||
+                                openingCalibrationInstrumentId === inst.id
                                   ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60 shadow-none"
                                   : "bg-royal-blue hover:bg-blue-600 text-white cursor-pointer"
                               }`}
@@ -8155,7 +8257,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             >
                               <Activity className="h-3 w-3" />
                               <span>
-                                {isRncIssued ? "RNC Emitido" : "Calibrar"}
+                                {isRncIssued
+                                  ? "RNC Emitido"
+                                  : openingCalibrationInstrumentId === inst.id
+                                    ? "Abrindo..."
+                                    : "Calibrar"}
                               </span>
                             </button>
 
@@ -18960,9 +19066,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <span>Atenção: Apenas o Administrador do Sistema pode confirmar!</span>
               </p>
               <p className="text-[11px] text-rose-700">
-                {deleteActionIsArchive
-                  ? "Você está prestes a arquivar, ocultar das listas operacionais e preservar para auditoria: "
-                  : "Você está prestes a remover: "}
+                {deleteTarget?.type === "report"
+                  ? "Você está prestes a excluir definitivamente este certificado e liberar o instrumento para uma nova ficha de calibração: "
+                  : deleteActionIsArchive
+                    ? "Você está prestes a arquivar, ocultar das listas operacionais e preservar para auditoria: "
+                    : "Você está prestes a remover: "}
                 <strong>{deleteTarget?.name}</strong>.
               </p>
             </div>

@@ -32,6 +32,7 @@ import {
   updateInstrumentDoc,
   saveCalibrationDoc,
   deleteReportDoc,
+  recoverArchivedCalibrationDoc,
   updateMessageDoc,
   addPortalUserDoc,
   updatePortalUserDoc,
@@ -368,11 +369,11 @@ export default function App() {
 
   const handleUpdateInstrumentStatus = async (id: string, status: Instrument['status']) => {
     try {
-      setInstruments(prev => prev.map(i => i.id === id ? { ...i, status } : i));
       await updateInstrumentDoc(id, { status });
+      setInstruments(prev => prev.map(i => i.id === id ? { ...i, status } : i));
     } catch (err) {
       console.error('Error updating instrument status in Firestore:', err);
-
+      throw err;
     }
   };
 
@@ -404,21 +405,37 @@ export default function App() {
 
   const handleDeleteReport = async (reportId: string) => {
     try {
-      const report = reports.find(r => r.id === reportId);
-      await deleteReportDoc(reportId);
+      const result = await deleteReportDoc(reportId);
       setReports(prev => prev.filter(r => r.id !== reportId));
-      
-      if (report && report.instrumentId) {
-        setInstruments(prev => prev.map(i => 
-          i.id === report.instrumentId 
-            ? { ...i, status: 'Aguardando Calibração' } 
-            : i
+
+      if (result.instrument) {
+        setInstruments(prev => prev.map(instrument =>
+          instrument.id === result.instrumentId
+            ? result.instrument as Instrument
+            : instrument
         ));
-        await updateInstrumentDoc(report.instrumentId, { status: 'Aguardando Calibração' });
       }
+      return result;
     } catch (err) {
       console.error('Error deleting calibration report from Firestore:', err);
+      throw err;
+    }
+  };
 
+  const handlePrepareCalibration = async (instrumentId: string) => {
+    try {
+      const result = await recoverArchivedCalibrationDoc(instrumentId);
+      if (result.instrument) {
+        setInstruments(prev => prev.map(instrument =>
+          instrument.id === instrumentId
+            ? result.instrument as Instrument
+            : instrument
+        ));
+      }
+      return result;
+    } catch (err) {
+      console.error('Error recovering archived calibration:', err);
+      throw err;
     }
   };
 
@@ -702,6 +719,7 @@ export default function App() {
             onUpdateInstrumentStatus={handleUpdateInstrumentStatus}
             onSaveCalibration={handleSaveCalibration}
             onDeleteReport={handleDeleteReport}
+            onPrepareCalibration={handlePrepareCalibration}
             onUpdateMessageStatus={handleUpdateMessageStatus}
           />
         )}

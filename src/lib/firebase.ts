@@ -1204,8 +1204,73 @@ export async function saveCalibrationDoc(data: {
   return { report: cleanReport, instrument: { ...updatedInst, ...instrumentUpdates } as Instrument };
 }
 
-export async function deleteReportDoc(reportId: string): Promise<void> {
-  await archiveCriticalRecord('calibrationReports', reportId);
+export interface CalibrationReopenResult {
+  success: true;
+  recovered?: boolean;
+  reportId?: string;
+  instrumentId: string;
+  removedReportIds?: string[];
+  instrument?: Instrument;
+}
+
+const parseCalibrationReopenResponse = async (
+  response: Response,
+): Promise<CalibrationReopenResult> => {
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (payload?.error === 'FORBIDDEN') {
+      throw new Error('Somente o Administrador do Sistema pode remover um certificado e reabrir a calibração.');
+    }
+    if (payload?.error === 'REPORT_NOT_FOUND') {
+      throw new Error('O certificado não foi encontrado. Atualize a página antes de tentar novamente.');
+    }
+    if (payload?.error === 'INSTRUMENT_NOT_FOUND') {
+      throw new Error('O instrumento vinculado ao certificado não foi encontrado.');
+    }
+    if (payload?.error === 'ACTIVE_CALIBRATION_REPORT_EXISTS') {
+      throw new Error('Este instrumento ainda possui um certificado ativo. Exclua o certificado antes de iniciar uma nova calibração.');
+    }
+    throw new Error('Não foi possível remover o certificado e reabrir a calibração.');
+  }
+  return payload as CalibrationReopenResult;
+};
+
+export async function deleteReportDoc(
+  reportId: string,
+): Promise<CalibrationReopenResult> {
+  const headers = await corporateFileAuthHeaders();
+  const response = await fetch(
+    `/api/internal/calibration-reports/${encodeURIComponent(reportId)}/delete-and-reopen`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    },
+  );
+  const result = await parseCalibrationReopenResponse(response);
+  if (result.instrument) {
+    mergeInstrumentIntoCache(result.instrument);
+    notifyInstrumentSubscribers();
+  }
+  return result;
+}
+
+export async function recoverArchivedCalibrationDoc(
+  instrumentId: string,
+): Promise<CalibrationReopenResult> {
+  const headers = await corporateFileAuthHeaders();
+  const response = await fetch(
+    `/api/internal/instruments/${encodeURIComponent(instrumentId)}/recover-archived-calibration`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    },
+  );
+  const result = await parseCalibrationReopenResponse(response);
+  if (result.instrument) {
+    mergeInstrumentIntoCache(result.instrument);
+    notifyInstrumentSubscribers();
+  }
+  return result;
 }
 
 // 4. Contact Messages / Leads

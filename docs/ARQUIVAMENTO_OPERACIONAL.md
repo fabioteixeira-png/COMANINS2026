@@ -2,9 +2,8 @@
 
 ## Escopo
 
-Este lote substitui a exclusão física pelo arquivamento lógico nas coleções:
+O arquivamento lógico permanece ativo nas coleções:
 
-- `calibrationReports`
 - `savedIntakes`
 - `rncReports`
 - `referenceStandards`
@@ -31,7 +30,19 @@ Os registros arquivados não aparecem nas listas operacionais nem no Portal do C
 
 Arquivar uma Entrada de Material não remove fotografias, formulários assinados nem outros objetos do Cloud Storage. Nenhum objeto antigo é apagado por este lote.
 
-Certificados, RNCs e padrões já vinculados a históricos permanecem preservados. O arquivamento afeta somente a exibição operacional corrente.
+RNCs e padrões já vinculados a históricos permanecem preservados. O arquivamento afeta somente a exibição operacional corrente.
+
+## Exceção administrativa — certificado com erro
+
+`calibrationReports` não utiliza mais o arquivamento lógico quando o Administrador confirma a exclusão de um certificado para correção e reemissão. O backend autenticado executa atomicamente:
+
+- exclusão física somente do relatório de calibração selecionado;
+- retorno do instrumento para `Aguardando Calibração`;
+- limpeza das datas e condições ambientais pertencentes à calibração removida;
+- preservação do cadastro, fotos, entrada e evidências de entrega;
+- criação de evento imutável em `systemAuditLogs`, contendo apenas identificação, ator e motivo da ação.
+
+A entrada já finalizada continua bloqueada e apresentada como entregue. O registro de auditoria não é uma cópia arquivada do certificado removido.
 
 ## Regras de produção
 
@@ -39,7 +50,7 @@ Certificados, RNCs e padrões já vinculados a históricos permanecem preservado
 - O navegador não pode excluir fisicamente registros das coleções deste lote.
 - Registros de tempo de calibração são append-only no navegador.
 - Somente o Administrador pode solicitar o arquivamento operacional.
-- Restauração ou exclusão física exigem processo posterior, documentado e com backup/PITR confirmado.
+- A exclusão física permanece proibida no navegador. A única exceção operacional é o endpoint administrativo de remoção de certificado para correção e reemissão, com trilha de auditoria.
 
 ## Compatibilidade
 
