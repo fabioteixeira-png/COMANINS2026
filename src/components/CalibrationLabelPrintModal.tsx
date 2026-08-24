@@ -31,12 +31,12 @@ export const formatCalibrationLabelDate = (value: string): string => {
 
 const certificateFontSize = (value: string): number => {
   const length = value.length;
-  if (length > 16) return 26;
-  if (length > 12) return 30;
-  if (length > 10) return 34;
-  if (length > 8) return 40;
-  if (length > 6) return 46;
-  return 52;
+  if (length > 16) return 25.22;
+  if (length > 12) return 29.1;
+  if (length > 10) return 32.98;
+  if (length > 8) return 38.8;
+  if (length > 6) return 44.62;
+  return 50.44;
 };
 
 export function CalibrationLabelArtwork({
@@ -46,8 +46,10 @@ export function CalibrationLabelArtwork({
   className = "",
   printable = false,
 }: CalibrationLabelArtworkProps) {
+  const [imgError, setImgError] = React.useState(false);
   const formattedDate = formatCalibrationLabelDate(calibrationDate);
   const cleanCert = certificateNumber.replace(/^COMA-/i, "").trim();
+  const finalLogo = imgError || !calibrationLogo ? "/comanins-calibration-label-logo.png" : calibrationLogo;
 
   return (
     <div
@@ -66,13 +68,14 @@ export function CalibrationLabelArtwork({
         <rect className="tze661-tape-background" width="360" height="159.8" fill="#f4cf16" />
 
         <image
-          href={calibrationLogo || "/comanins-calibration-label-logo.png"}
+          href={finalLogo}
           x="55"
           y="4"
           width="250"
           height="84"
           preserveAspectRatio="xMidYMid meet"
           style={{}}
+          onError={() => setImgError(true)}
         />
         <text
           x="215"

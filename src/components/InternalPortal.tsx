@@ -13793,6 +13793,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               src={calibrationLogoPreview}
                               alt="Logomarca da Etiqueta"
                               className="max-h-16 max-w-full object-contain"
+                              onError={(e) => { e.currentTarget.src = "/comanins-calibration-label-logo.png"; }}
                             />
                           ) : (
                             <div className="flex flex-col items-center space-y-1">
