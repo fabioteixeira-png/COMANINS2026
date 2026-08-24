@@ -174,6 +174,7 @@ export default function CalibrationLabelPrintModal({
       <style>{`
         @media print {
           @page {
+            size: landscape;
             margin: 0;
           }
 

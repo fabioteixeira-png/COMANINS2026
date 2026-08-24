@@ -869,8 +869,9 @@ export async function countInstrumentsForIntake(intakeNumber: string): Promise<n
     collection(db, 'instruments'),
     where('numeroDaEntrada', '==', normalized),
   );
-  const snapshot = await getCountFromServer(q);
-  return snapshot.data().count;
+  const snapshot = await getDocs(q);
+  const activeDocs = snapshot.docs.filter((doc) => doc.data().isDeleted !== true);
+  return activeDocs.length;
 }
 
 export async function instrumentCertificateExists(certificateNumber: string): Promise<boolean> {

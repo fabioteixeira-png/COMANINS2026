@@ -5659,7 +5659,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         rows: intakeRows,
       };
 
+      const existingIntake = editingIntakeId ? savedIntakes.find((item) => item.id === editingIntakeId) || {} : {};
       const intakeToSave = {
+        ...existingIntake,
         ...intakeData,
         id: editingIntakeId || Date.now().toString(),
       };
