@@ -78,6 +78,8 @@ export interface Instrument {
   rncTechnician?: string;
   temperature?: number;
   humidity?: number;
+  manualCalibrationDateAllowed?: boolean;
+  reissueSuggestedCalibrationDate?: string;
 }
 
 export interface RncReport {

@@ -44,6 +44,8 @@ RNCs e padrões já vinculados a históricos permanecem preservados. O arquivame
 
 A entrada já finalizada continua bloqueada e apresentada como entregue. O registro de auditoria não é uma cópia arquivada do certificado removido.
 
+Durante essa reemissão, o instrumento recebe uma autorização temporária para informar manualmente a data da calibração. A ficha sugere a data do certificado removido, aceita somente data válida até o dia atual e calcula o próximo vencimento a partir da data confirmada. A autorização e a sugestão são removidas automaticamente na gravação da nova ficha ou do RNC, impedindo o uso do campo nos fluxos normais.
+
 ## Regras de produção
 
 - O navegador não pode escrever campos de arquivamento.

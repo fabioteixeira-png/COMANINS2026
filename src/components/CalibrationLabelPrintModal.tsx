@@ -71,7 +71,7 @@ export function CalibrationLabelArtwork({
           width="150"
           height="45"
           preserveAspectRatio="xMidYMid meet"
-          style={{ imageRendering: "high-quality" }}
+          style={{}}
         />
         <text
           x="325"

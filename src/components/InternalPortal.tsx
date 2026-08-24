@@ -611,6 +611,12 @@ const compressBase64Image = (
   return compressBase64Helper(base64Str, maxWidth, maxHeight, quality);
 };
 
+const currentCalibrationDate = () => {
+  const now = new Date();
+  const localTime = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return localTime.toISOString().split("T")[0];
+};
+
 const resolveCalibrationLabelData = (
   instrument: any,
   calibrationReports: any[],
@@ -1434,6 +1440,9 @@ export default function InternalPortal({
   const [benchErrorMessage, setBenchErrorMessage] = useState<string>("");
   const [benchTemperature, setBenchTemperature] = useState<number | "">("");
   const [benchHumidity, setBenchHumidity] = useState<number | "">("");
+  const [benchCalibrationDate, setBenchCalibrationDate] = useState<string>(
+    currentCalibrationDate,
+  );
   const [isEditCondicaoDropdownOpen, setIsEditCondicaoDropdownOpen] =
     useState<boolean>(false);
   const [customLogo, setCustomLogo] = useState<string>(customLogoProp || "");
@@ -5119,6 +5128,19 @@ Status atual: ${e.status}.`,
       return;
     }
 
+    if (activeInst?.manualCalibrationDateAllowed) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(benchCalibrationDate)) {
+        setBenchSubmitting(false);
+        alert("Informe uma data de calibração válida.");
+        return;
+      }
+      if (benchCalibrationDate > currentCalibrationDate()) {
+        setBenchSubmitting(false);
+        alert("A data da calibração não pode estar no futuro.");
+        return;
+      }
+    }
+
     if (benchTemperature === "" || benchHumidity === "") {
       setBenchSubmitting(false);
       alert("Por favor, informe a temperatura e a umidade do laboratório.");
@@ -5296,7 +5318,7 @@ Status atual: ${e.status}.`,
           return;
         }
 
-        await onSaveCalibration({
+        const calibrationResult = await onSaveCalibration({
           instrumentId: selectedInstId,
           technicianName: benchTechnician,
           technicianId: techUser.id,
@@ -5327,6 +5349,9 @@ Status atual: ${e.status}.`,
           ].filter(Boolean),
           referenceStandards: selectedStandards,
           approved: true,
+          calibrationDate: activeInst?.manualCalibrationDateAllowed
+            ? benchCalibrationDate
+            : undefined,
         });
 
         // Update certificate sequence if a new one was generated
@@ -5380,7 +5405,11 @@ Status atual: ${e.status}.`,
             endTime: endTimeIso,
             durationSeconds: diffSeconds,
             durationFormatted,
-            date: new Date().toISOString().split("T")[0],
+            date:
+              calibrationResult?.report?.date ||
+              (activeInst?.manualCalibrationDateAllowed
+                ? benchCalibrationDate
+                : currentCalibrationDate()),
           });
         } catch (auditErr) {
           console.error(
@@ -5415,6 +5444,7 @@ Status atual: ${e.status}.`,
           setBenchStandardA("");
           setBenchStandardB("");
           setBenchStandardC("");
+          setBenchCalibrationDate(currentCalibrationDate());
           setActiveTab("instruments");
         }, 3000);
       }
@@ -5454,6 +5484,17 @@ Status atual: ${e.status}.`,
     try {
       const activeInst = instruments.find((i) => i.id === selectedInstId);
       const client = clients.find((c) => c.id === activeInst?.clientId);
+      const rncCalibrationDate = activeInst?.manualCalibrationDateAllowed
+        ? benchCalibrationDate
+        : currentCalibrationDate();
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(rncCalibrationDate) ||
+        rncCalibrationDate > currentCalibrationDate()
+      ) {
+        alert("Informe uma data de calibração válida e não futura.");
+        setIsGeneratingRnc(false);
+        return;
+      }
 
       let aiAnalysis = "";
       try {
@@ -5503,7 +5544,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           benchTechnician ||
           currentUser?.name ||
           "Técnico Responsável",
-        date: new Date().toISOString().split("T")[0],
+        date: rncCalibrationDate,
         reason: rncReason,
         aiAnalysis,
         status: "Não Conforme",
@@ -5545,6 +5586,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             benchStandardC,
           ].filter(Boolean),
           approved: false,
+          calibrationDate: activeInst.manualCalibrationDateAllowed
+            ? rncCalibrationDate
+            : undefined,
           rncNumber,
           rncData: newRnc,
         });
@@ -8193,7 +8237,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                         ...recovery.instrument,
                                       };
                                     }
-                                    if (recovery?.recovered) {
+                                    if (
+                                      recovery?.recovered ||
+                                      recovery?.dateAuthorizationRecovered
+                                    ) {
                                       clearIssuedCertificateFlag(inst.id);
                                     }
                                   }
@@ -8207,6 +8254,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     instrumentReady.status !== "Em Calibração"
                                       ? instrumentReady.status
                                       : "Aguardando Calibração";
+
+                                  setBenchCalibrationDate(
+                                    instrumentReady.manualCalibrationDateAllowed
+                                      ? instrumentReady.reissueSuggestedCalibrationDate ||
+                                          currentCalibrationDate()
+                                      : currentCalibrationDate(),
+                                  );
 
                                   if (
                                     onUpdateInstrumentStatus &&
@@ -10147,6 +10201,43 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </div>
                       </div>
                     )}
+
+                    {(() => {
+                      const activeInstrument = instruments.find(
+                        (instrument) => instrument.id === selectedInstId,
+                      );
+                      if (!activeInstrument?.manualCalibrationDateAllowed) {
+                        return null;
+                      }
+                      return (
+                        <div className="sm:col-span-2 bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-end gap-3">
+                          <div className="flex-1">
+                            <label className="text-amber-950 font-bold text-sm flex items-center gap-1.5 mb-1.5">
+                              <Calendar className="h-4 w-4 text-amber-700" />
+                              <span>
+                                Data manual da calibração corrigida
+                                <span className="text-red-500"> *</span>
+                              </span>
+                            </label>
+                            <input
+                              type="date"
+                              required
+                              max={currentCalibrationDate()}
+                              value={benchCalibrationDate}
+                              onChange={(event) =>
+                                setBenchCalibrationDate(event.target.value)
+                              }
+                              className="w-full sm:max-w-xs bg-white border border-amber-400 rounded px-3 py-2 text-slate-900 focus:ring-2 focus:ring-amber-400 font-mono text-sm"
+                            />
+                          </div>
+                          <p className="text-[11px] text-amber-800 sm:max-w-sm leading-relaxed">
+                            Campo liberado exclusivamente porque o certificado anterior
+                            foi excluído pelo Administrador. A data não pode ser futura e
+                            será usada no certificado e no próximo vencimento.
+                          </p>
+                        </div>
+                      );
+                    })()}
                     
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>

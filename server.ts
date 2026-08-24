@@ -1404,12 +1404,26 @@ const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance
   internal_tickets: { area: 'operations', label: 'Chamado interno' },
 };
 
-const calibrationReopenUpdates = (updatedAt: string) => ({
+const normalizeCalibrationDate = (value: unknown): string | null => {
+  const date = asLimitedString(value, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const parsed = new Date(`${date}T12:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date
+    ? null
+    : date;
+};
+
+const calibrationReopenUpdates = (
+  updatedAt: string,
+  suggestedCalibrationDate: string | null,
+) => ({
   status: 'Aguardando Calibração',
   lastCalibrationDate: FieldValue.delete(),
   nextCalibrationDate: FieldValue.delete(),
   temperature: FieldValue.delete(),
   humidity: FieldValue.delete(),
+  manualCalibrationDateAllowed: true,
+  reissueSuggestedCalibrationDate: suggestedCalibrationDate || FieldValue.delete(),
   updatedAt,
 });
 
@@ -1417,18 +1431,25 @@ const reopenedInstrumentPayload = (
   instrumentId: string,
   source: Record<string, any>,
   updatedAt: string,
+  suggestedCalibrationDate: string | null,
 ) => {
   const {
     lastCalibrationDate: _lastCalibrationDate,
     nextCalibrationDate: _nextCalibrationDate,
     temperature: _temperature,
     humidity: _humidity,
+    manualCalibrationDateAllowed: _manualCalibrationDateAllowed,
+    reissueSuggestedCalibrationDate: _reissueSuggestedCalibrationDate,
     ...preserved
   } = source;
   return {
     ...preserved,
     id: instrumentId,
     status: 'Aguardando Calibração',
+    manualCalibrationDateAllowed: true,
+    ...(suggestedCalibrationDate
+      ? { reissueSuggestedCalibrationDate: suggestedCalibrationDate }
+      : {}),
     updatedAt,
   };
 };
@@ -1473,8 +1494,12 @@ app.post(
         if (!instrumentSnapshot.exists) throw new Error('INSTRUMENT_NOT_FOUND');
 
         const instrument: any = instrumentSnapshot.data() || {};
+        const suggestedCalibrationDate = normalizeCalibrationDate(report.date);
         transaction.delete(reportRef);
-        transaction.update(instrumentRef, calibrationReopenUpdates(updatedAt));
+        transaction.update(
+          instrumentRef,
+          calibrationReopenUpdates(updatedAt, suggestedCalibrationDate),
+        );
         transaction.set(auditRef, {
           action: 'CALIBRATION_REPORT_DELETED_FOR_REISSUE',
           entityType: 'calibrationReport',
@@ -1494,6 +1519,7 @@ app.post(
           metadata: {
             instrumentId,
             certNumber: asLimitedString(report.certNumber, 160),
+            suggestedCalibrationDate,
             previousInstrumentStatus: asLimitedString(instrument.status, 100),
             reason: 'CERTIFICATE_CORRECTION_AND_REISSUE',
           },
@@ -1502,7 +1528,12 @@ app.post(
         return {
           reportId,
           instrumentId,
-          instrument: reopenedInstrumentPayload(instrumentId, instrument, updatedAt),
+          instrument: reopenedInstrumentPayload(
+            instrumentId,
+            instrument,
+            updatedAt,
+            suggestedCalibrationDate,
+          ),
         };
       });
 
@@ -1557,14 +1588,108 @@ app.post(
       if (activeReports.length > 0) {
         return res.status(409).json({ error: 'ACTIVE_CALIBRATION_REPORT_EXISTS' });
       }
+      const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+      const updatedAt = new Date().toISOString();
+
       if (archivedReports.length === 0) {
-        return res.json({ success: true, recovered: false, instrumentId });
+        const instrumentSnapshot = await instrumentRef.get();
+        if (!instrumentSnapshot.exists) {
+          return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+        }
+
+        const instrumentBefore: any = instrumentSnapshot.data() || {};
+        if (instrumentBefore.manualCalibrationDateAllowed === true) {
+          return res.json({
+            success: true,
+            recovered: false,
+            instrumentId,
+            instrument: { ...instrumentBefore, id: instrumentId },
+          });
+        }
+
+        // Compatibilidade com instrumentos que já foram reabertos pelo Lote 7
+        // antes de existir a autorização temporária de data manual.
+        const auditEvidenceSnapshot = await firestoreDb
+          .collection('systemAuditLogs')
+          .where('metadata.instrumentId', '==', instrumentId)
+          .limit(50)
+          .get();
+        const auditEvidence = auditEvidenceSnapshot.docs.find((snapshot) => {
+          const action = String(snapshot.data()?.action || '');
+          return action === 'CALIBRATION_REPORT_DELETED_FOR_REISSUE' ||
+            action === 'ARCHIVED_CALIBRATION_RECOVERED_FOR_REISSUE';
+        });
+
+        if (!auditEvidence) {
+          return res.json({ success: true, recovered: false, instrumentId });
+        }
+
+        const suggestedCalibrationDate =
+          normalizeCalibrationDate(instrumentBefore.reissueSuggestedCalibrationDate) ||
+          normalizeCalibrationDate(auditEvidence.data()?.metadata?.suggestedCalibrationDate);
+        const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+        const instrument = await firestoreDb.runTransaction(async (transaction) => {
+          const freshSnapshot = await transaction.get(instrumentRef);
+          if (!freshSnapshot.exists) throw new Error('INSTRUMENT_NOT_FOUND');
+          const freshInstrument: any = freshSnapshot.data() || {};
+
+          transaction.update(instrumentRef, {
+            manualCalibrationDateAllowed: true,
+            reissueSuggestedCalibrationDate:
+              suggestedCalibrationDate || FieldValue.delete(),
+            updatedAt,
+          });
+          transaction.set(auditRef, {
+            action: 'MANUAL_CALIBRATION_DATE_AUTHORIZED_AFTER_REOPEN',
+            entityType: 'instrument',
+            entityId: instrumentId,
+            actorUid: asLimitedString(req.user?.uid, 160),
+            actorName: asLimitedString(
+              administrator.name || administrator.username || req.user?.email,
+              160,
+            ) || 'Administrador',
+            actorRole: asLimitedString(
+              administrator.permissionLevel || administrator.role,
+              100,
+            ),
+            createdAt: updatedAt,
+            immutable: true,
+            summary: 'Data manual autorizada para calibração já reaberta',
+            metadata: {
+              instrumentId,
+              sourceAuditId: auditEvidence.id,
+              suggestedCalibrationDate,
+              reason: 'LOTE_7_REOPEN_COMPATIBILITY',
+            },
+          });
+
+          return {
+            ...freshInstrument,
+            id: instrumentId,
+            manualCalibrationDateAllowed: true,
+            ...(suggestedCalibrationDate
+              ? { reissueSuggestedCalibrationDate: suggestedCalibrationDate }
+              : {}),
+            updatedAt,
+          };
+        });
+
+        return res.json({
+          success: true,
+          recovered: false,
+          dateAuthorizationRecovered: true,
+          instrumentId,
+          instrument,
+        });
       }
 
-      const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
       const auditRef = firestoreDb.collection('systemAuditLogs').doc();
-      const updatedAt = new Date().toISOString();
       const removedReportIds = archivedReports.map((snapshot) => snapshot.id);
+      const suggestedCalibrationDate = archivedReports
+        .map((snapshot) => normalizeCalibrationDate(snapshot.data()?.date))
+        .filter((date): date is string => Boolean(date))
+        .sort()
+        .pop() || null;
 
       const instrument = await firestoreDb.runTransaction(async (transaction) => {
         const instrumentSnapshot = await transaction.get(instrumentRef);
@@ -1572,7 +1697,10 @@ app.post(
 
         const instrumentBefore: any = instrumentSnapshot.data() || {};
         archivedReports.forEach((snapshot) => transaction.delete(snapshot.ref));
-        transaction.update(instrumentRef, calibrationReopenUpdates(updatedAt));
+        transaction.update(
+          instrumentRef,
+          calibrationReopenUpdates(updatedAt, suggestedCalibrationDate),
+        );
         transaction.set(auditRef, {
           action: 'ARCHIVED_CALIBRATION_RECOVERED_FOR_REISSUE',
           entityType: 'instrument',
@@ -1592,12 +1720,18 @@ app.post(
           metadata: {
             instrumentId,
             removedReportIds: removedReportIds.slice(0, 50),
+            suggestedCalibrationDate,
             previousInstrumentStatus: asLimitedString(instrumentBefore.status, 100),
             reason: 'LEGACY_ARCHIVE_RECOVERY_FOR_REISSUE',
           },
         });
 
-        return reopenedInstrumentPayload(instrumentId, instrumentBefore, updatedAt);
+        return reopenedInstrumentPayload(
+          instrumentId,
+          instrumentBefore,
+          updatedAt,
+          suggestedCalibrationDate,
+        );
       });
 
       return res.json({

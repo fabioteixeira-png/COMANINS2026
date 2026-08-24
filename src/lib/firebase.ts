@@ -1049,6 +1049,7 @@ export async function saveCalibrationDoc(data: {
   transmitterPoints?: any[];
   switchPoints?: any[];
   approved?: boolean;
+  calibrationDate?: string;
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
@@ -1129,6 +1130,27 @@ export async function saveCalibrationDoc(data: {
   const maxRelativeError = span > 0 ? Number(((maxError / span) * 100).toFixed(4)) : 0;
   const approved = processedPoints.every(p => p.pass);
 
+  const now = new Date();
+  const automaticCalibrationDate = new Date(
+    now.getTime() - now.getTimezoneOffset() * 60_000,
+  ).toISOString().split('T')[0];
+  const requestedCalibrationDate = String(data.calibrationDate || '').trim();
+  if (requestedCalibrationDate && activeInst.manualCalibrationDateAllowed !== true) {
+    throw new Error('A data manual não está liberada para este instrumento.');
+  }
+  const calibrationDate = requestedCalibrationDate || automaticCalibrationDate;
+  const parsedCalibrationDate = new Date(`${calibrationDate}T12:00:00.000Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(calibrationDate) ||
+    Number.isNaN(parsedCalibrationDate.getTime()) ||
+    parsedCalibrationDate.toISOString().slice(0, 10) !== calibrationDate
+  ) {
+    throw new Error('Informe uma data de calibração válida.');
+  }
+  if (calibrationDate > automaticCalibrationDate) {
+    throw new Error('A data da calibração não pode estar no futuro.');
+  }
+
   const reportId = 'r_' + Date.now();
   const generatedAuthKey = generateAuthKey();
   const report: CalibrationReport = {
@@ -1142,7 +1164,7 @@ export async function saveCalibrationDoc(data: {
     signatureVersion: data.signatureVersion,
     signaturePath: data.signaturePath,
     emitterUser: data.emitterUser,
-    date: new Date().toISOString().split('T')[0],
+    date: calibrationDate,
     points: processedPoints,
     maxError,
     maxRelativeError,
@@ -1164,8 +1186,8 @@ export async function saveCalibrationDoc(data: {
     referenceStandards: data.referenceStandards || []
   };
 
-  const nextCal = new Date();
-  nextCal.setFullYear(nextCal.getFullYear() + 1);
+  const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);
+  nextCal.setUTCFullYear(nextCal.getUTCFullYear() + 1);
 
   const updatedInst: Instrument = {
     ...activeInst,
@@ -1186,6 +1208,9 @@ export async function saveCalibrationDoc(data: {
     humidity: data.humidity,
     updatedAt: new Date().toISOString(),
   });
+  const cacheableInstrumentUpdates = { ...instrumentUpdates };
+  instrumentUpdates.manualCalibrationDateAllowed = deleteField();
+  instrumentUpdates.reissueSuggestedCalibrationDate = deleteField();
   const cleanReport = stripUndefinedDeep(report) as CalibrationReport;
 
   // Report + instrument status are committed atomically. The UI only receives
@@ -1196,17 +1221,24 @@ export async function saveCalibrationDoc(data: {
   await batch.commit();
 
   const cachedInstrument = instrumentCache.get(activeInst.id);
+  const resolvedInstrument = {
+    ...updatedInst,
+    ...cacheableInstrumentUpdates,
+  } as Instrument;
+  delete resolvedInstrument.manualCalibrationDateAllowed;
+  delete resolvedInstrument.reissueSuggestedCalibrationDate;
   if (cachedInstrument) {
-    mergeInstrumentIntoCache({ ...cachedInstrument, ...instrumentUpdates, id: activeInst.id } as Instrument);
+    mergeInstrumentIntoCache({ ...cachedInstrument, ...resolvedInstrument, id: activeInst.id } as Instrument);
     notifyInstrumentSubscribers();
   }
 
-  return { report: cleanReport, instrument: { ...updatedInst, ...instrumentUpdates } as Instrument };
+  return { report: cleanReport, instrument: resolvedInstrument };
 }
 
 export interface CalibrationReopenResult {
   success: true;
   recovered?: boolean;
+  dateAuthorizationRecovered?: boolean;
   reportId?: string;
   instrumentId: string;
   removedReportIds?: string[];
