@@ -123,6 +123,7 @@ const emailApiRateLimit = createRateLimiter('email-api', 10 * 60 * 1000, 30);
 const adminApiRateLimit = createRateLimiter('admin-api', 5 * 60 * 1000, 30);
 const writeApiRateLimit = createRateLimiter('write-api', 60 * 1000, 120);
 const publicContactRateLimit = createRateLimiter('public-contact', 15 * 60 * 1000, 5);
+const passwordResetRateLimit = createRateLimiter('password-reset', 15 * 60 * 1000, 5);
 
 const asLimitedString = (value: unknown, maxLength: number): string =>
   String(value ?? '').trim().slice(0, maxLength);
@@ -1915,6 +1916,172 @@ app.post("/api/generate-birthday-message", requireAuth, requireInternalAccount, 
 
 
 
+
+const passwordResetGenericResponse = {
+  success: true,
+  message: 'Se a conta estiver ativa e possuir um e-mail de recuperação válido, as instruções serão enviadas.',
+};
+
+app.post('/api/auth/request-password-reset', passwordResetRateLimit, async (req: AuthRequest, res) => {
+  res.set('Cache-Control', 'no-store');
+
+  try {
+    if (!adminAuth || !firestoreDb) {
+      return res.status(503).json({
+        error: 'AUTH_SERVICE_UNAVAILABLE',
+        message: 'Serviço de recuperação temporariamente indisponível. Tente novamente mais tarde.',
+      });
+    }
+
+    const smtpHost = String(process.env.SMTP_HOST || '').trim();
+    const smtpUser = String(process.env.SMTP_USER || '').trim();
+    const smtpPass = String(process.env.SMTP_PASS || '').trim();
+    const parsedPort = Number(process.env.SMTP_PORT || 587);
+    const smtpPort = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 587;
+
+    // Check infrastructure before looking up the username. This keeps service
+    // failures from becoming an account-enumeration signal.
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      console.error('[Password reset] SMTP configuration is incomplete.');
+      return res.status(503).json({
+        error: 'EMAIL_SERVICE_UNAVAILABLE',
+        message: 'Serviço de recuperação temporariamente indisponível. Tente novamente mais tarde.',
+      });
+    }
+
+    const username = asLimitedString(req.body?.username, 80).toLowerCase();
+    if (!username || username.includes('@') || !/^[a-z0-9._-]+$/.test(username)) {
+      return res.json(passwordResetGenericResponse);
+    }
+
+    const usersRef = firestoreDb.collection('portalUsers');
+    const expectedTechnicalEmail = `${username}@comanins.internal`;
+    const byUsername = await usersRef
+      .where('username', '==', username)
+      .limit(2)
+      .get();
+
+    // Some legacy records may have a username saved with old casing/spacing,
+    // while authEmail was already normalized during the Firebase migration.
+    // Use that indexed technical identity as a compatibility fallback without
+    // scanning the whole portalUsers collection from a public endpoint.
+    const candidates = byUsername.empty
+      ? await usersRef.where('authEmail', '==', expectedTechnicalEmail).limit(2).get()
+      : byUsername;
+
+    if (candidates.size !== 1) {
+      if (candidates.size > 1) {
+        console.error(`[Password reset] Duplicate portal identity detected: ${username}`);
+      }
+      return res.json(passwordResetGenericResponse);
+    }
+
+    const userDoc = candidates.docs[0];
+    const profile: any = { id: userDoc.id, ...userDoc.data() };
+    if (normalizeAccessValue(profile.username) !== username) {
+      return res.json(passwordResetGenericResponse);
+    }
+    const status = normalizeAccessValue(profile.status);
+    if (status === 'desligado') {
+      return res.json(passwordResetGenericResponse);
+    }
+
+    const workEmail = String(profile.workEmail || '').trim().toLowerCase();
+    const personalEmail = String(profile.personalEmail || '').trim().toLowerCase();
+    const recoveryEmail = isValidEmailAddress(workEmail)
+      ? workEmail
+      : isValidEmailAddress(personalEmail)
+        ? personalEmail
+        : '';
+    const authUid = String(profile.authUid || '').trim();
+
+    if (!recoveryEmail || !authUid) {
+      console.warn(`[Password reset] Recovery data incomplete for portal user ${userDoc.id}.`);
+      return res.json(passwordResetGenericResponse);
+    }
+
+    let authUser: any;
+    try {
+      authUser = await adminAuth.getUser(authUid);
+    } catch (error: any) {
+      if (error?.code === 'auth/user-not-found') {
+        console.warn(`[Password reset] Firebase Auth user not found for portal user ${userDoc.id}.`);
+        return res.json(passwordResetGenericResponse);
+      }
+      throw error;
+    }
+
+    const technicalEmail = String(authUser.email || '').trim().toLowerCase();
+    const accountType = normalizeAccessValue(authUser.customClaims?.accountType);
+    const claimedPortalUserId = String(authUser.customClaims?.portalUserId || '').trim();
+
+    if (
+      authUser.disabled ||
+      technicalEmail !== expectedTechnicalEmail ||
+      (accountType && accountType !== 'internal') ||
+      (claimedPortalUserId && claimedPortalUserId !== userDoc.id)
+    ) {
+      console.warn(`[Password reset] Auth binding rejected for portal user ${userDoc.id}.`);
+      return res.json(passwordResetGenericResponse);
+    }
+
+    const resetLink = await adminAuth.generatePasswordResetLink(technicalEmail);
+    const displayName = asLimitedString(profile.name || username, 120) || username;
+    const safeDisplayName = escapeHtml(displayName);
+    const safeResetLink = escapeHtml(resetLink);
+
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"COMANINS - Acesso ao Portal" <${smtpUser}>`,
+      to: recoveryEmail,
+      subject: 'Redefinição de senha - Portal Interno COMANINS',
+      text: [
+        `Olá, ${displayName}.`,
+        '',
+        'Recebemos uma solicitação para redefinir a senha do seu acesso ao Portal Interno COMANINS.',
+        'Use o link abaixo para cadastrar uma nova senha:',
+        '',
+        resetLink,
+        '',
+        'Se você não solicitou esta alteração, ignore esta mensagem. Não compartilhe este link.',
+        '',
+        'COMANINS',
+      ].join('\n'),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a;line-height:1.6;">
+          <h2 style="color:#1d4ed8;">Redefinição de senha</h2>
+          <p>Olá, <strong>${safeDisplayName}</strong>.</p>
+          <p>Recebemos uma solicitação para redefinir a senha do seu acesso ao Portal Interno COMANINS.</p>
+          <p style="margin:28px 0;">
+            <a href="${safeResetLink}" style="background:#1d4ed8;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;display:inline-block;">
+              Redefinir minha senha
+            </a>
+          </p>
+          <p style="font-size:13px;color:#475569;">Se você não solicitou esta alteração, ignore esta mensagem. Não compartilhe este link.</p>
+          <p style="font-size:13px;color:#475569;">COMANINS</p>
+        </div>
+      `,
+    });
+
+    console.info(`[Password reset] Reset link sent for portal user ${userDoc.id}.`);
+    return res.json(passwordResetGenericResponse);
+  } catch (error) {
+    console.error('[Password reset] Request failed:', error);
+    return res.status(500).json({
+      error: 'PASSWORD_RESET_FAILED',
+      message: 'Serviço de recuperação temporariamente indisponível. Tente novamente mais tarde.',
+    });
+  }
+});
 
 app.post("/api/auth/sync-internal-profile", requireAuth, async (req: AuthRequest, res) => {
   try {

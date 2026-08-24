@@ -1,0 +1,248 @@
+LOTE 6 — RECUPERAÇÃO SEGURA DE SENHA DO PORTAL INTERNO COMANINS
+APLICAÇÃO CONTROLADA EM SISTEMA ATIVO / PRODUÇÃO
+
+OBJETIVO
+Aplicar EXCLUSIVAMENTE o patch:
+COMANINS_EXCELENCIA_LOTE_6_RECUPERACAO_SENHA.patch
+
+Este lote torna funcional o botão “Esqueceu a senha?” do Portal Interno sem alterar a arquitetura atual de autenticação.
+O login continua sendo feito por username e o Firebase continua usando internamente a identidade técnica username@comanins.internal.
+A recuperação passa a receber o username, localizar o portalUsers correspondente, gerar o link oficial de redefinição com Firebase Admin e enviar esse link ao workEmail ou, na ausência dele, ao personalEmail válido do colaborador através do SMTP já configurado no backend.
+
+REGRAS INEGOCIÁVEIS
+1. O sistema está ativo e em produção. Não fazer refatorações paralelas.
+2. Não criar branch, homologação ou projeto paralelo.
+3. Não fazer deploy/publicação durante esta execução.
+4. Não alterar manualmente arquivos fora do patch.
+5. Não alterar Firebase Authentication manualmente.
+6. Não recriar usuários Firebase.
+7. Não alterar UID, authUid, authEmail ou username de usuários existentes.
+8. Não migrar, apagar, renomear ou duplicar documentos do Firestore.
+9. Não alterar firestore.rules, storage.rules ou firebase.json.
+10. Não alterar package.json, package-lock.json, server.js, vite.config.ts ou configurações de startup da Hostinger.
+11. Não inserir senhas, chaves privadas, App Passwords ou valores de variáveis de ambiente no código, Git, logs ou relatório.
+12. Não substituir o fluxo por sendPasswordResetEmail no frontend. O fluxo deste lote é backend + Firebase Admin + SMTP.
+13. Não aplicar “melhorias” adicionais fora do patch, mesmo que pareçam úteis.
+14. Em caso de qualquer divergência de pré-condição, PARAR. Não tentar corrigir manualmente para fazer o patch encaixar.
+
+ARQUIVOS QUE ESTE PATCH PODE ALTERAR — SOMENTE ESTES DOIS
+- server.ts
+- src/components/LoginScreen.tsx
+
+SHA-256 ESPERADO DO PATCH
+90de2a2c78d155f41c028bda49ee8ec0ec682aabc03c28a878bdebeea063e88a
+
+SHA-256 DA BASE USADA PARA GERAR ESTE PATCH
+Antes da aplicação, se os arquivos corresponderem exatamente ao pacote usado para gerar o Lote 6, os hashes são:
+- server.ts
+  d9205a56100e38faa2a62a5929f43626c0b74535824e401c81aa2b1f8b951d5b
+- src/components/LoginScreen.tsx
+  1bf1621f06ecd5d9f1fc35084e2d31ca33bc89aa7a782649e6f8d7a9ee590567
+
+Os hashes-base são uma verificação adicional. Se divergirem, NÃO faça substituição manual de arquivos. Use obrigatoriamente o git apply --check para determinar compatibilidade real e reporte a divergência.
+
+PRÉ-CONDIÇÕES FUNCIONAIS QUE DEVEM SER CONFIRMADAS ANTES DE APLICAR
+Confirmar, sem editar:
+
+A. O arquivo src/utils/internalAccessPdf.ts continua existindo.
+B. LoginScreen.tsx ainda contém o login técnico baseado em:
+   `${cleanUser}@comanins.internal`
+C. LoginScreen.tsx ainda contém a implementação antiga de recuperação com sendPasswordResetEmail antes deste lote.
+D. server.ts importa nodemailer.
+E. server.ts importa adminAuth/adminDb do Firebase Admin.
+F. server.ts possui o mecanismo createRateLimiter existente.
+G. .env.example contém as variáveis SMTP_HOST, SMTP_PORT, SMTP_USER e SMTP_PASS.
+H. A política mínima de 10 caracteres implementada no sistema não deve ser removida nem reduzida.
+I. Não deve existir uma aplicação parcial anterior da rota /api/auth/request-password-reset.
+
+COMANDOS DE INSPEÇÃO SUGERIDOS
+Execute comandos equivalentes a:
+
+test -f src/utils/internalAccessPdf.ts
+grep -n "@comanins.internal" src/components/LoginScreen.tsx
+grep -n "sendPasswordResetEmail" src/components/LoginScreen.tsx
+grep -n "nodemailer" server.ts
+grep -n "adminAuth" server.ts
+grep -n "createRateLimiter" server.ts
+grep -n "SMTP_HOST\|SMTP_PORT\|SMTP_USER\|SMTP_PASS" .env.example
+grep -n "request-password-reset" server.ts src/components/LoginScreen.tsx || true
+
+VERIFICAÇÃO DO PATCH
+1. Localize exatamente o arquivo COMANINS_EXCELENCIA_LOTE_6_RECUPERACAO_SENHA.patch fornecido.
+2. Calcule o SHA-256.
+3. O resultado DEVE ser exatamente:
+   90de2a2c78d155f41c028bda49ee8ec0ec682aabc03c28a878bdebeea063e88a
+4. Se o hash for diferente: PARAR e relatar. Não aplicar.
+
+VALIDAÇÃO DE APLICAÇÃO — SEM APLICAÇÃO PARCIAL
+Execute primeiro:
+
+git apply --check COMANINS_EXCELENCIA_LOTE_6_RECUPERACAO_SENHA.patch
+
+Se retornar sucesso:
+- aplique UMA ÚNICA VEZ com:
+  git apply COMANINS_EXCELENCIA_LOTE_6_RECUPERACAO_SENHA.patch
+
+Se git apply --check falhar:
+- NÃO editar manualmente;
+- execute somente:
+  git apply --reverse --check COMANINS_EXCELENCIA_LOTE_6_RECUPERACAO_SENHA.patch
+
+Interpretação:
+- Se --reverse --check funcionar, o patch provavelmente já está aplicado. NÃO aplique novamente. Valide o estado e relate.
+- Se tanto --check quanto --reverse --check falharem, PARAR imediatamente e relatar conflito/incompatibilidade.
+- É proibido aplicar hunks isolados, usar --reject, copiar trechos manualmente ou criar uma versão improvisada do patch.
+
+O QUE DEVE EXISTIR APÓS A APLICAÇÃO
+Em server.ts:
+- passwordResetRateLimit com 5 solicitações por 15 minutos por identidade/IP.
+- POST /api/auth/request-password-reset.
+- resposta pública genérica que não confirma existência de username.
+- validação de Firebase Admin antes da consulta de usuário.
+- validação da configuração SMTP antes da consulta de usuário.
+- consulta de portalUsers pelo username normalizado, com fallback indexado por authEmail técnico para compatibilidade legada.
+- bloqueio de recuperação para status Desligado.
+- preferência por workEmail válido; fallback para personalEmail válido.
+- exigência de authUid válido.
+- verificação do vínculo do UID com a identidade técnica username@comanins.internal.
+- rejeição de Firebase Auth user disabled.
+- verificação das claims internas quando presentes.
+- geração do link por adminAuth.generatePasswordResetLink().
+- envio via nodemailer usando SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS.
+- nenhuma senha persistida no Firestore.
+- nenhum valor de e-mail de recuperação retornado ao navegador.
+
+Em src/components/LoginScreen.tsx:
+- sendPasswordResetEmail removido do import.
+- recuperação baseada em “Usuário Técnico”, não e-mail.
+- POST para /api/auth/request-password-reset.
+- mensagem de sucesso genérica.
+- tratamento específico de HTTP 429.
+- botão desabilitado enquanto a solicitação estiver em andamento.
+- username digitado no login pré-preenchido na tela de recuperação.
+- login normal e troca de senha no primeiro acesso preservados.
+
+VALIDAÇÃO DO DIFF APÓS APLICAÇÃO
+Execute:
+
+git diff --check
+git diff -- server.ts src/components/LoginScreen.tsx
+
+Confirme que SOMENTE os dois arquivos previstos foram alterados pelo lote.
+Se aparecer alteração inesperada causada por esta execução, PARAR e relatar.
+
+DEPENDÊNCIAS E VALIDAÇÃO ESTÁTICA
+Não atualizar versões de dependências.
+Não executar npm update.
+Não alterar package-lock.json.
+
+Use a instalação reproduzível já adotada nos lotes anteriores:
+
+npm ci --include=optional --ignore-scripts --no-audit --no-fund
+
+Depois execute obrigatoriamente:
+
+npm run lint
+npm run build
+
+Se o build gerar dist/server.cjs, execute também:
+
+node --check dist/server.cjs
+
+REGRAS PARA FALHAS DE LINT/BUILD
+- Se lint ou build falhar, NÃO faça correções manuais adicionais fora do patch.
+- Leia o erro e determine se é causado pelo lote ou por dependência/ambiente.
+- Relate literalmente o comando que falhou e a causa observada.
+- Não faça deploy com validação falhando.
+
+CHECAGEM DE CONFIGURAÇÃO — SOMENTE EXISTÊNCIA, NUNCA VALORES
+Verifique apenas se o ambiente de produção possui configurados os nomes abaixo:
+- SMTP_HOST
+- SMTP_PORT
+- SMTP_USER
+- SMTP_PASS
+- FIREBASE_ADMIN_PROJECT_ID
+- FIREBASE_ADMIN_CLIENT_EMAIL
+- FIREBASE_ADMIN_PRIVATE_KEY_B64
+
+NUNCA imprimir, copiar, revelar ou incluir no relatório o conteúdo de SMTP_PASS, FIREBASE_ADMIN_PRIVATE_KEY_B64 ou qualquer segredo.
+
+Se alguma variável necessária estiver ausente no ambiente disponível para inspeção, apenas informe o NOME da variável ausente. Não invente valor e não modifique arquivo .env versionado.
+
+IMPORTANTE SOBRE SENHAS
+Este patch usa a página/link oficial de redefinição do Firebase Authentication. Antes do deploy real do lote, a política de senha do Firebase Authentication deve estar compatível com a política do sistema COMANINS:
+- mínimo de 10 caracteres;
+- pelo menos 1 letra maiúscula;
+- pelo menos 1 letra minúscula;
+- pelo menos 1 número.
+
+Não altere essa política por código neste lote. Apenas sinalize no relatório se não houver como confirmar a configuração do console Firebase.
+
+NÃO FAZER DEPLOY
+Ao terminar lint/build/node check, PARE.
+Não publicar Firebase.
+Não executar firebase deploy.
+Não alterar Hostinger.
+Não reiniciar serviço Node.
+Não fazer push automático.
+Não fazer commit automático, salvo se houver instrução explícita posterior do usuário.
+
+TESTES FUNCIONAIS PÓS-DEPLOY — APENAS LISTAR NO RELATÓRIO, NÃO EXECUTAR SE NÃO HOUVER AMBIENTE REAL AUTORIZADO
+1. Usar uma conta de TESTE ativa, com authUid e workEmail válidos.
+2. Clicar “Esqueceu a senha?”.
+3. Informar o username técnico.
+4. Confirmar recebimento do e-mail real do colaborador.
+5. Abrir o link oficial do Firebase.
+6. Definir senha que cumpra a política COMANINS.
+7. Entrar novamente usando apenas username + nova senha.
+8. Confirmar que UID, authUid e authEmail permanecem inalterados.
+9. Testar username inexistente e confirmar a mesma mensagem genérica, sem revelar existência da conta.
+10. Testar colaborador com status Desligado e confirmar que nenhum e-mail é enviado e a interface continua genérica.
+11. Confirmar que excesso de solicitações resulta em HTTP 429 sem afetar o login normal.
+
+RELATÓRIO FINAL OBRIGATÓRIO
+Entregue um relatório objetivo contendo:
+
+1. ESTADO INICIAL E PRÉ-REQUISITOS
+- resultado de cada pré-condição A–I;
+- informar se havia ou não aplicação parcial anterior.
+
+2. SHA-256
+- hash calculado do patch;
+- comparação com o hash esperado.
+
+3. APLICAÇÃO
+- resultado do git apply --check;
+- informar se o patch foi aplicado, já estava aplicado ou foi interrompido por incompatibilidade;
+- confirmar ausência de aplicação parcial/manual.
+
+4. ARQUIVOS ALTERADOS
+- listar exatamente os arquivos modificados pelo lote.
+
+5. VALIDAÇÕES
+- git diff --check;
+- npm run lint;
+- npm run build;
+- node --check dist/server.cjs, se aplicável.
+
+6. CONFIGURAÇÃO
+- informar somente se os NOMES das variáveis necessárias estão presentes/ausentes;
+- não mostrar valores ou segredos;
+- informar que a política de senha do Firebase precisa estar/foi confirmada como compatível, sem alterar nada no console.
+
+7. PRESERVAÇÃO DE PRODUÇÃO
+Confirmar explicitamente:
+- nenhum usuário Firebase foi recriado;
+- nenhum UID/authUid/authEmail foi alterado;
+- nenhum documento Firestore foi migrado/apagado/renomeado;
+- nenhuma regra Firebase foi publicada;
+- nenhum deploy foi executado;
+- nenhuma configuração Hostinger foi alterada;
+- nenhuma correção extra fora do patch foi aplicada.
+
+8. RESULTADO FINAL
+Classificar como uma das opções:
+- APTO PARA TESTE CONTROLADO EM PRODUÇÃO
+- NÃO APTO — informar exatamente o bloqueio encontrado
+
+Não classificar como apto se lint, build ou node check obrigatório falhar.

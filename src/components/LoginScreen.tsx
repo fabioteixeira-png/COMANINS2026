@@ -3,7 +3,7 @@ import ComaninsLogo from './ComaninsLogo';
 import { ShieldCheck, Building, Key, AlertCircle, ArrowLeft, Eye, EyeOff, Gauge } from 'lucide-react';
 import { Client } from '../types';
 import { auth, clientAuth } from '../lib/firebase';
-import { signInWithEmailAndPassword, sendPasswordResetEmail, updatePassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { maskCpfCnpj } from '../utils/masks';
 import { authJsonFetch, clientAuthJsonFetch } from '../utils/authApi';
 
@@ -54,8 +54,9 @@ export default function LoginScreen({
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
+  const [resetUsername, setResetUsername] = useState('');
   const [resetSuccess, setResetSuccess] = useState(false);
+  const [isRequestingReset, setIsRequestingReset] = useState(false);
 
   // Password Change on First Access states
   const [pendingChangeUser, setPendingChangeUser] = useState<InternalUser | null>(null);
@@ -85,24 +86,37 @@ export default function LoginScreen({
     e.preventDefault();
     setErrorMsg('');
     setResetSuccess(false);
-    
-    if (!resetEmail) {
-      setErrorMsg('Por favor, informe seu e-mail para recuperação.');
+
+    const cleanUsername = resetUsername.trim().toLowerCase();
+    if (!cleanUsername) {
+      setErrorMsg('Por favor, informe seu usuário técnico.');
       return;
     }
-    
+
+    setIsRequestingReset(true);
     try {
-      await sendPasswordResetEmail(auth, resetEmail);
-      setResetSuccess(true);
-    } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/user-not-found') {
-         setResetSuccess(true);
-      } else if (err.code === 'auth/invalid-email') {
-         setErrorMsg('E-mail inválido.');
-      } else {
-         setErrorMsg('Erro ao tentar redefinir a senha. Verifique o e-mail ou contate o suporte.');
+      const response = await fetch('/api/auth/request-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cleanUsername }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (response.status === 429) {
+        setErrorMsg('Muitas tentativas de recuperação. Aguarde alguns minutos e tente novamente.');
+        return;
       }
+      if (!response.ok) {
+        setErrorMsg(data?.message || 'Serviço de recuperação temporariamente indisponível. Tente novamente mais tarde.');
+        return;
+      }
+
+      setResetSuccess(true);
+    } catch (err) {
+      console.error('Password reset request error:', err);
+      setErrorMsg('Não foi possível solicitar a recuperação agora. Verifique sua conexão e tente novamente.');
+    } finally {
+      setIsRequestingReset(false);
     }
   };
 
@@ -435,36 +449,38 @@ export default function LoginScreen({
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <h3 className="text-sm font-bold text-slate-800 text-center mb-2">Recuperação de Senha</h3>
             <p className="text-xs text-slate-600 text-center mb-4">
-              Digite seu e-mail cadastrado. Se ele existir em nossa base, enviaremos um link para redefinir a senha.
+              Informe seu usuário técnico. Se a conta estiver ativa e possuir e-mail de recuperação cadastrado, enviaremos um link seguro para redefinir a senha.
             </p>
             {resetSuccess ? (
                <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg text-xs text-center">
-                 E-mail de recuperação enviado! Verifique sua caixa de entrada (e pasta de spam).
+                 Solicitação recebida. Se a conta possuir um e-mail de recuperação válido, você receberá as instruções. Verifique também a pasta de spam.
                </div>
             ) : (
                <div className="space-y-1.5">
-                 <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">Seu E-mail</label>
+                 <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">Usuário Técnico</label>
                  <input 
-                   type="email"
+                   type="text"
+                   autoComplete="username"
                    required
-                   value={resetEmail}
-                   onChange={(e) => setResetEmail(e.target.value)}
-                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-royal-blue"
-                   placeholder="Ex: seu.email@empresa.com"
+                   value={resetUsername}
+                   onChange={(e) => setResetUsername(e.target.value)}
+                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-royal-blue font-mono"
+                   placeholder="Ex: fabio"
                  />
                </div>
             )}
             {!resetSuccess && (
                <button 
                  type="submit"
-                 className="w-full py-3 bg-royal-blue hover:bg-royal-light text-white font-bold text-xs rounded-xl uppercase tracking-wider transition-colors shadow-lg mt-2"
+                 disabled={isRequestingReset}
+                 className="w-full py-3 bg-royal-blue hover:bg-royal-light disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl uppercase tracking-wider transition-colors shadow-lg mt-2"
                >
-                 Enviar Link de Recuperação
+                 {isRequestingReset ? 'Solicitando...' : 'Enviar Link de Recuperação'}
                </button>
             )}
             <button 
               type="button"
-              onClick={() => { setShowForgotPassword(false); setResetSuccess(false); setErrorMsg(''); }}
+              onClick={() => { setShowForgotPassword(false); setResetSuccess(false); setIsRequestingReset(false); setErrorMsg(''); }}
               className="w-full py-3 bg-white text-slate-600 font-bold text-xs rounded-xl uppercase tracking-wider transition-colors border border-slate-200 mt-2 hover:bg-slate-50"
             >
               Voltar ao Login
@@ -555,7 +571,7 @@ export default function LoginScreen({
                 </button>
               </div>
               <div className="flex justify-end mt-1">
-                <button type="button" onClick={() => setShowForgotPassword(true)} className="text-[10px] text-royal-blue hover:underline font-semibold">Esqueceu a senha?</button>
+                <button type="button" onClick={() => { setResetUsername(username.trim().toLowerCase()); setResetSuccess(false); setErrorMsg(''); setShowForgotPassword(true); }} className="text-[10px] text-royal-blue hover:underline font-semibold">Esqueceu a senha?</button>
               </div>
             </div>
 
