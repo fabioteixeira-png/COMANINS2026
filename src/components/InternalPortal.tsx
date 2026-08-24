@@ -54,6 +54,7 @@ import {
   saveHeaderLogoConfig,
   syncCalibrationLogoConfig,
   saveCalibrationLogoConfig,
+  uploadSystemLogo,
   syncCustomLogo,
   saveCustomLogoConfig,
   syncSitePhotosConfig,
@@ -4682,15 +4683,17 @@ Status atual: ${e.status}.`,
           800,
           800,
           0.75,
+          file.type === 'image/png' // preserve transparency
         );
-        setLogoPreview(compressedDataUrl);
-        setSiteHeaderLogoPreview(compressedDataUrl);
-        setSiteHeaderLogo(compressedDataUrl);
-        localStorage.setItem("comanins_header_logo", compressedDataUrl);
-        localStorage.setItem("comanins_custom_logo", compressedDataUrl);
-        await saveHeaderLogoConfig(compressedDataUrl);
-        await saveCustomLogoConfig(compressedDataUrl);
-        if (onSaveCustomLogo) await onSaveCustomLogo(compressedDataUrl);
+        const uploadedUrl = await uploadSystemLogo(compressedDataUrl, 'header');
+        setLogoPreview(uploadedUrl);
+        setSiteHeaderLogoPreview(uploadedUrl);
+        setSiteHeaderLogo(uploadedUrl);
+        localStorage.setItem("comanins_header_logo", uploadedUrl);
+        localStorage.setItem("comanins_custom_logo", uploadedUrl);
+        await saveHeaderLogoConfig(uploadedUrl);
+        await saveCustomLogoConfig(uploadedUrl);
+        if (onSaveCustomLogo) await onSaveCustomLogo(uploadedUrl);
         setLogoSuccessMsg(
           "✓ Logomarca oficial otimizada e atualizada com sucesso em todo o sistema!",
         );
@@ -13477,6 +13480,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                       800,
                                       800,
                                       0.75,
+                                      file.type === 'image/png' // preserve transparency
                                     );
                                   setSiteHeaderLogoPreview(compressedDataUrl);
                                 } catch (err) {
@@ -13496,24 +13500,29 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         <button
                           type="button"
                           onClick={async () => {
-                            setSiteHeaderLogo(siteHeaderLogoPreview);
-                            setLogoPreview(siteHeaderLogoPreview);
-                            localStorage.setItem(
-                              "comanins_header_logo",
-                              siteHeaderLogoPreview,
-                            );
-                            localStorage.setItem(
-                              "comanins_custom_logo",
-                              siteHeaderLogoPreview,
-                            );
-                            await saveHeaderLogoConfig(siteHeaderLogoPreview);
-                            await saveCustomLogoConfig(siteHeaderLogoPreview);
-                            if (onSaveCustomLogo)
-                              await onSaveCustomLogo(siteHeaderLogoPreview);
-                            setHeaderLogoSuccessMsg(
-                              "✓ Logo do cabeçalho salva e aplicada em todo o sistema!",
-                            );
-                            setTimeout(() => setHeaderLogoSuccessMsg(""), 4000);
+                            try {
+                              const uploadedUrl = await uploadSystemLogo(siteHeaderLogoPreview, 'header');
+                              setSiteHeaderLogo(uploadedUrl);
+                              setLogoPreview(uploadedUrl);
+                              localStorage.setItem(
+                                "comanins_header_logo",
+                                uploadedUrl,
+                              );
+                              localStorage.setItem(
+                                "comanins_custom_logo",
+                                uploadedUrl,
+                              );
+                              await saveHeaderLogoConfig(uploadedUrl);
+                              await saveCustomLogoConfig(uploadedUrl);
+                              if (onSaveCustomLogo)
+                                await onSaveCustomLogo(uploadedUrl);
+                              setHeaderLogoSuccessMsg(
+                                "✓ Logo do cabeçalho salva e aplicada em todo o sistema!",
+                              );
+                              setTimeout(() => setHeaderLogoSuccessMsg(""), 4000);
+                            } catch (err) {
+                              alert("Erro ao salvar a logo. Tente novamente.");
+                            }
                           }}
                           className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer"
                         >
@@ -13636,6 +13645,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                         800,
                                         800,
                                         0.75,
+                                        file.type === 'image/png' // preserveTransparency for PNG logos
                                       );
                                     setCalibrationLogoPreview(compressedDataUrl);
                                   } catch (err) {
@@ -13655,12 +13665,18 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           <button
                             type="button"
                             onClick={async () => {
-                              setCalibrationLogo(calibrationLogoPreview);
-                              await saveCalibrationLogoConfig(calibrationLogoPreview);
-                              setCalibrationLogoSuccessMsg(
-                                "✓ Logo da etiqueta salva e aplicada!",
-                              );
-                              setTimeout(() => setCalibrationLogoSuccessMsg(""), 4000);
+                              try {
+                                const uploadedUrl = await uploadSystemLogo(calibrationLogoPreview, 'calibration');
+                                setCalibrationLogo(uploadedUrl);
+                                setCalibrationLogoPreview(uploadedUrl);
+                                await saveCalibrationLogoConfig(uploadedUrl);
+                                setCalibrationLogoSuccessMsg(
+                                  "✓ Logo da etiqueta salva e aplicada!",
+                                );
+                                setTimeout(() => setCalibrationLogoSuccessMsg(""), 4000);
+                              } catch (err) {
+                                alert("Erro ao salvar a logo. Tente novamente.");
+                              }
                             }}
                             className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer"
                           >

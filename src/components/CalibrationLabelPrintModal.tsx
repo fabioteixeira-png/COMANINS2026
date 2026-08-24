@@ -31,10 +31,10 @@ export const formatCalibrationLabelDate = (value: string): string => {
 
 const certificateFontSize = (value: string): number => {
   const length = value.length;
-  if (length > 28) return 15;
-  if (length > 22) return 18;
-  if (length > 16) return 21;
-  return 25;
+  if (length > 28) return 18;
+  if (length > 22) return 22;
+  if (length > 16) return 26;
+  return 32;
 };
 
 export function CalibrationLabelArtwork({
@@ -45,17 +45,18 @@ export function CalibrationLabelArtwork({
   printable = false,
 }: CalibrationLabelArtworkProps) {
   const formattedDate = formatCalibrationLabelDate(calibrationDate);
+  const cleanCert = certificateNumber.replace(/^COMA-/i, "").trim();
 
   return (
     <div
       id={printable ? "calibration-label-print" : undefined}
       className={`calibration-label-artwork overflow-hidden ${className}`}
       style={{ aspectRatio: "36 / 15.98" }}
-      aria-label={`Etiqueta de calibração. Certificado ${certificateNumber}. Data ${formattedDate}.`}
+      aria-label={`Etiqueta de calibração. Certificado ${cleanCert}. Data ${formattedDate}.`}
     >
       <svg
         className="block h-full w-full"
-        viewBox="-10 0 380 159.8"
+        viewBox="-20 0 400 159.8"
         role="img"
         aria-hidden="true"
         xmlns="http://www.w3.org/2000/svg"
@@ -81,7 +82,7 @@ export function CalibrationLabelArtwork({
           fontWeight="900"
           fill="#000"
         >
-          CALIBRAÇÃO
+          CALIBRADO
         </text>
         <text
           x="340"
@@ -97,7 +98,7 @@ export function CalibrationLabelArtwork({
         </text>
 
         <line x1="9" y1="64" x2="340" y2="64" stroke="#000" strokeWidth="2" />
-        <line x1="210" y1="70" x2="210" y2="148" stroke="#000" strokeWidth="1.5" />
+        <line x1="210" y1="70" x2="210" y2="150" stroke="#000" strokeWidth="1.5" />
 
         <text
           x="12"
@@ -112,15 +113,15 @@ export function CalibrationLabelArtwork({
         </text>
         <text
           x="12"
-          y="119"
+          y="135"
           fontFamily="Arial, Helvetica, sans-serif"
-          fontSize={certificateFontSize(certificateNumber)}
+          fontSize={certificateFontSize(cleanCert)}
           fontWeight="900"
           fill="#000"
-          textLength={certificateNumber.length > 22 ? 185 : undefined}
+          textLength={cleanCert.length > 22 ? 185 : undefined}
           lengthAdjust="spacingAndGlyphs"
         >
-          {certificateNumber}
+          {cleanCert}
         </text>
 
         <text
@@ -136,26 +137,13 @@ export function CalibrationLabelArtwork({
         </text>
         <text
           x="220"
-          y="116"
+          y="135"
           fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="20"
+          fontSize="24"
           fontWeight="900"
           fill="#000"
         >
           {formattedDate}
-        </text>
-
-        <text
-          x="340"
-          y="145"
-          textAnchor="end"
-          fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="8.5"
-          fontWeight="700"
-          letterSpacing="0.7"
-          fill="#000"
-        >
-          COMANINS • DESDE 1998
         </text>
       </svg>
     </div>
@@ -168,63 +156,77 @@ export default function CalibrationLabelPrintModal({
   calibrationLogo,
   onClose,
 }: CalibrationLabelPrintModalProps) {
+  const handlePrint = () => {
+    const printContent = document.getElementById("calibration-label-print");
+    if (!printContent) return;
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(`
+        <html>
+          <head>
+            <title>Imprimir Etiqueta</title>
+            <style>
+              @page {
+                size: 36mm 15.98mm;
+                margin: 0;
+              }
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 36mm !important;
+                height: 15.98mm !important;
+                overflow: hidden !important;
+                background: transparent !important;
+              }
+              svg {
+                display: block !important;
+                width: 36mm !important;
+                height: 15.98mm !important;
+              }
+              .tze661-tape-background {
+                fill: transparent !important;
+              }
+            </style>
+          </head>
+          <body>
+            ${printContent.outerHTML}
+          </body>
+        </html>
+      `);
+      doc.close();
+
+      iframe.contentWindow?.focus();
+      setTimeout(() => {
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 1000);
+      }, 250);
+    }
+  };
+
   return (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none"
+      className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="calibration-label-title"
     >
-      <style>{`
-        @media print {
-          @page {
-            size: 36mm 15.98mm;
-            margin: 0;
-          }
-
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            background: transparent !important;
-          }
-
-          body * {
-            visibility: hidden !important;
-          }
-
-          #calibration-label-print,
-          #calibration-label-print * {
-            visibility: visible !important;
-          }
-
-          #calibration-label-print {
-            position: fixed !important;
-            inset: 0 auto auto 0 !important;
-            width: 36mm !important;
-            height: 15.98mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            background: transparent !important;
-            break-after: avoid-page;
-            page-break-after: avoid;
-          }
-
-          #calibration-label-print svg {
-            display: block !important;
-            width: 36mm !important;
-            height: 15.98mm !important;
-          }
-
-          #calibration-label-print .tze661-tape-background {
-            fill: transparent !important;
-          }
-        }
-      `}</style>
-
-      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl print:max-w-none print:overflow-visible print:rounded-none print:border-0 print:shadow-none">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 print:hidden">
+      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div>
             <h2 id="calibration-label-title" className="text-base font-extrabold text-slate-900">
               Visualização da etiqueta de calibração
@@ -243,8 +245,8 @@ export default function CalibrationLabelPrintModal({
           </button>
         </div>
 
-        <div className="space-y-5 p-5 sm:p-7 print:p-0">
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 print:hidden">
+        <div className="space-y-5 p-5 sm:p-7">
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
@@ -254,16 +256,16 @@ export default function CalibrationLabelPrintModal({
             </div>
           </div>
 
-          <div className="flex justify-center overflow-x-auto rounded-xl bg-slate-200 p-5 print:block print:overflow-visible print:bg-transparent print:p-0">
+          <div className="flex justify-center overflow-x-auto rounded-xl bg-slate-200 p-5">
             <CalibrationLabelArtwork
               certificateNumber={certificateNumber}
               calibrationDate={calibrationDate}
               printable
-              className="w-full max-w-[720px] shadow-lg print:max-w-none print:shadow-none"
+              className="w-full max-w-[720px] shadow-lg"
             />
           </div>
 
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end print:hidden">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
@@ -273,7 +275,7 @@ export default function CalibrationLabelPrintModal({
             </button>
             <button
               type="button"
-              onClick={() => setTimeout(() => window.print(), 250)}
+              onClick={handlePrint}
               className="flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-teal-700"
             >
               <Printer className="h-4 w-4" />

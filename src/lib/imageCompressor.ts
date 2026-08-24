@@ -10,7 +10,8 @@ export async function compressImageToWebResolution(
   file: File,
   maxWidth = 800,
   maxHeight = 800,
-  quality = 0.65
+  quality = 0.65,
+  preserveTransparency = false
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let objectUrl: string | null = null;
@@ -55,10 +56,17 @@ export async function compressImageToWebResolution(
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      // White background fill for transparent/HEIC images converting to JPEG
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (!preserveTransparency) {
+        // White background fill for transparent/HEIC images converting to JPEG
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      
       ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+
+      if (preserveTransparency) {
+        return canvas.toDataURL('image/png');
+      }
 
       // Try JPEG first at quality 0.65 for ultra-compact cross-platform payload (~30KB - 60KB)
       try {
