@@ -9,10 +9,12 @@ export interface CalibrationLabelData {
 interface CalibrationLabelArtworkProps extends CalibrationLabelData {
   className?: string;
   printable?: boolean;
+  calibrationLogo?: string;
 }
 
 interface CalibrationLabelPrintModalProps extends CalibrationLabelData {
   onClose: () => void;
+  calibrationLogo?: string;
 }
 
 export const formatCalibrationLabelDate = (value: string): string => {
@@ -38,6 +40,7 @@ const certificateFontSize = (value: string): number => {
 export function CalibrationLabelArtwork({
   certificateNumber,
   calibrationDate,
+  calibrationLogo,
   className = "",
   printable = false,
 }: CalibrationLabelArtworkProps) {
@@ -61,16 +64,16 @@ export function CalibrationLabelArtwork({
         <rect x="3" y="3" width="354" height="153.8" rx="4" fill="none" stroke="#000" strokeWidth="2" />
 
         <image
-          href="/comanins-calibration-label-logo.png"
+          href={calibrationLogo || "/comanins-calibration-label-logo.png"}
           x="10"
           y="7"
           width="174"
           height="51"
-          preserveAspectRatio="xMinYMid meet"
+          preserveAspectRatio="xMidYMid meet"
           style={{ filter: "brightness(0)" }}
         />
         <text
-          x="349"
+          x="340"
           y="28"
           textAnchor="end"
           fontFamily="Arial, Helvetica, sans-serif"
@@ -81,7 +84,7 @@ export function CalibrationLabelArtwork({
           CALIBRAÇÃO
         </text>
         <text
-          x="349"
+          x="340"
           y="48"
           textAnchor="end"
           fontFamily="Arial, Helvetica, sans-serif"
@@ -93,8 +96,8 @@ export function CalibrationLabelArtwork({
           IDENTIFICAÇÃO METROLÓGICA
         </text>
 
-        <line x1="9" y1="64" x2="351" y2="64" stroke="#000" strokeWidth="2" />
-        <line x1="229" y1="70" x2="229" y2="148" stroke="#000" strokeWidth="1.5" />
+        <line x1="9" y1="64" x2="340" y2="64" stroke="#000" strokeWidth="2" />
+        <line x1="210" y1="70" x2="210" y2="148" stroke="#000" strokeWidth="1.5" />
 
         <text
           x="12"
@@ -114,14 +117,14 @@ export function CalibrationLabelArtwork({
           fontSize={certificateFontSize(certificateNumber)}
           fontWeight="900"
           fill="#000"
-          textLength={certificateNumber.length > 22 ? 205 : undefined}
+          textLength={certificateNumber.length > 22 ? 185 : undefined}
           lengthAdjust="spacingAndGlyphs"
         >
           {certificateNumber}
         </text>
 
         <text
-          x="240"
+          x="220"
           y="84"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize="12"
@@ -132,7 +135,7 @@ export function CalibrationLabelArtwork({
           DATA CALIB.
         </text>
         <text
-          x="240"
+          x="220"
           y="116"
           fontFamily="Arial, Helvetica, sans-serif"
           fontSize="20"
@@ -143,7 +146,7 @@ export function CalibrationLabelArtwork({
         </text>
 
         <text
-          x="349"
+          x="340"
           y="145"
           textAnchor="end"
           fontFamily="Arial, Helvetica, sans-serif"
@@ -162,6 +165,7 @@ export function CalibrationLabelArtwork({
 export default function CalibrationLabelPrintModal({
   certificateNumber,
   calibrationDate,
+  calibrationLogo,
   onClose,
 }: CalibrationLabelPrintModalProps) {
   return (

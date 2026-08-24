@@ -52,6 +52,8 @@ import {
   saveCompanySettings,
   syncHeaderLogo,
   saveHeaderLogoConfig,
+  syncCalibrationLogoConfig,
+  saveCalibrationLogoConfig,
   syncCustomLogo,
   saveCustomLogoConfig,
   syncSitePhotosConfig,
@@ -1689,6 +1691,10 @@ export default function InternalPortal({
   );
   const [headerLogoSuccessMsg, setHeaderLogoSuccessMsg] = useState("");
 
+  const [calibrationLogo, setCalibrationLogo] = useState("");
+  const [calibrationLogoPreview, setCalibrationLogoPreview] = useState("");
+  const [calibrationLogoSuccessMsg, setCalibrationLogoSuccessMsg] = useState("");
+
   const DEFAULT_SITE_PHOTOS = [
     {
       id: "photo1",
@@ -1969,6 +1975,17 @@ export default function InternalPortal({
           setSiteHeaderLogo(url);
           setSiteHeaderLogoPreview(url);
           localStorage.setItem("comanins_header_logo", url);
+        }
+      }),
+    );
+    unsubs.push(
+      syncCalibrationLogoConfig((url) => {
+        if (url) {
+          setCalibrationLogo(url);
+          setCalibrationLogoPreview(url);
+        } else {
+          setCalibrationLogo("");
+          setCalibrationLogoPreview("");
         }
       }),
     );
@@ -13533,6 +13550,149 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       </div>
                     </div>
                   </div>
+                  
+                  {/* Etiqueta de Calibração Logo Config */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 space-y-6 shadow-xs mt-6">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-4">
+                        <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl shadow-inner">
+                          <Image className="h-6 w-6 text-royal-blue" />
+                        </div>
+                        <div>
+                          <h3 className="font-display font-extrabold text-slate-900 text-base">
+                            Logomarca da Etiqueta de Calibração
+                          </h3>
+                          <p className="text-xs text-slate-500">
+                            Logomarca exclusiva exibida na impressão de etiquetas de calibração.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {calibrationLogoSuccessMsg && (
+                      <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
+                        <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                        <span>{calibrationLogoSuccessMsg}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                      <div className="md:col-span-5 bg-slate-50 p-5 rounded-xl border border-slate-200 text-center space-y-3">
+                        <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-widest block">
+                          Pré-visualização na Etiqueta
+                        </span>
+                        <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-inner flex items-center justify-center min-h-[100px]">
+                          {calibrationLogoPreview ? (
+                            <img
+                              src={calibrationLogoPreview}
+                              alt="Logomarca da Etiqueta"
+                              className="max-h-16 max-w-full object-contain"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center space-y-1">
+                              <span className="text-[9px] text-slate-400 font-mono">
+                                (Logo Padrão COMANINS)
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-7 space-y-4 text-xs">
+                        <div>
+                          <label className="block font-bold text-slate-800 mb-1">
+                            URL da Imagem
+                          </label>
+                          <input
+                            type="text"
+                            value={calibrationLogoPreview}
+                            onChange={(e) =>
+                              setCalibrationLogoPreview(e.target.value)
+                            }
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
+                            placeholder="https://sua-imagem.com/logo-etiqueta.png"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-slate-800 mb-1.5">
+                            Ou Enviar Arquivo de Imagem
+                          </label>
+                          <label className="cursor-pointer bg-slate-50 hover:bg-slate-100 border border-slate-300 border-dashed rounded-xl p-3 text-center transition-colors flex items-center justify-center space-x-2 text-slate-600 font-medium">
+                            <Upload className="h-4 w-4 text-royal-blue" />
+                            <span>
+                              Clique para carregar arquivo (PNG, JPG, SVG, HEIC)
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*,.heic,.heif"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  try {
+                                    const compressedDataUrl =
+                                      await compressImageToWebResolution(
+                                        file,
+                                        800,
+                                        800,
+                                        0.75,
+                                      );
+                                    setCalibrationLogoPreview(compressedDataUrl);
+                                  } catch (err) {
+                                    console.error(
+                                      "Error compressing calibration logo:",
+                                      err,
+                                    );
+                                  }
+                                }
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="flex items-center space-x-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setCalibrationLogo(calibrationLogoPreview);
+                              await saveCalibrationLogoConfig(calibrationLogoPreview);
+                              setCalibrationLogoSuccessMsg(
+                                "✓ Logo da etiqueta salva e aplicada!",
+                              );
+                              setTimeout(() => setCalibrationLogoSuccessMsg(""), 4000);
+                            }}
+                            className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer"
+                          >
+                            <Save className="h-4 w-4" />
+                            <span>Salvar Logo da Etiqueta</span>
+                          </button>
+
+                          {calibrationLogoPreview && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setCalibrationLogo("");
+                                setCalibrationLogoPreview("");
+                                await saveCalibrationLogoConfig("");
+                                setCalibrationLogoSuccessMsg(
+                                  "✓ Logo restaurada para o padrão!",
+                                );
+                                setTimeout(
+                                  () => setCalibrationLogoSuccessMsg(""),
+                                  4000,
+                                );
+                              }}
+                              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl font-bold transition-colors flex items-center space-x-1 cursor-pointer"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              <span>Restaurar Padrão</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* CARD 2: LOGO DE RELATÓRIO E CERTIFICADOS */}
@@ -21566,6 +21726,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         <CalibrationLabelPrintModal
           certificateNumber={selectedInstLabelToPrint.certificateNumber}
           calibrationDate={selectedInstLabelToPrint.calibrationDate}
+          calibrationLogo={calibrationLogo}
           onClose={() => setSelectedInstLabelToPrint(null)}
         />
       )}

@@ -1782,6 +1782,27 @@ export async function syncHeaderLogo(callback: (logoUrl: string) => void) {
   });
 }
 
+export async function syncCalibrationLogoConfig(callback: (url: string) => void) {
+  const docRef = doc(db, 'systemSettings', 'calibrationLogo');
+  return onSnapshot(docRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      callback(data?.url || '');
+      return;
+    }
+    callback('');
+  });
+}
+
+export async function saveCalibrationLogoConfig(url: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'systemSettings', 'calibrationLogo');
+    await setDoc(docRef, { url });
+  } catch (err) {
+    console.error('Error saving calibrationLogo config:', err);
+  }
+}
+
 export async function saveHeaderLogoConfig(url: string): Promise<void> {
   try {
     const docRef = doc(db, 'systemSettings', 'headerLogo');
