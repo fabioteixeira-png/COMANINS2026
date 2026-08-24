@@ -1949,38 +1949,79 @@ app.post('/api/auth/request-password-reset', passwordResetRateLimit, async (req:
       });
     }
 
-    const username = asLimitedString(req.body?.username, 80).toLowerCase();
-    if (!username || username.includes('@') || !/^[a-z0-9._-]+$/.test(username)) {
+    const rawInput = asLimitedString(req.body?.username, 120).trim().toLowerCase();
+    if (!rawInput) {
       return res.json(passwordResetGenericResponse);
     }
 
     const usersRef = firestoreDb.collection('portalUsers');
-    const expectedTechnicalEmail = `${username}@comanins.internal`;
-    const byUsername = await usersRef
-      .where('username', '==', username)
-      .limit(2)
-      .get();
+    let matchedDoc: any = null;
 
-    // Some legacy records may have a username saved with old casing/spacing,
-    // while authEmail was already normalized during the Firebase migration.
-    // Use that indexed technical identity as a compatibility fallback without
-    // scanning the whole portalUsers collection from a public endpoint.
-    const candidates = byUsername.empty
-      ? await usersRef.where('authEmail', '==', expectedTechnicalEmail).limit(2).get()
-      : byUsername;
+    // 1. If user typed technical email (e.g. usuario@comanins.internal) or plain username
+    let normalizedUser = rawInput;
+    if (normalizedUser.endsWith('@comanins.internal')) {
+      normalizedUser = normalizedUser.slice(0, -'@comanins.internal'.length).trim();
+    }
 
-    if (candidates.size !== 1) {
-      if (candidates.size > 1) {
-        console.error(`[Password reset] Duplicate portal identity detected: ${username}`);
+    if (!normalizedUser.includes('@')) {
+      const expectedTechnicalEmail = `${normalizedUser}@comanins.internal`;
+      const byUsername = await usersRef.where('username', '==', normalizedUser).limit(2).get();
+      const candidates = byUsername.empty
+        ? await usersRef.where('authEmail', '==', expectedTechnicalEmail).limit(2).get()
+        : byUsername;
+
+      if (candidates.size === 1) {
+        matchedDoc = candidates.docs[0];
+      } else if (candidates.empty) {
+        // Case-insensitive / legacy fallback
+        const allUsersSnap = await usersRef.get();
+        const found = allUsersSnap.docs.filter((doc) => {
+          const d = doc.data();
+          return (
+            normalizeAccessValue(d.username) === normalizedUser ||
+            normalizeAccessValue(d.authEmail) === expectedTechnicalEmail
+          );
+        });
+        if (found.length === 1) {
+          matchedDoc = found[0];
+        }
       }
+    } else {
+      // 2. User typed an email address (workEmail or personalEmail)
+      const byWorkEmail = await usersRef.where('workEmail', '==', rawInput).limit(2).get();
+      if (byWorkEmail.size === 1) {
+        matchedDoc = byWorkEmail.docs[0];
+      } else {
+        const byPersonalEmail = await usersRef.where('personalEmail', '==', rawInput).limit(2).get();
+        if (byPersonalEmail.size === 1) {
+          matchedDoc = byPersonalEmail.docs[0];
+        } else {
+          // Case-insensitive email search
+          const allUsersSnap = await usersRef.get();
+          const found = allUsersSnap.docs.filter((doc) => {
+            const d = doc.data();
+            return (
+              normalizeAccessValue(d.workEmail) === rawInput ||
+              normalizeAccessValue(d.personalEmail) === rawInput
+            );
+          });
+          if (found.length === 1) {
+            matchedDoc = found[0];
+          }
+        }
+      }
+    }
+
+    if (!matchedDoc) {
       return res.json(passwordResetGenericResponse);
     }
 
-    const userDoc = candidates.docs[0];
-    const profile: any = { id: userDoc.id, ...userDoc.data() };
-    if (normalizeAccessValue(profile.username) !== username) {
+    const profile: any = { id: matchedDoc.id, ...matchedDoc.data() };
+    const resolvedUsername = normalizeAccessValue(profile.username);
+    if (!resolvedUsername) {
       return res.json(passwordResetGenericResponse);
     }
+
     const status = normalizeAccessValue(profile.status);
     if (status === 'desligado') {
       return res.json(passwordResetGenericResponse);
@@ -1994,21 +2035,37 @@ app.post('/api/auth/request-password-reset', passwordResetRateLimit, async (req:
         ? personalEmail
         : '';
     const authUid = String(profile.authUid || '').trim();
+    const expectedTechnicalEmail = `${resolvedUsername}@comanins.internal`;
 
-    if (!recoveryEmail || !authUid) {
-      console.warn(`[Password reset] Recovery data incomplete for portal user ${userDoc.id}.`);
+    if (!recoveryEmail) {
+      console.warn(`[Password reset] No valid recovery email for portal user ${matchedDoc.id}.`);
       return res.json(passwordResetGenericResponse);
     }
 
-    let authUser: any;
-    try {
-      authUser = await adminAuth.getUser(authUid);
-    } catch (error: any) {
-      if (error?.code === 'auth/user-not-found') {
-        console.warn(`[Password reset] Firebase Auth user not found for portal user ${userDoc.id}.`);
-        return res.json(passwordResetGenericResponse);
+    let authUser: any = null;
+    if (authUid) {
+      try {
+        authUser = await adminAuth.getUser(authUid);
+      } catch (error: any) {
+        if (error?.code !== 'auth/user-not-found') throw error;
       }
-      throw error;
+    }
+
+    // If authUid was missing or stale, resolve by technical email directly
+    if (!authUser) {
+      try {
+        authUser = await adminAuth.getUserByEmail(expectedTechnicalEmail);
+        if (authUser?.uid && matchedDoc.ref) {
+          // Self-heal the authUid linkage
+          await matchedDoc.ref.update({ authUid: authUser.uid, authEmail: expectedTechnicalEmail });
+        }
+      } catch (error: any) {
+        if (error?.code === 'auth/user-not-found') {
+          console.warn(`[Password reset] Firebase Auth user not found for portal user ${matchedDoc.id} (${expectedTechnicalEmail}).`);
+          return res.json(passwordResetGenericResponse);
+        }
+        throw error;
+      }
     }
 
     const technicalEmail = String(authUser.email || '').trim().toLowerCase();
@@ -2019,14 +2076,14 @@ app.post('/api/auth/request-password-reset', passwordResetRateLimit, async (req:
       authUser.disabled ||
       technicalEmail !== expectedTechnicalEmail ||
       (accountType && accountType !== 'internal') ||
-      (claimedPortalUserId && claimedPortalUserId !== userDoc.id)
+      (claimedPortalUserId && claimedPortalUserId !== matchedDoc.id)
     ) {
-      console.warn(`[Password reset] Auth binding rejected for portal user ${userDoc.id}.`);
+      console.warn(`[Password reset] Auth binding rejected for portal user ${matchedDoc.id}.`);
       return res.json(passwordResetGenericResponse);
     }
 
     const resetLink = await adminAuth.generatePasswordResetLink(technicalEmail);
-    const displayName = asLimitedString(profile.name || username, 120) || username;
+    const displayName = asLimitedString(profile.name || resolvedUsername, 120) || resolvedUsername;
     const safeDisplayName = escapeHtml(displayName);
     const safeResetLink = escapeHtml(resetLink);
 
@@ -2037,6 +2094,9 @@ app.post('/api/auth/request-password-reset', passwordResetRateLimit, async (req:
       auth: {
         user: smtpUser,
         pass: smtpPass,
+      },
+      tls: {
+        rejectUnauthorized: false,
       },
     });
 
@@ -2072,7 +2132,7 @@ app.post('/api/auth/request-password-reset', passwordResetRateLimit, async (req:
       `,
     });
 
-    console.info(`[Password reset] Reset link sent for portal user ${userDoc.id}.`);
+    console.info(`[Password reset] Reset link sent successfully for portal user ${matchedDoc.id} to ${recoveryEmail}.`);
     return res.json(passwordResetGenericResponse);
   } catch (error) {
     console.error('[Password reset] Request failed:', error);

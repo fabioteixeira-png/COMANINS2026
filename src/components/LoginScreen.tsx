@@ -449,7 +449,7 @@ export default function LoginScreen({
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <h3 className="text-sm font-bold text-slate-800 text-center mb-2">Recuperação de Senha</h3>
             <p className="text-xs text-slate-600 text-center mb-4">
-              Informe seu usuário técnico. Se a conta estiver ativa e possuir e-mail de recuperação cadastrado, enviaremos um link seguro para redefinir a senha.
+              Informe seu usuário técnico ou e-mail cadastrado. Se a conta estiver ativa e possuir e-mail de recuperação válido, enviaremos um link seguro para redefinir a senha.
             </p>
             {resetSuccess ? (
                <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg text-xs text-center">
@@ -457,7 +457,7 @@ export default function LoginScreen({
                </div>
             ) : (
                <div className="space-y-1.5">
-                 <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">Usuário Técnico</label>
+                 <label className="text-[10px] uppercase font-mono font-bold text-slate-600 block tracking-wider">Usuário Técnico ou E-mail</label>
                  <input 
                    type="text"
                    autoComplete="username"
@@ -465,7 +465,7 @@ export default function LoginScreen({
                    value={resetUsername}
                    onChange={(e) => setResetUsername(e.target.value)}
                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-royal-blue font-mono"
-                   placeholder="Ex: fabio"
+                   placeholder="Ex: fabio ou seu.email@comanins.com.br"
                  />
                </div>
             )}
