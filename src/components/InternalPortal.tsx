@@ -1044,6 +1044,7 @@ export default function InternalPortal({
   const [certNextNumber, setCertNextNumber] = useState<any>("");
   const [intakeRows, setIntakeRows] = useState<any>([]);
   const [intakeSearchTerm, setIntakeSearchTerm] = useState<any>("");
+  const [inventorySearchTerm, setInventorySearchTerm] = useState<any>("");
   const [inventoryCategoryFilter, setInventoryCategoryFilter] =
     useState<any>("Todos");
   const [isCatalogOpen, setIsCatalogOpen] = useState<any>(false);
@@ -5859,7 +5860,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   ]);
 
   return (
-    <div className="h-screen sm:h-[100dvh] bg-slate-50 flex overflow-hidden">
+    <div className="h-screen sm:h-[100dvh] bg-slate-50 flex overflow-hidden print:h-auto print:overflow-visible print:block">
       {/* Signature Alert Modal */}
       {showSignatureAlert && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
@@ -15931,50 +15932,64 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               {/* Items List */}
               <div className="lg:col-span-2 space-y-4">
                 <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-                    <h3 className="font-bold text-slate-800 flex items-center space-x-2">
+                  <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center bg-slate-50 gap-4">
+                    <h3 className="font-bold text-slate-800 flex items-center space-x-2 w-full sm:w-auto shrink-0">
                       <Package className="h-5 w-5 text-slate-500" />
                       <span>Itens no Estoque</span>
                     </h3>
-                    <select
-                      value={inventoryCategoryFilter}
-                      onChange={(e) =>
-                        setInventoryCategoryFilter(e.target.value)
-                      }
-                      className="text-sm border-slate-200 rounded-lg px-3 py-1.5 focus:ring-royal-blue focus:border-royal-blue"
-                    >
-                      <option value="Todos">Todas as Categorias</option>
-                      {(
-                        dropdownOptions.estoqueCategoria || [
-                          "EPI",
-                          "Uniforme",
-                          "Material de Escritório",
-                          "Ferramenta",
-                          "Outros",
-                        ]
-                      ).map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex flex-col sm:flex-row items-center w-full sm:w-auto space-y-3 sm:space-y-0 sm:space-x-3">
+                      <div className="relative w-full sm:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Buscar item..."
+                          value={inventorySearchTerm}
+                          onChange={(e) => setInventorySearchTerm(e.target.value)}
+                          className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-1 focus:ring-royal-blue focus:border-royal-blue"
+                        />
+                      </div>
+                      <select
+                        value={inventoryCategoryFilter}
+                        onChange={(e) =>
+                          setInventoryCategoryFilter(e.target.value)
+                        }
+                        className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-royal-blue focus:border-royal-blue w-full sm:w-auto"
+                      >
+                        <option value="Todos">Todas as Categorias</option>
+                        {(
+                          dropdownOptions.estoqueCategoria || [
+                            "EPI",
+                            "Uniforme",
+                            "Material de Escritório",
+                            "Ferramenta",
+                            "Outros",
+                          ]
+                        ).map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {inventoryItems.filter(
                     (i) =>
-                      inventoryCategoryFilter === "Todos" ||
-                      i.category === inventoryCategoryFilter,
+                      (inventoryCategoryFilter === "Todos" ||
+                        i.category === inventoryCategoryFilter) &&
+                      (!inventorySearchTerm || i.name.toLowerCase().includes(inventorySearchTerm.toLowerCase()))
                   ).length === 0 ? (
                     <div className="p-8 text-center text-slate-500">
-                      Nenhum item encontrado nesta categoria.
+                      Nenhum item encontrado nesta busca.
                     </div>
                   ) : (
                     <div className="divide-y divide-slate-100">
                       {inventoryItems
                         .filter(
                           (i) =>
-                            inventoryCategoryFilter === "Todos" ||
-                            i.category === inventoryCategoryFilter,
+                            (inventoryCategoryFilter === "Todos" ||
+                              i.category === inventoryCategoryFilter) &&
+                            (!inventorySearchTerm || i.name.toLowerCase().includes(inventorySearchTerm.toLowerCase()))
                         )
                         .map((item) => {
                           const isLowStock = item.quantity <= item.minQuantity;

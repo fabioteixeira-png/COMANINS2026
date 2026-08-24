@@ -166,7 +166,7 @@ export default function CalibrationLabelPrintModal({
 }: CalibrationLabelPrintModalProps) {
   return (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm print:static print:block print:bg-transparent print:p-0"
+      className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none"
       role="dialog"
       aria-modal="true"
       aria-labelledby="calibration-label-title"
@@ -174,13 +174,10 @@ export default function CalibrationLabelPrintModal({
       <style>{`
         @media print {
           @page {
-            size: 36mm 15.98mm;
             margin: 0;
           }
 
           html, body {
-            width: 36mm !important;
-            height: 15.98mm !important;
             margin: 0 !important;
             padding: 0 !important;
             overflow: hidden !important;
@@ -271,7 +268,7 @@ export default function CalibrationLabelPrintModal({
             </button>
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => setTimeout(() => window.print(), 250)}
               className="flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-teal-700"
             >
               <Printer className="h-4 w-4" />
