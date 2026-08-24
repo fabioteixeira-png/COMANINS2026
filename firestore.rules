@@ -90,6 +90,10 @@ service cloud.firestore {
       // Operational counters are written by normal internal workflows.
       allow write: if (documentId in ['certSequence', 'intakeSequence'] && isInternalAccount()) ||
         (documentId == 'examTypes' && canManageRh()) ||
+        (documentId == 'calibrationLogo' && isAdministrator() &&
+          request.resource.data.keys().hasOnly(['url']) &&
+          request.resource.data.url is string &&
+          request.resource.data.url.size() <= 750000) ||
         (documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos', 'dropdownOptions'] && isAdministrator());
     }
     match /sitePhotos/{document=**} {

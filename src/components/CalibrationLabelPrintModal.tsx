@@ -6,6 +6,9 @@ export interface CalibrationLabelData {
   calibrationDate: string;
 }
 
+export const DEFAULT_CALIBRATION_LABEL_LOGO =
+  "/COMANINS%202026_logo_horizontal_transparente.png";
+
 interface CalibrationLabelArtworkProps extends CalibrationLabelData {
   className?: string;
   printable?: boolean;
@@ -31,12 +34,12 @@ export const formatCalibrationLabelDate = (value: string): string => {
 
 const certificateFontSize = (value: string): number => {
   const length = value.length;
-  if (length > 16) return 25.22;
-  if (length > 12) return 29.1;
-  if (length > 10) return 32.98;
-  if (length > 8) return 38.8;
-  if (length > 6) return 44.62;
-  return 50.44;
+  if (length > 16) return 22;
+  if (length > 12) return 26;
+  if (length > 10) return 30;
+  if (length > 8) return 34;
+  if (length > 6) return 38;
+  return 44;
 };
 
 export function CalibrationLabelArtwork({
@@ -46,10 +49,8 @@ export function CalibrationLabelArtwork({
   className = "",
   printable = false,
 }: CalibrationLabelArtworkProps) {
-  const [imgError, setImgError] = React.useState(false);
   const formattedDate = formatCalibrationLabelDate(calibrationDate);
   const cleanCert = certificateNumber.replace(/^COMA-/i, "").trim();
-  const finalLogo = imgError || !calibrationLogo ? "/comanins-calibration-label-logo.png" : calibrationLogo;
 
   return (
     <div
@@ -68,20 +69,23 @@ export function CalibrationLabelArtwork({
         <rect className="tze661-tape-background" width="360" height="159.8" fill="#f4cf16" />
 
         <image
-          href={finalLogo}
-          x="55"
+          href={calibrationLogo || DEFAULT_CALIBRATION_LABEL_LOGO}
+          x="60"
           y="4"
-          width="250"
-          height="84"
+          width="240"
+          height="78"
           preserveAspectRatio="xMidYMid meet"
-          style={{}}
-          onError={() => setImgError(true)}
+          onError={(event) => {
+            if (event.currentTarget.getAttribute("href") !== DEFAULT_CALIBRATION_LABEL_LOGO) {
+              event.currentTarget.setAttribute("href", DEFAULT_CALIBRATION_LABEL_LOGO);
+            }
+          }}
         />
         <text
-          x="215"
-          y="111"
+          x="220"
+          y="112"
           fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="18"
+          fontSize="15"
           fontWeight="900"
           fill="#000"
         >
@@ -94,17 +98,17 @@ export function CalibrationLabelArtwork({
           fontSize={certificateFontSize(cleanCert)}
           fontWeight="900"
           fill="#000"
-          textLength={cleanCert.length > 10 ? 170 : undefined}
+          textLength={cleanCert.length > 5 ? 155 : undefined}
           lengthAdjust="spacingAndGlyphs"
         >
           {cleanCert}
         </text>
 
         <text
-          x="215"
+          x="220"
           y="141"
           fontFamily="Arial, Helvetica, sans-serif"
-          fontSize="25"
+          fontSize="20"
           fontWeight="700"
           fill="#000"
         >

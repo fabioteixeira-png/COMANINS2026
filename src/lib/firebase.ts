@@ -1893,18 +1893,31 @@ export async function syncCalibrationLogoConfig(callback: (url: string) => void)
       return;
     }
     callback('');
+  }, (err) => {
+    console.error('Error syncing calibrationLogo config:', err);
   });
 }
 
 
 
 export async function saveCalibrationLogoConfig(url: string): Promise<void> {
-  try {
-    const docRef = doc(db, 'systemSettings', 'calibrationLogo');
-    await setDoc(docRef, { url });
-  } catch (err) {
-    console.error('Error saving calibrationLogo config:', err);
+  const normalizedUrl = String(url || '').trim();
+  const isAcceptedSource =
+    normalizedUrl === '' ||
+    normalizedUrl.startsWith('data:image/') ||
+    normalizedUrl.startsWith('/') ||
+    /^https:\/\//i.test(normalizedUrl);
+
+  if (!isAcceptedSource) {
+    throw new Error('A logomarca deve ser uma imagem enviada ou uma URL HTTPS válida.');
   }
+
+  if (normalizedUrl.length > 750_000) {
+    throw new Error('A logomarca ficou muito grande. Selecione uma imagem menor.');
+  }
+
+  const docRef = doc(db, 'systemSettings', 'calibrationLogo');
+  await setDoc(docRef, { url: normalizedUrl });
 }
 
 export async function saveHeaderLogoConfig(url: string): Promise<void> {
