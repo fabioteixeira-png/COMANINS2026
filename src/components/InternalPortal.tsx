@@ -167,7 +167,11 @@ import {
 } from "lucide-react";
 import FirebaseUsagePanel from "./FirebaseUsagePanel";
 import NotificationBellPopover from "./NotificationBellPopover";
-import IntakeLabelPrintModal from "./IntakeLabelPrintModal";
+import CalibrationLabelPrintModal, {
+  CalibrationLabelArtwork,
+  formatCalibrationLabelDate,
+} from "./CalibrationLabelPrintModal";
+import type { CalibrationLabelData } from "./CalibrationLabelPrintModal";
 import HealthProgramManagement from "./HealthProgramManagement";
 import {
   ResponsiveContainer,
@@ -604,6 +608,39 @@ const compressBase64Image = (
   quality = 0.72,
 ): Promise<string> => {
   return compressBase64Helper(base64Str, maxWidth, maxHeight, quality);
+};
+
+const resolveCalibrationLabelData = (
+  instrument: any,
+  calibrationReports: any[],
+): CalibrationLabelData | null => {
+  if (!instrument) return null;
+
+  const latestApprovedReport = calibrationReports
+    .filter(
+      (report: any) =>
+        report.instrumentId === instrument.id &&
+        report.approved === true &&
+        report.isDeleted !== true,
+    )
+    .sort((a: any, b: any) =>
+      String(b.date || b.createdAt || b.id || "").localeCompare(
+        String(a.date || a.createdAt || a.id || ""),
+      ),
+    )[0];
+
+  const certificateNumber = String(
+    latestApprovedReport?.certNumber ||
+      instrument.certificateNumber ||
+      instrument.coma ||
+      "",
+  ).trim();
+  const calibrationDate = String(
+    latestApprovedReport?.date || instrument.lastCalibrationDate || "",
+  ).trim();
+
+  if (!certificateNumber || !calibrationDate) return null;
+  return { certificateNumber, calibrationDate };
 };
 
 interface InternalPortalProps {
@@ -1060,6 +1097,7 @@ export default function InternalPortal({
   const [fieldServiceEquip, setFieldServiceEquip] = useState<string>("");
   const [fieldServiceTag, setFieldServiceTag] = useState<string>("");
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
+  const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
   const [selectedInstId, setSelectedInstId] = useState<any>("");
   const [selectedIntakeToPrint, setSelectedIntakeToPrint] = useState<any>("");
@@ -1067,8 +1105,8 @@ export default function InternalPortal({
   const [intakePortalCredential, setIntakePortalCredential] = useState<any>(null);
   const [isLoadingIntakeCredential, setIsLoadingIntakeCredential] = useState(false);
   const [intakeCredentialError, setIntakeCredentialError] = useState("");
-  const [selectedInstLabelToPrint, setSelectedInstLabelToPrint] = useState<any>(null);
-  const [instLabelClient, setInstLabelClient] = useState<any>(null);
+  const [selectedInstLabelToPrint, setSelectedInstLabelToPrint] =
+    useState<CalibrationLabelData | null>(null);
   const [selectedLabInstId, setSelectedLabInstId] = useState<any>("");
   const [selectedPsvInstId, setSelectedPsvInstId] = useState<any>("");
   const [seqSuccessMsg, setSeqSuccessMsg] = useState<any>("");
@@ -7878,6 +7916,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         (r: any) =>
                           r.instrumentId === inst.id && r.approved === true,
                       );
+                      const calibrationLabelData = resolveCalibrationLabelData(
+                        inst,
+                        reports,
+                      );
                       const isCalibrated =
                         (inst.status === "Calibrado" ||
                           inst.status === "Aguardando Emissão de Certificado" ||
@@ -8188,17 +8230,29 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               <span>Certificado</span>
                             </button>
 
-                            {/* Etiqueta de Calibração Button */}
+                            {/* Etiqueta de calibração Brother TZe-661 */}
                             <button
+                              disabled={!calibrationLabelData}
                               onClick={() => {
-                                setSelectedInstLabelToPrint(inst);
-                                setInstLabelClient(client);
+                                if (!calibrationLabelData) return;
+                                setSelectedEtiquetaInstId(inst.id);
+                                setLoadedEtiquetaInstId(inst.id);
+                                setActiveTab("etiquetas");
+                                window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
-                              className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors bg-teal-600 hover:bg-teal-700 text-white border-teal-600 cursor-pointer"
-                              title="Imprimir Etiqueta de Calibração"
+                              className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors ${
+                                calibrationLabelData
+                                  ? "bg-teal-600 hover:bg-teal-700 text-white border-teal-600 cursor-pointer"
+                                  : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60 shadow-none"
+                              }`}
+                              title={
+                                calibrationLabelData
+                                  ? "Carregar etiqueta de calibração Brother TZe-661"
+                                  : "Etiqueta disponível somente após existir certificado aprovado e data de calibração."
+                              }
                             >
                               <Printer className="h-3 w-3" />
-                              <span>Etiqueta de Calibração</span>
+                              <span>Etiqueta Calibração</span>
                             </button>
 
 
@@ -9678,150 +9732,146 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 Gerador de Etiquetas de Calibração
               </h2>
               <p className="text-sm text-slate-600">
-                Gere e visualize etiquetas adesivas de calibração para afixação
-                física nos instrumentos aprovados.
+                Visualize e imprima a etiqueta COMANINS na fita contínua Brother
+                TZe-661, com o número real do certificado e a data da calibração.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Selector */}
-              <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-sm text-xs text-slate-800">
-                <h3 className="font-display font-bold text-slate-900 text-sm">
-                  Selecione o Instrumento para Emissão
-                </h3>
-                <div>
-                  <label className="block text-slate-500 mb-1">
-                    Instrumento Calibrado
-                  </label>
-                  <select
-                    value={selectedEtiquetaInstId}
-                    onChange={(e) => setSelectedEtiquetaInstId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-800 focus:ring-1 focus:ring-royal-blue font-mono"
-                  >
-                    <option value="">Selecione o instrumento...</option>
-                    {instruments.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        [{i.coma || i.tag}] {i.description} - Status: {i.status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            {(() => {
+              const instrumentsReadyForLabel = instruments.filter((instrument: any) =>
+                Boolean(resolveCalibrationLabelData(instrument, reports)),
+              );
+              const selectedInstrument = instruments.find(
+                (instrument: any) => instrument.id === selectedEtiquetaInstId,
+              );
+              const selectedLabelData = resolveCalibrationLabelData(
+                selectedInstrument,
+                reports,
+              );
+              const loadedInstrument = instruments.find(
+                (instrument: any) => instrument.id === loadedEtiquetaInstId,
+              );
+              const loadedLabelData = resolveCalibrationLabelData(
+                loadedInstrument,
+                reports,
+              );
 
-                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-2 leading-relaxed">
-                  <p className="font-semibold text-slate-700">
-                    Sobre as etiquetas adesivas:
-                  </p>
-                  <p className="text-slate-600 text-[11px]">
-                    As etiquetas da COMANINS contêm o TAG do instrumento, número
-                    de série, data do ensaio, data recomendada da próxima
-                    calibração, identificação do laboratório e visto do técnico.
-                    Servem para rápida verificação e auditoria no chão de
-                    fábrica do cliente.
-                  </p>
-                </div>
+              return (
+                <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+                  <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs text-slate-800 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Selecione o instrumento calibrado
+                    </h3>
+                    <div>
+                      <label className="mb-1 block text-slate-500">
+                        Certificado disponível
+                      </label>
+                      <select
+                        value={selectedEtiquetaInstId}
+                        onChange={(event) => {
+                          setSelectedEtiquetaInstId(event.target.value);
+                          setLoadedEtiquetaInstId("");
+                        }}
+                        className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-slate-800 focus:ring-1 focus:ring-royal-blue"
+                      >
+                        <option value="">Selecione o instrumento...</option>
+                        {instrumentsReadyForLabel.map((instrument: any) => {
+                          const data = resolveCalibrationLabelData(instrument, reports)!;
+                          return (
+                            <option key={instrument.id} value={instrument.id}>
+                              [{data.certificateNumber}] {instrument.description} - {formatCalibrationLabelDate(data.calibrationDate)}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
 
-                <div className="flex items-center space-x-2 pt-2">
-                  <button
-                    onClick={() =>
-                      alert(
-                        "Disparando impressão térmica de etiqueta de calibração COMANINS...",
-                      )
-                    }
-                    disabled={!selectedEtiquetaInstId}
-                    className="flex-grow py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded-lg flex items-center justify-center space-x-2 text-xs transition-colors disabled:opacity-50 cursor-pointer"
-                  >
-                    <Printer className="h-4 w-4" />
-                    <span>Imprimir Etiqueta (Térmica 80mm)</span>
-                  </button>
-                </div>
-              </div>
+                    <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 leading-relaxed text-amber-950">
+                      <p className="font-bold">Padrão configurado</p>
+                      <p className="text-[11px]">
+                        Brother TZe-661 contínua, 36 mm × 8 m, impressão preta em
+                        fita amarela. Cada etiqueta será cortada em 36 mm de largura
+                        por 15,98 mm de altura.
+                      </p>
+                      <p className="text-[11px]">
+                        A arte utiliza a logo COMANINS anexada, o número do certificado
+                        aprovado e a data registrada da calibração. Nenhum dado é
+                        preenchido automaticamente quando estiver ausente.
+                      </p>
+                    </div>
 
-              {/* Sticker Preview */}
-              <div className="flex items-center justify-center bg-slate-100 p-8 rounded-xl border border-dashed border-slate-300 min-h-[300px]">
-                {selectedEtiquetaInstId ? (
-                  (() => {
-                    const inst = instruments.find(
-                      (i) => i.id === selectedEtiquetaInstId,
-                    );
-                    if (!inst) return null;
-                    return (
-                      <div className="w-[300px] bg-white p-6 rounded shadow-md border-2 border-slate-900 text-slate-950 font-mono space-y-4 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 bg-slate-900 text-white px-2 py-0.5 text-[8px] font-bold uppercase rounded-bl">
-                          Etiqueta de Inspeção
-                        </div>
-                        <div className="text-center border-b border-slate-900 pb-2">
-                          <h4 className="font-bold text-xs tracking-wider">
-                            COMANINS - COMÉRCIO E MANUTENÇÃO DE INSTRUMENTOS
-                          </h4>
-                          <p className="text-[9px] text-slate-500 font-sans">
-                            Aferição de Instrumentos de Medição
-                          </p>
-                        </div>
-                        <div className="space-y-1.5 text-[11px]">
-                          <div className="flex justify-between">
-                            <span className="font-bold">TAG:</span>
-                            <span className="font-extrabold text-royal-blue text-xs">
-                              {inst.coma || inst.tag}
-                            </span>
+                    {instrumentsReadyForLabel.length === 0 && (
+                      <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-600">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>
+                          Nenhum instrumento possui simultaneamente certificado aprovado e data de calibração.
+                        </span>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedInstrument || !selectedLabelData) {
+                          alert(
+                            "Selecione um instrumento com certificado aprovado e data de calibração.",
+                          );
+                          return;
+                        }
+                        setLoadedEtiquetaInstId(selectedInstrument.id);
+                      }}
+                      disabled={!selectedLabelData}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-royal-blue py-2.5 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Eye className="h-4 w-4" />
+                      Carregar visualização
+                    </button>
+                  </div>
+
+                  <div className="flex min-h-[300px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-100 p-5">
+                    {loadedLabelData ? (
+                      <div className="w-full space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-extrabold text-slate-900">
+                              Pré-visualização em escala ampliada
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              Tamanho físico de impressão: 36 mm × 15,98 mm
+                            </p>
                           </div>
-                          <div className="flex justify-between">
-                            <span>N/SÉRIE:</span>
-                            <span>{inst.serialNumber || "SN-N/A"}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>DATA CALIB:</span>
-                            <span>
-                              {inst.lastCalibrationDate ||
-                                new Date().toLocaleDateString("pt-BR")}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>PRÓX CALIB:</span>
-                            <span className="font-bold text-red-600">
-                              {inst.nextCalibrationDate || "20/07/2027"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>TÉCNICO:</span>
-                            <span className="text-[10px] truncate">
-                              {benchTechnician || "C. Moreira"}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="pt-2 border-t border-slate-200 flex justify-between items-center gap-2">
-                          <div className="flex items-center gap-1.5">
-                            <div className="p-0.5 bg-white border border-slate-300 rounded">
-                              <QRCodeSVG
-                                value="https://www.comanins.com.br"
-                                size={32}
-                                level="L"
-                              />
-                            </div>
-                            <div className="text-[8px] font-sans text-slate-500 leading-tight">
-                              <span className="font-bold block text-slate-800">
-                                www.comanins.com.br
-                              </span>
-                              <span>Rastreabilidade Inmetro</span>
-                            </div>
-                          </div>
-                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded border border-emerald-300 flex-shrink-0">
-                            APROVADO
+                          <span className="rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-900">
+                            TZe-661
                           </span>
                         </div>
+
+                        <CalibrationLabelArtwork
+                          certificateNumber={loadedLabelData.certificateNumber}
+                          calibrationDate={loadedLabelData.calibrationDate}
+                          className="w-full shadow-lg"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInstLabelToPrint(loadedLabelData)}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 py-2.5 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-teal-700"
+                        >
+                          <Printer className="h-4 w-4" />
+                          Abrir impressão
+                        </button>
                       </div>
-                    );
-                  })()
-                ) : (
-                  <div className="text-center text-slate-500 text-xs font-sans space-y-2">
-                    <Tag className="h-8 w-8 text-slate-400 mx-auto" />
-                    <p>
-                      Selecione um instrumento para pré-visualizar a etiqueta
-                      térmica de calibração.
-                    </p>
+                    ) : (
+                      <div className="space-y-2 text-center text-xs text-slate-500">
+                        <Tag className="mx-auto h-8 w-8 text-slate-400" />
+                        <p>
+                          Selecione o instrumento e clique em “Carregar visualização”.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -21496,13 +21546,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       )}
 
       {selectedInstLabelToPrint && (
-        <IntakeLabelPrintModal
-          instrument={selectedInstLabelToPrint}
-          client={instLabelClient}
-          onClose={() => {
-            setSelectedInstLabelToPrint(null);
-            setInstLabelClient(null);
-          }}
+        <CalibrationLabelPrintModal
+          certificateNumber={selectedInstLabelToPrint.certificateNumber}
+          calibrationDate={selectedInstLabelToPrint.calibrationDate}
+          onClose={() => setSelectedInstLabelToPrint(null)}
         />
       )}
     </div>
