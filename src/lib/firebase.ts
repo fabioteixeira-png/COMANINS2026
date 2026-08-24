@@ -1864,15 +1864,7 @@ export async function syncCalibrationLogoConfig(callback: (url: string) => void)
   });
 }
 
-export async function uploadSystemLogo(dataUrl: string, type: 'header' | 'calibration'): Promise<string> {
-  if (!dataUrl.startsWith('data:')) return dataUrl; // Might be a real URL already
-  const blob = await dataUrlToBlob(dataUrl);
-  const extension = blob.type.split('/')[1] || 'png';
-  const filePath = `systemSettings/${type}_logo_${Date.now()}.${extension}`;
-  const storageRef = ref(storage, filePath);
-  await uploadBytes(storageRef, blob, { contentType: blob.type });
-  return await getDownloadURL(storageRef);
-}
+
 
 export async function saveCalibrationLogoConfig(url: string): Promise<void> {
   try {

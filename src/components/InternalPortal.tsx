@@ -54,7 +54,6 @@ import {
   saveHeaderLogoConfig,
   syncCalibrationLogoConfig,
   saveCalibrationLogoConfig,
-  uploadSystemLogo,
   syncCustomLogo,
   saveCustomLogoConfig,
   syncSitePhotosConfig,
@@ -4742,7 +4741,7 @@ Status atual: ${e.status}.`,
           0.75,
           file.type === 'image/png' // preserve transparency
         );
-        const uploadedUrl = await uploadSystemLogo(compressedDataUrl, 'header');
+        const uploadedUrl = compressedDataUrl;
         setLogoPreview(uploadedUrl);
         setSiteHeaderLogoPreview(uploadedUrl);
         setSiteHeaderLogo(uploadedUrl);
@@ -13607,7 +13606,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           type="button"
                           onClick={async () => {
                             try {
-                              const uploadedUrl = await uploadSystemLogo(siteHeaderLogoPreview, 'header');
+                              const uploadedUrl = siteHeaderLogoPreview;
                               setSiteHeaderLogo(uploadedUrl);
                               setLogoPreview(uploadedUrl);
                               localStorage.setItem(
@@ -13772,7 +13771,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             type="button"
                             onClick={async () => {
                               try {
-                                const uploadedUrl = await uploadSystemLogo(calibrationLogoPreview, 'calibration');
+                                const uploadedUrl = calibrationLogoPreview;
                                 setCalibrationLogo(uploadedUrl);
                                 setCalibrationLogoPreview(uploadedUrl);
                                 await saveCalibrationLogoConfig(uploadedUrl);
