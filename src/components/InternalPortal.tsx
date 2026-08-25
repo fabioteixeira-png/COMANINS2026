@@ -1126,6 +1126,8 @@ export default function InternalPortal({
   const [showEmployeeTrainingForm, setShowEmployeeTrainingForm] =
     useState<any>(false);
   const [showInstForm, setShowInstForm] = useState<any>(false);
+  const instrumentSubmitLock = React.useRef(false);
+  const [instrumentSubmitting, setInstrumentSubmitting] = useState(false);
   const [showIntakeLookup, setShowIntakeLookup] = useState<any>(false);
   const [showIntakeModal, setShowIntakeModal] = useState<any>(false);
   const [showPhotosModal, setShowPhotosModal] = useState<boolean>(false);
@@ -4584,6 +4586,10 @@ Status atual: ${e.status}.`,
 
   const handleInstrumentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (instrumentSubmitLock.current) return;
+
+    instrumentSubmitLock.current = true;
+    setInstrumentSubmitting(true);
     setInstFormError("");
     try {
       if (!onAddInstrument) {
@@ -4736,9 +4742,12 @@ Status atual: ${e.status}.`,
       setInstRangeMax2("");
       setInstUnit2("");
       setInstFormError("");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setInstFormError("Erro ao salvar instrumento.");
+      setInstFormError(err?.message || "Erro ao salvar instrumento.");
+    } finally {
+      instrumentSubmitLock.current = false;
+      setInstrumentSubmitting(false);
     }
   };
 
@@ -7855,14 +7864,16 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <div className="flex items-end space-x-2">
                     <button
                       type="submit"
-                      className="flex-grow py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded"
+                      disabled={instrumentSubmitting}
+                      className="flex-grow py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Salvar Instrumento
+                      {instrumentSubmitting ? "Salvando..." : "Salvar Instrumento"}
                     </button>
                     <button
                       type="button"
+                      disabled={instrumentSubmitting}
                       onClick={() => setShowInstForm(false)}
-                      className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded"
+                      className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Cancelar
                     </button>
@@ -7911,6 +7922,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     </option>
                     <option value="Em Calibração">Em Calibração</option>
                     <option value="Calibrado">Calibrado</option>
+                    <option value="Aguardando Emissão de Certificado">
+                      Aguardando Emissão de Certificado
+                    </option>
                     <option value="Entregue">Entregue</option>
                   </select>
                 </div>
@@ -9912,14 +9926,25 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {/* TAB: ETIQUETAS */}
         {activeTab === "etiquetas" && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
-                Gerador de Etiquetas de Calibração
-              </h2>
-              <p className="text-sm text-slate-600">
-                Visualize e imprima a etiqueta COMANINS na fita contínua Brother
-                TZe-661, com o número real do certificado e a data da calibração.
-              </p>
+            <div className="flex items-start gap-4">
+              <button
+                type="button"
+                onClick={() => setActiveTab("instruments")}
+                className="mt-0.5 rounded-lg border border-slate-200 bg-white p-2 text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-royal-blue"
+                title="Voltar para Calibração"
+                aria-label="Voltar para Calibração"
+              >
+                <ArrowRight className="h-5 w-5 rotate-180" />
+              </button>
+              <div>
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
+                  Gerador de Etiquetas de Calibração
+                </h2>
+                <p className="text-sm text-slate-600">
+                  Visualize e imprima a etiqueta COMANINS na fita contínua Brother
+                  TZe-661, com o número real do certificado e a data da calibração.
+                </p>
+              </div>
             </div>
 
             {(() => {

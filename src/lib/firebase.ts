@@ -21,7 +21,7 @@ import {
   startAfter,
   DocumentData,
   QueryDocumentSnapshot
-, writeBatch } from "firebase/firestore";
+, runTransaction, writeBatch } from "firebase/firestore";
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument } from '../types';
 import { generateAuthKey } from '../utils/authKey';
@@ -777,9 +777,97 @@ let instrumentLoadPromise: Promise<void> | null = null;
 let instrumentLiveUnsubscribe: (() => void) | null = null;
 const instrumentSubscribers = new Set<(instruments: Instrument[]) => void>();
 
-const notifyInstrumentSubscribers = () => {
-  const snapshot = Array.from(instrumentCache.values())
+const normalizeInstrumentCertificate = (instrument: Partial<Instrument>): string =>
+  String(instrument.certificateNumber || instrument.coma || '')
+    .trim()
+    .toUpperCase();
+
+const instrumentStatusPriority = (status?: Instrument['status']): number => {
+  switch (status) {
+    case 'Entregue':
+      return 8;
+    case 'Disponível para Retirada':
+    case 'Não Conforme':
+    case 'RNC':
+      return 7;
+    case 'Aguardando Emissão de Certificado':
+      return 6;
+    case 'Calibrado':
+      return 5;
+    case 'Em Calibração':
+      return 3;
+    case 'Aguardando Calibração':
+    case 'Aguardando Triagem':
+      return 2;
+    default:
+      return 1;
+  }
+};
+
+const instrumentEvidencePriority = (instrument: Instrument): number =>
+  Number(Boolean(instrument.lastCalibrationDate)) * 4 +
+  Number(Boolean(instrument.photoCalibrated)) * 2 +
+  Number(Boolean(instrument.photoRegistration));
+
+const chooseCanonicalInstrument = (current: Instrument, candidate: Instrument): Instrument => {
+  const statusDifference =
+    instrumentStatusPriority(candidate.status) - instrumentStatusPriority(current.status);
+  if (statusDifference !== 0) return statusDifference > 0 ? candidate : current;
+
+  const evidenceDifference =
+    instrumentEvidencePriority(candidate) - instrumentEvidencePriority(current);
+  if (evidenceDifference !== 0) return evidenceDifference > 0 ? candidate : current;
+
+  const currentCreatedAt = Date.parse(String(current.createdAt || ''));
+  const candidateCreatedAt = Date.parse(String(candidate.createdAt || ''));
+  if (Number.isFinite(currentCreatedAt) && Number.isFinite(candidateCreatedAt)) {
+    if (currentCreatedAt !== candidateCreatedAt) {
+      return candidateCreatedAt < currentCreatedAt ? candidate : current;
+    }
+  }
+
+  return String(candidate.id || '').localeCompare(String(current.id || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  }) < 0
+    ? candidate
+    : current;
+};
+
+/**
+ * Consolida somente documentos que violam a unicidade do número de certificado.
+ * Nenhum documento é apagado: a função seleciona o registro operacional canônico
+ * para impedir linhas, contadores e seletores duplicados na interface.
+ */
+export const deduplicateInstrumentsByCertificate = (
+  instruments: Instrument[],
+): Instrument[] => {
+  const withoutCertificate: Instrument[] = [];
+  const byCertificate = new Map<string, Instrument>();
+
+  instruments
     .filter((instrument) => (instrument as any).isDeleted !== true)
+    .forEach((instrument) => {
+      const certificateKey = normalizeInstrumentCertificate(instrument);
+      if (!certificateKey) {
+        withoutCertificate.push(instrument);
+        return;
+      }
+
+      const current = byCertificate.get(certificateKey);
+      byCertificate.set(
+        certificateKey,
+        current ? chooseCanonicalInstrument(current, instrument) : instrument,
+      );
+    });
+
+  return [...byCertificate.values(), ...withoutCertificate];
+};
+
+const notifyInstrumentSubscribers = () => {
+  const snapshot = deduplicateInstrumentsByCertificate(
+    Array.from(instrumentCache.values()),
+  )
     .sort((a, b) => String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true }));
   instrumentSubscribers.forEach((subscriber) => subscriber(snapshot));
 };
@@ -875,8 +963,11 @@ export async function countInstrumentsForIntake(intakeNumber: string): Promise<n
     where('numeroDaEntrada', '==', normalized),
   );
   const snapshot = await getDocs(q);
-  const activeDocs = snapshot.docs.filter((doc) => doc.data().isDeleted !== true);
-  return activeDocs.length;
+  const activeInstruments = snapshot.docs.map(
+    (instrumentDoc) =>
+      ({ id: instrumentDoc.id, ...instrumentDoc.data() }) as Instrument,
+  );
+  return deduplicateInstrumentsByCertificate(activeInstruments).length;
 }
 
 export async function instrumentCertificateExists(certificateNumber: string): Promise<boolean> {
@@ -907,7 +998,10 @@ export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 
   if (data.model) data.model = data.model.toUpperCase();
   if (data.serialNumber) data.serialNumber = data.serialNumber.toUpperCase();
 
-  const newId = 'i_' + Date.now();
+  const normalizedCertificate = normalizeInstrumentCertificate(data);
+  const newId = normalizedCertificate
+    ? `i_cert_${encodeURIComponent(normalizedCertificate)}`
+    : 'i_' + Date.now();
   const nowIso = new Date().toISOString();
   const inst: Instrument = {
     status: 'Aguardando Calibração',
@@ -924,7 +1018,14 @@ export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 
       cleaned[key] = val;
     }
   }
-  await setDoc(doc(db, 'instruments', newId), cleaned);
+  const instrumentRef = doc(db, 'instruments', newId);
+  await runTransaction(db, async (transaction) => {
+    const existing = await transaction.get(instrumentRef);
+    if (existing.exists()) {
+      throw new Error('Este Número de Certificado já está cadastrado.');
+    }
+    transaction.set(instrumentRef, cleaned);
+  });
   mergeInstrumentIntoCache(inst);
   notifyInstrumentSubscribers();
   return inst;

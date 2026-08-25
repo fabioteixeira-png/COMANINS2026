@@ -28,6 +28,7 @@ import {
   updateClientDoc,
   addInstrumentDoc,
   addInstrumentsBulkDocs,
+  deduplicateInstrumentsByCertificate,
   deleteInstrumentDoc,
   updateInstrumentDoc,
   saveCalibrationDoc,
@@ -336,7 +337,12 @@ export default function App() {
   const handleAddInstrument = async (newInstData: Omit<Instrument, 'id' | 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'>) => {
     try {
       const saved = await addInstrumentDoc(newInstData);
-      setInstruments(prev => [saved, ...prev.filter(i => i.id !== saved.id)]);
+      setInstruments(prev =>
+        deduplicateInstrumentsByCertificate([
+          saved,
+          ...prev.filter(i => i.id !== saved.id),
+        ]),
+      );
       return saved;
     } catch (err) {
       console.error('Error adding instrument to Firestore:', err);
