@@ -68,6 +68,7 @@ export default function App() {
     accessProfileId?: string;
     accessProfileName?: string;
     allowedModules?: string[];
+    editableModules?: string[];
     accessProfileVersion?: number;
   } | null>(null);
 

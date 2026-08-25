@@ -60,12 +60,46 @@ service cloud.firestore {
       );
     }
 
+    function hasEditModule(moduleId) {
+      return isAdministrator() || (
+        isInternalAccount() && (
+          (request.auth.token.editableModules is list &&
+            request.auth.token.editableModules.hasAny([moduleId])) ||
+          // Compatibilidade durante o rollout: tokens antigos não possuem
+          // editableModules e mantêm temporariamente o comportamento anterior.
+          (request.auth.token.editableModules == null && hasModule(moduleId))
+        )
+      );
+    }
+
+    function isCalibrationScopedIntakeUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'devolutionGeneratedAt',
+        'devolutionGeneratedBy',
+        'devolutionRows',
+        'photoDevolution',
+        'deliveryInstrumentPhotos',
+        'deliveryFormPhotos',
+        'deliveryFinalizedAt',
+        'deliveryFinalizedBy',
+        'deliveryLocked'
+      ]);
+    }
+
     function isRhAccount() {
       return hasModule('hr');
     }
 
     function isFinanceAccount() {
       return hasModule('finance');
+    }
+
+    function isRhEditor() {
+      return hasEditModule('hr');
+    }
+
+    function isFinanceEditor() {
+      return hasEditModule('finance');
     }
 
     function isOwnPortalUser() {
@@ -97,6 +131,18 @@ service cloud.firestore {
       return isAdministrator() || isFinanceAccount();
     }
 
+    function canEditRh() {
+      return isAdministrator() || isRhEditor();
+    }
+
+    function canEditPayslips() {
+      return isAdministrator() || isRhEditor() || isFinanceEditor();
+    }
+
+    function canEditFinance() {
+      return isAdministrator() || isFinanceEditor();
+    }
+
     // Campos de arquivamento são autoritativos e só podem ser escritos pelo
     // backend via Admin SDK. O navegador pode editar o conteúdo operacional,
     // mas não pode apagar/restaurar/manipular a trilha de preservação.
@@ -117,8 +163,9 @@ service cloud.firestore {
       allow read: if isInternalAccount() || documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos'];
 
       // Operational counters are written by normal internal workflows.
-      allow write: if (documentId in ['certSequence', 'intakeSequence'] && isInternalAccount()) ||
-        (documentId == 'examTypes' && canManageRh()) ||
+      allow write: if (documentId == 'certSequence' && hasEditModule('calibration')) ||
+        (documentId == 'intakeSequence' && hasEditModule('material_intake')) ||
+        (documentId == 'examTypes' && canEditRh()) ||
         (documentId == 'calibrationLogo' && isAdministrator() &&
           request.resource.data.keys().hasOnly(['url']) &&
           request.resource.data.url is string &&
@@ -151,13 +198,14 @@ service cloud.firestore {
           'accessProfileName',
           'accessProfileVersion',
           'allowedModules',
+          'editableModules',
           'accessProfileUpdatedAt',
           'accessProfileUpdatedBy'
         ])
       ) || (
         // RH can maintain HR data but cannot change identity, authorization,
         // forced-password state or another employee's digital signature.
-        isRhAccount() &&
+        isRhEditor() &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'username',
           'permissionLevel',
@@ -165,6 +213,7 @@ service cloud.firestore {
           'accessProfileName',
           'accessProfileVersion',
           'allowedModules',
+          'editableModules',
           'accessProfileUpdatedAt',
           'accessProfileUpdatedBy',
           'authUid',
@@ -176,14 +225,21 @@ service cloud.firestore {
           'signatureDate'
         ])
       ) || (
-        isOwnPortalUser() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'passwordChangeRequired',
-          'mustChangePassword',
-          'signaturePath',
-          'signatureVersion',
-          'signatureDate'
-        ])
+        isOwnPortalUser() && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'passwordChangeRequired',
+            'mustChangePassword'
+          ]) || (
+            hasEditModule('digital_signature') &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'passwordChangeRequired',
+              'mustChangePassword',
+              'signaturePath',
+              'signatureVersion',
+              'signatureDate'
+            ])
+          )
+        )
       );
 
       allow create, delete: if isAdministrator();
@@ -194,12 +250,17 @@ service cloud.firestore {
     match /accessProfiles/{document=**} {
       allow read, write: if false;
     }
+    // Reserva imutável de números de Entrada. Criada no mesmo transaction do
+    // savedIntake pelo Admin SDK; nunca exposta para escrita no navegador.
+    match /intakeNumberLocks/{document=**} {
+      allow read, write: if false;
+    }
     match /clients/{clientId} {
       // Client master data is no longer public. Internal accounts can manage the
       // directory; a client account can read only its own company profile.
       allow read: if hasModule('clients') ||
         (isClientAccount() && request.auth.token.clientId == clientId);
-      allow create, update, delete: if hasModule('clients');
+      allow create, update, delete: if hasEditModule('clients');
     }
 
     // Credenciais do Portal do Cliente são mantidas em coleção exclusiva do servidor.
@@ -221,8 +282,8 @@ service cloud.firestore {
     // RH/Admin gerenciam inclusão, alteração e exclusão.
     match /employeeDocuments/{document=**} {
       allow read: if isOwnEmployeeResource() || canManageRh();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow create: if canEditRh();
+      allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;
     }
 
@@ -230,20 +291,20 @@ service cloud.firestore {
     // Exclusão física foi substituída por arquivamento via backend.
     match /medical_exams/{document=**} {
       allow read: if canManageRh();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow create: if canEditRh();
+      allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /employeeAsos/{document=**} {
       allow read: if canManageRh();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow create: if canEditRh();
+      allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /health_program_docs/{document=**} {
-      allow read: if canManageRh();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow read: if hasModule('health_programs');
+      allow create: if hasEditModule('health_programs');
+      allow update: if hasEditModule('health_programs') && archiveFieldsUntouched();
       allow delete: if false;
     }
 
@@ -252,9 +313,9 @@ service cloud.firestore {
     // os campos de ciência/visualização. RH, Financeiro e Admin gerenciam o todo.
     match /payslips/{document=**} {
       allow read: if isOwnEmployeeResource() || canManagePayslips();
-      allow create: if canManagePayslips();
+      allow create: if canEditPayslips();
       allow delete: if false;
-      allow update: if (canManagePayslips() && archiveFieldsUntouched()) || (
+      allow update: if (canEditPayslips() && archiveFieldsUntouched()) || (
         isOwnEmployeeResource() &&
         resource.data.get('isDeleted', false) != true &&
         request.resource.data.employeeId == resource.data.employeeId &&
@@ -276,11 +337,11 @@ service cloud.firestore {
     // filtros visuais e impede consulta cruzada entre clientes.
     match /instruments/{instrumentId} {
       allow read: if hasModule('calibration');
-      allow create: if hasModule('calibration');
+      allow create: if hasEditModule('calibration');
       // A transição para Entregue é permitida; depois disso o cadastro se torna
       // imutável para preservar a rastreabilidade da devolução. Campos de
       // arquivamento só podem ser escritos pelo backend (Admin SDK).
-      allow update: if hasModule('calibration')
+      allow update: if hasEditModule('calibration')
         && resource.data.status != 'Entregue'
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
@@ -290,10 +351,10 @@ service cloud.firestore {
     }
     match /calibrationReports/{reportId} {
       allow read: if hasModule('calibration');
-      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
       // Certificados associados a instrumento já entregue não podem ser
       // regravados. Campos de arquivamento são exclusivos do backend.
-      allow update: if hasModule('calibration')
+      allow update: if hasEditModule('calibration')
         && archiveFieldsUntouched()
         && (
           resource.data.get('instrumentId', null) == null ||
@@ -302,13 +363,21 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /savedIntakes/{intakeId} {
-      allow read: if hasAnyModule(['material_intake', 'calibration']);
-      allow create: if hasModule('material_intake') && archiveFieldsAbsentOnCreate();
+      allow read: if hasModule('material_intake') || hasModule('calibration');
+      // Criação passa exclusivamente pelo backend transacional para garantir unicidade do Nº de Entrada.
+      allow create: if false;
 
       // A entrada pode ser atualizada enquanto a entrega não foi finalizada.
       // A mesma gravação que conclui a entrega precisa conter as duas classes
       // de evidência e ativa o bloqueio imutável do registro.
-      allow update: if hasAnyModule(['material_intake', 'calibration'])
+      // material_intake=edit pode atualizar a guia operacional. calibration=edit,
+      // sem material_intake=edit, fica estritamente limitado aos campos de
+      // devolução/entrega utilizados pelo fluxo de calibração.
+      allow update: if (
+          hasEditModule('material_intake') ||
+          (hasEditModule('calibration') && isCalibrationScopedIntakeUpdate())
+        )
+        && request.resource.data.numEntrada == resource.data.numEntrada
         && archiveFieldsUntouched()
         && resource.data.get('deliveryLocked', false) != true
         && resource.data.get('deliveryFinalizedAt', null) == null
@@ -329,9 +398,9 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /rncReports/{rncId} {
-      allow read: if hasAnyModule(['calibration', 'audit']);
-      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
-      allow update: if hasModule('calibration')
+      allow read: if hasModule('calibration') || hasModule('audit');
+      allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow update: if hasEditModule('calibration')
         && archiveFieldsUntouched()
         && (
           resource.data.get('instrumentId', null) == null ||
@@ -341,8 +410,8 @@ service cloud.firestore {
     }
     match /fieldServiceRecords/{recordId} {
       allow read: if hasModule('field_service');
-      allow create: if hasModule('field_service');
-      allow update: if hasModule('field_service') && (
+      allow create: if hasEditModule('field_service');
+      allow update: if hasEditModule('field_service') && (
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
         ]) || isAdministrator()
@@ -354,32 +423,32 @@ service cloud.firestore {
     // Financeiro: acesso somente para Financeiro e Administradores.
     match /financeTransactions/{document=**} {
       allow read: if canManageFinance();
-      allow create: if canManageFinance();
-      allow update: if canManageFinance() && archiveFieldsUntouched();
+      allow create: if canEditFinance();
+      allow update: if canEditFinance() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /financeContracts/{document=**} {
       allow read: if canManageFinance();
-      allow create: if canManageFinance();
-      allow update: if canManageFinance() && archiveFieldsUntouched();
+      allow create: if canEditFinance();
+      allow update: if canEditFinance() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /financeMeasurements/{document=**} {
       allow read: if canManageFinance();
-      allow create: if canManageFinance();
-      allow update: if canManageFinance() && archiveFieldsUntouched();
+      allow create: if canEditFinance();
+      allow update: if canEditFinance() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /financeBankAccounts/{document=**} {
       allow read: if canManageFinance();
-      allow create: if canManageFinance();
-      allow update: if canManageFinance() && archiveFieldsUntouched();
+      allow create: if canEditFinance();
+      allow update: if canEditFinance() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /financeCategories/{document=**} {
       allow read: if canManageFinance();
-      allow create: if canManageFinance();
-      allow update: if canManageFinance() && archiveFieldsUntouched();
+      allow create: if canEditFinance();
+      allow update: if canEditFinance() && archiveFieldsUntouched();
       allow delete: if false;
     }
 
@@ -401,22 +470,23 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
     match /referenceStandards/{document=**} {
-      allow read: if hasAnyModule(['calibration', 'audit']);
-      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
-      allow update: if hasModule('calibration') && archiveFieldsUntouched();
+      allow read: if hasModule('calibration') || hasModule('audit');
+      allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow update: if hasEditModule('calibration') && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /calibrationAuditLogs/{document=**} {
-      allow read: if hasAnyModule(['calibration', 'audit']);
-      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow read: if hasModule('calibration') || hasModule('audit');
+      allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
       // Registros de tempo são append-only no navegador. O backend pode
       // arquivá-los com Admin SDK após autorização administrativa.
       allow update, delete: if false;
     }
     match /internal_tickets/{document=**} {
-      allow read: if hasModule('internal_communication');
-      allow create: if hasModule('internal_communication') && archiveFieldsAbsentOnCreate();
-      allow update: if hasModule('internal_communication') && archiveFieldsUntouched();
+      allow read: if hasModule('internal_communication') || hasModule('internal_communication_management');
+      allow create: if hasEditModule('internal_communication') && archiveFieldsAbsentOnCreate();
+      allow update: if (hasEditModule('internal_communication') || hasEditModule('internal_communication_management'))
+        && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /accessAuditLogs/{document=**} {
@@ -426,20 +496,20 @@ service cloud.firestore {
     }
     match /employeeBirthdays/{document=**} {
       allow read: if isInternalAccount();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow create: if canEditRh();
+      allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /trainings/{document=**} {
       allow read: if isInternalAccount();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow create: if canEditRh();
+      allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /employeeTrainings/{document=**} {
       allow read: if isInternalAccount();
-      allow create: if canManageRh();
-      allow update: if canManageRh() && archiveFieldsUntouched();
+      allow create: if canEditRh();
+      allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;
     }
 

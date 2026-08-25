@@ -49,9 +49,10 @@ const COLUMNS = [
 
 
 interface FieldServiceProps {
+  canEdit?: boolean;
   onPrintCertificate?: (instId: string, tagData: string, equipmentData: string) => void;
 }
-export default function FieldService({ onPrintCertificate }: FieldServiceProps = {}) {
+export default function FieldService({ canEdit = false, onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,6 +95,10 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
 
   const handleInlineSave = async (record: FieldServiceRecord, colId: string, newVal: string) => {
     setEditingCell(null);
+    if (!canEdit) {
+      alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
+      return;
+    }
     if (String((record as any)[colId] || '') === newVal) return;
     
     if (colId === 'certificate' && newVal.trim() !== '') {
@@ -121,6 +126,10 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleDeleteRecord = async (id: string) => {
+    if (!canEdit) {
+      alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
+      return;
+    }
     const adminUsername = prompt("Digite o usuário do administrador:");
     if (adminUsername === null) return;
     const pwd = prompt("Digite a senha do administrador para excluir este registro:");
@@ -149,6 +158,14 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!canEdit) {
+      setEditingCell(null);
+      setShowAddModal(false);
+      setFormData({});
+    }
+  }, [canEdit]);
 
   useEffect(() => {
     const unsubscribeInst = syncInstruments((data) => setInstruments(data));
@@ -215,6 +232,11 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      e.target.value = '';
+      alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -378,6 +400,11 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      e.target.value = '';
+      alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
     
@@ -455,6 +482,11 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
   };
 
   const handleSaveRecord = async () => {
+    if (!canEdit) {
+      alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
+      setShowAddModal(false);
+      return;
+    }
     const duplicateCert = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
     const duplicateTag = formData.tag && formData.tag.trim() !== '' && records.some(r => r.tag === formData.tag && r.id !== formData.id);
     if (duplicateCert) {
@@ -553,14 +585,16 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
             <span>Modelo Planilha</span>
           </button>
 
-          <button 
-            onClick={() => excelInputRef.current?.click()}
-            disabled={isImporting}
-            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
-          >
-            {isImporting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-            <span>{isImporting ? 'Importando...' : 'Importar Planilha'}</span>
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isImporting}
+              className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
+            >
+              {isImporting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+              <span>{isImporting ? 'Importando...' : 'Importar Planilha'}</span>
+            </button>
+          )}
           
           <button 
             onClick={handleExportExcel}
@@ -571,22 +605,26 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
           </button>
 
 
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessingImage}
-            className="flex items-center space-x-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
-          >
-            {isProcessingImage ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-            <span>{isProcessingImage ? 'Analisando...' : 'Anexar Foto (IA)'}</span>
-          </button>
+          {canEdit && (
+            <>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isProcessingImage}
+                className="flex items-center space-x-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
+              >
+                {isProcessingImage ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                <span>{isProcessingImage ? 'Analisando...' : 'Anexar Foto (IA)'}</span>
+              </button>
 
-          <button 
-            onClick={() => { setFormData({}); setShowAddModal(true); }}
-            className="flex items-center space-x-2 px-3 py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-sm"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Novo Registro</span>
-          </button>
+              <button
+                onClick={() => { setFormData({}); setShowAddModal(true); }}
+                className="flex items-center space-x-2 px-3 py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-sm"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Novo Registro</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -724,7 +762,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
                         }
                       }
                       
-                      const isEditing = editingCell?.rowId === record.id && editingCell?.colId === col.id;
+                      const isEditing = canEdit && editingCell?.rowId === record.id && editingCell?.colId === col.id;
                       if (isEditing && col.id !== 'dataCalibracao') {
                         return (
                           <td key={col.id} className="px-4 py-2">
@@ -741,14 +779,14 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
 
                       // Special renderers (clickable for edit)
                       if (col.id === 'certificate' || col.id === 'tag') {
-                        return <td key={col.id} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer hover:bg-blue-50 transition-colors" onClick={() => setEditingCell({rowId: record.id, colId: col.id})} title="Clique para editar">{value || '-'}</td>;
+                        return <td key={col.id} className={`px-4 py-3 font-medium whitespace-nowrap ${canEdit ? 'cursor-pointer hover:bg-blue-50 transition-colors' : ''}`} onClick={() => canEdit && setEditingCell({rowId: record.id, colId: col.id})} title={canEdit ? "Clique para editar" : "Somente visualização"}>{value || '-'}</td>;
                       }
                       
                       if (col.id === 'observacao') {
-                        return <td key={col.id} className="px-4 py-3 max-w-[200px] truncate cursor-pointer hover:bg-slate-100 transition-colors" title="Clique para editar" onClick={() => setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
+                        return <td key={col.id} className={`px-4 py-3 max-w-[200px] truncate ${canEdit ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''}`} title={canEdit ? "Clique para editar" : "Somente visualização"} onClick={() => canEdit && setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
                       }
 
-                      return <td key={col.id} className="px-4 py-3 whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors" title="Clique para editar" onClick={() => setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
+                      return <td key={col.id} className={`px-4 py-3 whitespace-nowrap ${canEdit ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''}`} title={canEdit ? "Clique para editar" : "Somente visualização"} onClick={() => canEdit && setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
                     })}
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       {(() => {
@@ -771,12 +809,16 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
                         }
                         return null;
                       })()}
-                      <button onClick={() => { setFormData(record); setShowAddModal(true); }} className="text-slate-400 hover:text-royal-blue mr-3" title="Editar Formulário">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500" title="Excluir">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button onClick={() => { setFormData(record); setShowAddModal(true); }} className="text-slate-400 hover:text-royal-blue mr-3" title="Editar Formulário">
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500" title="Excluir">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -786,7 +828,7 @@ export default function FieldService({ onPrintCertificate }: FieldServiceProps =
         </div>
       </div>
 
-      {showAddModal && (
+      {showAddModal && canEdit && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">

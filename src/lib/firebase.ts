@@ -314,7 +314,11 @@ export interface SavedIntake {
   deletedAt?: string;
   deletedBy?: string;
   deletedByUid?: string;
+  createdAt?: string;
+  createdBy?: string;
+  createdByUid?: string;
   updatedAt?: string;
+  updatedBy?: string;
   rows: {
     quant: number;
     descricao: string;
@@ -387,6 +391,7 @@ export interface PortalUser {
   accessProfileId?: string;
   accessProfileName?: string;
   allowedModules?: string[];
+  editableModules?: string[];
   accessProfileVersion?: number;
   register: string;
   mustChangePassword?: boolean;
@@ -1624,31 +1629,118 @@ export async function saveIntakeSequenceConfig(config: IntakeSequenceConfig): Pr
   }
 }
 
+const normalizeIntakeNumberKey = (value: unknown): string =>
+  String(value || '').trim().replace(/\s+/g, '').toUpperCase();
+
+const intakeDataWeight = (intake: SavedIntake): number => {
+  let weight = 0;
+  if (intake.deliveryFinalizedAt) weight += 10000;
+  if (intake.deliveryLocked) weight += 5000;
+  weight += Array.isArray(intake.photos) ? intake.photos.length * 50 : 0;
+  weight += Array.isArray(intake.devolutionRows) ? intake.devolutionRows.length * 20 : 0;
+  weight += intake.photoDevolution ? 100 : 0;
+  weight += Array.isArray(intake.deliveryInstrumentPhotos) ? intake.deliveryInstrumentPhotos.length * 50 : 0;
+  weight += Array.isArray(intake.deliveryFormPhotos) ? intake.deliveryFormPhotos.length * 50 : 0;
+  weight += Array.isArray(intake.rows) ? intake.rows.length * 10 : 0;
+  return weight;
+};
+
+/**
+ * Colapsa duplicidades históricas apenas na camada de leitura. Nenhum documento é
+ * excluído automaticamente. O registro com maior evidência operacional é
+ * preservado; em empate, o ID mais recente vence.
+ */
+export function deduplicateIntakesByNumber(intakes: SavedIntake[]): SavedIntake[] {
+  const byNumber = new Map<string, SavedIntake>();
+  let duplicateCount = 0;
+
+  for (const intake of intakes) {
+    const normalizedNumber = normalizeIntakeNumberKey(intake.numEntrada);
+    const key = normalizedNumber || `__id__:${intake.id}`;
+    const existing = byNumber.get(key);
+    if (!existing) {
+      byNumber.set(key, intake);
+      continue;
+    }
+
+    duplicateCount += 1;
+    const existingWeight = intakeDataWeight(existing);
+    const candidateWeight = intakeDataWeight(intake);
+    if (
+      candidateWeight > existingWeight ||
+      (candidateWeight === existingWeight && String(intake.id) > String(existing.id))
+    ) {
+      byNumber.set(key, intake);
+    }
+  }
+
+  if (duplicateCount > 0) {
+    console.warn(`[DATA INTEGRITY] ${duplicateCount} entrada(s) duplicada(s) por número foram ocultadas da interface sem excluir dados.`);
+  }
+
+  return Array.from(byNumber.values()).sort((a, b) => String(b.id).localeCompare(String(a.id)));
+}
+
 export async function syncIntakes(callback: (intakes: SavedIntake[]) => void) {
-  const cached = getLocalCache<SavedIntake[]>('savedIntakes', [])
-    .filter(intake => intake.isDeleted !== true);
+  const cached = deduplicateIntakesByNumber(
+    getLocalCache<SavedIntake[]>('savedIntakes', []).filter(intake => intake.isDeleted !== true),
+  );
   if (cached.length > 0) callback(cached);
   const q = query(collection(db, 'savedIntakes'));
   return onSnapshot(q, async (snapshot) => {
-    // Sort in memory by ID descending (which is essentially timestamp descending since IDs are Date.now())
-    const list = snapshot.docs
+    const active = snapshot.docs
       .map(d => ({ ...d.data(), id: d.id } as SavedIntake))
       .filter(intake => intake.isDeleted !== true);
-    list.sort((a, b) => {
-      if (a.id > b.id) return -1;
-      if (a.id < b.id) return 1;
-      return 0;
-    });
+    const list = deduplicateIntakesByNumber(active);
     setLocalCache('savedIntakes', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<SavedIntake[]>('savedIntakes', []).filter(intake => intake.isDeleted !== true));
+    callback(deduplicateIntakesByNumber(
+      getLocalCache<SavedIntake[]>('savedIntakes', []).filter(intake => intake.isDeleted !== true),
+    ));
   });
 }
 
+export async function createIntakeDoc(
+  intake: Omit<SavedIntake, 'id'>,
+): Promise<SavedIntake> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const response = await fetch('/api/internal/intakes', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${await user.getIdToken()}`,
+    },
+    body: JSON.stringify(intake),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.success !== true || !data?.intake?.id) {
+    if (data?.error === 'INTAKE_NUMBER_ALREADY_EXISTS') {
+      throw new Error('INTAKE_NUMBER_ALREADY_EXISTS');
+    }
+    if (data?.error === 'MODULE_EDIT_DENIED') {
+      throw new Error('MODULE_EDIT_DENIED');
+    }
+    if (data?.error === 'CLIENT_PROFILE_NOT_FOUND') {
+      throw new Error('O cliente selecionado não foi encontrado no cadastro. Atualize a tela e tente novamente.');
+    }
+    if (data?.error === 'INVALID_INTAKE_ROWS' || data?.error === 'INVALID_INTAKE_ROW_QUANTITY') {
+      throw new Error('Revise os equipamentos e as quantidades informadas na Entrada.');
+    }
+    if (data?.error === 'INTAKE_TOO_LARGE') {
+      throw new Error('A Entrada ultrapassou o limite seguro de dados. Reduza a quantidade de itens por guia.');
+    }
+    throw new Error(data?.error || 'Não foi possível registrar a Guia de Entrada.');
+  }
+  return data.intake as SavedIntake;
+}
+
 export async function saveIntakeDoc(intake: SavedIntake): Promise<void> {
-  await setDoc(doc(db, 'savedIntakes', intake.id), intake, { merge: true });
+  if (!intake?.id) throw new Error('Entrada sem identificador válido.');
+  await updateDoc(doc(db, 'savedIntakes', intake.id), intake as any);
 }
 
 export async function updateIntakeDevolutionPhoto(id: string, photoBase64: string): Promise<void> {
@@ -2700,8 +2792,10 @@ export async function syncClientIntakes(clientId: string, callback: (intakes: Sa
   const q = query(collection(db, 'savedIntakes'), where('clientId', '==', clientId));
   return onSnapshot(q, (snapshot) => {
     if (!snapshot.empty) {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SavedIntake));
-      callback(list);
+      const list = snapshot.docs
+        .map(d => ({ ...d.data(), id: d.id } as SavedIntake))
+        .filter(intake => intake.isDeleted !== true);
+      callback(deduplicateIntakesByNumber(list));
     } else {
       callback([]);
     }

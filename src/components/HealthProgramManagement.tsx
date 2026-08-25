@@ -34,7 +34,7 @@ import {
   downloadCorporateFile,
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
-import { isAdministratorAccess } from '../access-control';
+import { isAdministratorAccess, userCanEditModule } from '../access-control';
 
 interface HealthProgramManagementProps {
   currentUser?: {
@@ -44,6 +44,7 @@ interface HealthProgramManagementProps {
     permissionLevel?: string;
     accessProfileId?: string;
     allowedModules?: string[];
+    editableModules?: string[];
     password?: string;
   };
   internalUsers?: any[];
@@ -65,6 +66,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
   const isUserAdmin = isAdministratorAccess(currentUser);
+  const canEditHealthPrograms = userCanEditModule(currentUser, 'health_programs');
 
   // Delete Password Confirmation Modal State
   const [deleteConfirmDoc, setDeleteConfirmDoc] = useState<HealthProgramDocument | null>(null);
@@ -116,6 +118,15 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       if (unsubscribe) unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!canEditHealthPrograms) {
+      setShowModal(false);
+      setEditingDoc(null);
+      setDeleteConfirmDoc(null);
+      setFormFile(null);
+    }
+  }, [canEditHealthPrograms]);
 
   // Documentos novos são privados no Storage; para visualizar usamos uma URL
   // temporária em memória obtida pelo backend autenticado.
@@ -241,6 +252,10 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
   // Handle Form Modal Reset
   const handleOpenModal = (docToEdit?: HealthProgramDocument) => {
+    if (!canEditHealthPrograms) {
+      alert("Seu perfil possui somente permissão de visualização em Programas de Saúde.");
+      return;
+    }
     if (docToEdit) {
       setEditingDoc(docToEdit);
       setFormTitle(docToEdit.title);
@@ -276,6 +291,11 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
   // File Upload Handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditHealthPrograms) {
+      e.target.value = '';
+      alert("Seu perfil possui somente permissão de visualização em Programas de Saúde.");
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -307,6 +327,11 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
   // Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditHealthPrograms) {
+      alert("Seu perfil possui somente permissão de visualização em Programas de Saúde.");
+      setShowModal(false);
+      return;
+    }
     if (!formTitle.trim() || !formIssueDate || !formExpirationDate) {
       alert("Por favor, preencha o título do documento, a data de emissão e a data de validade.");
       return;
@@ -415,6 +440,10 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
   // Request Delete Handler (Admin check)
   const handleRequestDelete = (doc: HealthProgramDocument) => {
+    if (!canEditHealthPrograms) {
+      alert("Seu perfil possui somente permissão de visualização em Programas de Saúde.");
+      return;
+    }
     if (!isUserAdmin) {
       alert("Apenas usuários com perfil Administrador podem arquivar documentos de Programas de Saúde (PGR/PCMSO).");
       return;
@@ -427,6 +456,11 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
   // Confirm Delete Handler with Password Validation
   const handleConfirmDelete = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditHealthPrograms || !isUserAdmin) {
+      setDeleteConfirmDoc(null);
+      alert("Operação não permitida para o seu perfil.");
+      return;
+    }
     if (!deleteConfirmDoc) return;
 
     const pwd = deletePasswordInput.trim();
@@ -458,6 +492,10 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
 
   // Send Email Alert Handler
   const handleSendEmailAlert = async () => {
+    if (!canEditHealthPrograms) {
+      alert("Seu perfil possui somente permissão de visualização em Programas de Saúde.");
+      return;
+    }
     setSendingAlert(true);
     setAlertFeedback(null);
 
@@ -510,27 +548,31 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => handleSendEmailAlert()}
-            disabled={sendingAlert}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg border border-slate-700 text-sm font-semibold flex items-center space-x-2 transition-all shadow-sm hover:shadow focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-            title="Enviar e-mail para comercial, fabio.teixeira, financeiro, manutencao e isidro.teixeira"
-          >
-            {sendingAlert ? (
-              <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
-            ) : (
-              <Send className="h-4 w-4 text-blue-400" />
-            )}
-            <span>Notificar por E-mail</span>
-          </button>
+          {canEditHealthPrograms && (
+            <>
+              <button
+                onClick={() => handleSendEmailAlert()}
+                disabled={sendingAlert}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg border border-slate-700 text-sm font-semibold flex items-center space-x-2 transition-all shadow-sm hover:shadow focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                title="Enviar e-mail para comercial, fabio.teixeira, financeiro, manutencao e isidro.teixeira"
+              >
+                {sendingAlert ? (
+                  <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
+                ) : (
+                  <Send className="h-4 w-4 text-blue-400" />
+                )}
+                <span>Notificar por E-mail</span>
+              </button>
 
-          <button
-            onClick={() => handleOpenModal()}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold flex items-center space-x-2 transition-all shadow-md hover:shadow-lg focus:ring-2 focus:ring-blue-400"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Novo Documento</span>
-          </button>
+              <button
+                onClick={() => handleOpenModal()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold flex items-center space-x-2 transition-all shadow-md hover:shadow-lg focus:ring-2 focus:ring-blue-400"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Novo Documento</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -824,26 +866,30 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
                       {/* Actions */}
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end space-x-1">
-                          <button
-                            onClick={() => handleOpenModal(doc)}
-                            className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded transition"
-                            title="Editar Documento"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
+                          {canEditHealthPrograms && (
+                            <button
+                              onClick={() => handleOpenModal(doc)}
+                              className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded transition"
+                              title="Editar Documento"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
 
-                          <button
-                            onClick={() => handleRequestDelete(doc)}
-                            disabled={!isUserAdmin}
-                            className={`p-1.5 rounded transition ${
-                              isUserAdmin 
-                                ? 'text-slate-600 hover:text-red-600 hover:bg-red-50 cursor-pointer' 
-                                : 'text-slate-300 cursor-not-allowed opacity-40'
-                            }`}
-                            title={isUserAdmin ? "Arquivar Documento (Requer senha de Administrador)" : "Apenas usuários com perfil Administrador podem arquivar"}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {canEditHealthPrograms && (
+                            <button
+                              onClick={() => handleRequestDelete(doc)}
+                              disabled={!isUserAdmin}
+                              className={`p-1.5 rounded transition ${
+                                isUserAdmin
+                                  ? 'text-slate-600 hover:text-red-600 hover:bg-red-50 cursor-pointer'
+                                  : 'text-slate-300 cursor-not-allowed opacity-40'
+                              }`}
+                              title={isUserAdmin ? "Arquivar Documento (Requer senha de Administrador)" : "Apenas usuários com perfil Administrador podem arquivar"}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -856,7 +902,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       </div>
 
       {/* Add / Edit Modal */}
-      {showModal && (
+      {showModal && canEditHealthPrograms && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
@@ -1159,7 +1205,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       )}
 
       {/* Delete Password Confirmation Modal */}
-      {deleteConfirmDoc && (
+      {deleteConfirmDoc && canEditHealthPrograms && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="bg-red-600 text-white p-4 flex items-center justify-between">

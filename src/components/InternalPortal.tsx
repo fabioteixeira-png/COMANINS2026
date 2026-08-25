@@ -17,6 +17,7 @@ import {
   DEFAULT_DROPDOWN_OPTIONS,
   ensureArray,
   syncIntakes,
+  createIntakeDoc,
   saveIntakeDoc,
   updateIntakePhotosDoc,
   updateIntakeDevolutionPhoto,
@@ -224,6 +225,7 @@ import {
   activeTabAccessModule,
   isAdministratorAccess,
   userHasAccessModule,
+  userCanEditModule,
   type AccessModuleId,
 } from "../access-control";
 
@@ -626,6 +628,9 @@ const currentCalibrationDate = () => {
   return localTime.toISOString().split("T")[0];
 };
 
+const normalizeIntakeNumber = (value: unknown): string =>
+  String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
+
 const resolveCalibrationLabelData = (
   instrument: any,
   calibrationReports: any[],
@@ -670,6 +675,7 @@ interface InternalPortalProps {
     accessProfileId?: string;
     accessProfileName?: string;
     allowedModules?: string[];
+    editableModules?: string[];
     accessProfileVersion?: number;
     birthDate?: string;
     id?: string;
@@ -763,6 +769,13 @@ export default function InternalPortal({
   const isUserAdmin = isAdministratorAccess(currentUser);
   const canAccessModule = (moduleId: AccessModuleId) =>
     userHasAccessModule(currentUser, moduleId);
+  const canEditModule = (moduleId: AccessModuleId) =>
+    userCanEditModule(currentUser, moduleId);
+  const canEditMaterialIntake = canEditModule("material_intake");
+  const canEditClients = canEditModule("clients");
+  const canEditInventory = canEditModule("inventory");
+  const canEditFieldService = canEditModule("field_service");
+  const canEditDigitalSignature = canEditModule("digital_signature");
 
   const isRhUser = canAccessModule("hr");
   const isFinanceUser = canAccessModule("finance");
@@ -1063,6 +1076,7 @@ export default function InternalPortal({
   const [certPrefix, setCertPrefix] = useState<any>("");
   const [certNextNumber, setCertNextNumber] = useState<any>("");
   const [intakeRows, setIntakeRows] = useState<any>([]);
+  const [isSavingIntake, setIsSavingIntake] = useState(false);
   const [intakeSearchTerm, setIntakeSearchTerm] = useState<any>("");
   const [inventorySearchTerm, setInventorySearchTerm] = useState<any>("");
   const [inventoryCategoryFilter, setInventoryCategoryFilter] =
@@ -2891,6 +2905,10 @@ Status atual: ${e.status}.`,
   };
 
   const handleEditClient = (c: Client) => {
+    if (!canEditClients) {
+      alert("Seu perfil possui somente permissão de visualização no módulo Clientes.");
+      return;
+    }
     setEditingClient(c);
     setClientName(c.name || (c as any).razaoSocial || "");
     setClientCnpj(c.cnpj || "");
@@ -2903,6 +2921,10 @@ Status atual: ${e.status}.`,
 
   const handleClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditClients) {
+      alert("Seu perfil possui somente permissão de visualização no módulo Clientes.");
+      return;
+    }
     if (!clientName.trim() || !clientCnpj.trim()) {
       alert("Por favor, informe a Razão Social/Nome e o CNPJ/CPF do cliente.");
       return;
@@ -4345,6 +4367,11 @@ Status atual: ${e.status}.`,
   };
 
   const handleUploadPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditMaterialIntake) {
+      alert("Seu perfil possui somente visualização neste módulo.");
+      e.target.value = "";
+      return;
+    }
     if (
       !e.target.files ||
       e.target.files.length === 0 ||
@@ -4396,6 +4423,10 @@ Status atual: ${e.status}.`,
   };
 
   const handleDeletePhoto = async (photoIndex: number) => {
+    if (!canEditMaterialIntake) {
+      alert("Seu perfil possui somente visualização neste módulo.");
+      return;
+    }
     if (!selectedIntakeForPhotos) return;
     if (selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) {
       alert("Esta entrada já foi entregue e está bloqueada para alterações.");
@@ -4784,6 +4815,10 @@ Status atual: ${e.status}.`,
     }
   };
   const handleOpenNewIntakeModal = () => {
+    if (!canEditMaterialIntake) {
+      alert("Seu perfil possui somente visualização neste módulo.");
+      return;
+    }
     setEditingIntakeId("");
     const formattedNum = String(intakeNextNumber).padStart(5, "0");
     setIntakeNum(`${intakePrefix}${formattedNum}`);
@@ -5768,8 +5803,24 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   };
 
   const handleSaveIntakeFromModal = async (shouldPrint: boolean) => {
+    if (!canEditMaterialIntake) {
+      alert("Seu perfil possui somente visualização neste módulo.");
+      return;
+    }
+    if (isSavingIntake) return;
     if (!intakeNum || !intakeClientId || !intakeDate) {
       alert("Preencha o Nº de Entrada, Cliente e Data!");
+      return;
+    }
+
+    const normalizedIntakeNumber = normalizeIntakeNumber(intakeNum);
+    const duplicateInMemory = savedIntakes.some(
+      (item) =>
+        normalizeIntakeNumber(item.numEntrada) === normalizedIntakeNumber &&
+        item.id !== editingIntakeId,
+    );
+    if (duplicateInMemory) {
+      alert(`O Nº de Entrada ${normalizedIntakeNumber} já existe. Atualize a tela antes de tentar novamente.`);
       return;
     }
 
@@ -5781,12 +5832,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       }
     }
 
-    // Check if new or edit
     const isNew = !editingIntakeId;
+    setIsSavingIntake(true);
 
     try {
       const intakeData = {
-        numEntrada: intakeNum,
+        numEntrada: normalizedIntakeNumber,
         clientId: intakeClientId,
         dataEntrada: intakeDate,
         dataPrevistaSaida: intakeExpectedDate,
@@ -5794,24 +5845,18 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         rows: intakeRows,
       };
 
-      const existingIntake = editingIntakeId ? savedIntakes.find((item) => item.id === editingIntakeId) || {} : {};
-      const intakeToSave = {
-        ...existingIntake,
-        ...intakeData,
-        id: editingIntakeId || Date.now().toString(),
-      };
-
-      // The operational receipt is the primary business record and must never be
-      // lost because the auxiliary Portal credential service is temporarily
-      // unavailable. Persist the intake first; provision/recover access after it
-      // is safely stored. Printing retries credential provisioning as well.
-      await saveIntakeDoc(intakeToSave);
-
+      let persistedIntake: SavedIntake;
       if (isNew) {
-        await saveIntakeSequenceConfig({
-          prefix: intakePrefix,
-          nextNumber: Number(intakeNextNumber) + 1,
-        });
+        persistedIntake = await createIntakeDoc(intakeData as Omit<SavedIntake, "id">);
+      } else {
+        const existingIntake = savedIntakes.find((item) => item.id === editingIntakeId);
+        if (!existingIntake) throw new Error("Entrada não encontrada para atualização.");
+        persistedIntake = {
+          ...existingIntake,
+          ...intakeData,
+          id: editingIntakeId,
+        };
+        await saveIntakeDoc(persistedIntake);
       }
 
       let credentialWarning = "";
@@ -5826,13 +5871,13 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
       setShowIntakeModal(false);
       setIntakeSuccessMessage(
-        `Guia de Entrada (${intakeNum}) ${isNew ? "registrada" : "atualizada"} com sucesso!`,
+        `Guia de Entrada (${persistedIntake.numEntrada}) ${isNew ? "registrada" : "atualizada"} com sucesso!`,
       );
       setTimeout(() => setIntakeSuccessMessage(""), 4000);
 
       if (credentialWarning) {
         alert(
-          `A Guia de Entrada ${intakeNum} foi salva com sucesso.\n\nA credencial do Portal do Cliente ficou pendente e será tentada novamente ao abrir/imprimir a Entrada.\n\nDetalhe: ${credentialWarning}`,
+          `A Guia de Entrada ${persistedIntake.numEntrada} foi salva com sucesso.\n\nA credencial do Portal do Cliente ficou pendente e será tentada novamente ao abrir/imprimir a Entrada.\n\nDetalhe: ${credentialWarning}`,
         );
       }
 
@@ -5841,7 +5886,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       }
     } catch (err: any) {
       console.error(err);
-      alert(err?.message ? `Erro ao salvar a Guia de Entrada: ${err.message}` : "Erro ao salvar a Guia de Entrada.");
+      if (err?.message === "INTAKE_NUMBER_ALREADY_EXISTS") {
+        alert(`O Nº de Entrada ${normalizedIntakeNumber} já foi registrado por outro usuário ou outra sessão. Nenhum registro duplicado foi criado.`);
+      } else if (err?.message === "MODULE_EDIT_DENIED") {
+        alert("Seu perfil possui somente visualização neste módulo.");
+      } else {
+        alert(err?.message ? `Erro ao salvar a Guia de Entrada: ${err.message}` : "Erro ao salvar a Guia de Entrada.");
+      }
+    } finally {
+      setIsSavingIntake(false);
     }
   };
   const handleSendChat = (e?: React.FormEvent) => {
@@ -5878,6 +5931,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   };
 
   const handleInventoryFileChange = async (e: React.ChangeEvent<HTMLInputElement>, isTransaction = false) => {
+    if (!canEditInventory) {
+      e.target.value = "";
+      alert("Seu perfil possui somente permissão de visualização no módulo Controle de Estoque.");
+      return;
+    }
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -6959,6 +7017,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </p>
               </div>
 
+              {canEditClients && (
               <button
                 onClick={() => {
                   if (showClientForm && editingClient) {
@@ -6991,10 +7050,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     : "Cadastrar Cliente"}
                 </span>
               </button>
+              )}
             </div>
 
             {/* Form container */}
-            {showClientForm && (
+            {showClientForm && canEditClients && (
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-display font-bold text-sm text-slate-900">
@@ -7189,6 +7249,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end space-x-1">
+                              {canEditClients && (
+                                <>
                               <button
                                 onClick={() => handleEditClient(c)}
                                 className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors p-1.5 rounded-lg cursor-pointer flex items-center space-x-1"
@@ -7209,6 +7271,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -8539,13 +8603,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </h2>
               </div>
 
-              <button
-                onClick={handleOpenNewIntakeModal}
-                className="px-4 py-2 sm:px-5 sm:py-3 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center space-x-2 text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Nova Entrada</span>
-              </button>
+              {canEditMaterialIntake ? (
+                <button
+                  onClick={handleOpenNewIntakeModal}
+                  className="px-4 py-2 sm:px-5 sm:py-3 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center space-x-2 text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Nova Entrada</span>
+                </button>
+              ) : (
+                <span className="px-3 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold">
+                  Somente visualização
+                </span>
+              )}
             </div>
 
             {/* Success Message Banner */}
@@ -8742,11 +8812,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       <div className="flex items-center flex-wrap justify-end gap-2 shrink-0 pt-2 md:pt-0">
                         {!intake.deliveryFinalizedAt && !intake.deliveryLocked && (
                           <button
-                            onClick={() => handleEditIntakeModal(intake)}
+                            onClick={() => canEditMaterialIntake ? handleEditIntakeModal(intake) : handleOpenIntakePrint(intake)}
                             className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer border border-slate-200"
                           >
                             <Edit className="h-3.5 w-3.5 text-slate-600" />
-                            <span>Ver / Editar</span>
+                            <span>{canEditMaterialIntake ? "Ver / Editar" : "Ver"}</span>
                           </button>
                         )}
 
@@ -8788,7 +8858,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           </button>
                         )}
 
-                        {statusInfo.label === "Disponível para Retirada" && !intake.deliveryFinalizedAt && !intake.deliveryLocked && (
+                        {canEditMaterialIntake && statusInfo.label === "Disponível para Retirada" && !intake.deliveryFinalizedAt && !intake.deliveryLocked && (
                           <button
                             onClick={() => handleOpenDevolutionModal(intake)}
                             className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
@@ -8903,8 +8973,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 ? "bg-slate-100 text-slate-500 border-slate-300 cursor-not-allowed"
                                 : savedIntakes.some(
                                       (item) =>
-                                        item.numEntrada.trim().toLowerCase() ===
-                                          intakeNum.trim().toLowerCase() &&
+                                        normalizeIntakeNumber(item.numEntrada) ===
+                                          normalizeIntakeNumber(intakeNum) &&
                                         item.id !== editingIntakeId,
                                     )
                                   ? "border-rose-500 text-rose-700 focus:ring-rose-500 bg-rose-50/50 bg-white"
@@ -8914,8 +8984,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           />
                           {savedIntakes.some(
                             (item) =>
-                              item.numEntrada.trim().toLowerCase() ===
-                                intakeNum.trim().toLowerCase() &&
+                              normalizeIntakeNumber(item.numEntrada) ===
+                                normalizeIntakeNumber(intakeNum) &&
                               item.id !== editingIntakeId,
                           ) && (
                             <p className="text-[10px] text-rose-600 font-bold mt-1 flex items-center gap-1">
@@ -9265,14 +9335,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       >
                         Cancelar
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveIntakeFromModal(false)}
-                        className="px-5 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center space-x-2 text-xs uppercase tracking-wider transition-colors cursor-pointer"
-                      >
-                        <CheckSquare className="h-4 w-4" />
-                        <span>Salvar Entrada</span>
-                      </button>
+                      {canEditMaterialIntake && (
+                        <button
+                          type="button"
+                          onClick={() => handleSaveIntakeFromModal(false)}
+                          disabled={isSavingIntake || (!editingIntakeId && savedIntakes.some(
+                            (item) => normalizeIntakeNumber(item.numEntrada) === normalizeIntakeNumber(intakeNum),
+                          ))}
+                          className="px-5 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center space-x-2 text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSavingIntake ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+                          <span>{isSavingIntake ? "Salvando..." : "Salvar Entrada"}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -13235,11 +13310,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
-        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
+        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService canEdit={canEditFieldService} onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
         {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
         {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
         {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && <InternalCommunication currentUser={currentUser as any} />}
-        {activeTab === "minha_assinatura" && canAccessModule("digital_signature") && <MySignature currentUser={currentUser as any} onUpdateUser={onUpdateInternalUser || (() => {})} />}
+        {activeTab === "minha_assinatura" && canAccessModule("digital_signature") && <MySignature currentUser={currentUser as any} canEdit={canEditDigitalSignature} onUpdateUser={onUpdateInternalUser || (() => {})} />}
 
         {/* TAB: CONSUMO FIREBASE */}
         {activeTab === "consumo_firebase" && canAccessModule("firebase_usage") && (
@@ -16377,27 +16452,31 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 </p>
               </div>
               <div className="flex space-x-3">
-                <button
-                  onClick={() => {
-                    setEditingInventoryItem(null);
-                    setItemAttachments([]);
-                    setShowInventoryItemForm(true);
-                  }}
-                  className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Novo Item</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setTransactionAttachments([]);
-                    setShowInventoryTransactionForm(true);
-                  }}
-                  className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
-                >
-                  <ArrowRightLeft className="h-4 w-4" />
-                  <span>Movimentar Estoque</span>
-                </button>
+                {canEditInventory && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingInventoryItem(null);
+                        setItemAttachments([]);
+                        setShowInventoryItemForm(true);
+                      }}
+                      className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Novo Item</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTransactionAttachments([]);
+                        setShowInventoryTransactionForm(true);
+                      }}
+                      className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                      <span>Movimentar Estoque</span>
+                    </button>
+                  </>
+                )}
                 {isUserAdmin && (
                   <button
                     onClick={() => {
@@ -16539,6 +16618,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     Min: {item.minQuantity}
                                   </div>
                                 </div>
+                                {canEditInventory && (
                                 <div className="flex space-x-2">
                                   <button
                                     onClick={() => {
@@ -16566,6 +16646,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     <Trash2 className="h-4 w-4" />
                                   </button>
                                 </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -18376,7 +18457,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
       </div>
 
-      {showInventoryItemForm && (
+      {showInventoryItemForm && canEditInventory && (
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-slate-900 mb-4">
@@ -18385,6 +18466,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (!canEditInventory) {
+                  alert("Seu perfil possui somente permissão de visualização no módulo Controle de Estoque.");
+                  setShowInventoryItemForm(false);
+                  return;
+                }
                 const formData = new FormData(e.currentTarget);
                 const itemData = {
                   name: formData.get("name") as string,
@@ -18574,7 +18660,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         </div>
       )}
 
-      {showInventoryTransactionForm && (
+      {showInventoryTransactionForm && canEditInventory && (
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center space-x-2">
@@ -18584,6 +18670,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (!canEditInventory) {
+                  alert("Seu perfil possui somente permissão de visualização no módulo Controle de Estoque.");
+                  setShowInventoryTransactionForm(false);
+                  return;
+                }
                 const formData = new FormData(e.currentTarget);
                 const itemId = formData.get("itemId") as string;
                 const type = formData.get("type") as "entrada" | "saida";
@@ -19639,7 +19730,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             {/* Upload & Gallery Body */}
             <div className="p-6 space-y-6">
               {/* Upload Action Box - entradas finalizadas ficam somente leitura */}
-              {!selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
+              {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
               <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center space-y-3 hover:border-blue-500 transition-colors">
                 <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
                   {isUploadingPhotos ? (
@@ -19676,10 +19767,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               </div>
               )}
 
-              {(selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) && (
+              {(!canEditMaterialIntake || selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-800 font-semibold flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4" />
-                  Entrada finalizada: fotos disponíveis somente para visualização.
+                  {!canEditMaterialIntake
+                    ? "Seu perfil permite somente visualizar as fotos desta entrada."
+                    : "Entrada finalizada: fotos disponíveis somente para visualização."}
                 </div>
               )}
 
@@ -19720,7 +19813,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             >
                               <Eye className="h-4 w-4" />
                             </button>
-                            {!selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
+                            {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
                               <button
                                 type="button"
                                 onClick={() => handleDeletePhoto(index)}

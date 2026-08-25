@@ -21,8 +21,13 @@ import {
   legacyPermissionLevelForProfile,
   resolveLegacyAccessProfileId,
   resolveUserAccessModules,
+  resolveUserEditableModules,
   sanitizeAccessModules,
+  sanitizeModulePermissions,
+  modulesFromPermissions,
+  editableModulesFromPermissions,
   userHasAccessModule,
+  userCanEditModule,
   type AccessModuleId,
   type AccessProfileDefinition,
 } from './src/access-control.ts';
@@ -52,6 +57,14 @@ const isFinanceProfile = (profile: any): boolean => {
   return userHasAccessModule(profile, 'finance');
 };
 
+const isRhEditor = (profile: any): boolean => {
+  return userCanEditModule(profile, 'hr');
+};
+
+const isFinanceEditor = (profile: any): boolean => {
+  return userCanEditModule(profile, 'finance');
+};
+
 const isInternalDecodedToken = (decoded: any): boolean => {
   const accountType = normalizeAccessValue(decoded?.accountType);
   const email = String(decoded?.email || '').trim().toLowerCase();
@@ -72,21 +85,18 @@ const requireAdministratorAccount = (req: AuthRequest, res: Response, next: Next
   next();
 };
 
-const requireAdminOrRhAccount = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (
-    !req.user ||
-    !isInternalDecodedToken(req.user) ||
-    (!isAdministratorProfile(req.user) && !isRhProfile(req.user))
-  ) {
-    return res.status(403).json({ error: 'FORBIDDEN' });
-  }
-  next();
-};
-
 const requireAccessModule = (moduleId: AccessModuleId) =>
   (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user || !isInternalDecodedToken(req.user) || !userHasAccessModule(req.user as any, moduleId)) {
       return res.status(403).json({ error: 'MODULE_ACCESS_DENIED', moduleId });
+    }
+    next();
+  };
+
+const requireEditModule = (moduleId: AccessModuleId) =>
+  (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user || !isInternalDecodedToken(req.user) || !userCanEditModule(req.user as any, moduleId)) {
+      return res.status(403).json({ error: 'MODULE_EDIT_DENIED', moduleId });
     }
     next();
   };
@@ -131,6 +141,50 @@ const passwordResetRateLimit = createRateLimiter('password-reset', 15 * 60 * 100
 
 const asLimitedString = (value: unknown, maxLength: number): string =>
   String(value ?? '').trim().slice(0, maxLength);
+
+const normalizeIntakeNumberServer = (value: unknown): string =>
+  asLimitedString(value, 80).replace(/\s+/g, '').toUpperCase();
+
+const intakeNumberLockId = (normalizedNumber: string): string =>
+  createHash('sha256').update(normalizedNumber, 'utf8').digest('hex');
+
+const activeIntakeFromSnapshot = (snapshot: any): any | null =>
+  snapshot.docs.find((doc: any) => doc.data()?.isDeleted !== true) || null;
+
+const intakeReadWeightServer = (intake: any): number => {
+  let weight = 0;
+  if (intake?.deliveryFinalizedAt) weight += 10000;
+  if (intake?.deliveryLocked) weight += 5000;
+  weight += Array.isArray(intake?.photos) ? intake.photos.length * 50 : 0;
+  weight += Array.isArray(intake?.devolutionRows) ? intake.devolutionRows.length * 20 : 0;
+  weight += intake?.photoDevolution ? 100 : 0;
+  weight += Array.isArray(intake?.deliveryInstrumentPhotos) ? intake.deliveryInstrumentPhotos.length * 50 : 0;
+  weight += Array.isArray(intake?.deliveryFormPhotos) ? intake.deliveryFormPhotos.length * 50 : 0;
+  weight += Array.isArray(intake?.rows) ? intake.rows.length * 10 : 0;
+  return weight;
+};
+
+const deduplicateIntakesForReadServer = (intakes: any[]): any[] => {
+  const byNumber = new Map<string, any>();
+  for (const intake of intakes) {
+    const normalized = normalizeIntakeNumberServer(intake?.numEntrada);
+    const key = normalized || `__id__:${String(intake?.id || '')}`;
+    const existing = byNumber.get(key);
+    if (!existing) {
+      byNumber.set(key, intake);
+      continue;
+    }
+    const currentWeight = intakeReadWeightServer(existing);
+    const candidateWeight = intakeReadWeightServer(intake);
+    if (
+      candidateWeight > currentWeight ||
+      (candidateWeight === currentWeight && String(intake?.id || '') > String(existing?.id || ''))
+    ) {
+      byNumber.set(key, intake);
+    }
+  }
+  return Array.from(byNumber.values()).sort((a, b) => String(b?.id || '').localeCompare(String(a?.id || '')));
+};
 
 const escapeHtml = (value: unknown): string =>
   String(value ?? '')
@@ -234,9 +288,13 @@ const isOwnEmployeeId = (decoded: any, employeeId: unknown): boolean => {
 
 const canUploadCorporatePurpose = (decoded: any, purpose: string): boolean => {
   if (isAdministratorProfile(decoded)) return true;
-  if (purpose === 'payslip') return isRhProfile(decoded) || isFinanceProfile(decoded);
-  if (purpose === 'finance-document') return isFinanceProfile(decoded);
-  return isRhProfile(decoded);
+  if (purpose === 'payslip') return isRhEditor(decoded) || isFinanceEditor(decoded);
+  if (purpose === 'finance-document') return isFinanceEditor(decoded);
+  if (purpose === 'health-program') return userCanEditModule(decoded, 'health_programs');
+  if (purpose === 'employee-aso' || purpose === 'employee-document' || purpose === 'employee-training') {
+    return isRhEditor(decoded);
+  }
+  return false;
 };
 
 const canDownloadCorporatePurpose = (decoded: any, metadata: Record<string, any>): boolean => {
@@ -244,7 +302,8 @@ const canDownloadCorporatePurpose = (decoded: any, metadata: Record<string, any>
   const purpose = String(metadata?.purpose || '');
   const employeeId = String(metadata?.employeeId || '');
   if (purpose === 'finance-document') return isFinanceProfile(decoded);
-  if (purpose === 'health-program' || purpose === 'employee-aso') return isRhProfile(decoded);
+  if (purpose === 'health-program') return userHasAccessModule(decoded, 'health_programs');
+  if (purpose === 'employee-aso') return isRhProfile(decoded);
   if (purpose === 'payslip') return isRhProfile(decoded) || isFinanceProfile(decoded) || isOwnEmployeeId(decoded, employeeId);
   if (purpose === 'employee-document' || purpose === 'employee-training') {
     return isRhProfile(decoded) || isOwnEmployeeId(decoded, employeeId);
@@ -302,6 +361,7 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
 const cloneDefaultAccessProfile = (profile: AccessProfileDefinition): AccessProfileDefinition => ({
   ...profile,
   modules: [...profile.modules],
+  modulePermissions: { ...profile.modulePermissions },
 });
 
 const normalizeStoredAccessProfile = (
@@ -310,14 +370,19 @@ const normalizeStoredAccessProfile = (
   fallback?: AccessProfileDefinition,
 ): AccessProfileDefinition => {
   const isAdministrator = id === 'administrator';
+  const modulePermissions = isAdministrator
+    ? sanitizeModulePermissions(Object.fromEntries(ALL_ACCESS_MODULES.map((moduleId) => [moduleId, 'edit'])))
+    : sanitizeModulePermissions(
+        data?.modulePermissions,
+        data?.modules ?? fallback?.modules,
+      );
   return {
     ...(fallback ? cloneDefaultAccessProfile(fallback) : {}),
     id,
     name: asLimitedString(data?.name || fallback?.name || 'Perfil de acesso', 100),
     description: asLimitedString(data?.description || fallback?.description || '', 400),
-    modules: isAdministrator
-      ? [...ALL_ACCESS_MODULES]
-      : sanitizeAccessModules(data?.modules ?? fallback?.modules),
+    modules: modulesFromPermissions(modulePermissions),
+    modulePermissions,
     isSystem: fallback?.isSystem === true,
     isAdministrator,
     active: data?.active !== false,
@@ -394,6 +459,9 @@ const hydrateUserAccess = async (profile: any, requestedProfileId?: string) => {
     allowedModules: accessProfile.isAdministrator
       ? [...ALL_ACCESS_MODULES]
       : [...accessProfile.modules],
+    editableModules: accessProfile.isAdministrator
+      ? [...ALL_ACCESS_MODULES]
+      : editableModulesFromPermissions(accessProfile.modulePermissions),
   };
 };
 
@@ -420,6 +488,7 @@ const buildInternalClaims = (profile: any) => {
     accessProfileId: String(profile?.accessProfileId || resolveLegacyAccessProfileId(profile)),
     accessProfileVersion: Math.max(1, Number(profile?.accessProfileVersion || 1) || 1),
     allowedModules: resolveUserAccessModules(profile),
+    editableModules: resolveUserEditableModules(profile),
   };
 
   if (profile?.username) claims.username = String(profile.username).trim().toLowerCase();
@@ -453,6 +522,7 @@ const sanitizePortalUserForDirectory = (profile: any) => {
       ? Number(profile.accessProfileVersion)
       : undefined,
     allowedModules: sanitizeAccessModules(profile.allowedModules),
+    editableModules: sanitizeAccessModules(profile.editableModules),
     register: profile.register ? String(profile.register) : '',
     workEmail: profile.workEmail ? String(profile.workEmail) : '',
     companyUnit: profile.companyUnit ? String(profile.companyUnit) : '',
@@ -1144,7 +1214,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.post('/api/inventory/items', requireAuth, requireInternalAccount, requireAccessModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
+app.post('/api/inventory/items', requireAuth, requireInternalAccount, requireEditModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
 
   const name = asLimitedString(req.body?.name, 180);
@@ -1202,7 +1272,7 @@ app.post('/api/inventory/items', requireAuth, requireInternalAccount, requireAcc
   }
 });
 
-app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, requireAccessModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
+app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, requireEditModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const itemId = asLimitedString(req.params.id, 160);
   if (!itemId) return res.status(400).json({ error: 'INVALID_ITEM_ID' });
@@ -1257,7 +1327,7 @@ app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, requi
   }
 });
 
-app.post('/api/inventory/move', requireAuth, requireInternalAccount, requireAccessModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
+app.post('/api/inventory/move', requireAuth, requireInternalAccount, requireEditModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
 
   const itemId = asLimitedString(req.body?.itemId, 160);
@@ -1508,14 +1578,14 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
 });
 
 
-const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'payslip' | 'finance' | 'operations'; label: string }> = {
+const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'health' | 'payslip' | 'finance' | 'operations'; label: string }> = {
   employeeDocuments: { area: 'rh', label: 'Documento do colaborador' },
   employeeAsos: { area: 'rh', label: 'ASO' },
   employeeTrainings: { area: 'rh', label: 'Treinamento do colaborador' },
   trainings: { area: 'rh', label: 'Treinamento' },
   employeeBirthdays: { area: 'rh', label: 'Aniversário do colaborador' },
   medical_exams: { area: 'rh', label: 'Exame ocupacional' },
-  health_program_docs: { area: 'rh', label: 'Documento de programa de saúde' },
+  health_program_docs: { area: 'health', label: 'Documento de programa de saúde' },
   payslips: { area: 'payslip', label: 'Documento de folha' },
   financeTransactions: { area: 'finance', label: 'Lançamento financeiro' },
   financeContracts: { area: 'finance', label: 'Contrato financeiro' },
@@ -1885,9 +1955,10 @@ app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, wr
   if (!config || !recordId) return res.status(400).json({ error: 'INVALID_ARCHIVE_TARGET' });
 
   const allowed = isAdministratorProfile(req.user) ||
-    (config.area === 'rh' && isRhProfile(req.user)) ||
-    (config.area === 'payslip' && (isRhProfile(req.user) || isFinanceProfile(req.user))) ||
-    (config.area === 'finance' && isFinanceProfile(req.user));
+    (config.area === 'rh' && isRhEditor(req.user)) ||
+    (config.area === 'health' && userCanEditModule(req.user as any, 'health_programs')) ||
+    (config.area === 'payslip' && (isRhEditor(req.user) || isFinanceEditor(req.user))) ||
+    (config.area === 'finance' && isFinanceEditor(req.user));
   if (!allowed) return res.status(403).json({ error: 'FORBIDDEN' });
 
   try {
@@ -2251,7 +2322,7 @@ COMANINS Metrology Suite`;
 
 cron.schedule('0 8 * * *', runDailyNotifications);
 
-app.post("/api/send-health-program-alert", requireAuth, requireAdminOrRhAccount, emailApiRateLimit, async (req: AuthRequest, res) => {
+app.post("/api/send-health-program-alert", requireAuth, requireInternalAccount, requireEditModule('health_programs'), emailApiRateLimit, async (req: AuthRequest, res) => {
   const { docs } = req.body;
   const HEALTH_RECIPIENTS = "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br";
 
@@ -2724,7 +2795,11 @@ app.put(
 
       const name = asLimitedString(req.body?.name, 100);
       const description = asLimitedString(req.body?.description, 400);
-      const modules = sanitizeAccessModules(req.body?.modules);
+      const modulePermissions = sanitizeModulePermissions(
+        req.body?.modulePermissions,
+        req.body?.modules,
+      );
+      const modules = modulesFromPermissions(modulePermissions);
       if (!name) return res.status(400).json({ error: 'ACCESS_PROFILE_NAME_REQUIRED' });
       if (modules.length === 0) {
         return res.status(400).json({ error: 'ACCESS_PROFILE_REQUIRES_MODULE' });
@@ -2744,6 +2819,7 @@ app.put(
         name,
         description,
         modules,
+        modulePermissions,
         active: true,
         version: nextVersion,
         createdAt: current.createdAt || nowIso,
@@ -2777,7 +2853,13 @@ app.put(
         createdAt: nowIso,
         immutable: true,
         summary: `${isCreating ? 'Perfil de acesso criado' : 'Perfil de acesso atualizado'}: ${name}`,
-        metadata: { modules, version: nextVersion, affectedUsers: linkedUsers.size },
+        metadata: {
+          modules,
+          modulePermissions,
+          editableModules: editableModulesFromPermissions(modulePermissions),
+          version: nextVersion,
+          affectedUsers: linkedUsers.size,
+        },
       });
 
       const profile = normalizeStoredAccessProfile(
@@ -2865,6 +2947,187 @@ app.put(
   },
 );
 
+app.post(
+  '/api/internal/intakes',
+  requireAuth,
+  requireInternalAccount,
+  requireEditModule('material_intake'),
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!firestoreDb || !req.user) {
+        return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+      }
+
+      const requester = await requireInternalPortalRequester(req.user);
+      const numEntrada = normalizeIntakeNumberServer(req.body?.numEntrada);
+      const clientId = asLimitedString(req.body?.clientId, 180);
+      const dataEntrada = asLimitedString(req.body?.dataEntrada, 32);
+      const dataPrevistaSaida = asLimitedString(req.body?.dataPrevistaSaida, 32);
+      const contato = asLimitedString(req.body?.contato, 300);
+      const rawRows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+
+      if (!numEntrada || !clientId || !dataEntrada) {
+        return res.status(400).json({ error: 'INVALID_INTAKE_DATA' });
+      }
+      if (rawRows.length === 0 || rawRows.length > 500) {
+        return res.status(400).json({ error: 'INVALID_INTAKE_ROWS' });
+      }
+
+      const rows = rawRows.map((row: any) => {
+        const quantity = Number(row?.quant);
+        if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10000) {
+          throw new Error('INVALID_INTAKE_ROW_QUANTITY');
+        }
+        return {
+          quant: quantity,
+          descricao: asLimitedString(row?.descricao, 400),
+          escala: asLimitedString(row?.escala, 200),
+          undMedida: asLimitedString(row?.undMedida, 100),
+          obs: asLimitedString(row?.obs, 1000),
+        };
+      });
+
+      const intakePayloadSize = Buffer.byteLength(
+        JSON.stringify({ numEntrada, clientId, dataEntrada, dataPrevistaSaida, contato, rows }),
+        'utf8',
+      );
+      if (intakePayloadSize > 750 * 1024) {
+        return res.status(413).json({ error: 'INTAKE_TOO_LARGE' });
+      }
+
+      // Compatibilidade com registros anteriores ao lock de unicidade. A consulta
+      // evita reutilizar números já existentes; o lock transacional abaixo fecha
+      // a corrida entre novas requisições concorrentes.
+      const duplicateSnapshot = await firestoreDb
+        .collection('savedIntakes')
+        .where('numEntrada', '==', numEntrada)
+        .limit(10)
+        .get();
+      const existingDuplicate = activeIntakeFromSnapshot(duplicateSnapshot);
+      if (existingDuplicate) {
+        return res.status(409).json({
+          error: 'INTAKE_NUMBER_ALREADY_EXISTS',
+          intakeId: existingDuplicate.id,
+          numEntrada,
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const intakeId = `${Date.now()}_${randomBytes(5).toString('hex')}`;
+      const intakeRef = firestoreDb.collection('savedIntakes').doc(intakeId);
+      const sequenceRef = firestoreDb.collection('systemSettings').doc('intakeSequence');
+      const lockRef = firestoreDb.collection('intakeNumberLocks').doc(intakeNumberLockId(numEntrada));
+      const clientRef = firestoreDb.collection('clients').doc(clientId);
+      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+      const actorName = asLimitedString(requester?.name || requester?.username || req.user?.email, 160) || 'Usuário interno';
+      const actorUid = asLimitedString(req.user.uid, 160);
+      const actorRole = asLimitedString(requester?.accessProfileName || requester?.permissionLevel || requester?.role, 100);
+
+      const intake = {
+        id: intakeId,
+        numEntrada,
+        clientId,
+        dataEntrada,
+        dataPrevistaSaida,
+        contato,
+        rows,
+        createdAt: nowIso,
+        createdBy: actorName,
+        createdByUid: actorUid,
+        updatedAt: nowIso,
+        updatedBy: actorName,
+      };
+
+      let nextSequence: { prefix: string; nextNumber: number } | null = null;
+
+      await firestoreDb.runTransaction(async (transaction) => {
+        const lockSnapshot = await transaction.get(lockRef);
+        const sequenceSnapshot = await transaction.get(sequenceRef);
+        const clientSnapshot = await transaction.get(clientRef);
+
+        if (!clientSnapshot.exists) {
+          const error: any = new Error('CLIENT_PROFILE_NOT_FOUND');
+          error.code = 'CLIENT_PROFILE_NOT_FOUND';
+          throw error;
+        }
+
+        if (lockSnapshot.exists) {
+          const lockData = lockSnapshot.data() || {};
+          const error: any = new Error('INTAKE_NUMBER_ALREADY_EXISTS');
+          error.code = 'INTAKE_NUMBER_ALREADY_EXISTS';
+          error.intakeId = String(lockData.intakeId || '');
+          throw error;
+        }
+
+        const sequenceData = sequenceSnapshot.exists ? sequenceSnapshot.data() || {} : {};
+        const prefix = asLimitedString(sequenceData.prefix || 'C-', 20) || 'C-';
+        const currentNextNumber = Math.max(1, Number(sequenceData.nextNumber || 19928) || 19928);
+        const trailingMatch = numEntrada.match(/^(.*?)(\d+)$/);
+        let computedNextNumber = currentNextNumber;
+        if (trailingMatch) {
+          const numberPrefix = trailingMatch[1].toUpperCase();
+          const numericPart = Number(trailingMatch[2]);
+          if (
+            numberPrefix === prefix.toUpperCase() &&
+            Number.isSafeInteger(numericPart) &&
+            numericPart >= currentNextNumber
+          ) {
+            computedNextNumber = numericPart + 1;
+          }
+        }
+        nextSequence = { prefix, nextNumber: computedNextNumber };
+
+        transaction.create(lockRef, {
+          normalizedNumber: numEntrada,
+          intakeId,
+          createdAt: nowIso,
+          createdByUid: actorUid,
+        });
+        transaction.create(intakeRef, intake);
+        if (!sequenceSnapshot.exists || computedNextNumber !== currentNextNumber) {
+          transaction.set(sequenceRef, { prefix, nextNumber: computedNextNumber }, { merge: true });
+        }
+        transaction.set(auditRef, {
+          action: 'MATERIAL_INTAKE_CREATED',
+          entityType: 'savedIntake',
+          entityId: intakeId,
+          actorUid,
+          actorName,
+          actorRole,
+          createdAt: nowIso,
+          immutable: true,
+          summary: `Entrada de material criada: ${numEntrada}`,
+          metadata: {
+            numEntrada,
+            clientId,
+            rowCount: rows.length,
+            uniquenessLock: lockRef.id,
+          },
+        });
+      });
+
+      return res.status(201).json({ success: true, intake, sequence: nextSequence });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('INTAKE_NUMBER_ALREADY_EXISTS')) {
+        return res.status(409).json({
+          error: 'INTAKE_NUMBER_ALREADY_EXISTS',
+          intakeId: String(error?.intakeId || ''),
+        });
+      }
+      if (code.includes('INVALID_INTAKE_ROW_QUANTITY')) {
+        return res.status(400).json({ error: 'INVALID_INTAKE_ROW_QUANTITY' });
+      }
+      if (code.includes('CLIENT_PROFILE_NOT_FOUND')) {
+        return res.status(404).json({ error: 'CLIENT_PROFILE_NOT_FOUND' });
+      }
+      console.error('Atomic material intake creation failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
 app.get('/api/internal/clients', requireAuth, requireInternalAccount, requireAccessModule('clients'), async (req: AuthRequest, res) => {
   try {
     if (!req.user || !firestoreDb) {
@@ -2899,8 +3162,8 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     const requiredModule: AccessModuleId = purpose === 'intake-entry'
       ? 'material_intake'
       : 'calibration';
-    if (!userHasAccessModule(req.user as any, requiredModule)) {
-      return res.status(403).json({ error: 'MODULE_ACCESS_DENIED', moduleId: requiredModule });
+    if (!userCanEditModule(req.user as any, requiredModule)) {
+      return res.status(403).json({ error: 'MODULE_EDIT_DENIED', moduleId: requiredModule });
     }
 
     const { buffer, contentType, extension } = decodeOperationalDataUrl(req.body?.imageDataUrl);
@@ -3192,9 +3455,11 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
       .filter((item: any) => item?.isDeleted !== true)
       .filter((item: any) => instrumentIdSet.has(String(item?.instrumentId || '')));
 
-    const clientIntakes = intakesSnap.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }))
-      .filter((item: any) => item?.isDeleted !== true);
+    const clientIntakes = deduplicateIntakesForReadServer(
+      intakesSnap.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((item: any) => item?.isDeleted !== true),
+    );
 
     let fieldServiceRecords: any[] = [];
     if (profile?.isFieldService === true) {
@@ -3284,6 +3549,9 @@ app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, admi
       allowedModules: accessProfile.isAdministrator
         ? [...ALL_ACCESS_MODULES]
         : [...accessProfile.modules],
+      editableModules: accessProfile.isAdministrator
+        ? [...ALL_ACCESS_MODULES]
+        : editableModulesFromPermissions(accessProfile.modulePermissions),
       permissionLevel,
     };
     if (role) initialClaims.role = role;

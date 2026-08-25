@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Check, KeyRound, Loader2, Plus, Save, Search, ShieldCheck, Users } from "lucide-react";
 import type { PortalUser } from "../lib/firebase";
-import type { AccessModuleId, AccessProfileDefinition } from "../access-control";
-import { resolveLegacyAccessProfileId } from "../access-control";
+import type { AccessMode, AccessModuleId, AccessProfileDefinition } from "../access-control";
+import { modulesFromPermissions, resolveLegacyAccessProfileId } from "../access-control";
 import { authJsonFetch } from "../utils/authApi";
 
 interface ModuleCatalogItem {
@@ -25,8 +25,27 @@ const emptyDraft = (): AccessProfileDefinition => ({
   name: "",
   description: "",
   modules: ["dashboard"],
+  modulePermissions: { dashboard: "view" },
   active: true,
 });
+
+const permissionsForProfile = (profile: Pick<AccessProfileDefinition, "modules" | "modulePermissions">) => {
+  if (profile.modulePermissions && Object.keys(profile.modulePermissions).length > 0) {
+    return { ...profile.modulePermissions };
+  }
+  return Object.fromEntries(
+    profile.modules.map((moduleId) => [moduleId, "edit"]),
+  ) as AccessProfileDefinition["modulePermissions"];
+};
+
+const cloneProfile = (profile: AccessProfileDefinition): AccessProfileDefinition => {
+  const modulePermissions = permissionsForProfile(profile);
+  return {
+    ...profile,
+    modules: modulesFromPermissions(modulePermissions),
+    modulePermissions,
+  };
+};
 
 const errorMessage = (code: string) => {
   const messages: Record<string, string> = {
@@ -39,6 +58,7 @@ const errorMessage = (code: string) => {
     AUTH_USER_NOT_FOUND:
       "O colaborador ainda não possui uma conta de autenticação vinculada.",
     MODULE_ACCESS_DENIED: "Seu acesso não permite executar esta operação.",
+    MODULE_EDIT_DENIED: "Seu perfil permite apenas visualizar este módulo.",
   };
   return messages[code] || "Não foi possível concluir a operação.";
 };
@@ -79,7 +99,7 @@ export default function AccessProfileManagement({
       const nextDraft = nextProfiles.find(
         (profile: AccessProfileDefinition) => profile.id === nextSelectedId,
       );
-      setDraft(nextDraft ? { ...nextDraft, modules: [...nextDraft.modules] } : emptyDraft());
+      setDraft(nextDraft ? cloneProfile(nextDraft) : emptyDraft());
     } catch (loadError: any) {
       setError(errorMessage(loadError?.message || "LOAD_FAILED"));
     } finally {
@@ -111,7 +131,7 @@ export default function AccessProfileManagement({
 
   const selectProfile = (profile: AccessProfileDefinition) => {
     setSelectedId(profile.id);
-    setDraft({ ...profile, modules: [...profile.modules] });
+    setDraft(cloneProfile(profile));
     setNotice("");
     setError("");
   };
@@ -123,14 +143,21 @@ export default function AccessProfileManagement({
     setError("");
   };
 
-  const toggleModule = (moduleId: AccessModuleId) => {
+  const setModuleMode = (moduleId: AccessModuleId, mode: AccessMode | null) => {
     if (draft.id === "administrator") return;
-    setDraft((current) => ({
-      ...current,
-      modules: current.modules.includes(moduleId)
-        ? current.modules.filter((id) => id !== moduleId)
-        : [...current.modules, moduleId],
-    }));
+    setDraft((current) => {
+      const modulePermissions = permissionsForProfile(current);
+      if (mode === null) {
+        delete modulePermissions[moduleId];
+      } else {
+        modulePermissions[moduleId] = mode;
+      }
+      return {
+        ...current,
+        modulePermissions,
+        modules: modulesFromPermissions(modulePermissions),
+      };
+    });
   };
 
   const saveProfile = async () => {
@@ -145,13 +172,14 @@ export default function AccessProfileManagement({
           name: draft.name,
           description: draft.description,
           modules: draft.modules,
+          modulePermissions: draft.modulePermissions,
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || "SAVE_FAILED");
       setNotice(
         data?.affectedUsers > 0
-          ? `Perfil salvo. ${data.affectedUsers} usuário(s) vinculado(s) receberão a nova autorização na próxima atualização do login.`
+          ? `Perfil salvo. ${data.affectedUsers} usuário(s) vinculado(s) precisam sair e entrar novamente para aplicar a nova autorização imediatamente.`
           : "Perfil salvo com sucesso.",
       );
       await loadProfiles(data?.profile?.id);
@@ -171,7 +199,7 @@ export default function AccessProfileManagement({
       const updated = await onAssignAccessProfile(user.id, accessProfileId);
       const profile = profiles.find(({ id }) => id === accessProfileId);
       setNotice(
-        `Perfil ${profile?.name || accessProfileId} atribuído a ${updated.name || user.name}. O cargo profissional foi preservado.`,
+        `Perfil ${profile?.name || accessProfileId} atribuído a ${updated.name || user.name}. O cargo profissional foi preservado. O usuário deve sair e entrar novamente para aplicar o acesso imediatamente.`,
       );
     } catch (assignError: any) {
       setError(errorMessage(assignError?.message || "ASSIGN_FAILED"));
@@ -196,7 +224,7 @@ export default function AccessProfileManagement({
         </div>
         <p className="mt-1 text-xs leading-relaxed">
           O campo <b>Cargo</b> continua descrevendo a função do colaborador na empresa. O perfil abaixo
-          controla exclusivamente quais módulos do sistema ele pode abrir. Somente Administradores podem
+          controla quais módulos o colaborador pode abrir e, em cada módulo, se o acesso é apenas de visualização ou também de edição. Somente Administradores podem
           alterar esta configuração.
         </p>
       </div>
@@ -288,28 +316,49 @@ export default function AccessProfileManagement({
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {items.map((item) => {
-                      const checked = draft.modules.includes(item.id);
+                      const mode = draft.id === "administrator"
+                        ? "edit"
+                        : (draft.modulePermissions?.[item.id] || null);
                       return (
-                        <button
-                          type="button"
+                        <div
                           key={item.id}
-                          onClick={() => toggleModule(item.id)}
-                          disabled={draft.id === "administrator"}
-                          className={`text-left rounded-xl border p-3 text-xs font-bold flex items-center gap-2 ${
-                            checked
-                              ? "border-blue-300 bg-blue-50 text-blue-900"
-                              : "border-slate-200 bg-white text-slate-600"
-                          } disabled:cursor-not-allowed`}
+                          className={`rounded-xl border p-3 text-xs ${
+                            mode ? "border-blue-200 bg-blue-50/60" : "border-slate-200 bg-white"
+                          }`}
                         >
-                          <span
-                            className={`h-5 w-5 rounded flex items-center justify-center border ${
-                              checked ? "bg-royal-blue border-royal-blue text-white" : "border-slate-300"
-                            }`}
-                          >
-                            {checked && <Check className="h-3.5 w-3.5" />}
-                          </span>
-                          {item.label}
-                        </button>
+                          <div className="font-bold text-slate-900 mb-2 flex items-center gap-2">
+                            {mode && <Check className="h-3.5 w-3.5 text-emerald-600" />}
+                            <span>{item.label}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-1">
+                            {[
+                              { value: null, label: "Sem acesso" },
+                              { value: "view" as AccessMode, label: "Visualizar" },
+                              { value: "edit" as AccessMode, label: "Editar" },
+                            ].map((option) => {
+                              const selected = mode === option.value;
+                              return (
+                                <button
+                                  type="button"
+                                  key={option.label}
+                                  onClick={() => setModuleMode(item.id, option.value)}
+                                  disabled={draft.id === "administrator"}
+                                  className={`rounded-lg border px-2 py-1.5 text-[10px] font-extrabold transition-colors ${
+                                    selected
+                                      ? option.value === "edit"
+                                        ? "bg-emerald-600 border-emerald-600 text-white"
+                                        : option.value === "view"
+                                          ? "bg-royal-blue border-royal-blue text-white"
+                                          : "bg-slate-700 border-slate-700 text-white"
+                                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                  } disabled:cursor-not-allowed disabled:opacity-70`}
+                                >
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>

@@ -17,12 +17,17 @@ export const ACCESS_MODULE_CATALOG = [
 ] as const;
 
 export type AccessModuleId = (typeof ACCESS_MODULE_CATALOG)[number]["id"];
+export type AccessMode = "view" | "edit";
+export type AccessModulePermissions = Partial<Record<AccessModuleId, AccessMode>>;
 
 export interface AccessProfileDefinition {
   id: string;
   name: string;
   description: string;
+  /** Módulos visíveis. Mantido por compatibilidade com perfis/claims legados. */
   modules: AccessModuleId[];
+  /** Nível por módulo. "view" = consulta; "edit" = consulta + gravação/upload/cadastro. */
+  modulePermissions: AccessModulePermissions;
   isSystem?: boolean;
   isAdministrator?: boolean;
   active?: boolean;
@@ -39,14 +44,71 @@ export interface AccessAwareUser {
   accessProfileId?: string;
   accessProfileName?: string;
   allowedModules?: string[];
+  editableModules?: string[];
 }
 
 export const ALL_ACCESS_MODULES: AccessModuleId[] = ACCESS_MODULE_CATALOG.map(
   ({ id }) => id,
 );
 
+const normalize = (value: unknown) => String(value || "").trim().toLowerCase();
+const VALID_MODULE_IDS = new Set<string>(ALL_ACCESS_MODULES);
+
+export const sanitizeAccessModules = (modules: unknown): AccessModuleId[] => {
+  if (!Array.isArray(modules)) return [];
+  return Array.from(
+    new Set(
+      modules
+        .map((moduleId) => String(moduleId))
+        .filter((moduleId) => VALID_MODULE_IDS.has(moduleId)),
+    ),
+  ) as AccessModuleId[];
+};
+
+export const buildModulePermissions = (
+  modules: readonly AccessModuleId[],
+  mode: AccessMode = "edit",
+): AccessModulePermissions => Object.fromEntries(modules.map((moduleId) => [moduleId, mode]));
+
+export const sanitizeModulePermissions = (
+  permissions: unknown,
+  legacyModules?: unknown,
+): AccessModulePermissions => {
+  if (permissions !== undefined && permissions !== null) {
+    if (typeof permissions !== "object" || Array.isArray(permissions)) return {};
+
+    const result: AccessModulePermissions = {};
+    for (const [rawModuleId, rawMode] of Object.entries(permissions as Record<string, unknown>)) {
+      if (!VALID_MODULE_IDS.has(rawModuleId)) continue;
+      const mode = normalize(rawMode);
+      if (mode === "view" || mode === "edit") {
+        result[rawModuleId as AccessModuleId] = mode;
+      }
+    }
+    return result;
+  }
+
+  // Migração sem quebra: todo módulo de um perfil legado era, na prática, editável.
+  return buildModulePermissions(sanitizeAccessModules(legacyModules), "edit");
+};
+
+export const modulesFromPermissions = (
+  permissions: AccessModulePermissions,
+): AccessModuleId[] => ALL_ACCESS_MODULES.filter((moduleId) => permissions[moduleId] === "view" || permissions[moduleId] === "edit");
+
+export const editableModulesFromPermissions = (
+  permissions: AccessModulePermissions,
+): AccessModuleId[] => ALL_ACCESS_MODULES.filter((moduleId) => permissions[moduleId] === "edit");
+
+const profile = (
+  definition: Omit<AccessProfileDefinition, "modulePermissions">,
+): AccessProfileDefinition => ({
+  ...definition,
+  modulePermissions: buildModulePermissions(definition.modules, "edit"),
+});
+
 export const DEFAULT_ACCESS_PROFILES: AccessProfileDefinition[] = [
-  {
+  profile({
     id: "administrator",
     name: "Administrador",
     description: "Acesso total, incluindo Configurações e gestão de perfis.",
@@ -55,8 +117,8 @@ export const DEFAULT_ACCESS_PROFILES: AccessProfileDefinition[] = [
     isAdministrator: true,
     active: true,
     version: 1,
-  },
-  {
+  }),
+  profile({
     id: "human_resources",
     name: "Recursos Humanos (RH)",
     description: "Rotinas de colaboradores, documentos pessoais e saúde ocupacional.",
@@ -71,8 +133,8 @@ export const DEFAULT_ACCESS_PROFILES: AccessProfileDefinition[] = [
     isSystem: true,
     active: true,
     version: 1,
-  },
-  {
+  }),
+  profile({
     id: "finance",
     name: "Financeiro",
     description: "Rotinas financeiras, contracheques e comunicação interna.",
@@ -86,8 +148,8 @@ export const DEFAULT_ACCESS_PROFILES: AccessProfileDefinition[] = [
     isSystem: true,
     active: true,
     version: 1,
-  },
-  {
+  }),
+  profile({
     id: "standard",
     name: "Padrão",
     description: "Perfil operacional intermediário para recepção, laboratório e estoque.",
@@ -105,8 +167,8 @@ export const DEFAULT_ACCESS_PROFILES: AccessProfileDefinition[] = [
     isSystem: true,
     active: true,
     version: 1,
-  },
-  {
+  }),
+  profile({
     id: "limited",
     name: "Limitado",
     description: "Acesso essencial ao painel, documentos pessoais e comunicação.",
@@ -114,18 +176,8 @@ export const DEFAULT_ACCESS_PROFILES: AccessProfileDefinition[] = [
     isSystem: true,
     active: true,
     version: 1,
-  },
+  }),
 ];
-
-const normalize = (value: unknown) => String(value || "").trim().toLowerCase();
-const VALID_MODULE_IDS = new Set<string>(ALL_ACCESS_MODULES);
-
-export const sanitizeAccessModules = (modules: unknown): AccessModuleId[] => {
-  if (!Array.isArray(modules)) return [];
-  return Array.from(
-    new Set(modules.map((moduleId) => String(moduleId)).filter((moduleId) => VALID_MODULE_IDS.has(moduleId))),
-  ) as AccessModuleId[];
-};
 
 export const getDefaultAccessProfile = (profileId: string) =>
   DEFAULT_ACCESS_PROFILES.find(({ id }) => id === profileId);
@@ -178,10 +230,32 @@ export const resolveUserAccessModules = (user?: AccessAwareUser | null): AccessM
   return legacyProfile ? [...legacyProfile.modules] : [];
 };
 
+export const resolveUserEditableModules = (user?: AccessAwareUser | null): AccessModuleId[] => {
+  if (isAdministratorAccess(user)) return [...ALL_ACCESS_MODULES];
+
+  if (Array.isArray(user?.editableModules)) {
+    return sanitizeAccessModules(user.editableModules);
+  }
+
+  // Tokens/perfis anteriores a esta versão não tinham editableModules. Para não
+  // interromper produção durante rollout, os módulos já autorizados continuam editáveis.
+  if (Array.isArray(user?.allowedModules)) {
+    return sanitizeAccessModules(user.allowedModules);
+  }
+
+  const legacyProfile = getDefaultAccessProfile(resolveLegacyAccessProfileId(user));
+  return legacyProfile ? editableModulesFromPermissions(legacyProfile.modulePermissions) : [];
+};
+
 export const userHasAccessModule = (
   user: AccessAwareUser | null | undefined,
   moduleId: AccessModuleId,
 ): boolean => isAdministratorAccess(user) || resolveUserAccessModules(user).includes(moduleId);
+
+export const userCanEditModule = (
+  user: AccessAwareUser | null | undefined,
+  moduleId: AccessModuleId,
+): boolean => isAdministratorAccess(user) || resolveUserEditableModules(user).includes(moduleId);
 
 export const legacyPermissionLevelForProfile = (profileId: string): string => {
   if (profileId === "administrator") return "Administrador";

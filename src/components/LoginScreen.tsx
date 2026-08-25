@@ -21,6 +21,7 @@ export interface InternalUser {
   accessProfileId?: string;
   accessProfileName?: string;
   allowedModules?: string[];
+  editableModules?: string[];
   accessProfileVersion?: number;
   signaturePath?: string;
   signatureVersion?: number;

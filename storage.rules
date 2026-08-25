@@ -15,13 +15,57 @@ service firebase.storage {
 
     function isAdministrator() {
       return isInternalAccount() && (
-        request.auth.token.permissionLevel == 'Administrador' ||
-        request.auth.token.role == 'Administrador' ||
-        request.auth.token.role == 'Admin' ||
-        request.auth.token.role == 'admin' ||
-        request.auth.token.role == 'master' ||
-        request.auth.token.role == 'Diretor' ||
-        request.auth.token.role == 'Diretoria'
+        request.auth.token.accessProfileId == 'administrator' ||
+        (request.auth.token.accessProfileId == null && (
+          request.auth.token.permissionLevel == 'Administrador' ||
+          request.auth.token.role == 'Administrador' ||
+          request.auth.token.role == 'Admin' ||
+          request.auth.token.role == 'admin' ||
+          request.auth.token.role == 'master' ||
+          request.auth.token.role == 'Diretor' ||
+          request.auth.token.role == 'Diretoria'
+        ))
+      );
+    }
+
+    function legacyHasModule(moduleId) {
+      return request.auth.token.accessProfileId == null && (
+        (moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
+        (request.auth.token.permissionLevel in ['Padrão', 'Padrao'] &&
+          moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory']) ||
+        (request.auth.token.permissionLevel == 'Limitado' &&
+          moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
+        (request.auth.token.permissionLevel in ['Recursos Humanos (RH)', 'Recursos Humanos', 'RH'] &&
+          moduleId in ['hr', 'health_programs']) ||
+        (request.auth.token.role in ['Recursos Humanos (RH)', 'Recursos Humanos', 'RH'] &&
+          moduleId in ['hr', 'health_programs']) ||
+        (request.auth.token.permissionLevel == 'Financeiro' && moduleId == 'finance') ||
+        (request.auth.token.role == 'Financeiro' && moduleId == 'finance')
+      );
+    }
+
+    function hasModule(moduleId) {
+      return isInternalAccount() && (
+        isAdministrator() ||
+        (
+          request.auth.token.allowedModules is list
+          && request.auth.token.allowedModules.hasAny([moduleId])
+        ) ||
+        legacyHasModule(moduleId)
+      );
+    }
+
+    function hasEditModule(moduleId) {
+      return isInternalAccount() && (
+        isAdministrator() ||
+        (
+          request.auth.token.editableModules is list
+          && request.auth.token.editableModules.hasAny([moduleId])
+        ) ||
+        (
+          !(request.auth.token.editableModules is list)
+          && hasModule(moduleId)
+        )
       );
     }
 
@@ -72,7 +116,9 @@ service firebase.storage {
     // Cada versão é imutável: não permitimos sobrescrita ou exclusão pelo cliente web.
     match /signatures/{userId}/{fileName} {
       allow read: if isInternalAccount() || isClientAccount();
-      allow create: if isSignatureOwner(userId) && isValidSignatureImage();
+      allow create: if isSignatureOwner(userId)
+        && hasEditModule('digital_signature')
+        && isValidSignatureImage();
       allow update, delete: if false;
     }
 
@@ -81,7 +127,7 @@ service firebase.storage {
     // exclusão física fica restrita ao Administrador.
     match /intake-deliveries/{intakeId}/{category}/{fileName} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount()
+      allow create: if (hasEditModule('material_intake') || hasEditModule('calibration'))
         && category in ['instruments', 'signed-form']
         && isValidDeliveryImage();
       allow update: if false;
@@ -93,7 +139,7 @@ service firebase.storage {
     // durante a migração gradual e não são apagadas automaticamente.
     match /instrument-photos/{instrumentId}/{category}/{fileName} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount()
+      allow create: if hasEditModule('calibration')
         && category in ['registration', 'calibrated']
         && isValidOperationalImage();
       allow update, delete: if false;
@@ -101,13 +147,13 @@ service firebase.storage {
 
     match /intake-entry-photos/{intakeId}/{fileName} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && isValidOperationalImage();
+      allow create: if hasEditModule('material_intake') && isValidOperationalImage();
       allow update, delete: if false;
     }
 
     match /inventory-attachments/{userUid}/{category}/{fileName} {
       allow read: if isInternalAccount();
-      allow create: if isInternalAccount()
+      allow create: if hasEditModule('inventory')
         && request.auth.uid == userUid
         && category in ['item', 'transaction']
         && isValidInventoryAttachment();

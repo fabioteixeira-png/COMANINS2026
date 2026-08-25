@@ -5,10 +5,11 @@ import SignaturePad from 'react-signature-canvas';
 
 interface MySignatureProps {
   currentUser: PortalUser;
+  canEdit?: boolean;
   onUpdateUser: (id: string, updates: Partial<PortalUser>) => void;
 }
 
-export default function MySignature({ currentUser, onUpdateUser }: MySignatureProps) {
+export default function MySignature({ currentUser, canEdit = false, onUpdateUser }: MySignatureProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -16,10 +17,14 @@ export default function MySignature({ currentUser, onUpdateUser }: MySignaturePr
   const sigCanvas = useRef<any>(null);
 
   useEffect(() => {
+    if (!canEdit) {
+      setIsEditing(false);
+      return;
+    }
     if (!currentUser.signaturePath) {
       setIsEditing(true);
     }
-  }, [currentUser.signaturePath]);
+  }, [canEdit, currentUser.signaturePath]);
 
   const clearSignature = () => {
     if (sigCanvas.current) {
@@ -28,6 +33,11 @@ export default function MySignature({ currentUser, onUpdateUser }: MySignaturePr
   };
 
   const handleSaveSignature = async () => {
+    if (!canEdit) {
+      setIsEditing(false);
+      setErrorMsg('Seu perfil possui somente permissão de visualização em Minha Assinatura.');
+      return;
+    }
     if (sigCanvas.current?.isEmpty()) {
       setErrorMsg('Por favor, desenhe sua assinatura antes de salvar.');
       return;
@@ -100,15 +110,17 @@ export default function MySignature({ currentUser, onUpdateUser }: MySignaturePr
               Atualizada em: {new Date(currentUser.signatureDate || '').toLocaleDateString('pt-BR')} (Versão {currentUser.signatureVersion})
             </p>
           </div>
-          <button
-            onClick={() => setIsEditing(true)}
-            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-4 rounded transition-colors flex items-center justify-center"
-          >
-            <PenTool className="mr-2" size={20} />
-            Substituir Assinatura
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-4 rounded transition-colors flex items-center justify-center"
+            >
+              <PenTool className="mr-2" size={20} />
+              Substituir Assinatura
+            </button>
+          )}
         </div>
-      ) : (
+      ) : canEdit ? (
         <div className="space-y-6">
           <div className="bg-amber-50 text-amber-800 p-4 rounded text-sm mb-4">
             <p className="font-semibold mb-1">Instruções:</p>
@@ -169,6 +181,11 @@ export default function MySignature({ currentUser, onUpdateUser }: MySignaturePr
               Cancelar e manter assinatura atual
             </button>
           )}
+        </div>
+      ) : (
+        <div className="bg-slate-50 border border-slate-200 rounded p-6 text-center text-slate-600">
+          <p className="font-semibold text-slate-800">Nenhuma assinatura cadastrada.</p>
+          <p className="text-sm mt-2">Seu perfil possui permissão somente para visualização neste módulo.</p>
         </div>
       )}
     </div>
