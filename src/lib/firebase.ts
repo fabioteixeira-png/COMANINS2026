@@ -384,6 +384,10 @@ export interface PortalUser {
   username: string;
   role: string;
   permissionLevel?: string;
+  accessProfileId?: string;
+  accessProfileName?: string;
+  allowedModules?: string[];
+  accessProfileVersion?: number;
   register: string;
   mustChangePassword?: boolean;
   passwordChangeRequired?: boolean;

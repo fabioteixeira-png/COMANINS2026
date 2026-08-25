@@ -13,30 +13,59 @@ service cloud.firestore {
 
     function isAdministrator() {
       return isInternalAccount() && (
-        request.auth.token.permissionLevel == 'Administrador' ||
-        request.auth.token.role == 'Administrador' ||
-        request.auth.token.role == 'Admin' ||
-        request.auth.token.role == 'admin' ||
-        request.auth.token.role == 'master' ||
-        request.auth.token.role == 'Diretor' ||
-        request.auth.token.role == 'Diretoria'
+        request.auth.token.accessProfileId == 'administrator' ||
+        (request.auth.token.accessProfileId == null && (
+          request.auth.token.permissionLevel == 'Administrador' ||
+          request.auth.token.role == 'Administrador' ||
+          request.auth.token.role == 'Admin' ||
+          request.auth.token.role == 'admin' ||
+          request.auth.token.role == 'master' ||
+          request.auth.token.role == 'Diretor' ||
+          request.auth.token.role == 'Diretoria'
+        ))
+      );
+    }
+
+    function legacyHasModule(moduleId) {
+      return request.auth.token.accessProfileId == null && (
+        (moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
+        (request.auth.token.permissionLevel in ['Padrão', 'Padrao'] &&
+          moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory']) ||
+        (request.auth.token.permissionLevel == 'Limitado' &&
+          moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
+        (request.auth.token.permissionLevel in ['Recursos Humanos (RH)', 'Recursos Humanos', 'RH'] &&
+          moduleId in ['hr', 'health_programs']) ||
+        (request.auth.token.role in ['Recursos Humanos (RH)', 'Recursos Humanos', 'RH'] &&
+          moduleId in ['hr', 'health_programs']) ||
+        (request.auth.token.permissionLevel == 'Financeiro' && moduleId == 'finance') ||
+        (request.auth.token.role == 'Financeiro' && moduleId == 'finance')
+      );
+    }
+
+    function hasModule(moduleId) {
+      return isAdministrator() || (
+        isInternalAccount() && (
+          (request.auth.token.allowedModules is list &&
+            request.auth.token.allowedModules.hasAny([moduleId])) ||
+          legacyHasModule(moduleId)
+        )
+      );
+    }
+
+    function hasAnyModule(moduleIds) {
+      return isAdministrator() || (
+        isInternalAccount() &&
+        request.auth.token.allowedModules is list &&
+        request.auth.token.allowedModules.hasAny(moduleIds)
       );
     }
 
     function isRhAccount() {
-      return isInternalAccount() && (
-        request.auth.token.permissionLevel == 'Recursos Humanos (RH)' ||
-        request.auth.token.role == 'Recursos Humanos (RH)' ||
-        request.auth.token.role == 'Recursos Humanos' ||
-        request.auth.token.role == 'RH'
-      );
+      return hasModule('hr');
     }
 
     function isFinanceAccount() {
-      return isInternalAccount() && (
-        request.auth.token.permissionLevel == 'Financeiro' ||
-        request.auth.token.role == 'Financeiro'
-      );
+      return hasModule('finance');
     }
 
     function isOwnPortalUser() {
@@ -114,14 +143,30 @@ service cloud.firestore {
       // Self-service updates are restricted to password-change state and digital
       // signature metadata. Role, permissionLevel, username, auth linkage and all
       // RH/financial fields cannot be changed by the employee through Firestore.
-      allow update: if isAdministrator() || (
+      allow update: if (
+        isAdministrator() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'permissionLevel',
+          'accessProfileId',
+          'accessProfileName',
+          'accessProfileVersion',
+          'allowedModules',
+          'accessProfileUpdatedAt',
+          'accessProfileUpdatedBy'
+        ])
+      ) || (
         // RH can maintain HR data but cannot change identity, authorization,
         // forced-password state or another employee's digital signature.
         isRhAccount() &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'username',
-          'role',
           'permissionLevel',
+          'accessProfileId',
+          'accessProfileName',
+          'accessProfileVersion',
+          'allowedModules',
+          'accessProfileUpdatedAt',
+          'accessProfileUpdatedBy',
           'authUid',
           'authEmail',
           'passwordChangeRequired',
@@ -143,12 +188,18 @@ service cloud.firestore {
 
       allow create, delete: if isAdministrator();
     }
+
+    // Perfis de acesso são lidos e gravados somente pelo backend Admin SDK.
+    // Isso impede que o navegador altere a própria autorização.
+    match /accessProfiles/{document=**} {
+      allow read, write: if false;
+    }
     match /clients/{clientId} {
       // Client master data is no longer public. Internal accounts can manage the
       // directory; a client account can read only its own company profile.
-      allow read: if isInternalAccount() ||
+      allow read: if hasModule('clients') ||
         (isClientAccount() && request.auth.token.clientId == clientId);
-      allow create, update, delete: if isInternalAccount();
+      allow create, update, delete: if hasModule('clients');
     }
 
     // Credenciais do Portal do Cliente são mantidas em coleção exclusiva do servidor.
@@ -224,12 +275,12 @@ service cloud.firestore {
     // e filtra os registros no servidor. Isso evita que regras virem apenas
     // filtros visuais e impede consulta cruzada entre clientes.
     match /instruments/{instrumentId} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount();
+      allow read: if hasModule('calibration');
+      allow create: if hasModule('calibration');
       // A transição para Entregue é permitida; depois disso o cadastro se torna
       // imutável para preservar a rastreabilidade da devolução. Campos de
       // arquivamento só podem ser escritos pelo backend (Admin SDK).
-      allow update: if isInternalAccount()
+      allow update: if hasModule('calibration')
         && resource.data.status != 'Entregue'
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
@@ -238,11 +289,11 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /calibrationReports/{reportId} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      allow read: if hasModule('calibration');
+      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
       // Certificados associados a instrumento já entregue não podem ser
       // regravados. Campos de arquivamento são exclusivos do backend.
-      allow update: if isInternalAccount()
+      allow update: if hasModule('calibration')
         && archiveFieldsUntouched()
         && (
           resource.data.get('instrumentId', null) == null ||
@@ -251,13 +302,13 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /savedIntakes/{intakeId} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      allow read: if hasAnyModule(['material_intake', 'calibration']);
+      allow create: if hasModule('material_intake') && archiveFieldsAbsentOnCreate();
 
       // A entrada pode ser atualizada enquanto a entrega não foi finalizada.
       // A mesma gravação que conclui a entrega precisa conter as duas classes
       // de evidência e ativa o bloqueio imutável do registro.
-      allow update: if isInternalAccount()
+      allow update: if hasAnyModule(['material_intake', 'calibration'])
         && archiveFieldsUntouched()
         && resource.data.get('deliveryLocked', false) != true
         && resource.data.get('deliveryFinalizedAt', null) == null
@@ -278,9 +329,9 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /rncReports/{rncId} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
-      allow update: if isInternalAccount()
+      allow read: if hasAnyModule(['calibration', 'audit']);
+      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow update: if hasModule('calibration')
         && archiveFieldsUntouched()
         && (
           resource.data.get('instrumentId', null) == null ||
@@ -289,9 +340,9 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /fieldServiceRecords/{recordId} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount();
-      allow update: if isInternalAccount() && (
+      allow read: if hasModule('field_service');
+      allow create: if hasModule('field_service');
+      allow update: if hasModule('field_service') && (
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
         ]) || isAdministrator()
@@ -336,36 +387,36 @@ service cloud.firestore {
     match /inventoryItems/{itemId} {
       // Cadastro, edição, saldo e arquivamento passam pelo backend para que
       // estoque + movimentação + auditoria sejam consistentes e atômicos.
-      allow read: if isInternalAccount();
+      allow read: if hasModule('inventory');
       allow create, update, delete: if false;
     }
     match /inventoryTransactions/{transactionId} {
       // Movimentações são gravadas somente pelo backend em transação atômica.
-      allow read: if isInternalAccount();
+      allow read: if hasModule('inventory');
       allow create, update, delete: if false;
     }
     match /systemAuditLogs/{auditId} {
       // Trilha autoritativa: escrita somente pelo Admin SDK do backend.
-      allow read: if isAdministrator();
+      allow read: if hasModule('audit');
       allow create, update, delete: if false;
     }
     match /referenceStandards/{document=**} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
-      allow update: if isInternalAccount() && archiveFieldsUntouched();
+      allow read: if hasAnyModule(['calibration', 'audit']);
+      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow update: if hasModule('calibration') && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /calibrationAuditLogs/{document=**} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
+      allow read: if hasAnyModule(['calibration', 'audit']);
+      allow create: if hasModule('calibration') && archiveFieldsAbsentOnCreate();
       // Registros de tempo são append-only no navegador. O backend pode
       // arquivá-los com Admin SDK após autorização administrativa.
       allow update, delete: if false;
     }
     match /internal_tickets/{document=**} {
-      allow read: if isInternalAccount();
-      allow create: if isInternalAccount() && archiveFieldsAbsentOnCreate();
-      allow update: if isInternalAccount() && archiveFieldsUntouched();
+      allow read: if hasModule('internal_communication');
+      allow create: if hasModule('internal_communication') && archiveFieldsAbsentOnCreate();
+      allow update: if hasModule('internal_communication') && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /accessAuditLogs/{document=**} {

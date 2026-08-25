@@ -34,6 +34,7 @@ import {
   downloadCorporateFile,
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
+import { isAdministratorAccess } from '../access-control';
 
 interface HealthProgramManagementProps {
   currentUser?: {
@@ -41,6 +42,8 @@ interface HealthProgramManagementProps {
     username?: string;
     role?: string;
     permissionLevel?: string;
+    accessProfileId?: string;
+    allowedModules?: string[];
     password?: string;
   };
   internalUsers?: any[];
@@ -61,14 +64,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  const isUserAdmin = 
-    currentUser?.permissionLevel === 'Administrador' ||
-    currentUser?.role === 'Administrador' ||
-    currentUser?.role === 'Admin' ||
-    currentUser?.role === 'admin' ||
-    currentUser?.role === 'master' ||
-    currentUser?.role === 'Diretoria' ||
-    currentUser?.role === 'Diretor';
+  const isUserAdmin = isAdministratorAccess(currentUser);
 
   // Delete Password Confirmation Modal State
   const [deleteConfirmDoc, setDeleteConfirmDoc] = useState<HealthProgramDocument | null>(null);

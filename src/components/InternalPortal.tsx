@@ -165,7 +165,8 @@ import {
   FileSpreadsheet,
   ArrowLeft,
   Menu,
-  PenTool
+  PenTool,
+  KeyRound
 } from "lucide-react";
 import FirebaseUsagePanel from "./FirebaseUsagePanel";
 import NotificationBellPopover from "./NotificationBellPopover";
@@ -217,7 +218,14 @@ import FieldService from "./FieldService";
 import FinanceManagement from "./FinanceManagement";
 import MySignature from "./MySignature";
 import InternalCommunication from "./InternalCommunication";
+import AccessProfileManagement from "./AccessProfileManagement";
 import { generateAuthKey, getReportAuthKey } from "../utils/authKey";
+import {
+  activeTabAccessModule,
+  isAdministratorAccess,
+  userHasAccessModule,
+  type AccessModuleId,
+} from "../access-control";
 
 const ARCHIVE_ACTION_TYPES = new Set([
   "instrument",
@@ -659,6 +667,10 @@ interface InternalPortalProps {
     role: string;
     register: string;
     permissionLevel?: string;
+    accessProfileId?: string;
+    accessProfileName?: string;
+    allowedModules?: string[];
+    accessProfileVersion?: number;
     birthDate?: string;
     id?: string;
     signaturePath?: string;
@@ -667,6 +679,7 @@ interface InternalPortalProps {
   internalUsers: any[];
   onAddInternalUser: (newUser: any) => void;
   onUpdateInternalUser?: (id: string, updates: any) => void;
+  onAssignAccessProfile: (id: string, accessProfileId: string) => Promise<any>;
   onDeleteInternalUser: (username: string) => void;
   onLogout: () => void;
   [key: string]: any;
@@ -678,6 +691,7 @@ export default function InternalPortal({
   internalUsers,
   onAddInternalUser,
   onUpdateInternalUser,
+  onAssignAccessProfile,
   onDeleteInternalUser,
   onLogout,
   customLogo: customLogoProp,
@@ -699,12 +713,6 @@ export default function InternalPortal({
   onPrepareCalibration,
   onUpdateMessageStatus,
 }: InternalPortalProps) {
-  const isLimitedRole =
-    currentUser?.permissionLevel === "Limitado" ||
-    (!currentUser?.permissionLevel &&
-      (isCalibrationTechnicianRole(currentUser?.role) ||
-        currentUser?.role === "Comercial"));
-
   const [showBirthdayModal, setShowBirthdayModal] = React.useState(false);
   const [birthdayMessage, setBirthdayMessage] = React.useState("");
 
@@ -752,25 +760,12 @@ export default function InternalPortal({
     }
   }, [currentUser]);
 
-  const isUserAdmin =
-    currentUser?.permissionLevel === "Administrador" ||
-    (!currentUser?.permissionLevel &&
-      (currentUser?.role === "Administrador" ||
-        currentUser?.role === "Admin" ||
-        currentUser?.role === "admin" ||
-        currentUser?.role === "master" ||
-        currentUser?.role === "Diretor" ||
-        currentUser?.role === "Diretoria"));
+  const isUserAdmin = isAdministratorAccess(currentUser);
+  const canAccessModule = (moduleId: AccessModuleId) =>
+    userHasAccessModule(currentUser, moduleId);
 
-  const isRhUser =
-    currentUser?.permissionLevel === "Recursos Humanos (RH)" ||
-    currentUser?.role === "Recursos Humanos (RH)" ||
-    currentUser?.role === "Recursos Humanos" ||
-    currentUser?.role === "RH";
-
-  const isFinanceUser =
-    currentUser?.permissionLevel === "Financeiro" ||
-    currentUser?.role === "Financeiro";
+  const isRhUser = canAccessModule("hr");
+  const isFinanceUser = canAccessModule("finance");
 
   const canManageRh = isUserAdmin || isRhUser;
   const canManagePayslips = isUserAdmin || isRhUser || isFinanceUser;
@@ -797,17 +792,15 @@ export default function InternalPortal({
 
   const initIsRestricted = 
     checkIsAfterHours() &&
-    !(
-      currentUser?.permissionLevel === "Administrador" ||
-      (!currentUser?.permissionLevel &&
-        (currentUser?.role === "Administrador" ||
-          currentUser?.role === "Admin" ||
-          currentUser?.role === "admin" ||
-          currentUser?.role === "master" ||
-          currentUser?.role === "Diretor"))
-    );
+    !isUserAdmin;
 
-  const [activeTab, setRawActiveTab] = useState<any>(initIsRestricted ? "colaboradores" : "dashboard");
+  const [activeTab, setRawActiveTab] = useState<any>(
+    initIsRestricted
+      ? "colaboradores"
+      : canAccessModule("dashboard")
+        ? "dashboard"
+        : "colaboradores",
+  );
   const [accessAuditLogs, setAccessAuditLogs] = useState<AccessAuditLog[]>([]);
   const [showAfterHoursModal, setShowAfterHoursModal] = useState(false);
   const [afterHoursTargetTab, setAfterHoursTargetTab] = useState("");
@@ -820,6 +813,24 @@ export default function InternalPortal({
   const cancelActiveCalibrationRef = React.useRef<((instIdToCancel?: string) => Promise<void>) | null>(null);
 
   const setActiveTab = (t: any) => {
+    if ((t === "configuracoes" || t === "cadastro_usuarios") && !isUserAdmin) {
+      alert("Acesso negado: somente Administradores podem abrir as Configurações.");
+      setIsMobileMenuOpen(false);
+      return;
+    }
+
+    const requiredModule = activeTabAccessModule(String(t));
+    const hasRequiredModule =
+      !requiredModule ||
+      (t === "colaboradores"
+        ? canAccessModule("hr") || canAccessModule("personal_documents")
+        : canAccessModule(requiredModule));
+    if (!hasRequiredModule) {
+      alert("Acesso negado: seu perfil não possui autorização para este módulo.");
+      setIsMobileMenuOpen(false);
+      return;
+    }
+
     if (currentUser && !isUserAdmin) {
       const hasPendingPayslip = payslips.some(p => 
         p.employeeId === currentUser.id && 
@@ -1500,6 +1511,7 @@ export default function InternalPortal({
     | "logos"
     | "photos"
     | "users"
+    | "access"
     | "system"
     | "standards"
     | "import"
@@ -2226,16 +2238,7 @@ Status atual: ${e.status}.`,
     "all" | "aso" | "cnh_reg" | "training" | "birthday"
   >("all");
 
-  const canViewRhAlerts =
-    currentUser?.role === "Administrador" ||
-    currentUser?.role === "Admin" ||
-    currentUser?.role === "admin" ||
-    currentUser?.role === "RH" ||
-    currentUser?.role === "Recursos Humanos" ||
-    currentUser?.role === "Financeiro" ||
-    currentUser?.role === "Gerente" ||
-    currentUser?.role === "master" ||
-    currentUser?.role === "Diretor";
+  const canViewRhAlerts = canManagePayslips;
 
   // Alertas e Status de Padrões RBC (VISÍVEL PARA TODOS OS USUÁRIOS)
   const standardsDashboardAlerts = React.useMemo(() => {
@@ -6081,19 +6084,21 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
-          <button
-            onClick={() => setActiveTab("dashboard")}
-            className="w-full text-left px-3 py-2 rounded text-slate-700 hover:bg-slate-50"
-          >
-            Dashboard
-          </button>
+          {canAccessModule("dashboard") && (
+            <button
+              onClick={() => setActiveTab("dashboard")}
+              className="w-full text-left px-3 py-2 rounded text-slate-700 hover:bg-slate-50"
+            >
+              Dashboard
+            </button>
+          )}
 
           <div className="pt-4 pb-1">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
               Recepção
             </span>
           </div>
-          {!isLimitedRole && (
+          {canAccessModule("clients") && (
             <button
               onClick={() => setActiveTab("clients")}
               className="w-full text-left px-3 py-2 rounded text-slate-700 hover:bg-slate-50"
@@ -6101,19 +6106,21 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               Clientes
             </button>
           )}
-          <button
-            onClick={() => setActiveTab("entrada_material")}
-            className="w-full text-left px-3 py-2 rounded text-slate-700 hover:bg-slate-50"
-          >
-            Entrada de Material
-          </button>
+          {canAccessModule("material_intake") && (
+            <button
+              onClick={() => setActiveTab("entrada_material")}
+              className="w-full text-left px-3 py-2 rounded text-slate-700 hover:bg-slate-50"
+            >
+              Entrada de Material
+            </button>
+          )}
 
           <div className="pt-4 pb-1">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
               Laboratório
             </span>
           </div>
-          {(isCalibrationTechnicianRole(currentUser?.role) || currentUser?.role === 'Administrador' || currentUser?.role === 'admin' || currentUser?.role === 'Admin') && (
+          {canAccessModule("digital_signature") && (
             <button
               onClick={() => setActiveTab("minha_assinatura")}
               className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
@@ -6126,7 +6133,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               <span>Minha Assinatura</span>
             </button>
           )}
-          <button
+          {canAccessModule("calibration") && <button
             onClick={() => setActiveTab("instruments")}
             className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
               activeTab === "instruments" || activeTab === "bench"
@@ -6136,8 +6143,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           >
             <Gauge className="h-4 w-4 text-slate-500" />
             <span>Calibração</span>
-          </button>
-          <button
+          </button>}
+          {canAccessModule("field_service") && <button
             onClick={() => setActiveTab("field_service")}
             className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
               activeTab === "field_service"
@@ -6147,15 +6154,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             <span>Serviço de Campo</span>
-          </button>
-          {!isLimitedRole && (
+          </button>}
+          {(canAccessModule("inventory") || canAccessModule("hr")) && (
             <>
               <div className="pt-4 pb-1">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
                   RH & Estoque
                 </span>
               </div>
-              <button
+              {canAccessModule("inventory") && <button
                 onClick={() => setActiveTab("controle_estoque")}
                 className={`w-full text-left px-3 py-2 rounded transition-colors ${
                   activeTab === "controle_estoque"
@@ -6164,12 +6171,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 }`}
               >
                 Controle de Estoque
-              </button>
-              {canManageRh && (
+              </button>}
+              {canAccessModule("hr") && (
                 <button
                   onClick={() => {
-                    setActiveTab("colaboradores");
                     setRhSubTab("cadastro");
+                    setActiveTab("colaboradores");
                   }}
                   className={`w-full text-left px-3 py-2 rounded transition-colors ${
                     activeTab === "colaboradores" &&
@@ -6189,11 +6196,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               Pessoal
             </span>
           </div>
-          <button
+          {canAccessModule("personal_documents") && <button
             onClick={() => {
-              setActiveTab("colaboradores");
               setRhSubTab("contra_cheques");
               setActivePayslipTab("meus");
+              setActiveTab("colaboradores");
             }}
             className={`w-full text-left px-3 py-2 rounded transition-colors ${
               activeTab === "colaboradores" && rhSubTab === "contra_cheques"
@@ -6202,8 +6209,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             }`}
           >
             Meus Documentos
-          </button>
-          <button
+          </button>}
+          {canAccessModule("internal_communication") && <button
             onClick={() => setActiveTab("comunicacao_interna")}
             className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
               activeTab === "comunicacao_interna"
@@ -6213,16 +6220,16 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           >
             <MessageSquare className="h-4 w-4 text-slate-500 inline-block mr-1" />
             <span>Comunicação Interna</span>
-          </button>
+          </button>}
 
-          {(canAccessFinance || canManageRh) && (
+          {(canAccessModule("finance") || canAccessModule("health_programs")) && (
             <>
               <div className="pt-4 pb-1">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
                   Administrativo
                 </span>
               </div>
-              {canAccessFinance && (
+              {canAccessModule("finance") && (
                 <button
                   onClick={() => setActiveTab("financeiro")}
                   className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
@@ -6235,7 +6242,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <span>Financeiro</span>
                 </button>
               )}
-              {canManageRh && (
+              {canAccessModule("health_programs") && (
                 <button
                   onClick={() => setActiveTab("programas_saude")}
                   className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
@@ -6251,14 +6258,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             </>
           )}
 
-                    {isUserAdmin && (
+          {(canAccessModule("audit") || isUserAdmin || canAccessModule("firebase_usage")) && (
             <>
               <div className="pt-4 pb-1">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
                   Admin
                 </span>
               </div>
-              <button
+              {canAccessModule("audit") && <button
                 onClick={() => setActiveTab("auditoria")}
                 className={`w-full text-left px-3 py-2 rounded font-medium flex items-center space-x-2 transition-colors ${
                   activeTab === "auditoria"
@@ -6268,8 +6275,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               >
                 <ShieldCheck className="h-4 w-4 text-slate-500" />
                 <span>Auditoria e Metrologia</span>
-              </button>
-              <button
+              </button>}
+              {isUserAdmin && <button
                 onClick={() => setActiveTab("configuracoes")}
                 className={`w-full text-left px-3 py-2 rounded font-medium flex items-center space-x-2 transition-colors ${
                   activeTab === "configuracoes" ||
@@ -6280,8 +6287,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               >
                 <Settings className="h-4 w-4 text-slate-500" />
                 <span>Configurações</span>
-              </button>
-              <button
+              </button>}
+              {canAccessModule("firebase_usage") && <button
                 onClick={() => setActiveTab("consumo_firebase")}
                 className={`w-full text-left px-3 py-2 rounded font-medium flex items-center space-x-2 transition-colors ${
                   activeTab === "consumo_firebase"
@@ -6291,7 +6298,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               >
                 <Database className="h-4 w-4 text-slate-500" />
                 <span>Consumo Firebase</span>
-              </button>
+              </button>}
             </>
           )}
 
@@ -6350,7 +6357,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   {currentUser?.name || "Administrador"}
                 </span>
                 <span className="text-[10px] text-slate-500 block">
-                  {currentUser?.role || "Usuário"} ({currentUser?.permissionLevel || "Acesso Total"})
+                  {currentUser?.role || "Cargo não informado"} · {currentUser?.accessProfileName || currentUser?.permissionLevel || "Perfil padrão"}
                 </span>
               </div>
               <div className="w-9 h-9 rounded-full bg-royal-blue text-white font-extrabold text-xs flex items-center justify-center shadow-xs">
@@ -6360,7 +6367,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           </div>
         </div>
 
-        {activeTab === "dashboard" && (
+        {activeTab === "dashboard" && canAccessModule("dashboard") && (
           <div className="space-y-8">
             {/* CARDS QUANTITATIVOS DA OPERAÇÃO & METROLOGIA (VISÍVEL PARA TODOS OS USUÁRIOS) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -6940,7 +6947,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: CLIENTS */}
-        {(activeTab === "clients" || activeTab === "cadastro_cliente") && (
+        {(activeTab === "clients" || activeTab === "cadastro_cliente") && canAccessModule("clients") && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
@@ -7234,7 +7241,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: INSTRUMENTS (Inventário) */}
-        {activeTab === "instruments" && (
+        {activeTab === "instruments" && canAccessModule("calibration") && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
@@ -8087,18 +8094,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       const hasRegPhoto = !!inst.photoRegistration;
                       const hasCalPhoto = !!inst.photoCalibrated;
 
-                      const userRole = currentUser?.role || "";
-                      const isUserAdmin =
-                        currentUser?.permissionLevel === "Administrador" ||
-                        (!currentUser?.permissionLevel &&
-                          (userRole === "Administrador" ||
-                            userRole === "Admin" ||
-                            userRole === "admin" ||
-                            userRole === "master" ||
-                            userRole === "Diretor" ||
-                            userRole === "Diretoria"));
-                      const isTechLab = isCalibrationTechnicianRole(userRole);
-                      const canAccessCalibrarRole = isUserAdmin || isTechLab;
+                      const canAccessCalibrarRole = canAccessModule("calibration");
 
                       // Para administrador, as fotos não são obrigatórias para abrir calibração ou certificado
                       const canOpenCert =
@@ -8533,7 +8529,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: ENTRADA DE MATERIAL */}
-        {activeTab === "entrada_material" && (
+        {activeTab === "entrada_material" && canAccessModule("material_intake") && (
           <div className="space-y-6 print:space-y-0">
             {/* Top Header Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden">
@@ -11794,16 +11790,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
         {/* TAB: AUDITORIA DE CALIBRAÇÃO (Relatório de Tempos) */}
         {activeTab === "auditoria" &&
-          (!isUserAdmin ? (
+          (!canAccessModule("audit") ? (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4 my-6">
               <ShieldAlert className="h-12 w-12 text-rose-500 mx-auto" />
               <h3 className="text-lg font-bold text-slate-900">
-                Acesso Restrito ao Administrador
+                Acesso não autorizado
               </h3>
               <p className="text-sm text-slate-600 max-w-md mx-auto">
                 A aba de Auditoria e Relatórios de Tempo de Calibração é de
-                visibilidade restrita e exclusiva para usuários com perfil
-                Administrador.
+                visibilidade restrita aos perfis autorizados para o módulo de Auditoria.
               </p>
             </div>
           ) : (<><div className="space-y-6 print:space-y-4">
@@ -13240,19 +13235,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
-        {activeTab === "field_service" && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
-        {activeTab === "financeiro" && canAccessFinance && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
-        {activeTab === "programas_saude" && canManageRh && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
-        {activeTab === "comunicacao_interna" && <InternalCommunication currentUser={currentUser as any} />}
-        {activeTab === "minha_assinatura" && <MySignature currentUser={currentUser as any} onUpdateUser={onUpdateInternalUser || (() => {})} />}
+        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
+        {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
+        {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
+        {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && <InternalCommunication currentUser={currentUser as any} />}
+        {activeTab === "minha_assinatura" && canAccessModule("digital_signature") && <MySignature currentUser={currentUser as any} onUpdateUser={onUpdateInternalUser || (() => {})} />}
 
         {/* TAB: CONSUMO FIREBASE */}
-        {activeTab === "consumo_firebase" && (
+        {activeTab === "consumo_firebase" && canAccessModule("firebase_usage") && (
           <FirebaseUsagePanel onNavigateToAudit={() => setActiveTab("auditoria")} />
         )}
 
         {/* TAB: CONFIGURAÇÕES E ADMINISTRAÇÃO */}
-        {(activeTab === "configuracoes" ||
+        {isUserAdmin && (activeTab === "configuracoes" ||
           activeTab === "cadastro_usuarios") && (
           <div className="space-y-6">
             <div>
@@ -13305,6 +13300,19 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               >
                 <Camera className="h-4 w-4" />
                 <span>Fotos do Site Institucional</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setConfigSubTab("access")}
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
+                  configSubTab === "access"
+                    ? "bg-royal-blue text-white shadow-sm"
+                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                }`}
+              >
+                <KeyRound className="h-4 w-4" />
+                <span>Perfis de Acesso</span>
               </button>
 
               <button
@@ -13385,6 +13393,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                 <span>Segurança do Banco</span>
               </button>
             </div>
+
+            {configSubTab === "access" && (
+              <AccessProfileManagement
+                currentUser={currentUser as any}
+                internalUsers={internalUsers}
+                onAssignAccessProfile={onAssignAccessProfile}
+              />
+            )}
 
             {/* SUB-TAB 1: CADASTRO DA EMPRESA */}
             {configSubTab === "company" && (
@@ -16348,7 +16364,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: ANIVERSARIOS (RH) */}
-        {activeTab === "controle_estoque" && (
+        {activeTab === "controle_estoque" && canAccessModule("inventory") && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
@@ -17440,7 +17456,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         )}
 
         {/* TAB: CONTRA-CHEQUES (RH & Estoque) */}
-        {activeTab === "colaboradores" && rhSubTab === "contra_cheques" && (
+        {activeTab === "colaboradores" && rhSubTab === "contra_cheques" &&
+          (canAccessModule("personal_documents") || canManagePayslips) && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
@@ -17453,9 +17470,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   LGPD.
                 </p>
               </div>
-              {(isUserAdmin ||
-                currentUser?.role === "Recursos Humanos (RH)" ||
-                currentUser?.role === "Financeiro") && (
+              {canManagePayslips && (
                 <div className="flex space-x-2">
                   <button
                     onClick={() => {
@@ -17489,9 +17504,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             </div>
 
             {/* Subtabs for HR/Admin users */}
-            {(isUserAdmin ||
-              currentUser?.role === "Recursos Humanos (RH)" ||
-              currentUser?.role === "Financeiro") && (
+            {canManagePayslips && (
               <div className="flex border-b border-slate-200 mb-6">
                 <button
                   className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 ${
@@ -17517,11 +17530,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             )}
 
             {/* MEUS CONTRA-CHEQUES */}
-            {(!(
-              isUserAdmin ||
-              currentUser?.role === "Recursos Humanos (RH)" ||
-              currentUser?.role === "Financeiro"
-            ) ||
+            {(!canManagePayslips ||
               activePayslipTab === "meus") && (
               <div className="space-y-6">
                 {payslips.some(p => p.employeeId === currentUser?.id && !p.visualized && Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11) && (
@@ -17795,9 +17804,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             )}
 
             {/* GERENCIAR CONTRA-CHEQUES (RH / Admin) */}
-            {(isUserAdmin ||
-              currentUser?.role === "Recursos Humanos (RH)" ||
-              currentUser?.role === "Financeiro") &&
+            {canManagePayslips &&
               activePayslipTab === "gerenciar" && (
                 <div className="space-y-6">
                   {/* Complete List with Audit Log */}

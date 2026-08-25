@@ -12,6 +12,20 @@ import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 import { adminAuth, adminDb, adminStorage, adminStorageBucketName } from './src/lib/firebase-admin.ts';
 import { FieldPath, FieldValue } from 'firebase-admin/firestore';
+import {
+  ACCESS_MODULE_CATALOG,
+  ALL_ACCESS_MODULES,
+  DEFAULT_ACCESS_PROFILES,
+  getDefaultAccessProfile,
+  isAdministratorAccess,
+  legacyPermissionLevelForProfile,
+  resolveLegacyAccessProfileId,
+  resolveUserAccessModules,
+  sanitizeAccessModules,
+  userHasAccessModule,
+  type AccessModuleId,
+  type AccessProfileDefinition,
+} from './src/access-control.ts';
 
 let firebaseConfig: any = {};
 try {
@@ -27,33 +41,15 @@ const firestoreDb = adminDb;
 const normalizeAccessValue = (value: unknown) => String(value || '').trim().toLowerCase();
 
 const isAdministratorProfile = (profile: any): boolean => {
-  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
-  if (permissionLevel) {
-    return permissionLevel === 'administrador';
-  }
-  const role = normalizeAccessValue(profile?.role);
-  return ['administrador', 'admin', 'master', 'diretor', 'diretoria'].includes(role);
+  return isAdministratorAccess(profile);
 };
 
 const isRhProfile = (profile: any): boolean => {
-  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
-  const role = normalizeAccessValue(profile?.role);
-  return [
-    'recursos humanos (rh)',
-    'recursos humanos',
-    'rh',
-  ].includes(permissionLevel) || [
-    'recursos humanos (rh)',
-    'recursos humanos',
-    'rh',
-  ].includes(role);
+  return userHasAccessModule(profile, 'hr');
 };
 
 const isFinanceProfile = (profile: any): boolean => {
-  const permissionLevel = normalizeAccessValue(profile?.permissionLevel);
-  const role = normalizeAccessValue(profile?.role);
-  return ['financeiro', 'financeira', 'finance'].includes(permissionLevel) ||
-    ['financeiro', 'financeira', 'finance'].includes(role);
+  return userHasAccessModule(profile, 'finance');
 };
 
 const isInternalDecodedToken = (decoded: any): boolean => {
@@ -86,6 +82,14 @@ const requireAdminOrRhAccount = (req: AuthRequest, res: Response, next: NextFunc
   }
   next();
 };
+
+const requireAccessModule = (moduleId: AccessModuleId) =>
+  (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user || !isInternalDecodedToken(req.user) || !userHasAccessModule(req.user as any, moduleId)) {
+      return res.status(403).json({ error: 'MODULE_ACCESS_DENIED', moduleId });
+    }
+    next();
+  };
 
 type RateLimitBucket = { count: number; resetAt: number };
 const apiRateLimitBuckets = new Map<string, RateLimitBucket>();
@@ -295,12 +299,127 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   return { id: match.id, ...data };
 };
 
+const cloneDefaultAccessProfile = (profile: AccessProfileDefinition): AccessProfileDefinition => ({
+  ...profile,
+  modules: [...profile.modules],
+});
+
+const normalizeStoredAccessProfile = (
+  id: string,
+  data: any,
+  fallback?: AccessProfileDefinition,
+): AccessProfileDefinition => {
+  const isAdministrator = id === 'administrator';
+  return {
+    ...(fallback ? cloneDefaultAccessProfile(fallback) : {}),
+    id,
+    name: asLimitedString(data?.name || fallback?.name || 'Perfil de acesso', 100),
+    description: asLimitedString(data?.description || fallback?.description || '', 400),
+    modules: isAdministrator
+      ? [...ALL_ACCESS_MODULES]
+      : sanitizeAccessModules(data?.modules ?? fallback?.modules),
+    isSystem: fallback?.isSystem === true,
+    isAdministrator,
+    active: data?.active !== false,
+    version: Math.max(1, Number(data?.version || fallback?.version || 1) || 1),
+    createdAt: data?.createdAt ? String(data.createdAt) : undefined,
+    createdBy: data?.createdBy ? String(data.createdBy) : undefined,
+    updatedAt: data?.updatedAt ? String(data.updatedAt) : undefined,
+    updatedBy: data?.updatedBy ? String(data.updatedBy) : undefined,
+  };
+};
+
+const getAccessProfileById = async (profileId: string): Promise<AccessProfileDefinition | null> => {
+  if (!firestoreDb) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  const safeProfileId = String(profileId || '').trim();
+  if (!safeProfileId) return null;
+
+  const fallback = getDefaultAccessProfile(safeProfileId);
+  const snapshot = await firestoreDb.collection('accessProfiles').doc(safeProfileId).get();
+  if (!snapshot.exists && !fallback) return null;
+
+  return normalizeStoredAccessProfile(
+    safeProfileId,
+    snapshot.exists ? snapshot.data() : fallback,
+    fallback,
+  );
+};
+
+const listAccessProfiles = async (): Promise<AccessProfileDefinition[]> => {
+  if (!firestoreDb) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  const snapshot = await firestoreDb.collection('accessProfiles').get();
+  const storedById = new Map(snapshot.docs.map((doc) => [doc.id, doc.data()]));
+  const profiles = DEFAULT_ACCESS_PROFILES.map((fallback) =>
+    normalizeStoredAccessProfile(fallback.id, storedById.get(fallback.id) || fallback, fallback),
+  );
+
+  snapshot.docs.forEach((doc) => {
+    if (!getDefaultAccessProfile(doc.id)) {
+      profiles.push(normalizeStoredAccessProfile(doc.id, doc.data()));
+    }
+  });
+
+  return profiles
+    .filter((profile) => profile.active !== false)
+    .sort((a, b) => {
+      if (a.id === 'administrator') return -1;
+      if (b.id === 'administrator') return 1;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+};
+
+const resolveAccessProfileForUser = async (
+  user: any,
+  requestedProfileId?: string,
+): Promise<AccessProfileDefinition> => {
+  const profileId = String(
+    requestedProfileId || user?.accessProfileId || resolveLegacyAccessProfileId(user),
+  ).trim();
+  const resolved = await getAccessProfileById(profileId);
+  if (resolved?.active !== false) return resolved;
+
+  const fallbackId = isAdministratorAccess(user) ? 'administrator' : 'limited';
+  return (await getAccessProfileById(fallbackId)) || cloneDefaultAccessProfile(
+    getDefaultAccessProfile(fallbackId)!,
+  );
+};
+
+const hydrateUserAccess = async (profile: any, requestedProfileId?: string) => {
+  const accessProfile = await resolveAccessProfileForUser(profile, requestedProfileId);
+  return {
+    ...profile,
+    accessProfileId: accessProfile.id,
+    accessProfileName: accessProfile.name,
+    accessProfileVersion: accessProfile.version || 1,
+    allowedModules: accessProfile.isAdministrator
+      ? [...ALL_ACCESS_MODULES]
+      : [...accessProfile.modules],
+  };
+};
+
+const refreshInternalUserClaims = async (profile: any) => {
+  if (!adminAuth) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+  const hydratedProfile = await hydrateUserAccess(profile);
+  const authUid = String(hydratedProfile?.authUid || '').trim();
+  if (!authUid) return hydratedProfile;
+
+  const authUser = await adminAuth.getUser(authUid);
+  await adminAuth.setCustomUserClaims(authUid, {
+    ...(authUser.customClaims || {}),
+    ...buildInternalClaims(hydratedProfile),
+  });
+  return hydratedProfile;
+};
+
 const buildInternalClaims = (profile: any) => {
-  const claims: Record<string, string | boolean> = {
+  const claims: Record<string, string | boolean | number | string[]> = {
     accountType: 'internal',
     portalUserId: String(profile.id),
     passwordChangeRequired:
       profile?.passwordChangeRequired !== false || profile?.mustChangePassword === true,
+    accessProfileId: String(profile?.accessProfileId || resolveLegacyAccessProfileId(profile)),
+    accessProfileVersion: Math.max(1, Number(profile?.accessProfileVersion || 1) || 1),
+    allowedModules: resolveUserAccessModules(profile),
   };
 
   if (profile?.username) claims.username = String(profile.username).trim().toLowerCase();
@@ -328,6 +447,12 @@ const sanitizePortalUserForDirectory = (profile: any) => {
     username: String(profile.username || ''),
     role: String(profile.role || ''),
     permissionLevel: profile.permissionLevel ? String(profile.permissionLevel) : undefined,
+    accessProfileId: profile.accessProfileId ? String(profile.accessProfileId) : undefined,
+    accessProfileName: profile.accessProfileName ? String(profile.accessProfileName) : undefined,
+    accessProfileVersion: Number.isFinite(Number(profile.accessProfileVersion))
+      ? Number(profile.accessProfileVersion)
+      : undefined,
+    allowedModules: sanitizeAccessModules(profile.allowedModules),
     register: profile.register ? String(profile.register) : '',
     workEmail: profile.workEmail ? String(profile.workEmail) : '',
     companyUnit: profile.companyUnit ? String(profile.companyUnit) : '',
@@ -439,7 +564,7 @@ const requireInternalPortalRequester = async (decoded: any) => {
   }
   const profile = await findPortalUserForAuth(decoded);
   if (!profile) throw new Error('INTERNAL_PROFILE_NOT_FOUND');
-  return profile;
+  return hydrateUserAccess(profile);
 };
 
 const ensureOfficialClientAuthUser = async (
@@ -680,7 +805,7 @@ const syncInternalAuthProfile = async (decoded: any) => {
     await firestoreDb.collection('portalUsers').doc(profile.id).update(updates);
   }
 
-  const mergedProfile = { ...profile, ...updates };
+  const mergedProfile = await hydrateUserAccess({ ...profile, ...updates });
   const authUser = await adminAuth.getUser(decoded.uid);
   await adminAuth.setCustomUserClaims(decoded.uid, {
     ...(authUser.customClaims || {}),
@@ -1019,7 +1144,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.post('/api/inventory/items', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+app.post('/api/inventory/items', requireAuth, requireInternalAccount, requireAccessModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
 
   const name = asLimitedString(req.body?.name, 180);
@@ -1077,7 +1202,7 @@ app.post('/api/inventory/items', requireAuth, requireInternalAccount, writeApiRa
   }
 });
 
-app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, requireAccessModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const itemId = asLimitedString(req.params.id, 160);
   if (!itemId) return res.status(400).json({ error: 'INVALID_ITEM_ID' });
@@ -1132,7 +1257,7 @@ app.patch('/api/inventory/items/:id', requireAuth, requireInternalAccount, write
   }
 });
 
-app.post('/api/inventory/move', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+app.post('/api/inventory/move', requireAuth, requireInternalAccount, requireAccessModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
 
   const itemId = asLimitedString(req.body?.itemId, 160);
@@ -2557,7 +2682,190 @@ app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res)
   }
 });
 
-app.get('/api/internal/clients', requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+app.get(
+  '/api/internal/access-profiles',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (_req: AuthRequest, res) => {
+    try {
+      const profiles = await listAccessProfiles();
+      return res.json({
+        success: true,
+        modules: ACCESS_MODULE_CATALOG,
+        profiles,
+      });
+    } catch (error) {
+      console.error('List access profiles error:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.put(
+  '/api/internal/access-profiles',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+      const requester = await requireInternalPortalRequester(req.user);
+      const requestedId = asLimitedString(req.body?.id, 100);
+      const isCreating = !requestedId;
+      const profileId = requestedId || `profile_${randomBytes(8).toString('hex')}`;
+
+      if (profileId === 'administrator') {
+        return res.status(400).json({ error: 'ADMINISTRATOR_PROFILE_IS_IMMUTABLE' });
+      }
+      if (!/^[a-z0-9_-]{3,100}$/i.test(profileId)) {
+        return res.status(400).json({ error: 'INVALID_ACCESS_PROFILE_ID' });
+      }
+
+      const name = asLimitedString(req.body?.name, 100);
+      const description = asLimitedString(req.body?.description, 400);
+      const modules = sanitizeAccessModules(req.body?.modules);
+      if (!name) return res.status(400).json({ error: 'ACCESS_PROFILE_NAME_REQUIRED' });
+      if (modules.length === 0) {
+        return res.status(400).json({ error: 'ACCESS_PROFILE_REQUIRES_MODULE' });
+      }
+
+      const profileRef = firestoreDb.collection('accessProfiles').doc(profileId);
+      const currentSnapshot = await profileRef.get();
+      if (isCreating && currentSnapshot.exists) {
+        return res.status(409).json({ error: 'ACCESS_PROFILE_ALREADY_EXISTS' });
+      }
+
+      const current = currentSnapshot.data() || {};
+      const nowIso = new Date().toISOString();
+      const actorName = asLimitedString(requester?.name || requester?.username, 160) || 'Administrador';
+      const nextVersion = Math.max(1, Number(current.version || 0) + 1);
+      const storedProfile = {
+        name,
+        description,
+        modules,
+        active: true,
+        version: nextVersion,
+        createdAt: current.createdAt || nowIso,
+        createdBy: current.createdBy || actorName,
+        updatedAt: nowIso,
+        updatedBy: actorName,
+      };
+      await profileRef.set(storedProfile, { merge: true });
+
+      const linkedUsers = await firestoreDb
+        .collection('portalUsers')
+        .where('accessProfileId', '==', profileId)
+        .get();
+      await Promise.all(
+        linkedUsers.docs.map(async (doc) => {
+          try {
+            await refreshInternalUserClaims({ id: doc.id, ...doc.data() });
+          } catch (error) {
+            console.error(`Could not refresh claims for portal user ${doc.id}:`, error);
+          }
+        }),
+      );
+
+      await firestoreDb.collection('systemAuditLogs').add({
+        action: isCreating ? 'ACCESS_PROFILE_CREATED' : 'ACCESS_PROFILE_UPDATED',
+        entityType: 'accessProfile',
+        entityId: profileId,
+        actorUid: String(req.user?.uid || ''),
+        actorName,
+        actorRole: String(requester?.accessProfileName || requester?.permissionLevel || 'Administrador'),
+        createdAt: nowIso,
+        immutable: true,
+        summary: `${isCreating ? 'Perfil de acesso criado' : 'Perfil de acesso atualizado'}: ${name}`,
+        metadata: { modules, version: nextVersion, affectedUsers: linkedUsers.size },
+      });
+
+      const profile = normalizeStoredAccessProfile(
+        profileId,
+        storedProfile,
+        getDefaultAccessProfile(profileId),
+      );
+      return res.json({ success: true, profile, affectedUsers: linkedUsers.size });
+    } catch (error) {
+      console.error('Save access profile error:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.put(
+  '/api/internal/portal-users/:id/access-profile',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+      const requester = await requireInternalPortalRequester(req.user);
+      const targetId = asLimitedString(req.params.id, 160);
+      const accessProfileId = asLimitedString(req.body?.accessProfileId, 100);
+      if (!targetId || !accessProfileId) {
+        return res.status(400).json({ error: 'ACCESS_PROFILE_ASSIGNMENT_REQUIRED' });
+      }
+
+      const accessProfile = await getAccessProfileById(accessProfileId);
+      if (!accessProfile || accessProfile.active === false) {
+        return res.status(404).json({ error: 'ACCESS_PROFILE_NOT_FOUND' });
+      }
+      if (requester.id === targetId && accessProfile.id !== 'administrator') {
+        return res.status(409).json({ error: 'CANNOT_REMOVE_OWN_ADMIN_ACCESS' });
+      }
+
+      const targetRef = firestoreDb.collection('portalUsers').doc(targetId);
+      const targetSnapshot = await targetRef.get();
+      if (!targetSnapshot.exists) {
+        return res.status(404).json({ error: 'PORTAL_USER_NOT_FOUND' });
+      }
+
+      const target: any = { id: targetSnapshot.id, ...targetSnapshot.data() };
+      const permissionLevel = legacyPermissionLevelForProfile(accessProfile.id);
+      const nowIso = new Date().toISOString();
+      await targetRef.update({
+        accessProfileId: accessProfile.id,
+        permissionLevel,
+        accessProfileUpdatedAt: nowIso,
+        accessProfileUpdatedBy: String(requester?.name || requester?.username || 'Administrador'),
+      });
+
+      const hydratedTarget = await refreshInternalUserClaims({
+        ...target,
+        accessProfileId: accessProfile.id,
+        permissionLevel,
+      });
+      await firestoreDb.collection('systemAuditLogs').add({
+        action: 'USER_ACCESS_PROFILE_ASSIGNED',
+        entityType: 'portalUser',
+        entityId: targetId,
+        actorUid: String(req.user?.uid || ''),
+        actorName: String(requester?.name || requester?.username || 'Administrador'),
+        actorRole: String(requester?.accessProfileName || requester?.permissionLevel || 'Administrador'),
+        createdAt: nowIso,
+        immutable: true,
+        summary: `Perfil ${accessProfile.name} atribuído a ${String(target?.name || target?.username || targetId)}`,
+        metadata: {
+          accessProfileId: accessProfile.id,
+          accessProfileName: accessProfile.name,
+          professionalRolePreserved: String(target?.role || ''),
+        },
+      });
+
+      return res.json({ success: true, user: sanitizePortalUserForClient(hydratedTarget) });
+    } catch (error: any) {
+      if (error?.code === 'auth/user-not-found') {
+        return res.status(409).json({ error: 'AUTH_USER_NOT_FOUND' });
+      }
+      console.error('Assign access profile error:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.get('/api/internal/clients', requireAuth, requireInternalAccount, requireAccessModule('clients'), async (req: AuthRequest, res) => {
   try {
     if (!req.user || !firestoreDb) {
       return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
@@ -2588,6 +2896,12 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     const sequence = Math.max(0, Math.min(9999, Number(req.body?.sequence || 0) || 0));
     const allowed = new Set(['instrument-registration', 'instrument-calibrated', 'intake-entry']);
     if (!allowed.has(purpose)) return res.status(400).json({ error: 'INVALID_UPLOAD_PURPOSE' });
+    const requiredModule: AccessModuleId = purpose === 'intake-entry'
+      ? 'material_intake'
+      : 'calibration';
+    if (!userHasAccessModule(req.user as any, requiredModule)) {
+      return res.status(403).json({ error: 'MODULE_ACCESS_DENIED', moduleId: requiredModule });
+    }
 
     const { buffer, contentType, extension } = decodeOperationalDataUrl(req.body?.imageDataUrl);
     const timestamp = Date.now();
@@ -2948,7 +3262,8 @@ app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, admi
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     const role = String(req.body?.role || '').trim();
-    const permissionLevel = String(req.body?.permissionLevel || '').trim();
+    const requestedAccessProfileId = String(req.body?.accessProfileId || 'limited').trim();
+    const accessProfile = await getAccessProfileById(requestedAccessProfileId);
 
     if (!email.endsWith('@comanins.internal')) {
       return res.status(400).json({ error: 'INVALID_INTERNAL_EMAIL' });
@@ -2956,13 +3271,22 @@ app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, admi
     if (password.length < 10) {
       return res.status(400).json({ error: 'WEAK_TEMP_PASSWORD' });
     }
+    if (!accessProfile || accessProfile.active === false) {
+      return res.status(400).json({ error: 'INVALID_ACCESS_PROFILE' });
+    }
 
-    const initialClaims: Record<string, string | boolean> = {
+    const permissionLevel = legacyPermissionLevelForProfile(accessProfile.id);
+    const initialClaims: Record<string, string | boolean | number | string[]> = {
       accountType: 'internal',
       passwordChangeRequired: true,
+      accessProfileId: accessProfile.id,
+      accessProfileVersion: accessProfile.version || 1,
+      allowedModules: accessProfile.isAdministrator
+        ? [...ALL_ACCESS_MODULES]
+        : [...accessProfile.modules],
+      permissionLevel,
     };
     if (role) initialClaims.role = role;
-    if (permissionLevel) initialClaims.permissionLevel = permissionLevel;
 
     try {
       const created = await adminAuth.createUser({
@@ -3418,7 +3742,7 @@ app.post("/api/send-document-notification", requireAuth, requireInternalAccount,
   const documentType = asLimitedString(req.body?.documentType, 120);
 
   try {
-    const requesterProfile = await findPortalUserForAuth(req.user);
+    const requesterProfile = await requireInternalPortalRequester(req.user);
     const canNotifyForOthers = requesterProfile && (
       isAdministratorProfile(requesterProfile) ||
       isRhProfile(requesterProfile) ||

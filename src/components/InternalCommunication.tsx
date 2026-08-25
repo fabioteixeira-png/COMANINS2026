@@ -4,6 +4,7 @@ import { InternalTicket, TicketMessage } from "../types";
 import { syncInternalTickets, saveInternalTicket, deleteInternalTicket, PortalUser } from "../lib/firebase";
 import { compressImageToWebResolution } from "../lib/imageCompressor";
 import { safeFetch } from "../utils/apiClient";
+import { isAdministratorAccess, userHasAccessModule } from "../access-control";
 
 export interface ParsedAttachment {
   name: string;
@@ -221,8 +222,9 @@ export default function InternalCommunication({ currentUser }: { currentUser: Po
   const [previewAttachment, setPreviewAttachment] = useState<ParsedAttachment | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const isUserAdmin = currentUser?.permissionLevel === "Administrador" || currentUser?.role === "Administrador" || currentUser?.role === "Admin" || currentUser?.role === "admin" || currentUser?.role === "Diretoria" || currentUser?.role === "master";
-  const isFinanceOrAdmin = isUserAdmin || currentUser?.role === "Financeiro" || currentUser?.role === "Recursos Humanos (RH)";
+  const isUserAdmin = isAdministratorAccess(currentUser);
+  const isFinanceOrAdmin =
+    isUserAdmin || userHasAccessModule(currentUser, "internal_communication_management");
 
   useEffect(() => {
     const unsub = syncInternalTickets((list) => {

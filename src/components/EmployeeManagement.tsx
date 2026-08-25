@@ -14,9 +14,10 @@ import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrain
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { verifyAdminCredentials } from '../utils/authApi';
+import { isAdministratorAccess, userHasAccessModule } from '../access-control';
 
 interface EmployeeManagementProps {
-  currentUser: { name: string; username: string; role: string; register: string; permissionLevel?: string } | null;
+  currentUser: { name: string; username: string; role: string; register: string; permissionLevel?: string; accessProfileId?: string; allowedModules?: string[] } | null;
   internalUsers: PortalUser[];
   employeeTrainings?: any[];
   employeeAsos?: any[];
@@ -46,12 +47,12 @@ export default function EmployeeManagement({
   activeRhTab,
   setActiveRhTab
 }: EmployeeManagementProps) {
-  const isUserAdmin = currentUser?.permissionLevel === 'Administrador' || (!currentUser?.permissionLevel && (currentUser?.role === 'Administrador' || currentUser?.role === 'Admin' || currentUser?.role === 'admin' || currentUser?.role === 'master' || currentUser?.role === 'Diretor'));
+  const isUserAdmin = isAdministratorAccess(currentUser);
   // Access control check for sensitive data (LGPD)
-  const isAuthorizedRH = 
-    currentUser?.role === 'Administrador' || 
-    currentUser?.role === 'Recursos Humanos (RH)' || 
-    currentUser?.role === 'Financeiro';
+  const isAuthorizedRH =
+    isUserAdmin ||
+    userHasAccessModule(currentUser, 'hr') ||
+    userHasAccessModule(currentUser, 'finance');
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -742,10 +743,17 @@ export default function EmployeeManagement({
       const { password: _legacyPassword, ...safeFormData } = formData as Partial<PortalUser> & { password?: string };
       const updatePayload: any = {
         ...safeFormData,
-        permissionLevel: (formData as any).permissionLevel || 'Padrão',
         mustChangePassword: formData.mustChangePassword ?? selectedUser.mustChangePassword,
         auditLogs: logs
       };
+
+      // Autorização é administrada exclusivamente em Configurações > Perfis de Acesso.
+      // O formulário de RH não regrava nem apaga os vínculos existentes.
+      delete updatePayload.permissionLevel;
+      delete updatePayload.accessProfileId;
+      delete updatePayload.accessProfileName;
+      delete updatePayload.accessProfileVersion;
+      delete updatePayload.allowedModules;
       
       // Não regravar campos legados volumosos e, principalmente, não apagá-los.
       // A ausência da chave no update preserva o valor existente no Firestore
@@ -763,7 +771,6 @@ export default function EmployeeManagement({
         name: formData.name || '',
         username: formData.username?.trim().toLowerCase() || '',
         role: formData.role || 'Técnico de Laboratório',
-        permissionLevel: (formData as any).permissionLevel || 'Padrão',
         register: formData.register || `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
         mustChangePassword: true,
         auditLogs: logs
@@ -771,6 +778,11 @@ export default function EmployeeManagement({
       createPayload.attachedDocs = null;
       createPayload.asoContracts = null;
       createPayload.employeeTrainings = null;
+      delete createPayload.permissionLevel;
+      delete createPayload.accessProfileId;
+      delete createPayload.accessProfileName;
+      delete createPayload.accessProfileVersion;
+      delete createPayload.allowedModules;
       onAddInternalUser(createPayload);
       alert('Novo colaborador cadastrado com sucesso! No primeiro acesso, o colaborador deverá alterar a senha padrão.');
     }
@@ -2661,7 +2673,7 @@ export default function EmployeeManagement({
                 <div className="space-y-4">
                   <h4 className="font-bold text-slate-900 border-b border-slate-200 pb-2 text-sm flex items-center space-x-2">
                     <Key className="h-4 w-4 text-royal-blue" />
-                    <span>7. Controle Interno, Login do Sistema e Equipamentos</span>
+                    <span>7. Controle Interno, Login e Equipamentos</span>
                   </h4>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2678,18 +2690,14 @@ export default function EmployeeManagement({
                       />
                     </div>
 
-                    <div>
-                      <label className="block font-semibold mb-1">Nível de Permissão no Sistema</label>
-                      <select
-                        value={(formData as any).permissionLevel || 'Padrão'}
-                        onChange={(e) => setFormData({ ...formData, permissionLevel: e.target.value } as any)}
-                        disabled={!isUserAdmin}
-                        className="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 font-bold disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <option value="Administrador">Administrador (Total)</option>
-                        <option value="Padrão">Padrão (Intermediário)</option>
-                        <option value="Limitado">Limitado (Restrito)</option>
-                      </select>
+                    <div className="md:col-span-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950">
+                      <div className="font-extrabold flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4" /> Perfil de acesso separado do Cargo
+                      </div>
+                      <p className="mt-1 leading-relaxed">
+                        O perfil e os módulos autorizados são definidos pelo Administrador em
+                        <b> Configurações → Perfis de Acesso</b>. Alterações nesta ficha preservam a autorização atual.
+                      </p>
                     </div>
 
                     <div className="md:col-span-3">

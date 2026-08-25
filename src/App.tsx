@@ -65,6 +65,10 @@ export default function App() {
     role: string;
     register: string;
     permissionLevel?: string;
+    accessProfileId?: string;
+    accessProfileName?: string;
+    allowedModules?: string[];
+    accessProfileVersion?: number;
   } | null>(null);
 
   // Custom logo state for reports and certificates
@@ -471,9 +475,10 @@ export default function App() {
   };
 
   // USER MANAGEMENT ACTIONS (Firestore)
-  const handleAddInternalUser = async (newUser: { name: string; username: string; role: string; permissionLevel?: string; register: string; password?: string }) => {
+  const handleAddInternalUser = async (newUser: { name: string; username: string; role: string; permissionLevel?: string; accessProfileId?: string; register: string; password?: string }) => {
     try {
       const email = `${newUser.username.toLowerCase()}@comanins.internal`;
+      const initialAccessProfileId = newUser.accessProfileId || 'limited';
       const generatedTempPass = (() => {
         const bytes = new Uint32Array(4);
         crypto.getRandomValues(bytes);
@@ -487,7 +492,7 @@ export default function App() {
           email,
           password: tempPass,
           role: newUser.role,
-          permissionLevel: newUser.permissionLevel,
+          accessProfileId: initialAccessProfileId,
         })
       });
       const data = await res.json();
@@ -528,6 +533,8 @@ export default function App() {
       cleanUser.passwordChangeRequired = true;
       cleanUser.authUid = data.uid;
       cleanUser.authEmail = email;
+      cleanUser.accessProfileId = initialAccessProfileId;
+      cleanUser.permissionLevel = initialAccessProfileId === 'limited' ? 'Limitado' : 'Padrão';
       delete cleanUser.password;
 
       const savedUser = await addPortalUserDoc(cleanUser);
@@ -592,6 +599,27 @@ export default function App() {
          alert("⚠️ Erro ao salvar alterações: " + err.message);
       }
     }
+  };
+
+  const handleAssignAccessProfile = async (
+    id: string,
+    accessProfileId: string,
+  ): Promise<PortalUser> => {
+    const response = await authJsonFetch(
+      `/api/internal/portal-users/${encodeURIComponent(id)}/access-profile`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ accessProfileId }),
+      },
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.user) {
+      throw new Error(data?.error || 'ACCESS_PROFILE_ASSIGNMENT_FAILED');
+    }
+
+    const updatedUser = data.user as PortalUser;
+    setInternalUsers(prev => prev.map(user => user.id === id ? { ...user, ...updatedUser } : user));
+    return updatedUser;
   };
 
   const handleDeleteInternalUser = async (username: string) => {
@@ -698,6 +726,7 @@ export default function App() {
             internalUsers={internalUsers}
             onAddInternalUser={handleAddInternalUser}
             onUpdateInternalUser={handleUpdateInternalUser}
+            onAssignAccessProfile={handleAssignAccessProfile}
             onDeleteInternalUser={handleDeleteInternalUser}
             onLogout={async () => {
               try {

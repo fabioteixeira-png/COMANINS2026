@@ -18,6 +18,10 @@ export interface InternalUser {
   authUid?: string;
   authEmail?: string;
   permissionLevel?: string;
+  accessProfileId?: string;
+  accessProfileName?: string;
+  allowedModules?: string[];
+  accessProfileVersion?: number;
   signaturePath?: string;
   signatureVersion?: number;
   signatureDate?: string;
