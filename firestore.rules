@@ -343,6 +343,9 @@ service cloud.firestore {
       // arquivamento só podem ser escritos pelo backend (Admin SDK).
       allow update: if hasEditModule('calibration')
         && resource.data.status != 'Entregue'
+        // A ficha de registro representa o estado histórico de entrada do
+        // instrumento e não pode ser alterada pelo navegador após a criação.
+        && request.resource.data.get('registrationSnapshot', null) == resource.data.get('registrationSnapshot', null)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
         ]);
@@ -423,8 +426,37 @@ service cloud.firestore {
     // Financeiro: acesso somente para Financeiro e Administradores.
     match /financeTransactions/{document=**} {
       allow read: if canManageFinance();
-      allow create: if canEditFinance();
-      allow update: if canEditFinance() && archiveFieldsUntouched();
+      allow create: if canEditFinance()
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.get('paidAmount', 0) == 0
+        && request.resource.data.get('openBalance', request.resource.data.amount) == request.resource.data.amount
+        && request.resource.data.get('settlements', []).size() == 0
+        && request.resource.data.status != 'pago'
+        // Compatibilidade de rollout: clientes antigos que ainda não enviam
+        // createdByUid continuam válidos; quando o campo existir, ele só pode
+        // identificar o próprio usuário autenticado.
+        && request.resource.data.get('createdByUid', request.auth.uid) == request.auth.uid;
+      // Baixas (paidAmount/openBalance/settlements) são autoritativas no backend
+      // transacional. O navegador pode editar os dados cadastrais do título,
+      // mas não pode fabricar ou apagar histórico de pagamentos/recebimentos.
+      allow update: if canEditFinance()
+        && archiveFieldsUntouched()
+        // A autoria de criação e a data original são imutáveis. O UID do
+        // último editor, quando alterado, deve corresponder ao token atual.
+        && request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
+        && request.resource.data.get('createdAt', '') == resource.data.get('createdAt', '')
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['updatedByUid'])
+          || request.resource.data.get('updatedByUid', '') == request.auth.uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'paidAmount', 'openBalance', 'settlements',
+          'importFingerprint', 'importedAt', 'importedBy'
+        ])
+        && (resource.data.get('paidAmount', 0) == 0
+          || request.resource.data.amount == resource.data.amount)
+        && (request.resource.data.status != 'pago'
+          || (request.resource.data.get('paidAmount', 0) == request.resource.data.amount
+            && request.resource.data.get('openBalance', request.resource.data.amount) == 0));
       allow delete: if false;
     }
     match /financeContracts/{document=**} {

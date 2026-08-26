@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle, 
-  X, FileText, Upload, DollarSign, Eye, RefreshCw 
+import {
+  Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle,
+  X, FileText, Upload, DollarSign, Eye, RefreshCw
 } from 'lucide-react';
 import { FinanceTransaction } from '../../types';
-import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction } from '../../lib/firebase';
+import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction } from '../../lib/firebase';
 
-export default function ContasReceber({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
+interface ContasReceberProps {
+  requestAdminDelete?: (type: string, id: string, name: string) => void;
+  canEdit?: boolean;
+  currentUserName?: string;
+}
+
+export default function ContasReceber({ requestAdminDelete, canEdit = false, currentUserName = '' }: ContasReceberProps) {
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -20,22 +26,23 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
   // Form states
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState(0); // bruto
+  const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
   const [category, setCategory] = useState('Serviço'); // Tipo de receita
-  const [costCenter, setCostCenter] = useState('Contrato Braskem');
-  const [contractNumber, setContractNumber] = useState('CT-2025-01');
+  const [costCenter, setCostCenter] = useState('');
+  const [contractNumber, setContractNumber] = useState('');
   const [contactName, setContactName] = useState(''); // Cliente
   const [contactDocument, setContactDocument] = useState(''); // CNPJ/CPF
   const [documentNumber, setDocumentNumber] = useState(''); // NF
   const [paymentMethod, setPaymentMethod] = useState('TED');
-  const [bankAccount, setBankAccount] = useState('Itaú Sede');
+  const [bankAccount, setBankAccount] = useState('');
   const [notes, setNotes] = useState('');
   const [retentions, setRetentions] = useState(0); // Deductible taxes
 
   // Baja states
   const [receivedDate, setReceivedDate] = useState(new Date().toISOString().split('T')[0]);
   const [amountReceived, setAmountReceived] = useState(0);
-  const [bajaBankAccount, setBajaBankAccount] = useState('Itaú Sede');
+  const [bajaBankAccount, setBajaBankAccount] = useState('');
 
   useEffect(() => {
     const unsubscribe = syncFinanceTransactions((data) => {
@@ -45,6 +52,7 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
   }, []);
 
   const handleDelete = async (tx: FinanceTransaction) => {
+    if (!canEdit) return;
     if (requestAdminDelete) {
       requestAdminDelete('finance_transaction', tx.id, `Receita: ${tx.description}`);
     } else {
@@ -55,34 +63,37 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
   };
 
   const handleOpenForm = (tx: FinanceTransaction | null) => {
+    if (!canEdit) return;
     if (tx) {
       setSelectedTx(tx);
       setDescription(tx.description);
-      setAmount(tx.amount);
+      setAmount(Number(tx.grossAmount ?? (Number(tx.amount || 0) + Number(tx.retentions || 0))));
+      setTransactionDate(tx.date || new Date().toISOString().split('T')[0]);
       setDueDate(tx.dueDate);
       setCategory(tx.category);
       setCostCenter(tx.costCenter);
-      setContractNumber(tx.contractNumber || 'CT-2025-01');
+      setContractNumber(tx.contractNumber || '');
       setContactName(tx.contactName);
       setContactDocument(tx.contactDocument);
       setDocumentNumber(tx.documentNumber);
       setPaymentMethod(tx.paymentMethod);
       setBankAccount(tx.bankAccount);
       setNotes(tx.notes || '');
-      setRetentions(0);
+      setRetentions(Number(tx.retentions || 0));
     } else {
       setSelectedTx(null);
       setDescription('');
       setAmount(0);
+      setTransactionDate(new Date().toISOString().split('T')[0]);
       setDueDate(new Date().toISOString().split('T')[0]);
       setCategory('Serviço');
-      setCostCenter('Contrato Braskem');
-      setContractNumber('CT-2025-01');
+      setCostCenter('');
+      setContractNumber('');
       setContactName('');
       setContactDocument('');
       setDocumentNumber('');
       setPaymentMethod('TED');
-      setBankAccount('Itaú Sede');
+      setBankAccount('');
       setNotes('');
       setRetentions(0);
     }
@@ -91,12 +102,15 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
 
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     const finalAmount = amount - retentions;
     const data: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt'> = {
       type: 'receita',
       description,
       amount: finalAmount,
-      date: new Date().toISOString().split('T')[0],
+      grossAmount: amount,
+      retentions,
+      date: transactionDate,
       dueDate,
       status: selectedTx ? selectedTx.status : 'pendente',
       category,
@@ -107,12 +121,20 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
       paymentMethod,
       bankAccount,
       contractNumber,
-      createdBy: 'Administrador',
-      notes: `${notes} \n [Valor Bruto: R$ ${amount} - Retenções: R$ ${retentions}]`.trim()
+      createdBy: selectedTx?.createdBy || currentUserName || 'Usuário autenticado',
+      notes
     };
 
     if (selectedTx) {
-      await updateFinanceTransaction(selectedTx.id, data);
+      if (Number(selectedTx.paidAmount || 0) > 0) {
+        data.amount = selectedTx.amount;
+        data.grossAmount = selectedTx.grossAmount;
+        data.retentions = selectedTx.retentions;
+      }
+      await updateFinanceTransaction(selectedTx.id, {
+        ...data,
+        updatedBy: currentUserName || 'Usuário autenticado',
+      });
     } else {
       await addFinanceTransaction(data);
     }
@@ -120,30 +142,35 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
   };
 
   const handleOpenBaja = (tx: FinanceTransaction) => {
+    if (!canEdit) return;
     setSelectedTx(tx);
-    setAmountReceived(tx.amount);
+    const openBalance = Number.isFinite(Number(tx.openBalance)) ? Number(tx.openBalance) : Math.max(0, Number(tx.amount || 0) - Number(tx.paidAmount || 0));
+    setAmountReceived(openBalance);
+    setBajaBankAccount(tx.bankAccount || '');
     setShowBajaModal(true);
   };
 
   const handleSaveBaja = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTx) return;
-
-    const remaining = selectedTx.amount - amountReceived;
-    const isPartial = remaining > 0;
-
-    await updateFinanceTransaction(selectedTx.id, {
-      status: isPartial ? 'pendente' : 'pago',
-      amount: isPartial ? remaining : selectedTx.amount,
-      notes: `${selectedTx.notes || ''} \n [Recebimento ${isPartial ? 'Parcial' : 'Total'} de R$ ${amountReceived} em ${receivedDate} via ${bajaBankAccount}]`.trim()
-    });
-
-    setShowBajaModal(false);
+    if (!canEdit || !selectedTx || amountReceived <= 0) return;
+    try {
+      await settleFinanceTransaction({
+        transactionId: selectedTx.id,
+        amount: amountReceived,
+        date: receivedDate,
+        bankAccount: bajaBankAccount,
+        paymentMethod: selectedTx.paymentMethod || paymentMethod,
+        notes: 'Recebimento registrado pelo Contas a Receber',
+      });
+      setShowBajaModal(false);
+    } catch (error: any) {
+      alert(error?.message || 'Não foi possível registrar o recebimento.');
+    }
   };
 
   // Filter list
   const filtered = transactions.filter(t => {
-    const matchesSearch = t.contactName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = t.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           t.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'todos' || t.status === statusFilter;
     const matchesContract = contractFilter === 'todos' || t.contractNumber === contractFilter;
@@ -163,16 +190,16 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Buscar cliente/descrição..." 
+            <input
+              type="text"
+              placeholder="Buscar cliente/descrição..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none" 
+              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none"
             />
           </div>
 
-          <select 
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
@@ -183,7 +210,7 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
             <option value="atrasado">Atrasado</option>
           </select>
 
-          <select 
+          <select
             value={contractFilter}
             onChange={(e) => setContractFilter(e.target.value)}
             className="border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
@@ -192,13 +219,15 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
             {contractsList.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
-          <button 
-            onClick={() => handleOpenForm(null)} 
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Nova Receita</span>
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => handleOpenForm(null)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Nova Receita</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -231,7 +260,10 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                   {new Date(item.dueDate).toLocaleDateString('pt-BR')}
                 </td>
                 <td className="px-6 py-4 text-right font-mono font-bold text-slate-800">
-                  R$ {item.amount.toFixed(2).replace('.', ',')}
+                  <div>R$ {item.amount.toFixed(2).replace('.', ',')}</div>
+                  {Number(item.openBalance ?? item.amount) < item.amount && (
+                    <div className="text-[10px] font-sans font-semibold text-amber-700">Saldo: R$ {Number(item.openBalance ?? item.amount).toFixed(2).replace('.', ',')}</div>
+                  )}
                 </td>
                 <td className="px-6 py-4 text-center">
                   {item.status === 'pago' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"><CheckCircle className="h-3 w-3 mr-1" /> Recebido</span>}
@@ -240,8 +272,8 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex items-center justify-center space-x-2">
-                    {item.status !== 'pago' && (
-                      <button 
+                    {canEdit && item.status !== 'pago' && (
+                      <button
                         onClick={() => handleOpenBaja(item)}
                         className="p-1 text-emerald-600 hover:text-emerald-800 font-bold text-xs border border-emerald-200 rounded bg-emerald-50 px-2 py-1 flex items-center space-x-1"
                         title="Efetuar Recebimento"
@@ -250,8 +282,10 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                         <span>Baixar</span>
                       </button>
                     )}
-                    <button onClick={() => handleOpenForm(item)} className="p-1 text-slate-400 hover:text-royal-blue"><Edit className="h-4 w-4" /></button>
-                    <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                    {canEdit && (<>
+                      <button onClick={() => handleOpenForm(item)} className="p-1 text-slate-400 hover:text-royal-blue"><Edit className="h-4 w-4" /></button>
+                      <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                    </>)}
                   </div>
                 </td>
               </tr>
@@ -267,7 +301,7 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
       </div>
 
       {/* Receivable Form Modal */}
-      {showFormModal && (
+      {showFormModal && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center">
@@ -310,12 +344,7 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Centro de Custo de Destino *</label>
-                  <select value={costCenter} onChange={(e) => setCostCenter(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
-                    <option value="Contrato Braskem">Contrato Braskem</option>
-                    <option value="Contrato Acelen">Contrato Acelen</option>
-                    <option value="Laboratório Metrológico">Laboratório Metrológico</option>
-                    <option value="Sede (Corporativo)">Sede (Corporativo)</option>
-                  </select>
+                  <input type="text" required value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="Centro de custo real do lançamento" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
                 </div>
               </div>
 
@@ -334,7 +363,11 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Data do Lançamento / Competência *</label>
+                  <input type="date" required value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Data de Vencimento *</label>
                   <input type="date" required value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
@@ -360,9 +393,9 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                   <FileText className="h-4 w-4 text-slate-500" />
                   <span className="text-xs font-semibold text-slate-600">Documento de Medição Aprovada / NF-e</span>
                 </div>
-                <button type="button" className="text-xs font-bold text-emerald-600 hover:underline flex items-center space-x-1">
+                <button type="button" disabled title="Upload documental financeiro será liberado após validação específica" className="text-xs font-bold text-slate-400 flex items-center space-x-1 cursor-not-allowed">
                   <Upload className="h-3.5 w-3.5" />
-                  <span>Anexar NF em PDF</span>
+                  <span>Anexos financeiros: em implantação</span>
                 </button>
               </div>
 
@@ -376,7 +409,7 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
       )}
 
       {/* Baja / Receipt Modal */}
-      {showBajaModal && selectedTx && (
+      {showBajaModal && selectedTx && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center">
@@ -388,38 +421,35 @@ export default function ContasReceber({ requestAdminDelete }: { requestAdminDele
                 <p><strong>Cliente:</strong> {selectedTx.contactName}</p>
                 <p><strong>Contrato:</strong> {selectedTx.contractNumber}</p>
                 <p><strong>Descrição:</strong> {selectedTx.description}</p>
-                <p><strong>Valor Pendente:</strong> R$ {selectedTx.amount.toFixed(2).replace('.', ',')}</p>
+                <p><strong>Valor Pendente:</strong> R$ {Number(selectedTx.openBalance ?? selectedTx.amount).toFixed(2).replace('.', ',')}</p>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Valor Efetivamente Recebido (R$) *</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  required 
-                  value={amountReceived} 
-                  onChange={(e) => setAmountReceived(Number(e.target.value))} 
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" 
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={amountReceived}
+                  onChange={(e) => setAmountReceived(Number(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Data de Recebimento Efetivo *</label>
-                <input 
-                  type="date" 
-                  required 
-                  value={receivedDate} 
-                  onChange={(e) => setReceivedDate(e.target.value)} 
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" 
+                <input
+                  type="date"
+                  required
+                  value={receivedDate}
+                  onChange={(e) => setReceivedDate(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Conta Bancária de Entrada *</label>
-                <select value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
-                  <option value="Itaú Sede">Itaú Sede</option>
-                  <option value="Bradesco Operacional">Bradesco Operacional</option>
-                </select>
+                <input type="text" required value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} placeholder="Conta bancária de entrada" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end space-x-2">

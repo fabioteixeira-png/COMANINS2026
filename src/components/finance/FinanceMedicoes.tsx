@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Filter, Edit, FileCheck, CheckCircle, Clock, Trash2, X, DollarSign, Calendar, FileText } from 'lucide-react';
 import { FinanceMeasurement, FinanceContract } from '../../types';
-import { 
-  syncFinanceMeasurements, 
-  deleteFinanceMeasurement, 
-  addFinanceMeasurement, 
+import {
+  syncFinanceMeasurements,
+  deleteFinanceMeasurement,
+  addFinanceMeasurement,
   updateFinanceMeasurement,
-  syncFinanceContracts 
+  syncFinanceContracts
 } from '../../lib/firebase';
 
-export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
+export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }: { requestAdminDelete?: (type: string, id: string, name: string) => void; canEdit?: boolean }) {
   const [showModal, setShowModal] = useState(false);
   const [measurements, setMeasurements] = useState<FinanceMeasurement[]>([]);
   const [contracts, setContracts] = useState<FinanceContract[]>([]);
   const [editingItem, setEditingItem] = useState<FinanceMeasurement | null>(null);
-  
+
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -44,6 +44,7 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
   }, []);
 
   const handleDelete = async (med: FinanceMeasurement) => {
+    if (!canEdit) return;
     if (requestAdminDelete) {
       requestAdminDelete('finance_measurement', med.id, `Medição: ${med.contractNumber} (${med.period})`);
     } else {
@@ -54,6 +55,7 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
   };
 
   const handleOpenAddModal = () => {
+    if (!canEdit) return;
     setEditingItem(null);
     setSelectedContractId('manual');
     setContractNumber('');
@@ -68,8 +70,9 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
   };
 
   const handleOpenEditModal = (item: FinanceMeasurement) => {
+    if (!canEdit) return;
     setEditingItem(item);
-    
+
     // Check if contract belongs to existing contracts
     const match = contracts.find(c => c.contractNumber === item.contractNumber);
     if (match) {
@@ -77,7 +80,7 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
     } else {
       setSelectedContractId('manual');
     }
-    
+
     setContractNumber(item.contractNumber);
     setClientName(item.clientName);
     setPeriod(item.period);
@@ -104,6 +107,7 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
   };
 
   const handleEmitNF = async (item: FinanceMeasurement) => {
+    if (!canEdit) return;
     const nf = prompt('Digite o número da Nota Fiscal para faturamento:', item.invoiceNumber || '');
     if (nf !== null) {
       await updateFinanceMeasurement(item.id, {
@@ -116,7 +120,8 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    if (!canEdit) return;
+
     if (!contractNumber.trim() || !clientName.trim() || !period.trim() || !value.trim()) {
       alert('Por favor, preencha todos os campos obrigatórios.');
       return;
@@ -157,14 +162,14 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
 
   // Filter Logic
   const filteredMeasurements = measurements.filter(item => {
-    const matchesSearch = 
+    const matchesSearch =
       item.contractNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.period.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (item.invoiceNumber && item.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()));
-    
+
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
 
@@ -208,15 +213,15 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Buscar medição..." 
+            <input
+              type="text"
+              placeholder="Buscar medição..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none w-48 sm:w-64" 
+              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none w-48 sm:w-64"
             />
           </div>
-          
+
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -229,13 +234,13 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
             <option value="cancelada">Cancelada</option>
           </select>
 
-          <button 
-            onClick={handleOpenAddModal} 
+          {canEdit && <button
+            onClick={handleOpenAddModal}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors"
           >
             <Plus className="h-4 w-4" />
             <span>Nova Medição</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -278,27 +283,29 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex items-center justify-center space-x-2">
-                    <button 
+                    {canEdit && <>
+                    <button
                       onClick={() => handleEmitNF(item)}
-                      className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-slate-100 rounded" 
+                      className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-slate-100 rounded"
                       title="Emitir NF / Faturar"
                     >
                       <FileCheck className="h-4 w-4" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleOpenEditModal(item)}
                       className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-slate-100 rounded"
                       title="Editar Medição"
                     >
                       <Edit className="h-4 w-4" />
                     </button>
-                    <button 
-                      onClick={() => handleDelete(item)} 
+                    <button
+                      onClick={() => handleDelete(item)}
                       className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded"
                       title="Excluir"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
+                    </>}
                   </div>
                 </td>
               </tr>
@@ -314,21 +321,21 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
       </div>
 
       {/* Modern, elegant Modal for Registering/Editing a Measurement */}
-      {showModal && (
+      {showModal && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
               <h4 className="text-base font-extrabold text-slate-900">
                 {editingItem ? 'Editar Medição de Serviço' : 'Nova Medição de Serviço'}
               </h4>
-              <button 
-                onClick={() => setShowModal(false)} 
+              <button
+                onClick={() => setShowModal(false)}
                 className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
+
             <form onSubmit={handleSave} className="p-6 space-y-4">
               {/* Select Contract dropdown */}
               <div>
@@ -355,14 +362,14 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Número do Contrato *
                   </label>
-                  <input 
-                    type="text" 
-                    required 
+                  <input
+                    type="text"
+                    required
                     disabled={selectedContractId !== 'manual'}
-                    value={contractNumber} 
-                    onChange={(e) => setContractNumber(e.target.value)} 
-                    placeholder="Ex: CT-2026-04" 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-500" 
+                    value={contractNumber}
+                    onChange={(e) => setContractNumber(e.target.value)}
+                    placeholder="Ex: CT-2026-04"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-500"
                   />
                 </div>
 
@@ -371,14 +378,14 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Nome do Cliente *
                   </label>
-                  <input 
-                    type="text" 
-                    required 
+                  <input
+                    type="text"
+                    required
                     disabled={selectedContractId !== 'manual'}
-                    value={clientName} 
-                    onChange={(e) => setClientName(e.target.value)} 
-                    placeholder="Ex: Braskem S.A." 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-500" 
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="Ex: Braskem S.A."
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-500"
                   />
                 </div>
               </div>
@@ -389,13 +396,13 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Período da Medição *
                   </label>
-                  <input 
-                    type="text" 
-                    required 
-                    value={period} 
-                    onChange={(e) => setPeriod(e.target.value)} 
-                    placeholder="Ex: 01/08 a 31/08" 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm" 
+                  <input
+                    type="text"
+                    required
+                    value={period}
+                    onChange={(e) => setPeriod(e.target.value)}
+                    placeholder="Ex: 01/08 a 31/08"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm"
                   />
                 </div>
 
@@ -427,14 +434,14 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 text-xs font-bold">R$</span>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      required 
-                      value={value} 
-                      onChange={(e) => setValue(e.target.value)} 
-                      placeholder="0,00" 
-                      className="w-full border border-slate-300 rounded-lg p-2.5 pl-9 text-sm font-mono" 
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={value}
+                      onChange={(e) => setValue(e.target.value)}
+                      placeholder="0,00"
+                      className="w-full border border-slate-300 rounded-lg p-2.5 pl-9 text-sm font-mono"
                     />
                   </div>
                 </div>
@@ -444,12 +451,12 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Data de Envio *
                   </label>
-                  <input 
-                    type="date" 
-                    required 
-                    value={sendDate} 
-                    onChange={(e) => setSendDate(e.target.value)} 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm" 
+                  <input
+                    type="date"
+                    required
+                    value={sendDate}
+                    onChange={(e) => setSendDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm"
                   />
                 </div>
               </div>
@@ -460,12 +467,12 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Número NF-e (Opcional)
                   </label>
-                  <input 
-                    type="text" 
-                    value={invoiceNumber} 
-                    onChange={(e) => setInvoiceNumber(e.target.value)} 
-                    placeholder="Ex: 2450" 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm" 
+                  <input
+                    type="text"
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    placeholder="Ex: 2450"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm"
                   />
                 </div>
 
@@ -488,15 +495,15 @@ export default function FinanceMedicoes({ requestAdminDelete }: { requestAdminDe
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end space-x-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowModal(false)} 
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
                   className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors"
                 >
                   Cancelar
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-sm transition-colors"
                 >
                   {editingItem ? 'Salvar Alterações' : 'Cadastrar Medição'}

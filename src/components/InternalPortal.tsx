@@ -664,6 +664,55 @@ const resolveCalibrationLabelData = (
   return { certificateNumber, calibrationDate };
 };
 
+const CALIBRATION_CONSUMABLE_OPTIONS = [
+  'Ponteiro', 'Escala', 'Vidro', 'Borracha / Vedação', 'Válvula de segurança',
+  'Glicerina', 'Óleo de silicone', 'O-ring', 'Junta', 'Niple', 'Conexão',
+  'Parafuso', 'Porca', 'Arruela', 'Lacre', 'Bateria', 'Cabo', 'Conector',
+  'Prensa-cabo', 'Mola', 'Bucha', 'Diafragma', 'Sifão', 'Adaptador'
+] as const;
+
+const INSTRUMENT_SHEET_FIELDS: Array<{ key: string; label: string }> = [
+  { key: 'certificateNumber', label: 'Nº do Certificado / COMA' },
+  { key: 'tag', label: 'TAG' },
+  { key: 'description', label: 'Descrição' },
+  { key: 'brand', label: 'Fabricante / Marca' },
+  { key: 'model', label: 'Modelo' },
+  { key: 'serialNumber', label: 'Nº de Série' },
+  { key: 'category', label: 'Categoria' },
+  { key: 'typeSpec', label: 'Tipo do Instrumento' },
+  { key: 'metrologicalNorm', label: 'Norma Metrológica' },
+  { key: 'sensorType', label: 'Tipo de Sensor' },
+  { key: 'outputSignal', label: 'Sinal de Saída' },
+  { key: 'setPoint', label: 'Set Point' },
+  { key: 'contactType', label: 'Tipo de Contato' },
+  { key: 'thermalMedium', label: 'Meio Térmico' },
+  { key: 'hasteLength', label: 'Comprimento da Haste' },
+  { key: 'rangeMin', label: 'Faixa Mínima' },
+  { key: 'rangeMax', label: 'Faixa Máxima' },
+  { key: 'unit', label: 'Unidade' },
+  { key: 'unitNegative', label: 'Unidade Negativa' },
+  { key: 'rangeMin2', label: '2ª Faixa Mínima' },
+  { key: 'rangeMax2', label: '2ª Faixa Máxima' },
+  { key: 'unit2', label: '2ª Unidade' },
+  { key: 'accuracyClass', label: 'Classe de Exatidão' },
+  { key: 'escala', label: 'Escala' },
+  { key: 'escala2', label: '2ª Escala' },
+  { key: 'unidade2', label: 'Unidade da 2ª Escala' },
+  { key: 'mpe', label: 'MPE' },
+  { key: 'material', label: 'Material' },
+  { key: 'conexao', label: 'Conexão' },
+  { key: 'diametro', label: 'Diâmetro' },
+  { key: 'numeroDaEntrada', label: 'Nº da Entrada' },
+  { key: 'dataEntrada', label: 'Data da Entrada' },
+  { key: 'condicao', label: 'Condição Geral' },
+  { key: 'condicaoDeEntrada', label: 'Condição de Entrada' },
+  { key: 'materialDeRetorno', label: 'Material de Retorno' },
+  { key: 'dataDeRetorno', label: 'Data de Retorno' },
+  { key: 'status', label: 'Status no Registro' },
+  { key: 'createdAt', label: 'Registrado em' },
+  { key: 'observacoes', label: 'Observações do Registro' },
+];
+
 interface InternalPortalProps {
   onBackToSite: () => void;
   currentUser: {
@@ -726,8 +775,8 @@ export default function InternalPortal({
 
   React.useEffect(() => {
     if (
-      currentUser && 
-      isCalibrationTechnicianRole(currentUser.role) && 
+      currentUser &&
+      isCalibrationTechnicianRole(currentUser.role) &&
       !currentUser.signaturePath
     ) {
       const hasSeen = sessionStorage.getItem(`sig_alert_${currentUser.id}`);
@@ -803,7 +852,7 @@ export default function InternalPortal({
     return (h > 17 || (h === 17 && m >= 30)) || (h < 7);
   };
 
-  const initIsRestricted = 
+  const initIsRestricted =
     checkIsAfterHours() &&
     !isUserAdmin;
 
@@ -845,9 +894,9 @@ export default function InternalPortal({
     }
 
     if (currentUser && !isUserAdmin) {
-      const hasPendingPayslip = payslips.some(p => 
-        p.employeeId === currentUser.id && 
-        !p.visualized && 
+      const hasPendingPayslip = payslips.some(p =>
+        p.employeeId === currentUser.id &&
+        !p.visualized &&
         Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
       );
       if (hasPendingPayslip && (t !== "colaboradores" || rhSubTab !== "contra_cheques" || activePayslipTab !== "meus")) {
@@ -871,7 +920,7 @@ export default function InternalPortal({
         cancelActiveCalibrationRef.current();
       }
     }
-    
+
     setRawActiveTab(t);
     setIsMobileMenuOpen(false);
   };
@@ -909,11 +958,11 @@ export default function InternalPortal({
 
   useEffect(() => {
     if (!currentUser || isUserAdmin) return;
-    
+
     // Check pending 11 days payslips first
-    const hasPendingPayslip = payslips.some(p => 
-      p.employeeId === currentUser.id && 
-      !p.visualized && 
+    const hasPendingPayslip = payslips.some(p =>
+      p.employeeId === currentUser.id &&
+      !p.visualized &&
       Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
     );
 
@@ -929,11 +978,11 @@ export default function InternalPortal({
 
     if (checkIsAfterHours() && !afterHoursBypass) {
       const isAllowed = activeTab === "colaboradores" && rhSubTab === "contra_cheques";
-      
+
       if (!isAllowed) {
         setAfterHoursTargetTab(activeTab);
         setAfterHoursTargetSubTab(rhSubTab);
-        
+
         setRawActiveTab("colaboradores");
         setRhSubTab("contra_cheques");
         setActivePayslipTab("meus");
@@ -945,13 +994,13 @@ export default function InternalPortal({
   // Background check for email notifications
   useEffect(() => {
     if (!payslips.length) return;
-    
+
     payslips.forEach(async (p) => {
       if (p.visualized) return;
-      
+
       const diffTime = Date.now() - new Date(p.createdAt).getTime();
       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      
+
       if (diffDays >= 10 && !p.emailSent10Days) {
          // simulate send email to fabio
          console.log(`[EMAIL ENVIADO para fabio.teixeira@comanins.com.br]: O colaborador ${p.employeeName} não visualizou a documentação pessoal após 10 dias.`);
@@ -1003,6 +1052,10 @@ export default function InternalPortal({
   const [benchPoints, setBenchPoints] = useState<any>([]);
   const [benchPointCount, setBenchPointCount] = useState<number>(5);
   const [benchTechnician, setBenchTechnician] = useState<any>("");
+  const [benchMaterialsUsed, setBenchMaterialsUsed] = useState<string[]>([]);
+  const [benchCustomMaterial, setBenchCustomMaterial] = useState<string>("");
+  const [showBenchMaterialSelector, setShowBenchMaterialSelector] = useState(false);
+  const [benchMaterialSearch, setBenchMaterialSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<any>("");
   const [certificateType, setCertificateType] = useState<any>("");
   const [chatInput, setChatInput] = useState<any>("");
@@ -1202,7 +1255,7 @@ export default function InternalPortal({
 
     return (employeeTrainings || []).map((record: any) => {
       const training = (trainings || []).find((t: any) => t.id === record.trainingId);
-      
+
       let expDateStr = record.expirationDate || "";
       if (!expDateStr && record.completionDate && training?.validityMonths) {
         const compDate = new Date(record.completionDate + (record.completionDate.includes("T") ? "" : "T00:00:00"));
@@ -1397,6 +1450,7 @@ export default function InternalPortal({
   >(null);
   const [showEditInstrumentModal, setShowEditInstrumentModal] =
     useState<boolean>(false);
+  const [instrumentSheetInstrument, setInstrumentSheetInstrument] = useState<Instrument | null>(null);
 
   // RNC State (Relatórios de Não Conformidade)
   const [rncReports, setRncReports] = useState<RncReport[]>([]);
@@ -1670,7 +1724,7 @@ export default function InternalPortal({
           await deleteEmployeeBirthdayDoc(deleteTarget.id);
         } else if (deleteTarget.type === "intake") {
           await deleteIntakeDoc(deleteTarget.id);
-          
+
         } else if (deleteTarget.type === "inventory") {
           await deleteInventoryItemDoc(deleteTarget.id);
         } else if (deleteTarget.type === "training") {
@@ -1703,10 +1757,10 @@ export default function InternalPortal({
           }
         } else if (deleteTarget.type === "inst_photo_reg" as any) {
           await updateInstrumentDoc(deleteTarget.id, { photoRegistration: "" });
-          
+
         } else if (deleteTarget.type === "inst_photo_calib" as any) {
           await updateInstrumentDoc(deleteTarget.id, { photoCalibrated: "" });
-          
+
         } else if (deleteTarget.type === "finance_transaction") {
           const fb = await import('../lib/firebase');
           await fb.deleteFinanceTransaction(deleteTarget.id);
@@ -4011,7 +4065,7 @@ Status atual: ${e.status}.`,
               const padroesRaw = row.padroes_utilizados || row["padrões utilizados"] || "";
               const selectedStds = padroesRaw ? padroesRaw.split(',').map((s) => s.trim()).filter(Boolean) : [];
               const matchedStds = referenceStandards.filter((rs) => selectedStds.some((s) => rs.certificateNumber.toLowerCase().includes(s.toLowerCase()) || rs.identification?.toLowerCase().includes(s.toLowerCase())));
-              
+
               let parsedPoints = [];
               for (let i = 1; i <= 10; i++) {
                 const nom = row[`p${i}_nominal`];
@@ -5200,7 +5254,7 @@ Status atual: ${e.status}.`,
     if (benchTemperature < 15 || benchTemperature > 25 || benchHumidity < 30 || benchHumidity > 70) {
       alert("AVISO: A condição ambiental do laboratório não está atendendo o Procedimento Interno Comanins. Temperatura permitida: 20ºC ± 5ºC. Umidade permitida: 50% ± 20%.");
       // The prompt says "deverá emitir um alerta". We emit the alert but we shouldn't necessarily block if they acknowledge it, or maybe we do block?
-      // Let's block it so they have to fix it, or we just let it pass after the alert. Let's block it for safety as "não está atendendo". 
+      // Let's block it so they have to fix it, or we just let it pass after the alert. Let's block it for safety as "não está atendendo".
       // Actually, standard practice for such validation is to block or require justification. I will block it here.
       setBenchSubmitting(false);
       return;
@@ -5399,6 +5453,7 @@ Status atual: ${e.status}.`,
           ].filter(Boolean),
           referenceStandards: selectedStandards,
           approved: true,
+          materialsUsed: benchMaterialsUsed,
           calibrationDate: activeInst?.manualCalibrationDateAllowed
             ? benchCalibrationDate
             : undefined,
@@ -5491,6 +5546,10 @@ Status atual: ${e.status}.`,
           setBenchTransmitterPoints([]);
           setBenchSwitchPoints([]);
           setBenchObs("");
+          setBenchMaterialsUsed([]);
+          setBenchCustomMaterial("");
+          setShowBenchMaterialSelector(false);
+          setBenchMaterialSearch("");
           setBenchStandardA("");
           setBenchStandardB("");
           setBenchStandardC("");
@@ -5636,6 +5695,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             benchStandardC,
           ].filter(Boolean),
           approved: false,
+          materialsUsed: benchMaterialsUsed,
           calibrationDate: activeInst.manualCalibrationDateAllowed
             ? rncCalibrationDate
             : undefined,
@@ -6118,7 +6178,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       )}
       {/* Mobile Sidebar Overlay */}
       {isMobileMenuOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-slate-900/50 z-40 md:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
@@ -6134,7 +6194,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             size={180}
             className="max-h-12 w-auto"
           />
-          <button 
+          <button
             className="md:hidden absolute right-4 text-slate-500 hover:bg-slate-100 p-1 rounded"
             onClick={() => setIsMobileMenuOpen(false)}
           >
@@ -6372,7 +6432,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         {/* Top Navigation Header with Notification Bell */}
         <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <button 
+            <button
               onClick={() => setIsMobileMenuOpen(true)}
               className="md:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg"
             >
@@ -7267,7 +7327,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 }
                                 className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 hover:bg-rose-50 rounded-lg cursor-pointer"
                                 title="Remover Cliente"
-                                
+
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -7424,14 +7484,14 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         const isFull =
                           registeredCount >= totalAllowed && totalAllowed > 0;
                         const hasPhotos = intake.photos && intake.photos.length > 0;
-                        
+
                         let label = `${intake.numEntrada} (${registeredCount}/${totalAllowed} reg.)`;
                         if (isFull) label += " - ESGOTADO";
                         else if (!hasPhotos) label += " - FOTO PENDENTE";
 
                         return (
-                          <option 
-                            key={intake.id} 
+                          <option
+                            key={intake.id}
                             value={intake.numEntrada}
                             disabled={isFull || !hasPhotos}
                           >
@@ -8218,6 +8278,15 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             </span>
                           </td>
                           <td className="p-3 text-right flex items-center justify-end space-x-1.5 flex-wrap gap-y-1">
+                            <button
+                              onClick={() => setInstrumentSheetInstrument(inst)}
+                              className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer"
+                              title="Consultar a ficha histórica do instrumento"
+                            >
+                              <ClipboardCheck className="h-3 w-3" />
+                              <span>Ficha do Instrumento</span>
+                            </button>
+
                             {/* Foto Cadastro (Antes do Botão Calibrar) */}
                             <button
                               onClick={() => {
@@ -8349,6 +8418,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     );
                                   }
 
+                                  setBenchMaterialsUsed([]);
+                                  setBenchCustomMaterial("");
+                                  setShowBenchMaterialSelector(false);
+                                  setBenchMaterialSearch("");
                                   setSelectedInstId(inst.id);
                                   recordCalibrationStart(inst.id, prevStatus);
                                   setActiveTab("bench");
@@ -8576,7 +8649,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                               }
                               className="text-slate-400 hover:text-rose-700 transition-colors p-1 cursor-pointer"
                               title="Excluir Calibração/Equipamento (Requer Senha do Administrador)"
-                              
+
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -9305,7 +9378,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           <Trash2 className="h-4 w-4 text-rose-600" />
                           <span>Excluir Guia</span>
                         </button>
-                        
+
                         {(() => {
                           const currentIntake = savedIntakes.find(i => i.id === editingIntakeId);
                           if (currentIntake && currentIntake.photoDevolution) {
@@ -10338,7 +10411,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                         </div>
                       );
                     })()}
-                    
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-slate-600 font-bold mb-1 text-sm">
@@ -11701,6 +11774,66 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           </div>
                         </div>
 
+                        <div className="space-y-3 text-xs bg-blue-50/50 p-4 rounded-xl border border-blue-200">
+                          <div>
+                            <label className="block text-slate-800 font-bold mb-1 flex items-center gap-1.5">
+                              <Package className="h-4 w-4 text-blue-600" />
+                              <span>Material utilizado na calibração</span>
+                            </label>
+                            <p className="text-[10px] text-slate-500">Clique no campo abaixo e marque um ou mais itens efetivamente utilizados. O histórico ficará vinculado a esta calibração e será exibido na Ficha do Instrumento.</p>
+                          </div>
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setShowBenchMaterialSelector((current) => !current)}
+                              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-left flex items-center justify-between gap-3 hover:border-blue-300 focus:ring-1 focus:ring-blue-500"
+                              aria-expanded={showBenchMaterialSelector}
+                            >
+                              <span className="font-semibold text-slate-700">{benchMaterialsUsed.length > 0 ? `${benchMaterialsUsed.length} item(ns) selecionado(s)` : 'Selecionar materiais utilizados...'}</span>
+                              <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${showBenchMaterialSelector ? 'rotate-180' : ''}`} />
+                            </button>
+                            {showBenchMaterialSelector && (
+                              <div className="mt-2 bg-white border border-slate-200 rounded-xl shadow-lg p-3 space-y-3 max-h-80 overflow-y-auto">
+                                <input
+                                  value={benchMaterialSearch}
+                                  onChange={(event) => setBenchMaterialSearch(event.target.value)}
+                                  placeholder="Pesquisar material..."
+                                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:ring-1 focus:ring-blue-500"
+                                />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {CALIBRATION_CONSUMABLE_OPTIONS
+                                    .filter((material) => material.toLowerCase().includes(benchMaterialSearch.trim().toLowerCase()))
+                                    .map((material) => {
+                                      const checked = benchMaterialsUsed.includes(material);
+                                      return (
+                                        <label key={material} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors ${checked ? 'bg-blue-100 border-blue-300 text-blue-900' : 'bg-white border-slate-200 text-slate-700 hover:border-blue-200'}`}>
+                                          <input type="checkbox" checked={checked} onChange={() => setBenchMaterialsUsed((current) => checked ? current.filter((item) => item !== material) : [...current, material])} />
+                                          <span className="font-semibold">{material}</span>
+                                        </label>
+                                      );
+                                    })}
+                                </div>
+                                <div className="pt-2 border-t border-slate-200 flex flex-col sm:flex-row gap-2">
+                                  <input
+                                    value={benchCustomMaterial}
+                                    onChange={(event) => setBenchCustomMaterial(event.target.value)}
+                                    maxLength={80}
+                                    placeholder="Outro material utilizado..."
+                                    className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:ring-1 focus:ring-blue-500"
+                                  />
+                                  <button type="button" onClick={() => {
+                                    const custom = benchCustomMaterial.trim();
+                                    if (!custom) return;
+                                    if (!benchMaterialsUsed.some((item) => item.toLowerCase() === custom.toLowerCase())) setBenchMaterialsUsed((current) => [...current, custom]);
+                                    setBenchCustomMaterial('');
+                                  }} className="px-3 py-2 rounded-lg bg-blue-50 border border-blue-300 text-blue-700 font-bold hover:bg-blue-100">Adicionar outro</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          {benchMaterialsUsed.length > 0 && <div className="flex flex-wrap gap-1.5">{benchMaterialsUsed.map((item) => <span key={item} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded-full text-[10px] font-bold">{item}<button type="button" onClick={() => setBenchMaterialsUsed((current) => current.filter((value) => value !== item))} className="hover:text-blue-100" aria-label={`Remover ${item}`}><X className="h-3 w-3" /></button></span>)}</div>}
+                        </div>
+
                         <div className="space-y-3 text-xs">
                           <label className="block text-slate-600 font-bold mb-1">
                             Observações / Comentários
@@ -12075,8 +12208,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                           : "Recentemente";
                         const techName =
                           startObj?.technicianName || benchTechnician || currentUser?.name || "Técnico Responsável";
-                        const elapsed = startObj?.startTime 
-                          ? formatElapsedTime(startObj.startTime, nowTicker) 
+                        const elapsed = startObj?.startTime
+                          ? formatElapsedTime(startObj.startTime, nowTicker)
                           : "00:00:00";
 
                         return (
@@ -12366,7 +12499,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     }
                                     className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                                     title="Excluir registro de auditoria (requer senha do Administrador)"
-                                    
+
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -12401,7 +12534,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   </div>
                 </div>
               </div>
-              
+
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden print:shadow-none print:border-slate-300">
                 <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                   <div className="flex items-center space-x-2">
@@ -12414,7 +12547,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     </span>
                   </div>
                 </div>
-                
+
                 {accessAuditLogs.length === 0 ? (
                   <div className="p-8 text-center text-slate-500">
                     <Clock className="h-10 w-10 mx-auto text-slate-300 mb-2" />
@@ -12720,7 +12853,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             }
                             className="p-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-md cursor-pointer"
                             title="Excluir Certificado de Calibração (Requer Senha do Administrador)"
-                            
+
                           >
                             <Trash2 className="h-4 w-4" />
                             <span>Excluir Calibração</span>
@@ -13311,7 +13444,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
 
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
         {activeTab === "field_service" && canAccessModule("field_service") && <FieldService canEdit={canEditFieldService} onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
-        {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} />}
+        {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}
         {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
         {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && <InternalCommunication currentUser={currentUser as any} />}
         {activeTab === "minha_assinatura" && canAccessModule("digital_signature") && <MySignature currentUser={currentUser as any} canEdit={canEditDigitalSignature} onUpdateUser={onUpdateInternalUser || (() => {})} />}
@@ -13875,7 +14008,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Etiqueta de Calibração Logo Config */}
                   <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 space-y-6 shadow-xs mt-6">
                     <div className="flex items-start justify-between">
@@ -15153,7 +15286,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                       }
                                       className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                                       title="Excluir Padrão"
-                                      
+
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </button>
@@ -16083,9 +16216,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               activeRhTab={rhSubTab}
               setActiveRhTab={(tab) => {
                 if (currentUser && !isUserAdmin) {
-                  const hasPendingPayslip = payslips.some(p => 
-                    p.employeeId === currentUser.id && 
-                    !p.visualized && 
+                  const hasPendingPayslip = payslips.some(p =>
+                    p.employeeId === currentUser.id &&
+                    !p.visualized &&
                     Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
                   );
                   if (hasPendingPayslip && (tab !== "contra_cheques" || activePayslipTab !== "meus")) {
@@ -16215,7 +16348,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                             </td>
                             <td className="px-6 py-4">
                               <span
-                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                                   ${record.dynamicStatus === "Válido" ? "bg-emerald-100 text-emerald-800" : ""}
                                   ${record.dynamicStatus === "Vencido" ? "bg-red-100 text-red-800" : ""}
                                   ${record.dynamicStatus === "Próximo do vencimento" ? "bg-amber-100 text-amber-800" : ""}
@@ -16307,7 +16440,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     )
                                   }
                                   className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-                                  
+
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>
@@ -16369,7 +16502,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 requestAdminDelete("training", t.id, t.title)
                               }
                               className="p-1 text-slate-400 hover:text-red-500"
-                              
+
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -16641,7 +16774,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     }
                                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                     title="Excluir Item"
-                                    
+
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -16941,7 +17074,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                     }
                                     className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                                     title="Excluir"
-                                    
+
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -17556,9 +17689,9 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                   <button
                     onClick={() => {
                       if (currentUser && !isUserAdmin) {
-                        const hasPendingPayslip = payslips.some(p => 
-                          p.employeeId === currentUser.id && 
-                          !p.visualized && 
+                        const hasPendingPayslip = payslips.some(p =>
+                          p.employeeId === currentUser.id &&
+                          !p.visualized &&
                           Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
                         );
                         if (hasPendingPayslip) {
@@ -17620,7 +17753,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                     <div>
                       <h4 className="text-sm font-bold text-rose-800">Acesso Restrito: Documentação Pendente</h4>
                       <p className="text-sm text-rose-700 mt-1">
-                        Você possui documentação pessoal (como contra-cheques, espelhos de ponto, etc.) que está aguardando visualização há mais de 11 dias. 
+                        Você possui documentação pessoal (como contra-cheques, espelhos de ponto, etc.) que está aguardando visualização há mais de 11 dias.
                         <strong>O seu acesso às demais áreas do portal foi temporariamente bloqueado.</strong><br/>
                         Para liberar o seu acesso, por favor visualize todos os documentos pendentes abaixo (clicando no botão "Visualizar Documento").
                       </p>
@@ -18003,7 +18136,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
                                 <button
                                   onClick={() => handleDeletePayslip(p.id)}
                                   className="text-red-600 font-bold hover:underline"
-                                  
+
                                 >
                                   Excluir
                                 </button>
@@ -19194,7 +19327,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         </div>
       )}
 
-      
+
       {/* MODAL: ACESSO FORA DE HORÁRIO */}
       {showAfterHoursModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -19209,8 +19342,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             <p className="text-sm text-slate-600 font-semibold">
               Para prosseguir para <b>{afterHoursTargetTab}</b>, justifique o acesso e insira a senha de um Administrador.
             </p>
-            
-            <form 
+
+            <form
               className="w-full space-y-4 text-left mt-2"
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -19410,7 +19543,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
         </div>
       )}
 
-      
+
       {/* MODAL: ENTREGA / EVIDÊNCIAS DE DEVOLUÇÃO */}
       {showDevolutionModal && selectedIntakeForDevolution && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
@@ -19861,6 +19994,93 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       )}
 
       {/* MODAL: FOTO DO INSTRUMENTO (CADASTRO / CALIBRADO) */}
+      {instrumentSheetInstrument && (() => {
+        const instrument = instrumentSheetInstrument;
+        const historical = instrument.registrationSnapshot?.data as Record<string, any> | undefined;
+        const data = historical || (instrument as unknown as Record<string, any>);
+        const sheetClient = clients.find((client: any) => client.id === data.clientId) || clients.find((client: any) => client.id === instrument.clientId);
+        const materialHistory = reports
+          .filter((report: any) => report.instrumentId === instrument.id && report.isDeleted !== true && Array.isArray(report.materialsUsed) && report.materialsUsed.length > 0)
+          .sort((a: any, b: any) => String(b.date || '').localeCompare(String(a.date || '')));
+        const knownSheetKeys = new Set(INSTRUMENT_SHEET_FIELDS.map(({ key }) => key));
+        const additionalFields = Object.entries(data)
+          .filter(([key]) => !knownSheetKeys.has(key) && !['clientId', 'photoRegistration', 'photoRegistrationPath', 'registrationSnapshot'].includes(key))
+          .sort(([a], [b]) => a.localeCompare(b, 'pt-BR'));
+        const additionalFieldLabel = (key: string) => key
+          .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+          .replace(/[_-]+/g, ' ')
+          .replace(/\b\w/g, (letter) => letter.toUpperCase());
+        const renderValue = (key: string, value: any) => {
+          if (value === undefined || value === null || value === '') return '—';
+          if (key.toLowerCase().includes('photo') || key.toLowerCase().includes('image')) return 'Imagem / arquivo registrado';
+          if (Array.isArray(value)) return value.length ? value.map((item) => typeof item === 'object' ? JSON.stringify(item) : String(item)).join(', ') : '—';
+          if (typeof value === 'object') return JSON.stringify(value, null, 2);
+          if (key.toLowerCase().includes('data') || key.toLowerCase().includes('date')) return formatDateBR(String(value));
+          if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
+          return String(value);
+        };
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/70 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden border border-slate-200">
+              <div className="p-5 border-b border-slate-200 flex items-start justify-between gap-4 bg-slate-50">
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><ClipboardCheck className="h-5 w-5 text-blue-600" /> Ficha do Instrumento</h3>
+                  <p className="text-xs text-slate-500 mt-1">Consulta do cadastro de entrada e histórico de materiais utilizados em calibração.</p>
+                </div>
+                <button onClick={() => setInstrumentSheetInstrument(null)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="p-5 overflow-y-auto max-h-[calc(92vh-82px)] space-y-5">
+                <div className={`p-3 rounded-xl border text-xs ${historical ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                  {historical
+                    ? `Registro histórico preservado desde ${formatDateBR(instrument.registrationSnapshot?.capturedAt?.slice(0, 10))}. Alterações posteriores no cadastro não modificam esta ficha.`
+                    : 'Instrumento legado: não havia snapshot histórico no momento do cadastro. Os dados abaixo foram reconstruídos a partir do cadastro atual e estão identificados como tal.'}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><div className="text-[10px] uppercase font-bold text-slate-500">Cliente / Proprietário</div><div className="text-sm font-bold text-slate-900 mt-1">{sheetClient?.name || '—'}</div></div>
+                  {INSTRUMENT_SHEET_FIELDS.map(({ key, label }) => <div key={key} className={`bg-slate-50 border border-slate-200 rounded-lg p-3 ${key === 'observacoes' || key === 'condicaoDeEntrada' ? 'sm:col-span-2 lg:col-span-3' : ''}`}><div className="text-[10px] uppercase font-bold text-slate-500">{label}</div><div className="text-sm font-semibold text-slate-900 mt-1 break-words whitespace-pre-wrap">{renderValue(key, data[key] ?? (key === 'certificateNumber' ? data.coma : undefined))}</div></div>)}
+                </div>
+
+                {additionalFields.length > 0 && (
+                  <div className="border-t border-slate-200 pt-5">
+                    <h4 className="font-extrabold text-slate-900 flex items-center gap-2"><FileText className="h-4 w-4 text-blue-600" /> Dados adicionais do registro</h4>
+                    <p className="text-xs text-slate-500 mt-1">Campos existentes no registro histórico que não fazem parte da grade principal também são exibidos, garantindo consulta integral do snapshot.</p>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {additionalFields.map(([key, value]) => (
+                        <div key={key} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                          <div className="text-[10px] uppercase font-bold text-slate-500">{additionalFieldLabel(key)}</div>
+                          <div className="text-sm font-semibold text-slate-900 mt-1 break-words whitespace-pre-wrap max-h-48 overflow-auto">{renderValue(key, value)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(data.photoRegistration || data.photoRegistrationPath) && (
+                  <div className="border-t border-slate-200 pt-5">
+                    <h4 className="font-extrabold text-slate-900 flex items-center gap-2"><Camera className="h-4 w-4 text-blue-600" /> Foto registrada na entrada</h4>
+                    {data.photoRegistration ? (
+                      <img src={String(data.photoRegistration)} alt="Instrumento no registro" className="mt-3 max-h-72 rounded-xl border border-slate-200 object-contain bg-slate-50" />
+                    ) : (
+                      <div className="mt-2 text-xs text-slate-500">A imagem possui referência segura no Storage e permanece vinculada ao registro histórico.</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="border-t border-slate-200 pt-5">
+                  <h4 className="font-extrabold text-slate-900 flex items-center gap-2"><Package className="h-4 w-4 text-blue-600" /> Material utilizado na calibração</h4>
+                  <p className="text-xs text-slate-500 mt-1">Histórico por calibração. Uma calibração sem consumo informado permanece registrada sem itens.</p>
+                  {materialHistory.length === 0 ? (
+                    <div className="mt-3 p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-500">Nenhum material de consumo foi registrado nas calibrações deste instrumento.</div>
+                  ) : (
+                    <div className="mt-3 space-y-2">{materialHistory.map((report: any) => <div key={report.id} className="p-3 rounded-lg border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4"><div className="sm:w-44 shrink-0"><div className="font-bold text-slate-800">{formatDateBR(report.date)}</div><div className="text-[10px] text-slate-500">{report.certNumber || 'Calibração'}</div></div><div className="flex flex-wrap gap-1.5">{report.materialsUsed.map((item: string) => <span key={item} className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">{item}</span>)}</div></div>)}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {photoModalInstrument && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
           <div className="bg-white w-full max-w-xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">

@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  TrendingUp, TrendingDown, DollarSign, PieChart, FileText, Filter, 
+import {
+  TrendingUp, TrendingDown, DollarSign, PieChart, FileText, Filter,
   Briefcase, Landmark, CreditCard, RefreshCw, FileCheck, Building2,
-  Activity, Users, ClipboardCheck, ShieldCheck, Bell, Shield, ShieldAlert, Trash2, HelpCircle
+  Activity, Users, ClipboardCheck, ShieldCheck, Bell, Shield, ShieldAlert, Trash2, HelpCircle, Upload, AlertTriangle
 } from 'lucide-react';
 
-import { 
-  syncFinanceTransactions, 
-  syncFinanceContracts, 
-  syncFinanceMeasurements, 
-  deleteFinanceTransaction, 
-  deleteFinanceContract, 
-  deleteFinanceMeasurement 
+import {
+  syncFinanceTransactions,
+  syncFinanceContracts,
+  syncFinanceMeasurements,
+  deleteFinanceTransaction,
+  deleteFinanceContract,
+  deleteFinanceMeasurement
 } from '../lib/firebase';
 
 import DashboardFinanceiro from './finance/DashboardFinanceiro';
@@ -34,13 +34,17 @@ import RateioCustos from './finance/RateioCustos';
 import AtivosInvestimentos from './finance/AtivosInvestimentos';
 import TributosRetencoes from './finance/TributosRetencoes';
 import AlertasNotificacoes from './finance/AlertasNotificacoes';
+import FinanceImport from './finance/FinanceImport';
 
 interface FinanceManagementProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
+  canEdit?: boolean;
+  currentUser?: { id?: string; name?: string; username?: string } | null;
 }
-export default function FinanceManagement({ requestAdminDelete }: FinanceManagementProps) {
+export default function FinanceManagement({ requestAdminDelete, canEdit = false, currentUser }: FinanceManagementProps) {
+  const currentUserName = String(currentUser?.name || currentUser?.username || '').trim();
   const [activeSubTab, setActiveSubTab] = useState('dashboard');
-  
+
   // Operational Mode state saved in localStorage (defaults to homologado/production)
     // State to track Firestore records for the wiper function
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -59,26 +63,27 @@ export default function FinanceManagement({ requestAdminDelete }: FinanceManagem
   }, []);
 
       const menuItems = [
-    { id: 'dashboard', label: 'Dashboard Financeiro', icon: <PieChart className="h-4 w-4" /> },
-    { id: 'pagar', label: 'Contas a Pagar', icon: <TrendingDown className="h-4 w-4" /> },
-    { id: 'receber', label: 'Contas a Receber', icon: <TrendingUp className="h-4 w-4" /> },
-    { id: 'medicoes', label: 'Medições e Faturamento', icon: <FileCheck className="h-4 w-4" /> },
-    { id: 'fluxo', label: 'Fluxo de Caixa', icon: <RefreshCw className="h-4 w-4" /> },
-    { id: 'conciliacao', label: 'Conciliação Bancária', icon: <Landmark className="h-4 w-4" /> },
-    { id: 'contratos', label: 'Contratos e Centros de Custo', icon: <Briefcase className="h-4 w-4" /> },
-    { id: 'orcamento', label: 'Previsto x Realizado', icon: <Activity className="h-4 w-4" /> },
-    { id: 'emprestimos', label: 'Empréstimos', icon: <DollarSign className="h-4 w-4" /> },
-    { id: 'cartoes', label: 'Cartões Corporativos', icon: <CreditCard className="h-4 w-4" /> },
-    { id: 'reembolsos', label: 'Reembolsos', icon: <FileText className="h-4 w-4" /> },
-    { id: 'relatorios', label: 'Relatórios', icon: <Filter className="h-4 w-4" /> },
-    { id: 'cadastros', label: 'Cadastros Financeiros', icon: <Building2 className="h-4 w-4" /> },
-    { id: 'aprovacoes', label: 'Aprovações', icon: <ClipboardCheck className="h-4 w-4" /> },
-    { id: 'auditoria', label: 'Auditoria de Alterações', icon: <ShieldCheck className="h-4 w-4" /> },
-    { id: 'pessoal', label: 'Custos de Pessoal', icon: <Users className="h-4 w-4" /> },
-    { id: 'rateio', label: 'Rateio de Custos', icon: <RefreshCw className="h-4 w-4" /> },
-    { id: 'ativos', label: 'Ativos e Depreciação', icon: <TrendingDown className="h-4 w-4" /> },
-    { id: 'tributos', label: 'Tributos e Retenções', icon: <DollarSign className="h-4 w-4" /> },
-    { id: 'alertas', label: 'Alertas e Avisos', icon: <Bell className="h-4 w-4" /> },
+    { id: 'dashboard', label: 'Dashboard Financeiro', icon: <PieChart className="h-4 w-4" />, ready: true },
+    { id: 'pagar', label: 'Contas a Pagar', icon: <TrendingDown className="h-4 w-4" />, ready: true },
+    { id: 'receber', label: 'Contas a Receber', icon: <TrendingUp className="h-4 w-4" />, ready: true },
+    { id: 'importar', label: 'Importar XLS/XLSX', icon: <Upload className="h-4 w-4" />, ready: true },
+    { id: 'medicoes', label: 'Medições e Faturamento', icon: <FileCheck className="h-4 w-4" />, ready: true },
+    { id: 'fluxo', label: 'Fluxo de Caixa', icon: <RefreshCw className="h-4 w-4" />, ready: true },
+    { id: 'contratos', label: 'Contratos e Centros de Custo', icon: <Briefcase className="h-4 w-4" />, ready: true },
+    { id: 'cadastros', label: 'Cadastros Financeiros', icon: <Building2 className="h-4 w-4" />, ready: true },
+    { id: 'conciliacao', label: 'Conciliação Bancária', icon: <Landmark className="h-4 w-4" />, ready: false },
+    { id: 'orcamento', label: 'Previsto x Realizado', icon: <Activity className="h-4 w-4" />, ready: false },
+    { id: 'emprestimos', label: 'Empréstimos', icon: <DollarSign className="h-4 w-4" />, ready: false },
+    { id: 'cartoes', label: 'Cartões Corporativos', icon: <CreditCard className="h-4 w-4" />, ready: false },
+    { id: 'reembolsos', label: 'Reembolsos', icon: <FileText className="h-4 w-4" />, ready: false },
+    { id: 'relatorios', label: 'Relatórios', icon: <Filter className="h-4 w-4" />, ready: false },
+    { id: 'aprovacoes', label: 'Aprovações', icon: <ClipboardCheck className="h-4 w-4" />, ready: false },
+    { id: 'auditoria', label: 'Auditoria de Alterações', icon: <ShieldCheck className="h-4 w-4" />, ready: false },
+    { id: 'pessoal', label: 'Custos de Pessoal', icon: <Users className="h-4 w-4" />, ready: false },
+    { id: 'rateio', label: 'Rateio de Custos', icon: <RefreshCw className="h-4 w-4" />, ready: false },
+    { id: 'ativos', label: 'Ativos e Depreciação', icon: <TrendingDown className="h-4 w-4" />, ready: false },
+    { id: 'tributos', label: 'Tributos e Retenções', icon: <DollarSign className="h-4 w-4" />, ready: false },
+    { id: 'alertas', label: 'Alertas e Avisos', icon: <Bell className="h-4 w-4" />, ready: false },
   ];
 
   return (
@@ -93,7 +98,7 @@ export default function FinanceManagement({ requestAdminDelete }: FinanceManagem
           <p className="text-xs text-slate-600 font-medium mt-1">
             Controle integrado de faturamento, liquidez, centros de custo e apurações por contrato.
           </p>
-          
+
           {/* Active status indicator */}
           <div className="mt-3 flex items-center space-x-2">
             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
@@ -102,7 +107,7 @@ export default function FinanceManagement({ requestAdminDelete }: FinanceManagem
           </div>
         </div>
       </div>
-      
+
       {/* Information Alert Box */}
       <div className="bg-blue-50/50 border border-blue-200 p-4 rounded-xl flex items-start space-x-3">
         <Shield className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
@@ -113,20 +118,27 @@ export default function FinanceManagement({ requestAdminDelete }: FinanceManagem
         </div>
       </div>
 
+      <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3 text-xs text-amber-900">
+        <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
+        <div><strong>Liberação financeira controlada.</strong> Contas a Pagar, Contas a Receber, Importação XLS/XLSX, Medições, Fluxo, Contratos e Cadastros usam dados reais. Submódulos que ainda continham valores ou rotinas demonstrativas permanecem bloqueados como “Em implantação” para impedir uso contábil indevido.</div>
+      </div>
+
       {/* Horizontal Scrollable Menu */}
       <div className="flex overflow-x-auto pb-2 space-x-2 border-b border-slate-200 hide-scrollbar">
         {menuItems.map(item => (
-          <button 
+          <button
             key={item.id}
-            onClick={() => setActiveSubTab(item.id)} 
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-t-lg font-bold text-xs whitespace-nowrap transition-colors border-b-2 ${
-              activeSubTab === item.id 
-                ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
+            onClick={() => item.ready && setActiveSubTab(item.id)}
+            disabled={!item.ready}
+            title={!item.ready ? 'Módulo temporariamente indisponível: ainda contém lógica demonstrativa e será liberado após validação operacional.' : undefined}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-t-lg font-bold text-xs whitespace-nowrap transition-colors border-b-2 ${!item.ready ? 'opacity-45 cursor-not-allowed bg-slate-50 text-slate-400 border-transparent' :
+              activeSubTab === item.id
+                ? 'border-blue-600 text-blue-600 bg-blue-50/50'
                 : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
             {item.icon}
-            <span>{item.label}</span>
+            <span>{item.label}{!item.ready ? ' · Em implantação' : ''}</span>
           </button>
         ))}
       </div>
@@ -134,10 +146,11 @@ export default function FinanceManagement({ requestAdminDelete }: FinanceManagem
       {/* Conditional Rendering of all submodules */}
       <div className="space-y-6">
         {activeSubTab === 'dashboard' && <div className="animate-fade-in"><DashboardFinanceiro /></div>}
-        {activeSubTab === 'pagar' && <div className="animate-fade-in"><ContasPagar requestAdminDelete={requestAdminDelete} /></div>}
-        {activeSubTab === 'receber' && <div className="animate-fade-in"><ContasReceber requestAdminDelete={requestAdminDelete} /></div>}
-        {activeSubTab === 'contratos' && <div className="animate-fade-in"><FinanceContratos requestAdminDelete={requestAdminDelete} /></div>}
-        {activeSubTab === 'medicoes' && <div className="animate-fade-in"><FinanceMedicoes requestAdminDelete={requestAdminDelete} /></div>}
+        {activeSubTab === 'pagar' && <div className="animate-fade-in"><ContasPagar requestAdminDelete={requestAdminDelete} canEdit={canEdit} currentUserName={currentUserName} /></div>}
+        {activeSubTab === 'receber' && <div className="animate-fade-in"><ContasReceber requestAdminDelete={requestAdminDelete} canEdit={canEdit} currentUserName={currentUserName} /></div>}
+        {activeSubTab === 'importar' && <div className="animate-fade-in"><FinanceImport canEdit={canEdit} /></div>}
+        {activeSubTab === 'contratos' && <div className="animate-fade-in"><FinanceContratos requestAdminDelete={requestAdminDelete} canEdit={canEdit} /></div>}
+        {activeSubTab === 'medicoes' && <div className="animate-fade-in"><FinanceMedicoes requestAdminDelete={requestAdminDelete} canEdit={canEdit} /></div>}
         {activeSubTab === 'fluxo' && <div className="animate-fade-in"><FluxoCaixa /></div>}
         {activeSubTab === 'conciliacao' && <div className="animate-fade-in"><ConciliacaoBancaria /></div>}
         {activeSubTab === 'orcamento' && <div className="animate-fade-in"><OrcamentoPrevistoRealizado /></div>}
@@ -145,7 +158,7 @@ export default function FinanceManagement({ requestAdminDelete }: FinanceManagem
         {activeSubTab === 'cartoes' && <div className="animate-fade-in"><CartoesCorporativos /></div>}
         {activeSubTab === 'reembolsos' && <div className="animate-fade-in"><ReembolsosAdiantamentos /></div>}
         {activeSubTab === 'relatorios' && <div className="animate-fade-in"><RelatoriosFinanceiros /></div>}
-        {activeSubTab === 'cadastros' && <div className="animate-fade-in"><CadastrosFinanceiros requestAdminDelete={requestAdminDelete} /></div>}
+        {activeSubTab === 'cadastros' && <div className="animate-fade-in"><CadastrosFinanceiros requestAdminDelete={requestAdminDelete} canEdit={canEdit} /></div>}
         {activeSubTab === 'aprovacoes' && <div className="animate-fade-in"><CentralAprovacoes /></div>}
         {activeSubTab === 'auditoria' && <div className="animate-fade-in"><AuditoriaAlteracoes /></div>}
         {activeSubTab === 'pessoal' && <div className="animate-fade-in"><CustosPessoalContrato /></div>}

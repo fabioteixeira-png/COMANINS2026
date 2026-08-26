@@ -1002,6 +1002,16 @@ export async function instrumentCertificateExists(certificateNumber: string): Pr
   return !byComa.empty;
 }
 
+const buildInstrumentRegistrationSnapshot = (instrument: Record<string, any>, capturedAt: string) => {
+  const snapshotData: Record<string, any> = {};
+  Object.entries(instrument).forEach(([key, value]) => {
+    if (key === 'registrationSnapshot' || value === undefined || typeof value === 'function') return;
+    if (typeof value === 'number' && Number.isNaN(value)) return;
+    snapshotData[key] = value;
+  });
+  return { capturedAt, schemaVersion: 1 as const, data: snapshotData };
+};
+
 export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'> & Partial<Pick<Instrument, 'status' | 'lastCalibrationDate' | 'nextCalibrationDate'>>): Promise<Instrument> {
   if (data.tag) data.tag = data.tag.toUpperCase();
   if (data.model) data.model = data.model.toUpperCase();
@@ -1021,6 +1031,7 @@ export async function addInstrumentDoc(data: Omit<Instrument, 'id' | 'status' | 
     createdAt: nowIso,
     updatedAt: nowIso,
   } as Instrument;
+  inst.registrationSnapshot = buildInstrumentRegistrationSnapshot(inst as unknown as Record<string, any>, nowIso);
   const cleaned: Record<string, any> = {};
   for (const [key, val] of Object.entries(inst)) {
     if (val !== undefined && !Number.isNaN(val)) {
@@ -1059,6 +1070,7 @@ export async function addInstrumentsBulkDocs(list: Omit<Instrument, 'id' | 'stat
       createdAt: nowIso,
       updatedAt: nowIso,
     } as Instrument;
+    item.registrationSnapshot = buildInstrumentRegistrationSnapshot(item as unknown as Record<string, any>, nowIso);
     const cleaned: Record<string, any> = {};
     for (const [key, val] of Object.entries(item)) {
       if (val !== undefined && !Number.isNaN(val)) {
@@ -1160,6 +1172,7 @@ export async function saveCalibrationDoc(data: {
   switchPoints?: any[];
   approved?: boolean;
   calibrationDate?: string;
+  materialsUsed?: string[];
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
@@ -1281,6 +1294,7 @@ export async function saveCalibrationDoc(data: {
     maxHysteresis,
     approved: data.approved !== undefined ? data.approved : approved,
     observations: data.observations || '',
+    materialsUsed: Array.from(new Set((data.materialsUsed || []).map((item) => String(item || '').trim()).filter(Boolean))).slice(0, 50),
     temperature: data.temperature !== undefined ? data.temperature : undefined,
     humidity: data.humidity !== undefined ? data.humidity : undefined,
     instrumentType: data.instrumentType,
@@ -2572,7 +2586,7 @@ export const syncFinanceTransactions = (callback: (transactions: FinanceTransact
     'financeTransactions',
     [],
     (onData, onError) => {
-      const q = query(collection(db, 'financeTransactions'), orderBy('date', 'desc'), limit(25));
+      const q = query(collection(db, 'financeTransactions'), orderBy('date', 'desc'), limit(1000));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction)).filter((item: any) => item.isDeleted !== true);
         onData(items);
@@ -2585,8 +2599,17 @@ export const syncFinanceTransactions = (callback: (transactions: FinanceTransact
 
 export const addFinanceTransaction = async (transaction: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt'>) => {
   const now = new Date().toISOString();
+  const originalAmount = Math.max(0, Number(transaction.amount || 0));
+  const paidAmount = Math.max(0, Math.min(originalAmount, Number(transaction.paidAmount || 0)));
+  const openBalance = Math.max(0, originalAmount - paidAmount);
   const docRef = await addDoc(collection(db, 'financeTransactions'), {
     ...transaction,
+    amount: originalAmount,
+    paidAmount,
+    openBalance,
+    status: openBalance <= 0 && originalAmount > 0 ? 'pago' : transaction.status,
+    settlements: Array.isArray(transaction.settlements) ? transaction.settlements : [],
+    createdByUid: auth.currentUser?.uid || transaction.createdByUid || '',
     createdAt: now,
     updatedAt: now,
   });
@@ -2594,12 +2617,60 @@ export const addFinanceTransaction = async (transaction: Omit<FinanceTransaction
 };
 
 export const updateFinanceTransaction = async (id: string, updates: Partial<FinanceTransaction>) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
   const docRef = doc(db, 'financeTransactions', id);
   await updateDoc(docRef, {
     ...updates,
+    updatedByUid: user.uid,
     updatedAt: new Date().toISOString(),
   });
 };
+
+export async function settleFinanceTransaction(input: {
+  transactionId: string;
+  amount: number;
+  date: string;
+  bankAccount?: string;
+  paymentMethod?: string;
+  notes?: string;
+}): Promise<{ paidAmount: number; openBalance: number; status: FinanceTransaction['status'] }> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/finance/transactions/${encodeURIComponent(input.transactionId)}/settle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (payload?.error === 'SETTLEMENT_EXCEEDS_BALANCE') throw new Error('O valor da baixa excede o saldo em aberto do título.');
+    if (payload?.error === 'TRANSACTION_NOT_FOUND') throw new Error('Lançamento financeiro não encontrado.');
+    throw new Error(payload?.message || payload?.error || 'Não foi possível registrar a baixa financeira.');
+  }
+  return {
+    paidAmount: Number(payload.paidAmount || 0),
+    openBalance: Number(payload.openBalance || 0),
+    status: payload.status || 'pendente',
+  };
+}
+
+export async function importFinanceTransactions(items: Array<Partial<FinanceTransaction>>): Promise<{ imported: number; skipped: number; errors: Array<{ row: number; message: string }> }> {
+  if (!Array.isArray(items) || items.length === 0) return { imported: 0, skipped: 0, errors: [] };
+  if (items.length > 1000) throw new Error('O limite por importação é de 1.000 lançamentos.');
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/finance/transactions/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ items }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível importar os lançamentos financeiros.');
+  return { imported: Number(payload.imported || 0), skipped: Number(payload.skipped || 0), errors: Array.isArray(payload.errors) ? payload.errors : [] };
+}
 
 export const deleteFinanceTransaction = async (id: string) => {
   await archiveCriticalRecord('financeTransactions', id);

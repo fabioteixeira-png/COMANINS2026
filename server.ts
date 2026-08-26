@@ -492,6 +492,7 @@ const buildInternalClaims = (profile: any) => {
   };
 
   if (profile?.username) claims.username = String(profile.username).trim().toLowerCase();
+  if (profile?.name) claims.name = String(profile.name).trim().slice(0, 160);
   if (profile?.role) claims.role = String(profile.role);
   if (profile?.permissionLevel) claims.permissionLevel = String(profile.permissionLevel);
 
@@ -1430,6 +1431,213 @@ app.post('/api/inventory/move', requireAuth, requireInternalAccount, requireEdit
   }
 });
 
+const normalizeFinanceDate = (value: unknown): string => {
+  const text = asLimitedString(value, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+  const parsed = new Date(`${text}T12:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text ? '' : text;
+};
+
+const normalizeFinanceAmount = (value: unknown): number | null => {
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/\s/g, '').replace(/R\$/gi, '').replace(/\./g, '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+app.post('/api/finance/transactions/:id/settle', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const transactionId = asLimitedString(req.params.id, 180);
+  const settlementAmount = normalizeFinanceAmount(req.body?.amount);
+  const settlementDate = normalizeFinanceDate(req.body?.date);
+  const bankAccount = asLimitedString(req.body?.bankAccount, 180);
+  const paymentMethod = asLimitedString(req.body?.paymentMethod, 120);
+  const notes = asLimitedString(req.body?.notes, 1000);
+  if (!transactionId || settlementAmount === null || settlementAmount <= 0 || !settlementDate) {
+    return res.status(400).json({ error: 'INVALID_FINANCE_SETTLEMENT' });
+  }
+
+  const ref = firestoreDb.collection('financeTransactions').doc(transactionId);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const nowIso = new Date().toISOString();
+  const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+  const actorUid = asLimitedString(req.user?.uid, 160);
+  const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+  let result = { paidAmount: 0, openBalance: 0, status: 'pendente' };
+
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists || snap.data()?.isDeleted === true) {
+        const error: any = new Error('TRANSACTION_NOT_FOUND'); error.code = 'TRANSACTION_NOT_FOUND'; throw error;
+      }
+      const before: any = snap.data() || {};
+      if (before.status === 'cancelado') {
+        const error: any = new Error('TRANSACTION_CANCELLED'); error.code = 'TRANSACTION_CANCELLED'; throw error;
+      }
+      const originalAmount = Math.max(0, Number(before.amount || 0));
+      const currentPaid = Math.max(0, Number(before.paidAmount || 0));
+      const currentOpen = Math.max(0, Number.isFinite(Number(before.openBalance)) ? Number(before.openBalance) : originalAmount - currentPaid);
+      if (settlementAmount > currentOpen + 0.00001) {
+        const error: any = new Error('SETTLEMENT_EXCEEDS_BALANCE'); error.code = 'SETTLEMENT_EXCEEDS_BALANCE'; throw error;
+      }
+      const nextPaid = Math.min(originalAmount, Number((currentPaid + settlementAmount).toFixed(2)));
+      const nextOpen = Math.max(0, Number((originalAmount - nextPaid).toFixed(2)));
+      const dueDate = normalizeFinanceDate(before.dueDate);
+      const today = new Date().toISOString().slice(0, 10);
+      const nextStatus = nextOpen <= 0 ? 'pago' : (dueDate && dueDate < today ? 'atrasado' : 'pendente');
+      const settlement = {
+        id: `sett_${Date.now()}_${randomBytes(3).toString('hex')}`,
+        amount: Number(settlementAmount.toFixed(2)),
+        date: settlementDate,
+        bankAccount,
+        paymentMethod,
+        notes,
+        createdAt: nowIso,
+        createdBy: actorName,
+        createdByUid: actorUid,
+      };
+      const existingSettlements = Array.isArray(before.settlements) ? before.settlements.slice(-199) : [];
+      transaction.update(ref, {
+        amount: originalAmount,
+        paidAmount: nextPaid,
+        openBalance: nextOpen,
+        status: nextStatus,
+        settlements: [...existingSettlements, settlement],
+        ...(bankAccount ? { bankAccount } : {}),
+        ...(paymentMethod ? { paymentMethod } : {}),
+        updatedAt: nowIso,
+        updatedBy: actorName,
+        updatedByUid: actorUid,
+      });
+      transaction.set(auditRef, {
+        action: before.type === 'receita' ? 'FINANCE_RECEIPT_RECORDED' : 'FINANCE_PAYMENT_RECORDED',
+        entityType: 'financeTransaction', entityId: transactionId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Baixa financeira de R$ ${settlementAmount.toFixed(2)}`,
+        metadata: { previousOpenBalance: currentOpen, settlementAmount, openBalance: nextOpen, settlementDate, bankAccount, paymentMethod },
+      });
+      result = { paidAmount: nextPaid, openBalance: nextOpen, status: nextStatus };
+    });
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('TRANSACTION_NOT_FOUND')) return res.status(404).json({ error: 'TRANSACTION_NOT_FOUND' });
+    if (code.includes('SETTLEMENT_EXCEEDS_BALANCE')) return res.status(409).json({ error: 'SETTLEMENT_EXCEEDS_BALANCE' });
+    if (code.includes('TRANSACTION_CANCELLED')) return res.status(409).json({ error: 'TRANSACTION_CANCELLED' });
+    console.error('Finance settlement failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/finance/transactions/import', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (rawItems.length === 0 || rawItems.length > 1000) return res.status(400).json({ error: 'INVALID_IMPORT_SIZE' });
+
+  const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+  const actorUid = asLimitedString(req.user?.uid, 160);
+  const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+  const nowIso = new Date().toISOString();
+  const errors: Array<{ row: number; message: string }> = [];
+  const normalized: Array<{ ref: any; data: Record<string, any> }> = [];
+
+  rawItems.forEach((item: any, index: number) => {
+    const row = index + 2;
+    const type = item?.type === 'receita' || item?.type === 'despesa' ? item.type : '';
+    const description = asLimitedString(item?.description, 500);
+    const amount = normalizeFinanceAmount(item?.amount);
+    const date = normalizeFinanceDate(item?.date);
+    const dueDate = normalizeFinanceDate(item?.dueDate || item?.date);
+    if (!type || !description || amount === null || amount <= 0 || !date || !dueDate) {
+      errors.push({ row, message: 'Tipo, descrição, valor, data e vencimento são obrigatórios e devem ser válidos.' });
+      return;
+    }
+    const grossAmountRaw = normalizeFinanceAmount(item?.grossAmount);
+    const retentionsRaw = normalizeFinanceAmount(item?.retentions);
+    const informedRetentions = retentionsRaw !== null && retentionsRaw >= 0 ? retentionsRaw : 0;
+    const grossAmount = grossAmountRaw !== null && grossAmountRaw >= amount ? grossAmountRaw : amount + informedRetentions;
+    const retentions = grossAmountRaw !== null
+      ? Math.max(0, Number((grossAmount - amount).toFixed(2)))
+      : Number(informedRetentions.toFixed(2));
+    const requestedStatus = ['pendente', 'pago', 'atrasado', 'cancelado'].includes(String(item?.status || '').toLowerCase()) ? String(item.status).toLowerCase() : 'pendente';
+    const paidRaw = normalizeFinanceAmount(item?.paidAmount);
+    const paidAmount = requestedStatus === 'pago' ? amount : Math.max(0, Math.min(amount, paidRaw || 0));
+    const settlementDate = normalizeFinanceDate(item?.settlementDate);
+    if (paidAmount > 0 && !settlementDate) {
+      errors.push({ row, message: 'Data da Baixa é obrigatória quando houver Valor Baixado ou status Pago.' });
+      return;
+    }
+    const openBalance = Math.max(0, Number((amount - paidAmount).toFixed(2)));
+    const status = requestedStatus === 'cancelado' ? 'cancelado' : openBalance <= 0 ? 'pago' : requestedStatus === 'atrasado' ? 'atrasado' : 'pendente';
+    const fingerprintSource = [
+      type, description.toLowerCase(), amount.toFixed(2), date, dueDate,
+      asLimitedString(item?.documentNumber, 160).toLowerCase(),
+      asLimitedString(item?.contactDocument, 40).replace(/\D/g, ''),
+      asLimitedString(item?.contactName, 240).toLowerCase(),
+      asLimitedString(item?.contractNumber, 160).toLowerCase(),
+      asLimitedString(item?.category, 160).toLowerCase(),
+      asLimitedString(item?.costCenter, 180).toLowerCase(),
+      asLimitedString(item?.bankAccount, 180).toLowerCase(),
+    ].join('|');
+    const fingerprint = createHash('sha256').update(fingerprintSource).digest('hex');
+    const ref = firestoreDb.collection('financeTransactions').doc(`finimp_${fingerprint.slice(0, 40)}`);
+    normalized.push({
+      ref,
+      data: {
+        type, description, amount: Number(amount.toFixed(2)), grossAmount: Number(grossAmount.toFixed(2)), retentions: Number(retentions.toFixed(2)),
+        paidAmount: Number(paidAmount.toFixed(2)), openBalance, status, date, dueDate,
+        category: asLimitedString(item?.category, 160), costCenter: asLimitedString(item?.costCenter, 180),
+        contractId: asLimitedString(item?.contractId, 180), contractNumber: asLimitedString(item?.contractNumber, 180), contractClientName: asLimitedString(item?.contractClientName, 180),
+        bankAccount: asLimitedString(item?.bankAccount, 180), paymentMethod: asLimitedString(item?.paymentMethod, 120),
+        contactName: asLimitedString(item?.contactName, 240), contactDocument: asLimitedString(item?.contactDocument, 60), documentNumber: asLimitedString(item?.documentNumber, 160),
+        notes: asLimitedString(item?.notes, 2000), settlements: paidAmount > 0 ? [{ id: `import_${fingerprint.slice(0, 12)}`, amount: Number(paidAmount.toFixed(2)), date: settlementDate!, bankAccount: asLimitedString(item?.bankAccount, 180), paymentMethod: asLimitedString(item?.paymentMethod, 120), notes: 'Baixa informada na importação', createdAt: nowIso, createdBy: actorName, createdByUid: actorUid }] : [],
+        importFingerprint: fingerprint, importedAt: nowIso, importedBy: actorName,
+        createdAt: nowIso, updatedAt: nowIso, createdBy: actorName, createdByUid: actorUid, isDeleted: false,
+      },
+    });
+  });
+
+  if (normalized.length === 0) return res.status(400).json({ error: 'NO_VALID_ROWS', errors });
+
+  let imported = 0;
+  let skipped = 0;
+  try {
+    for (let offset = 0; offset < normalized.length; offset += 200) {
+      const chunk = normalized.slice(offset, offset + 200);
+      const existing = await firestoreDb.getAll(...chunk.map((entry) => entry.ref));
+      const batch = firestoreDb.batch();
+      let chunkWrites = 0;
+      chunk.forEach((entry, index) => {
+        if (existing[index]?.exists) {
+          skipped += 1;
+        } else {
+          batch.create(entry.ref, entry.data);
+          chunkWrites += 1;
+        }
+      });
+      if (chunkWrites > 0) {
+        await batch.commit();
+        imported += chunkWrites;
+      }
+    }
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    await auditRef.set({
+      action: 'FINANCE_XLS_IMPORT', entityType: 'financeTransactionImport', entityId: auditRef.id,
+      actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+      summary: `Importação financeira: ${imported} incluído(s), ${skipped} duplicado(s), ${errors.length} erro(s)`,
+      metadata: { receivedRows: rawItems.length, imported, skipped, errors: errors.slice(0, 50) },
+    });
+    return res.json({ success: true, imported, skipped, errors });
+  } catch (error) {
+    console.error('Finance XLS import failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR', imported, skipped, errors });
+  }
+});
+
 app.post('/api/inventory/items/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const itemId = asLimitedString(req.params.id, 160);
@@ -2062,7 +2270,7 @@ async function runDailyNotifications() {
       return;
     }
     console.log("Executando verificação diária de notificações e alertas...");
-    
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -2076,7 +2284,7 @@ async function runDailyNotifications() {
 
     // 1. Verificar Aniversários (EXATAMENTE 1 dia antes)
     const upcomingBdays = [];
-    
+
     // A. Buscar de employeeBirthdays
     const bdaySnapshot = await firestoreDb.collection('employeeBirthdays').get();
     bdaySnapshot.forEach(doc => {
@@ -2119,19 +2327,19 @@ async function runDailyNotifications() {
     const trSnapshot = await firestoreDb.collection('trainings').get();
     const trainings = [];
     trSnapshot.forEach(doc => trainings.push({ id: doc.id, ...doc.data() }));
-    
+
     const empTrSnapshot = await firestoreDb.collection('employeeTrainings').get();
     empTrSnapshot.forEach(doc => {
       const record = doc.data();
       const user = internalUsers.find(u => u.id === record.employeeId);
       const training = trainings.find(t => t.id === record.trainingId);
-      
+
       if (record.completionDate && training && training.validityMonths > 0) {
         const [year, month, day] = record.completionDate.split('-');
         const completionDateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
         const expirationDate = new Date(completionDateObj);
         expirationDate.setMonth(expirationDate.getMonth() + training.validityMonths);
-        
+
         const days = diffInDays(expirationDate);
         if (days === 10) {
           upcomingTrainings.push({
@@ -2208,7 +2416,7 @@ async function runDailyNotifications() {
 
     if (upcomingBdays.length > 0 || upcomingTrainings.length > 0 || upcomingASO.length > 0 || upcomingStandards.length > 0 || upcomingHealthDocs.length > 0) {
       const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
-      
+
       if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
         const transporter = nodemailer.createTransport({
           service: 'gmail',
@@ -2307,7 +2515,7 @@ COMANINS Metrology Suite`;
           text: textBody,
           html: htmlBody
         });
-        
+
         console.log("Email de notificações enviado: %s", info.messageId);
       } else {
         console.log("Configurações SMTP ausentes. O email não foi enviado.");
@@ -2437,7 +2645,7 @@ app.post("/api/generate-birthday-message", requireAuth, requireInternalAccount, 
     // display name only as a fallback if Firestore is temporarily unavailable.
   }
   if (!name) return res.status(400).json({ error: "Nome não fornecido" });
-  
+
   const genAI = getGeminiClient();
   if (!genAI) {
     return res.json({ message: `Feliz Aniversário, ${name}! A equipe COMANINS deseja a você um excelente dia, com muita saúde, paz e sucesso.` });
@@ -3855,7 +4063,7 @@ app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLim
   }
 
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  
+
   if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     try {
       const transporter = nodemailer.createTransport({
@@ -3872,7 +4080,7 @@ app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLim
         subject: subject,
         html: html
       });
-      
+
       return res.json({ success: true, emailSent: true });
     } catch (err) {
       console.error("[EMAIL] Erro ao enviar e-mail via SMTP:", err);
@@ -3930,13 +4138,13 @@ app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequ
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
 
   const emailSubject = `[SITE COMANINS] Contato: ${asLimitedString(category || 'Geral', 80)} - ${asLimitedString(company || name, 160)}`;
-  
+
   const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #1e293b;">
       <div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
         <h2 style="color: #2563eb; margin: 0; font-size: 20px;">Contato pelo Site - COMANINS</h2>
       </div>
-      
+
       <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 20px 0;">
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
           <tr>
@@ -3961,7 +4169,7 @@ app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequ
           </tr>
         </table>
       </div>
-      
+
       <div style="margin-top: 20px;">
         <h3 style="color: #64748b; font-size: 14px; margin-bottom: 10px;">Mensagem:</h3>
         <p style="background-color: #f1f5f9; padding: 16px; border-radius: 6px; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${safeMessage}</p>
@@ -3987,7 +4195,7 @@ app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequ
         html: emailHtml,
         text: `Nome: ${name}\nEmpresa: ${company}\nE-mail: ${email}\nTelefone: ${phone}\n\nMensagem:\n${message}`
       });
-      
+
       return res.json({ success: true, contactSaved: true, emailSent: true });
     } catch (err: any) {
       console.error("[CONTACT EMAIL] Erro ao enviar e-mail via SMTP:", err);
@@ -4038,11 +4246,11 @@ app.post("/api/send-document-notification", requireAuth, requireInternalAccount,
         <h2 style="color: #2563eb; margin: 0; font-size: 20px;">COMANINS INSTRUMENTAÇÃO</h2>
         <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; display: block; margin-top: 4px;">Comprovante Oficial de Visualização (LGPD)</span>
       </div>
-      
+
       <p style="font-size: 14px; line-height: 1.6; color: #334155;">
         Confirmamos que o colaborador abaixo visualizou seu(ua) <b>${docTypeLabel}</b> correspondente ao mês de referência <b>${month}</b>.
       </p>
-      
+
       <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 20px 0;">
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
           <tr>
@@ -4071,11 +4279,11 @@ app.post("/api/send-document-notification", requireAuth, requireInternalAccount,
           </tr>
         </table>
       </div>
-      
+
       <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 11px; color: #64748b; line-height: 1.5; text-align: justify;">
         <p><b>Aviso Legal (LGPD):</b> Este e-mail é uma notificação automática e serve como trilha de auditoria para fins de compliance com a Lei Geral de Proteção de Dados (LGPD). O acesso aos dados de folha de pagamento do respectivo colaborador foi registrado com o seu consentimento explícito em nosso portal interno de Recursos Humanos. As informações de IP e dispositivo foram coletadas exclusivamente para garantir a integridade da segurança da informação e prevenção de fraudes.</p>
       </div>
-      
+
       <div style="text-align: center; margin-top: 24px; font-size: 10px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 12px;">
         © ${new Date().getFullYear()} COMANINS Metrologia Industrial • Todos os direitos reservados.
       </div>
@@ -4169,7 +4377,7 @@ Required JSON format:
           { role: "user", parts: [
               { text: prompt },
               { inlineData: { mimeType: imageMimeType, data: base64Data } }
-            ] 
+            ]
           }
         ],
         config: {

@@ -3,7 +3,7 @@ import { Plus, Search, Filter, Edit, Trash2, CheckCircle, Briefcase, BarChart, X
 import { FinanceContract } from '../../types';
 import { syncFinanceContracts, deleteFinanceContract, addFinanceContract, updateFinanceContract } from '../../lib/firebase';
 
-export default function FinanceContratos({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
+export default function FinanceContratos({ requestAdminDelete, canEdit = false }: { requestAdminDelete?: (type: string, id: string, name: string) => void; canEdit?: boolean }) {
   const [showModal, setShowModal] = useState(false);
   const [contracts, setContracts] = useState<FinanceContract[]>([]);
   const [editingItem, setEditingItem] = useState<FinanceContract | null>(null);
@@ -27,6 +27,7 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
   }, []);
 
   const handleDelete = async (contract: FinanceContract) => {
+    if (!canEdit) return;
     if (requestAdminDelete) {
       requestAdminDelete('finance_contract', contract.id, `Contrato: ${contract.contractNumber} - ${contract.clientName}`);
     } else {
@@ -37,6 +38,7 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
   };
 
   const handleOpenAdd = () => {
+    if (!canEdit) return;
     setEditingItem(null);
     setClientName('');
     setContractNumber('');
@@ -50,6 +52,7 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
   };
 
   const handleOpenEdit = (item: FinanceContract) => {
+    if (!canEdit) return;
     setEditingItem(item);
     setClientName(item.clientName);
     setContractNumber(item.contractNumber);
@@ -64,6 +67,7 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
 
     if (!clientName.trim() || !contractNumber.trim() || !value.trim() || !startDate.trim() || !endDate.trim()) {
       alert('Por favor, preencha todos os campos obrigatórios.');
@@ -104,7 +108,7 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
   };
 
   // Filter lists based on search
-  const filteredContracts = contracts.filter(c => 
+  const filteredContracts = contracts.filter(c =>
     c.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.contractNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.description && c.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -121,21 +125,21 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Buscar contrato..." 
+            <input
+              type="text"
+              placeholder="Buscar contrato..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none w-48 sm:w-64" 
+              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none w-48 sm:w-64"
             />
           </div>
-          <button 
-            onClick={handleOpenAdd} 
+          {canEdit && <button
+            onClick={handleOpenAdd}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors shadow-sm"
           >
             <Plus className="h-4 w-4" />
             <span>Novo Contrato</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -188,20 +192,22 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex items-center justify-center space-x-2">
-                    <button 
+                    {canEdit && <>
+                    <button
                       onClick={() => handleOpenEdit(item)}
                       className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-slate-100 rounded transition-colors"
                       title="Editar Contrato"
                     >
                       <Edit className="h-4 w-4" />
                     </button>
-                    <button 
-                      onClick={() => handleDelete(item)} 
+                    <button
+                      onClick={() => handleDelete(item)}
                       className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
                       title="Excluir Contrato"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
+                    </>}
                   </div>
                 </td>
               </tr>
@@ -217,21 +223,21 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
       </div>
 
       {/* Modern, elegant Contract Modal */}
-      {showModal && (
+      {showModal && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
               <h4 className="text-base font-extrabold text-slate-900">
                 {editingItem ? 'Editar Contrato de Cliente' : 'Cadastrar Novo Contrato'}
               </h4>
-              <button 
-                onClick={() => setShowModal(false)} 
+              <button
+                onClick={() => setShowModal(false)}
                 className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
+
             <form onSubmit={handleSave} className="p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Client Name */}
@@ -239,13 +245,13 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Nome do Cliente *
                   </label>
-                  <input 
-                    type="text" 
-                    required 
-                    value={clientName} 
-                    onChange={(e) => setClientName(e.target.value)} 
-                    placeholder="Ex: Braskem S.A." 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue" 
+                  <input
+                    type="text"
+                    required
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="Ex: Braskem S.A."
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue"
                   />
                 </div>
 
@@ -254,13 +260,13 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Número do Contrato *
                   </label>
-                  <input 
-                    type="text" 
-                    required 
-                    value={contractNumber} 
-                    onChange={(e) => setContractNumber(e.target.value)} 
-                    placeholder="Ex: CT-2026-08" 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue font-mono" 
+                  <input
+                    type="text"
+                    required
+                    value={contractNumber}
+                    onChange={(e) => setContractNumber(e.target.value)}
+                    placeholder="Ex: CT-2026-08"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue font-mono"
                   />
                 </div>
               </div>
@@ -270,12 +276,12 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Objeto do Contrato / Descrição
                 </label>
-                <input 
-                  type="text" 
-                  value={description} 
-                  onChange={(e) => setDescription(e.target.value)} 
-                  placeholder="Ex: Calibração de Instrumentos de Pressão e Temperatura" 
-                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue" 
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Ex: Calibração de Instrumentos de Pressão e Temperatura"
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue"
                 />
               </div>
 
@@ -285,14 +291,14 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Valor Global do Contrato (R$) *
                   </label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     step="0.01"
-                    required 
-                    value={value} 
-                    onChange={(e) => setValue(e.target.value)} 
-                    placeholder="Ex: 150000.00" 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue font-mono" 
+                    required
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    placeholder="Ex: 150000.00"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue font-mono"
                   />
                 </div>
 
@@ -301,12 +307,12 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Centro de Custo Associado
                   </label>
-                  <input 
-                    type="text" 
-                    value={costCenter} 
-                    onChange={(e) => setCostCenter(e.target.value)} 
-                    placeholder="Ex: Braskem-Sede (ou vazio p/ usar número)" 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue" 
+                  <input
+                    type="text"
+                    value={costCenter}
+                    onChange={(e) => setCostCenter(e.target.value)}
+                    placeholder="Ex: Braskem-Sede (ou vazio p/ usar número)"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue"
                   />
                 </div>
               </div>
@@ -317,12 +323,12 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Data Inicial *
                   </label>
-                  <input 
-                    type="date" 
-                    required 
-                    value={startDate} 
-                    onChange={(e) => setStartDate(e.target.value)} 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue" 
+                  <input
+                    type="date"
+                    required
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue"
                   />
                 </div>
 
@@ -331,12 +337,12 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Data Final *
                   </label>
-                  <input 
-                    type="date" 
-                    required 
-                    value={endDate} 
-                    onChange={(e) => setEndDate(e.target.value)} 
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue" 
+                  <input
+                    type="date"
+                    required
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-royal-blue"
                   />
                 </div>
               </div>
@@ -358,15 +364,15 @@ export default function FinanceContratos({ requestAdminDelete }: { requestAdminD
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end space-x-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowModal(false)} 
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
                   className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors"
                 >
                   Cancelar
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-sm transition-colors"
                 >
                   {editingItem ? 'Salvar Alterações' : 'Cadastrar Contrato'}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, Search, Landmark, BookOpen, Users, Settings, 
-  Trash2, Edit, CheckCircle, HelpCircle, X, ShieldAlert 
+import {
+  Plus, Search, Landmark, BookOpen, Users, Settings,
+  Trash2, Edit, CheckCircle, HelpCircle, X, ShieldAlert
 } from 'lucide-react';
 import { syncFinanceCollection, addFinanceDoc, deleteFinanceDoc } from '../../lib/firebase';
 
@@ -22,7 +22,12 @@ interface Category {
   status: string;
 }
 
-export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
+interface CadastrosFinanceirosProps {
+  requestAdminDelete?: (type: string, id: string, name: string) => void;
+  canEdit?: boolean;
+}
+
+export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = false }: CadastrosFinanceirosProps) {
   const [activeTab, setActiveTab] = useState<'contas' | 'plano'>('contas');
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -60,37 +65,30 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
     };
   }, []);
 
-  // Seeding Default Production/Homologation baseline structures
+  // Inicialização segura apenas do plano de contas. Nenhum banco, agência,
+  // conta ou saldo fictício é criado automaticamente em produção.
   const handleSeedDefaults = async () => {
+    if (!canEdit) return;
+    if (categories.length > 0) {
+      alert('O plano de contas já possui categorias. A inicialização automática foi cancelada para evitar duplicidades.');
+      return;
+    }
     try {
       setLoading(true);
-      // Default bank accounts
-      const defaultAccounts = [
-        { bank: 'Itaú Unibanco S.A.', agency: '3840', account: '99201-1', type: 'Corrente', balance: 138450.00 },
-        { bank: 'Bradesco S.A.', agency: '1204', account: '44102-3', type: 'Corrente', balance: 25000.00 },
-      ];
-
-      // Default chart of accounts categories
       const defaultCategories = [
         { code: '1.01', name: 'Faturamento de Serviços', type: 'Receita', status: 'Ativo' },
-        { code: '2.01', name: 'Mão de Obra de Engenharia', type: 'Custo Direto', status: 'Ativo' },
-        { code: '2.02', name: 'Ferramental e Equipamentos', type: 'Custo Direto', status: 'Ativo' },
-        { code: '3.01', name: 'Aluguel Sede Administrativa', type: 'Despesa Indireta', status: 'Ativo' },
-        { code: '3.02', name: 'Manutenção de Veículos (Frota)', type: 'Despesa Indireta', status: 'Ativo' },
-        { code: '3.03', name: 'Impostos e Taxas Federais', type: 'Despesa Indireta', status: 'Ativo' },
+        { code: '2.01', name: 'Mão de Obra', type: 'Custo Direto', status: 'Ativo' },
+        { code: '2.02', name: 'Materiais e Consumíveis', type: 'Custo Direto', status: 'Ativo' },
+        { code: '2.03', name: 'Ferramentas e Equipamentos', type: 'Custo Direto', status: 'Ativo' },
+        { code: '3.01', name: 'Despesas Administrativas', type: 'Despesa Indireta', status: 'Ativo' },
+        { code: '3.02', name: 'Frota e Deslocamentos', type: 'Despesa Indireta', status: 'Ativo' },
+        { code: '3.03', name: 'Impostos e Taxas', type: 'Despesa Indireta', status: 'Ativo' },
       ];
-
-      for (const acc of defaultAccounts) {
-        await addFinanceDoc('financeBankAccounts', acc);
-      }
-      for (const cat of defaultCategories) {
-        await addFinanceDoc('financeCategories', cat);
-      }
-
-      alert('✓ Estrutura Financeira Padrão (Contas e Plano de Contas) inicializada com sucesso no Firestore!');
+      for (const cat of defaultCategories) await addFinanceDoc('financeCategories', cat);
+      alert('Plano de contas básico criado sem contas bancárias ou saldos fictícios. Cadastre as contas reais manualmente.');
     } catch (error) {
-      console.error('Error seeding defaults:', error);
-      alert('Erro ao inicializar estrutura padrão.');
+      console.error('Error seeding finance categories:', error);
+      alert('Erro ao inicializar o plano de contas.');
     } finally {
       setLoading(false);
     }
@@ -98,13 +96,14 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
 
   const handleAddAccount = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!bankName.trim() || !accountNum.trim()) return;
 
     try {
       const balanceVal = parseFloat(initialBalance) || 0;
       await addFinanceDoc('financeBankAccounts', {
         bank: bankName.trim(),
-        agency: agencyNum.trim() || '1000',
+        agency: agencyNum.trim(),
         account: accountNum.trim(),
         type: accountType,
         balance: balanceVal,
@@ -123,6 +122,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
 
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!catCode.trim() || !catName.trim()) return;
 
     try {
@@ -143,8 +143,9 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
   };
 
   const handleDeleteAccount = async (banco: any) => {
+    if (!canEdit) return;
     if (requestAdminDelete) {
-      requestAdminDelete('finance_bank', banco.id, `Conta Bancária: ${banco.bankName}`);
+      requestAdminDelete('finance_bank', banco.id, `Conta Bancária: ${banco.bank}`);
     } else {
       if (confirm('Tem certeza que deseja excluir esta conta bancária? Lançamentos vinculados perderão a referência.')) {
         await deleteFinanceDoc('financeBankAccounts', banco.id);
@@ -153,6 +154,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
   };
 
   const handleDeleteCategory = async (cat: any) => {
+    if (!canEdit) return;
     if (requestAdminDelete) {
       requestAdminDelete('finance_category', cat.id, `Categoria: ${cat.name}`);
     } else {
@@ -167,7 +169,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
       {/* Header Tabs */}
       <div className="border-b border-slate-200 bg-slate-50/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-wrap gap-2">
-          <button 
+          <button
             onClick={() => setActiveTab('contas')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all ${activeTab === 'contas' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-700'}`}
           >
@@ -175,7 +177,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
             <span>Contas Bancárias Ativas</span>
           </button>
 
-          <button 
+          <button
             onClick={() => setActiveTab('plano')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all ${activeTab === 'plano' ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-700'}`}
           >
@@ -185,13 +187,13 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
         </div>
 
         {/* Empty database assistance banner */}
-        {bankAccounts.length === 0 && categories.length === 0 && !loading && (
+        {canEdit && bankAccounts.length === 0 && categories.length === 0 && !loading && (
           <button
             onClick={handleSeedDefaults}
             className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition-colors"
           >
             <ShieldAlert className="h-4 w-4 text-amber-600" />
-            <span>Inicializar Contas e Plano de Contas Padrão</span>
+            <span>Inicializar Plano de Contas Básico</span>
           </button>
         )}
       </div>
@@ -204,7 +206,8 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
               <h4 className="font-bold text-slate-800 text-sm">Contas e Caixas de Movimentação</h4>
               <p className="text-xs text-slate-500 font-medium">Cadastro de agências, contas correntes e saldos iniciais de abertura.</p>
             </div>
-            <button 
+            {canEdit && (
+            <button
               onClick={() => {
                 setBankName('');
                 setAgencyNum('');
@@ -217,6 +220,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
               <Plus className="h-3.5 w-3.5" />
               <span>Adicionar Conta</span>
             </button>
+            )}
           </div>
 
           {loading ? (
@@ -225,13 +229,15 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {bankAccounts.map(account => (
                 <div key={account.id} className="p-5 rounded-xl border border-slate-200 bg-slate-50/20 relative group hover:shadow-sm transition-shadow">
-                  <button 
-                    onClick={() => handleDeleteAccount(account.id)}
-                    className="absolute top-4 right-4 text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-slate-100 transition-colors"
-                    title="Excluir Conta"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleDeleteAccount(account)}
+                      className="absolute top-4 right-4 text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-slate-100 transition-colors"
+                      title="Excluir Conta"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                   <div className="flex justify-between items-start">
                     <div>
                       <h5 className="font-bold text-slate-800 text-sm">{account.bank}</h5>
@@ -261,18 +267,20 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
               <h4 className="font-bold text-slate-800 text-sm">Estrutura de Plano de Contas (Plano Referencial)</h4>
               <p className="text-xs text-slate-500 font-medium">Hierarquização de despesas e receitas para apuração contábil correta do DRE Gerencial.</p>
             </div>
-            <button 
-              onClick={() => {
-                setCatCode('');
-                setCatName('');
-                setCatType('Receita');
-                setShowCategoryModal(true);
-              }}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1 shadow-sm transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Nova Categoria</span>
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => {
+                  setCatCode('');
+                  setCatName('');
+                  setCatType('Receita');
+                  setShowCategoryModal(true);
+                }}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1 shadow-sm transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Nova Categoria</span>
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -296,10 +304,10 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
                       <td className="px-6 py-3 text-slate-800">{cat.name}</td>
                       <td className="px-6 py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
-                          cat.type === 'Receita' 
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                            : cat.type === 'Custo Direto' 
-                            ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                          cat.type === 'Receita'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : cat.type === 'Custo Direto'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
                             : 'bg-slate-100 text-slate-800 border border-slate-200'
                         }`}>
                           {cat.type}
@@ -307,13 +315,15 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
                       </td>
                       <td className="px-6 py-3 text-emerald-600">✓ Ativo</td>
                       <td className="px-6 py-3 text-center">
-                        <button 
-                          onClick={() => handleDeleteCategory(cat)}
-                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
-                          title="Excluir Categoria"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={() => handleDeleteCategory(cat)}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
+                            title="Excluir Categoria"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -329,7 +339,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
       )}
 
       {/* New Account Modal */}
-      {showAccountModal && (
+      {showAccountModal && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
@@ -378,7 +388,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete }: { requestAd
       )}
 
       {/* New Category Modal */}
-      {showCategoryModal && (
+      {showCategoryModal && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">

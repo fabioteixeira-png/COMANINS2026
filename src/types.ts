@@ -16,6 +16,12 @@ export interface Client {
   isFieldService?: boolean;
 }
 
+export interface InstrumentRegistrationSnapshot {
+  capturedAt: string;
+  schemaVersion: 1;
+  data: Record<string, unknown>;
+}
+
 export interface Instrument {
   id: string;
   tag: string; // Client TAG (can be repeated)
@@ -51,7 +57,7 @@ export interface Instrument {
   condicao?: string;
   observacoes?: string;
   dataEntrada?: string;
-  mpe?: number; 
+  mpe?: number;
   lastCalibrationDate?: string;
   nextCalibrationDate?: string;
   status: CalibrationStatus;
@@ -80,6 +86,7 @@ export interface Instrument {
   humidity?: number;
   manualCalibrationDateAllowed?: boolean;
   reissueSuggestedCalibrationDate?: string;
+  registrationSnapshot?: InstrumentRegistrationSnapshot;
 }
 
 export interface RncReport {
@@ -192,6 +199,7 @@ export interface CalibrationReport {
   referenceStandards?: ReferenceStandard[];
   rncNumber?: string;
   rncData?: RncReport;
+  materialsUsed?: string[];
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
@@ -356,11 +364,31 @@ export interface PayslipItem {
   value: number;
 }
 
+export interface FinanceSettlement {
+  id: string;
+  amount: number;
+  date: string;
+  bankAccount?: string;
+  paymentMethod?: string;
+  notes?: string;
+  createdAt: string;
+  createdBy?: string;
+  createdByUid?: string;
+}
+
 export interface FinanceTransaction {
   id: string;
   type: 'receita' | 'despesa';
   description: string;
-  amount: number;
+  amount: number; // valor original líquido do título; nunca é reduzido em baixa parcial
+  grossAmount?: number;
+  retentions?: number;
+  paidAmount?: number;
+  openBalance?: number;
+  settlements?: FinanceSettlement[];
+  importFingerprint?: string;
+  importedAt?: string;
+  importedBy?: string;
   date: string;
   dueDate: string;
   status: 'pendente' | 'pago' | 'atrasado' | 'cancelado';
@@ -382,6 +410,9 @@ export interface FinanceTransaction {
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+  createdByUid?: string;
+  updatedBy?: string;
+  updatedByUid?: string;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
@@ -428,7 +459,7 @@ export interface Payslip {
   inssBase?: number;
   createdAt: string;
   items?: PayslipItem[];
-  
+
   pdfBase64?: string;       // legado: Base64 do PDF
   pdfStoragePath?: string;  // novo: caminho privado no Storage
   pdfName?: string;         // nome do arquivo
@@ -437,7 +468,7 @@ export interface Payslip {
   pdfSha256?: string;
   pdfVersion?: number;
   documentType?: "holerite" | "alimentacao" | "transporte" | "espelho_ponto";
-  
+
   // LGPD audit trails
   lgpdConsentAccepted: boolean;
   lgpdConsentDate?: string;

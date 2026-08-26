@@ -9,7 +9,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 export default function DashboardFinanceiro() {
   // Filters
-  const [period, setPeriod] = useState('2026');
+  const [period, setPeriod] = useState(String(new Date().getFullYear()));
   const [vision, setVision] = useState<'competencia' | 'caixa'>('caixa');
   const [selectedCostCenter, setSelectedCostCenter] = useState('todos');
   const [selectedContract, setSelectedContract] = useState('todos');
@@ -34,15 +34,43 @@ export default function DashboardFinanceiro() {
     };
   }, []);
 
-  // Filter calculations
-  const filteredTx = transactions.filter(t => {
-    if (period !== 'todos') {
-      const year = new Date(t.date).getFullYear().toString();
-      if (year !== period) return false;
+  const txOpenBalance = (t: FinanceTransaction) => {
+    if (Number.isFinite(Number(t.openBalance))) return Math.max(0, Number(t.openBalance));
+    return t.status === 'pago' ? 0 : Math.max(0, Number(t.amount || 0) - Number(t.paidAmount || 0));
+  };
+
+  const settledAmountForPeriod = (t: FinanceTransaction, month?: number) => {
+    const settlements = Array.isArray(t.settlements) ? t.settlements : [];
+    if (settlements.length > 0) {
+      return settlements.reduce((sum, settlement) => {
+        const d = new Date(`${settlement.date}T12:00:00`);
+        if (Number.isNaN(d.getTime())) return sum;
+        if (period !== 'todos' && String(d.getFullYear()) !== period) return sum;
+        if (month !== undefined && d.getMonth() !== month) return sum;
+        return sum + Number(settlement.amount || 0);
+      }, 0);
     }
+    const legacyPaid = Number(t.paidAmount || (t.status === 'pago' ? t.amount : 0));
+    if (legacyPaid <= 0) return 0;
+    const d = new Date(`${t.date}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return 0;
+    if (period !== 'todos' && String(d.getFullYear()) !== period) return 0;
+    if (month !== undefined && d.getMonth() !== month) return 0;
+    return legacyPaid;
+  };
+
+  // Os filtros organizacionais valem para competência e caixa. Em regime de
+  // caixa, o período é aplicado à data real das baixas, não à criação do título.
+  const scopedTx = transactions.filter(t => {
     if (selectedCostCenter !== 'todos' && t.costCenter !== selectedCostCenter) return false;
     if (selectedContract !== 'todos' && t.contractNumber !== selectedContract) return false;
     return true;
+  });
+
+  const filteredTx = scopedTx.filter(t => {
+    if (vision === 'caixa' || period === 'todos') return true;
+    const year = new Date(`${t.date}T12:00:00`).getFullYear().toString();
+    return year === period;
   });
 
   const isSimulacao = false;
@@ -54,13 +82,13 @@ export default function DashboardFinanceiro() {
 
   // Receita operacional (services recognized in the period)
   const receitaOperacional = filteredTx
-    .filter(t => t.type === 'receita' && (vision === 'competencia' || t.status === 'pago'))
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'receita')
+    .reduce((sum, t) => sum + (vision === 'competencia' ? t.amount : settledAmountForPeriod(t)), 0);
 
   // Custos operacionais (direct + indirect of period)
   const custosOperacionais = filteredTx
-    .filter(t => t.type === 'despesa' && (vision === 'competencia' || t.status === 'pago'))
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'despesa')
+    .reduce((sum, t) => sum + (vision === 'competencia' ? t.amount : settledAmountForPeriod(t)), 0);
 
   // Resultado operacional = receita - custos
   const resultadoOperacional = receitaOperacional - custosOperacionais;
@@ -69,22 +97,22 @@ export default function DashboardFinanceiro() {
   const margemOperacional = receitaOperacional > 0 ? (resultadoOperacional / receitaOperacional) * 100 : 0;
 
   // Entradas e saídas de caixa (effectively paid/received)
-  const totalEntradasCaixa = filteredTx
-    .filter(t => t.type === 'receita' && t.status === 'pago')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const totalEntradasCaixa = scopedTx
+    .filter(t => t.type === 'receita')
+    .reduce((sum, t) => sum + settledAmountForPeriod(t), 0);
 
-  const totalSaidasCaixa = filteredTx
-    .filter(t => t.type === 'despesa' && t.status === 'pago')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const totalSaidasCaixa = scopedTx
+    .filter(t => t.type === 'despesa')
+    .reduce((sum, t) => sum + settledAmountForPeriod(t), 0);
 
   // Contas Vencidas
   const contasPagarVencidas = filteredTx
     .filter(t => t.type === 'despesa' && t.status === 'atrasado')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + txOpenBalance(t), 0);
 
   const contasReceberVencidas = filteredTx
     .filter(t => t.type === 'receita' && t.status === 'atrasado')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + txOpenBalance(t), 0);
 
   // Contract list and cost centers extracted from transactions for filter dropdowns
   const costCenters = Array.from(new Set(transactions.map(t => t.costCenter).filter(Boolean)));
@@ -98,13 +126,13 @@ export default function DashboardFinanceiro() {
       return tMonth === idx;
     });
 
-    const rec = monthTx
-      .filter(t => t.type === 'receita' && (vision === 'competencia' || t.status === 'pago'))
-      .reduce((sum, t) => sum + t.amount, 0);
+    const rec = vision === 'competencia'
+      ? monthTx.filter(t => t.type === 'receita').reduce((sum, t) => sum + t.amount, 0)
+      : scopedTx.filter(t => t.type === 'receita').reduce((sum, t) => sum + settledAmountForPeriod(t, idx), 0);
 
-    const desp = monthTx
-      .filter(t => t.type === 'despesa' && (vision === 'competencia' || t.status === 'pago'))
-      .reduce((sum, t) => sum + t.amount, 0);
+    const desp = vision === 'competencia'
+      ? monthTx.filter(t => t.type === 'despesa').reduce((sum, t) => sum + t.amount, 0)
+      : scopedTx.filter(t => t.type === 'despesa').reduce((sum, t) => sum + settledAmountForPeriod(t, idx), 0);
 
     return {
       name: monthName,
@@ -119,7 +147,7 @@ export default function DashboardFinanceiro() {
     .map(clientName => {
       const clientTotal = filteredTx
         .filter(t => t.type === 'receita' && t.contactName === clientName)
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum, t) => sum + (vision === 'competencia' ? t.amount : settledAmountForPeriod(t)), 0);
       const percentage = receitaOperacional > 0 ? (clientTotal / receitaOperacional) * 100 : 0;
       return { name: clientName, value: clientTotal, percentage };
     })
@@ -137,8 +165,10 @@ export default function DashboardFinanceiro() {
               onChange={(e) => setPeriod(e.target.value)}
               className="text-sm border-slate-300 rounded-lg p-1.5 font-semibold focus:ring-royal-blue focus:border-royal-blue"
             >
-              <option value="2026">Ano de 2026</option>
-              <option value="2025">Ano de 2025</option>
+              {Array.from(new Set([String(new Date().getFullYear()), ...transactions.map(t => String(new Date(`${t.date}T12:00:00`).getFullYear()))]))
+                .filter(year => /^\d{4}$/.test(year))
+                .sort((a, b) => Number(b) - Number(a))
+                .map(year => <option key={year} value={year}>Ano de {year}</option>)}
               <option value="todos">Todos os Anos</option>
             </select>
           </div>

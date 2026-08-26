@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle, 
-  X, FileText, Upload, Landmark, DollarSign, Eye, CreditCard 
+import {
+  Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle,
+  X, FileText, Upload, Landmark, DollarSign, Eye, CreditCard
 } from 'lucide-react';
 import { FinanceTransaction } from '../../types';
-import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction } from '../../lib/firebase';
+import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction } from '../../lib/firebase';
 
-export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete?: (type: string, id: string, name: string) => void }) {
+interface ContasPagarProps {
+  requestAdminDelete?: (type: string, id: string, name: string) => void;
+  canEdit?: boolean;
+  currentUserName?: string;
+}
+
+export default function ContasPagar({ requestAdminDelete, canEdit = false, currentUserName = '' }: ContasPagarProps) {
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -20,6 +26,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
   // Form states
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState(0);
+  const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
   const [category, setCategory] = useState('Pessoal');
   const [costCenter, setCostCenter] = useState('Sede (Corporativo)');
@@ -27,7 +34,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
   const [contactDocument, setContactDocument] = useState('');
   const [documentNumber, setDocumentNumber] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Pix');
-  const [bankAccount, setBankAccount] = useState('Itaú Sede');
+  const [bankAccount, setBankAccount] = useState('');
   const [installments, setInstallments] = useState(1);
   const [notes, setNotes] = useState('');
   const [costType, setCostType] = useState('Direto');
@@ -35,8 +42,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
   // Baja (payment) states
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [amountPaid, setAmountPaid] = useState(0);
-  const [bajaBankAccount, setBajaBankAccount] = useState('Itaú Sede');
-  const [bajaComprovante, setBajaComprovante] = useState('comprovante_pix.pdf');
+  const [bajaBankAccount, setBajaBankAccount] = useState('');
 
   useEffect(() => {
     const unsubscribe = syncFinanceTransactions((data) => {
@@ -46,6 +52,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
   }, []);
 
   const handleDelete = async (tx: FinanceTransaction) => {
+    if (!canEdit) return;
     if (requestAdminDelete) {
       requestAdminDelete('finance_transaction', tx.id, `Despesa: ${tx.description}`);
     } else {
@@ -56,10 +63,12 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
   };
 
   const handleOpenForm = (tx: FinanceTransaction | null) => {
+    if (!canEdit) return;
     if (tx) {
       setSelectedTx(tx);
       setDescription(tx.description);
       setAmount(tx.amount);
+      setTransactionDate(tx.date || new Date().toISOString().split('T')[0]);
       setDueDate(tx.dueDate);
       setCategory(tx.category);
       setCostCenter(tx.costCenter);
@@ -74,6 +83,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
       setSelectedTx(null);
       setDescription('');
       setAmount(0);
+      setTransactionDate(new Date().toISOString().split('T')[0]);
       setDueDate(new Date().toISOString().split('T')[0]);
       setCategory('Sede');
       setCostCenter('Sede (Corporativo)');
@@ -81,7 +91,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
       setContactDocument('');
       setDocumentNumber('');
       setPaymentMethod('Pix');
-      setBankAccount('Itaú Sede');
+      setBankAccount('');
       setInstallments(1);
       setNotes('');
     }
@@ -90,11 +100,12 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
 
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     const data: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt'> = {
       type: 'despesa',
       description,
       amount,
-      date: new Date().toISOString().split('T')[0],
+      date: transactionDate,
       dueDate,
       status: selectedTx ? selectedTx.status : 'pendente',
       category,
@@ -105,12 +116,16 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
       paymentMethod,
       bankAccount,
       installments,
-      createdBy: 'Administrador',
+      createdBy: selectedTx?.createdBy || currentUserName || 'Usuário autenticado',
       notes,
     };
 
     if (selectedTx) {
-      await updateFinanceTransaction(selectedTx.id, data);
+      if (Number(selectedTx.paidAmount || 0) > 0) data.amount = selectedTx.amount;
+      await updateFinanceTransaction(selectedTx.id, {
+        ...data,
+        updatedBy: currentUserName || 'Usuário autenticado',
+      });
     } else {
       await addFinanceTransaction(data);
     }
@@ -118,30 +133,35 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
   };
 
   const handleOpenBaja = (tx: FinanceTransaction) => {
+    if (!canEdit) return;
     setSelectedTx(tx);
-    setAmountPaid(tx.amount);
+    const openBalance = Number.isFinite(Number(tx.openBalance)) ? Number(tx.openBalance) : Math.max(0, Number(tx.amount || 0) - Number(tx.paidAmount || 0));
+    setAmountPaid(openBalance);
+    setBajaBankAccount(tx.bankAccount || '');
     setShowBajaModal(true);
   };
 
   const handleSaveBaja = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTx) return;
-
-    const remaining = selectedTx.amount - amountPaid;
-    const isPartial = remaining > 0;
-
-    await updateFinanceTransaction(selectedTx.id, {
-      status: isPartial ? 'pendente' : 'pago',
-      amount: isPartial ? remaining : selectedTx.amount, // keeping outstanding or whole
-      notes: `${selectedTx.notes || ''} \n [Baixa ${isPartial ? 'Parcial' : 'Total'} de R$ ${amountPaid} em ${paymentDate} via ${bajaBankAccount}]`.trim()
-    });
-
-    setShowBajaModal(false);
+    if (!canEdit || !selectedTx || amountPaid <= 0) return;
+    try {
+      await settleFinanceTransaction({
+        transactionId: selectedTx.id,
+        amount: amountPaid,
+        date: paymentDate,
+        bankAccount: bajaBankAccount,
+        paymentMethod: selectedTx.paymentMethod || paymentMethod,
+        notes: 'Baixa registrada pelo Contas a Pagar',
+      });
+      setShowBajaModal(false);
+    } catch (error: any) {
+      alert(error?.message || 'Não foi possível registrar a baixa.');
+    }
   };
 
   // Filter list
   const filtered = transactions.filter(t => {
-    const matchesSearch = t.contactName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = t.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           t.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'todos' || t.status === statusFilter;
     const matchesCostCenter = costCenterFilter === 'todos' || t.costCenter === costCenterFilter;
@@ -161,16 +181,16 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Buscar fornecedor/serviço..." 
+            <input
+              type="text"
+              placeholder="Buscar fornecedor/serviço..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none" 
+              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none"
             />
           </div>
 
-          <select 
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
@@ -181,7 +201,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
             <option value="atrasado">Atrasado</option>
           </select>
 
-          <select 
+          <select
             value={costCenterFilter}
             onChange={(e) => setCostCenterFilter(e.target.value)}
             className="border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
@@ -190,13 +210,15 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
             {costCenters.map(cc => <option key={cc} value={cc}>{cc}</option>)}
           </select>
 
-          <button 
-            onClick={() => handleOpenForm(null)} 
-            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Nova Despesa</span>
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => handleOpenForm(null)}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Nova Despesa</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -230,7 +252,10 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
                   {new Date(item.dueDate).toLocaleDateString('pt-BR')}
                 </td>
                 <td className="px-6 py-4 text-right font-mono font-bold text-slate-800">
-                  R$ {item.amount.toFixed(2).replace('.', ',')}
+                  <div>R$ {item.amount.toFixed(2).replace('.', ',')}</div>
+                  {Number(item.openBalance ?? item.amount) < item.amount && (
+                    <div className="text-[10px] font-sans font-semibold text-amber-700">Saldo: R$ {Number(item.openBalance ?? item.amount).toFixed(2).replace('.', ',')}</div>
+                  )}
                 </td>
                 <td className="px-6 py-4 text-center">
                   {item.status === 'pago' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"><CheckCircle className="h-3 w-3 mr-1" /> Pago</span>}
@@ -239,8 +264,8 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex items-center justify-center space-x-2">
-                    {item.status !== 'pago' && (
-                      <button 
+                    {canEdit && item.status !== 'pago' && (
+                      <button
                         onClick={() => handleOpenBaja(item)}
                         className="p-1 text-emerald-600 hover:text-emerald-800 font-bold text-xs border border-emerald-200 rounded bg-emerald-50 px-2 py-1 flex items-center space-x-1"
                         title="Efetuar Baixa de Pagamento"
@@ -249,8 +274,10 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
                         <span>Baixar</span>
                       </button>
                     )}
-                    <button onClick={() => handleOpenForm(item)} className="p-1 text-slate-400 hover:text-royal-blue"><Edit className="h-4 w-4" /></button>
-                    <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                    {canEdit && (<>
+                      <button onClick={() => handleOpenForm(item)} className="p-1 text-slate-400 hover:text-royal-blue"><Edit className="h-4 w-4" /></button>
+                      <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                    </>)}
                   </div>
                 </td>
               </tr>
@@ -266,7 +293,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
       </div>
 
       {/* Bill Form Modal */}
-      {showFormModal && (
+      {showFormModal && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center">
@@ -307,13 +334,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Centro de Custo de Alocação *</label>
-                  <select value={costCenter} onChange={(e) => setCostCenter(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
-                    <option value="Sede (Corporativo)">Sede (Corporativo)</option>
-                    <option value="Laboratório Metrológico">Laboratório Metrológico</option>
-                    <option value="Contrato Braskem">Contrato Braskem</option>
-                    <option value="Contrato Acelen">Contrato Acelen</option>
-                    <option value="Frota corporativa">Frota corporativa</option>
-                  </select>
+                  <input type="text" required value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="Ex.: Sede, Laboratório, Contrato Acelen" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Tipo de Custo</label>
@@ -324,10 +345,14 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Valor Bruto (R$) *</label>
                   <input type="number" step="0.01" required value={amount} onChange={(e) => setAmount(Number(e.target.value))} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Data do Lançamento / Competência *</label>
+                  <input type="date" required value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Data de Vencimento *</label>
@@ -366,9 +391,9 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
                   <FileText className="h-4 w-4 text-slate-500" />
                   <span className="text-xs font-semibold text-slate-600">Comprovante de Despesa / Contrato</span>
                 </div>
-                <button type="button" className="text-xs font-bold text-royal-blue hover:underline flex items-center space-x-1">
+                <button type="button" disabled title="Upload documental financeiro será liberado após validação específica" className="text-xs font-bold text-slate-400 flex items-center space-x-1 cursor-not-allowed">
                   <Upload className="h-3.5 w-3.5" />
-                  <span>Anexar PDF/Imagem</span>
+                  <span>Anexos financeiros: em implantação</span>
                 </button>
               </div>
 
@@ -382,7 +407,7 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
       )}
 
       {/* Baja / Payment Modal */}
-      {showBajaModal && selectedTx && (
+      {showBajaModal && selectedTx && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden animate-scale-in">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center">
@@ -393,48 +418,40 @@ export default function ContasPagar({ requestAdminDelete }: { requestAdminDelete
               <div className="bg-amber-50 p-3 rounded-lg border border-amber-100 text-xs text-slate-700 space-y-1">
                 <p><strong>Favorecido:</strong> {selectedTx.contactName}</p>
                 <p><strong>Descrição:</strong> {selectedTx.description}</p>
-                <p><strong>Valor Pendente:</strong> R$ {selectedTx.amount.toFixed(2).replace('.', ',')}</p>
+                <p><strong>Valor Pendente:</strong> R$ {Number(selectedTx.openBalance ?? selectedTx.amount).toFixed(2).replace('.', ',')}</p>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Valor Efetivamente Pago (R$) *</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  required 
-                  value={amountPaid} 
-                  onChange={(e) => setAmountPaid(Number(e.target.value))} 
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" 
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={amountPaid}
+                  onChange={(e) => setAmountPaid(Number(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
                 />
                 <span className="text-[10px] text-slate-400">Valores menores que o total registrarão baixa parcial automática.</span>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Data Efetiva da Baixa / Pagamento *</label>
-                <input 
-                  type="date" 
-                  required 
-                  value={paymentDate} 
-                  onChange={(e) => setPaymentDate(e.target.value)} 
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" 
+                <input
+                  type="date"
+                  required
+                  value={paymentDate}
+                  onChange={(e) => setPaymentDate(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Conta Bancária de Saída *</label>
-                <select value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
-                  <option value="Itaú Sede">Itaú Sede</option>
-                  <option value="Bradesco Operacional">Bradesco Operacional</option>
-                  <option value="Caixa Depósitos">Caixa Depósitos</option>
-                </select>
+                <input type="text" required value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} placeholder="Conta bancária utilizada" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Arquivo do Comprovante (Obrigatório PDF 5.1)</label>
-                <div className="flex items-center space-x-2 border border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:bg-slate-50">
-                  <Upload className="h-5 w-5 text-slate-400" />
-                  <span className="text-xs text-slate-500 font-semibold">{bajaComprovante}</span>
-                </div>
+              <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                A baixa registra valor, data, conta, usuário e histórico de auditoria. O valor original do título permanece preservado em baixas parciais.
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end space-x-2">

@@ -28,6 +28,32 @@ export default function FluxoCaixa() {
 
   const isSimulacao = false;
 
+  const paidAmount = (t: FinanceTransaction) => {
+    if (Array.isArray(t.settlements) && t.settlements.length > 0) {
+      return t.settlements.reduce((sum, settlement) => sum + Number(settlement.amount || 0), 0);
+    }
+    return Math.max(0, Number(t.paidAmount || (t.status === 'pago' ? t.amount : 0)));
+  };
+
+  const openBalance = (t: FinanceTransaction) => {
+    if (t.status === 'cancelado') return 0;
+    if (Number.isFinite(Number(t.openBalance))) return Math.max(0, Number(t.openBalance));
+    return Math.max(0, Number(t.amount || 0) - paidAmount(t));
+  };
+
+  const settlementAmountInMonth = (t: FinanceTransaction, month: number, year: number) => {
+    if (Array.isArray(t.settlements) && t.settlements.length > 0) {
+      return t.settlements.reduce((sum, settlement) => {
+        const d = new Date(`${settlement.date}T12:00:00`);
+        return !Number.isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year
+          ? sum + Number(settlement.amount || 0)
+          : sum;
+      }, 0);
+    }
+    const d = new Date(`${t.date}T12:00:00`);
+    return !Number.isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year ? paidAmount(t) : 0;
+  };
+
   // Projections
   const currentBalance = isSimulacao 
     ? 138450.00 
@@ -35,21 +61,21 @@ export default function FluxoCaixa() {
 
   // Realized and Planned entries
   const entriesRealized = transactions
-    .filter(t => t.type === 'receita' && t.status === 'pago')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'receita')
+    .reduce((sum, t) => sum + paidAmount(t), 0);
 
   const entriesPlanned = transactions
-    .filter(t => t.type === 'receita' && t.status === 'pendente')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'receita' && t.status !== 'cancelado')
+    .reduce((sum, t) => sum + openBalance(t), 0);
 
   // Realized and Planned exits
   const exitsRealized = transactions
-    .filter(t => t.type === 'despesa' && t.status === 'pago')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'despesa')
+    .reduce((sum, t) => sum + paidAmount(t), 0);
 
   const exitsPlanned = transactions
-    .filter(t => t.type === 'despesa' && t.status === 'pendente')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'despesa' && t.status !== 'cancelado')
+    .reduce((sum, t) => sum + openBalance(t), 0);
 
   // Scenario Multiplier Rule (Page 13 - Cenário)
   // Otimista: assumes receiving 100% of planned receivables
@@ -80,21 +106,21 @@ export default function FluxoCaixa() {
         return txDate.getMonth() === d.getMonth() && txDate.getFullYear() === d.getFullYear();
       });
 
-      const recReal = monthTx
-        .filter(t => t.type === 'receita' && t.status === 'pago')
-        .reduce((sum, t) => sum + t.amount, 0);
+      const recReal = transactions
+        .filter(t => t.type === 'receita')
+        .reduce((sum, t) => sum + settlementAmountInMonth(t, d.getMonth(), d.getFullYear()), 0);
 
       const recPrev = monthTx
-        .filter(t => t.type === 'receita' && t.status === 'pendente')
-        .reduce((sum, t) => sum + t.amount, 0);
+        .filter(t => t.type === 'receita' && t.status !== 'cancelado')
+        .reduce((sum, t) => sum + openBalance(t), 0);
 
-      const despReal = monthTx
-        .filter(t => t.type === 'despesa' && t.status === 'pago')
-        .reduce((sum, t) => sum + t.amount, 0);
+      const despReal = transactions
+        .filter(t => t.type === 'despesa')
+        .reduce((sum, t) => sum + settlementAmountInMonth(t, d.getMonth(), d.getFullYear()), 0);
 
       const despPrev = monthTx
-        .filter(t => t.type === 'despesa' && t.status === 'pendente')
-        .reduce((sum, t) => sum + t.amount, 0);
+        .filter(t => t.type === 'despesa' && t.status !== 'cancelado')
+        .reduce((sum, t) => sum + openBalance(t), 0);
 
       arr.push({
         name: i === 0 ? `${capitalizedName} (Atual)` : capitalizedName,
