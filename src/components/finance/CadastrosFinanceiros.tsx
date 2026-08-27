@@ -4,6 +4,7 @@ import {
   Trash2, Edit, CheckCircle, HelpCircle, X, ShieldAlert
 } from 'lucide-react';
 import { syncFinanceCollection, addFinanceDoc, deleteFinanceDoc } from '../../lib/firebase';
+import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 
 interface BankAccount {
   id: string;
@@ -53,11 +54,11 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
     setLoading(true);
     const unsubAccounts = syncFinanceCollection<BankAccount>('financeBankAccounts', (data) => {
       setBankAccounts(data);
-    });
+    }, 1000);
     const unsubCategories = syncFinanceCollection<Category>('financeCategories', (data) => {
       setCategories(data);
       setLoading(false);
-    });
+    }, 1000);
 
     return () => {
       unsubAccounts();
@@ -206,8 +207,10 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
               <h4 className="font-bold text-slate-800 text-sm">Contas e Caixas de Movimentação</h4>
               <p className="text-xs text-slate-500 font-medium">Cadastro de agências, contas correntes e saldos iniciais de abertura.</p>
             </div>
-            {canEdit && (
-            <button
+            <div className="flex flex-wrap items-center gap-2">
+              <FinanceSpreadsheetActions entity="bankAccounts" canEdit={canEdit} exportRows={bankAccounts} compact />
+              {canEdit && (
+              <button
               onClick={() => {
                 setBankName('');
                 setAgencyNum('');
@@ -220,7 +223,8 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
               <Plus className="h-3.5 w-3.5" />
               <span>Adicionar Conta</span>
             </button>
-            )}
+              )}
+            </div>
           </div>
 
           {loading ? (
@@ -267,7 +271,9 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
               <h4 className="font-bold text-slate-800 text-sm">Estrutura de Plano de Contas (Plano Referencial)</h4>
               <p className="text-xs text-slate-500 font-medium">Hierarquização de despesas e receitas para apuração contábil correta do DRE Gerencial.</p>
             </div>
-            {canEdit && (
+            <div className="flex flex-wrap items-center gap-2">
+              <FinanceSpreadsheetActions entity="categories" canEdit={canEdit} exportRows={categories} compact />
+              {canEdit && (
               <button
                 onClick={() => {
                   setCatCode('');
@@ -280,7 +286,8 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
                 <Plus className="h-3.5 w-3.5" />
                 <span>Nova Categoria</span>
               </button>
-            )}
+              )}
+            </div>
           </div>
 
           {loading ? (

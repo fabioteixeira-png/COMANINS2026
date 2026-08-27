@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   TrendingUp, TrendingDown, DollarSign, PieChart, FileText, Filter,
   Briefcase, Landmark, CreditCard, RefreshCw, FileCheck, Building2,
-  Activity, Users, ClipboardCheck, ShieldCheck, Bell, Shield, ShieldAlert, Trash2, HelpCircle, Upload, AlertTriangle
+  Activity, Users, ClipboardCheck, ShieldCheck, Bell, Shield, ShieldAlert, Trash2, HelpCircle, AlertTriangle
 } from 'lucide-react';
 
 import {
@@ -34,7 +34,6 @@ import RateioCustos from './finance/RateioCustos';
 import AtivosInvestimentos from './finance/AtivosInvestimentos';
 import TributosRetencoes from './finance/TributosRetencoes';
 import AlertasNotificacoes from './finance/AlertasNotificacoes';
-import FinanceImport from './finance/FinanceImport';
 
 interface FinanceManagementProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
@@ -66,7 +65,6 @@ export default function FinanceManagement({ requestAdminDelete, canEdit = false,
     { id: 'dashboard', label: 'Dashboard Financeiro', icon: <PieChart className="h-4 w-4" />, ready: true },
     { id: 'pagar', label: 'Contas a Pagar', icon: <TrendingDown className="h-4 w-4" />, ready: true },
     { id: 'receber', label: 'Contas a Receber', icon: <TrendingUp className="h-4 w-4" />, ready: true },
-    { id: 'importar', label: 'Importar XLS/XLSX', icon: <Upload className="h-4 w-4" />, ready: true },
     { id: 'medicoes', label: 'Medições e Faturamento', icon: <FileCheck className="h-4 w-4" />, ready: true },
     { id: 'fluxo', label: 'Fluxo de Caixa', icon: <RefreshCw className="h-4 w-4" />, ready: true },
     { id: 'contratos', label: 'Contratos e Centros de Custo', icon: <Briefcase className="h-4 w-4" />, ready: true },
@@ -120,7 +118,7 @@ export default function FinanceManagement({ requestAdminDelete, canEdit = false,
 
       <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3 text-xs text-amber-900">
         <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
-        <div><strong>Liberação financeira controlada.</strong> Contas a Pagar, Contas a Receber, Importação XLS/XLSX, Medições, Fluxo, Contratos e Cadastros usam dados reais. Submódulos que ainda continham valores ou rotinas demonstrativas permanecem bloqueados como “Em implantação” para impedir uso contábil indevido.</div>
+        <div><strong>Liberação financeira controlada.</strong> Contas a Pagar, Contas a Receber, Medições, Fluxo, Contratos e Cadastros usam dados reais. Planilhas ficam dentro de cada atividade: módulos de cadastro permitem Modelo + Importar + Exportar; Dashboard e Fluxo de Caixa são calculados e, por segurança, permitem somente Exportar. Submódulos que ainda continham valores ou rotinas demonstrativas permanecem bloqueados como “Em implantação” para impedir uso contábil indevido.</div>
       </div>
 
       {/* Horizontal Scrollable Menu */}
@@ -148,7 +146,6 @@ export default function FinanceManagement({ requestAdminDelete, canEdit = false,
         {activeSubTab === 'dashboard' && <div className="animate-fade-in"><DashboardFinanceiro /></div>}
         {activeSubTab === 'pagar' && <div className="animate-fade-in"><ContasPagar requestAdminDelete={requestAdminDelete} canEdit={canEdit} currentUserName={currentUserName} /></div>}
         {activeSubTab === 'receber' && <div className="animate-fade-in"><ContasReceber requestAdminDelete={requestAdminDelete} canEdit={canEdit} currentUserName={currentUserName} /></div>}
-        {activeSubTab === 'importar' && <div className="animate-fade-in"><FinanceImport canEdit={canEdit} /></div>}
         {activeSubTab === 'contratos' && <div className="animate-fade-in"><FinanceContratos requestAdminDelete={requestAdminDelete} canEdit={canEdit} /></div>}
         {activeSubTab === 'medicoes' && <div className="animate-fade-in"><FinanceMedicoes requestAdminDelete={requestAdminDelete} canEdit={canEdit} /></div>}
         {activeSubTab === 'fluxo' && <div className="animate-fade-in"><FluxoCaixa /></div>}

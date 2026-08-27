@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { FinanceTransaction } from '../../types';
 import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction } from '../../lib/firebase';
+import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 
 interface ContasReceberProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
@@ -219,6 +220,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
             {contractsList.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
+          <FinanceSpreadsheetActions entity="receivables" canEdit={canEdit} exportRows={filtered} compact />
           {canEdit && (
             <button
               onClick={() => handleOpenForm(null)}

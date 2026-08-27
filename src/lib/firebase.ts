@@ -2881,6 +2881,29 @@ export async function importFinanceTransactions(items: Array<Partial<FinanceTran
   return { imported: Number(payload.imported || 0), skipped: Number(payload.skipped || 0), errors: Array.isArray(payload.errors) ? payload.errors : [] };
 }
 
+export async function importFinanceModuleRows(
+  entity: 'contracts' | 'measurements' | 'bankAccounts' | 'categories',
+  items: Array<Record<string, any>>
+): Promise<{ imported: number; skipped: number; errors: Array<{ row: number; message: string }> }> {
+  if (!Array.isArray(items) || items.length === 0) return { imported: 0, skipped: 0, errors: [] };
+  if (items.length > 1000) throw new Error('O limite por importação é de 1.000 registros.');
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/finance/module-import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ entity, items }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível importar os dados financeiros.');
+  return {
+    imported: Number(payload.imported || 0),
+    skipped: Number(payload.skipped || 0),
+    errors: Array.isArray(payload.errors) ? payload.errors : [],
+  };
+}
+
 export const deleteFinanceTransaction = async (id: string) => {
   await archiveCriticalRecord('financeTransactions', id);
 };
@@ -2891,7 +2914,7 @@ export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) =>
     'financeContracts',
     [],
     (onData, onError) => {
-      const q = query(collection(db, 'financeContracts'), limit(25));
+      const q = query(collection(db, 'financeContracts'), limit(1000));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract)).filter((item: any) => item.isDeleted !== true);
         onData(items);
@@ -2922,7 +2945,7 @@ export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurem
     'financeMeasurements',
     [],
     (onData, onError) => {
-      const q = query(collection(db, 'financeMeasurements'), orderBy('createdAt', 'desc'), limit(25));
+      const q = query(collection(db, 'financeMeasurements'), orderBy('createdAt', 'desc'), limit(1000));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement)).filter((item: any) => item.isDeleted !== true);
         onData(items);
@@ -2956,13 +2979,13 @@ export const deleteFinanceMeasurement = async (id: string) => {
 };
 
 // Generic Finance Operations
-export const syncFinanceCollection = <T>(collectionName: string, callback: (data: T[]) => void) => {
+export const syncFinanceCollection = <T>(collectionName: string, callback: (data: T[]) => void, maxItems = 25) => {
   const shared = createSharedSync<T[]>(
     `financeCollection_${collectionName}`,
     collectionName,
     [],
     (onData, onError) => {
-      const q = query(collection(db, collectionName), limit(25));
+      const q = query(collection(db, collectionName), limit(Math.max(1, Math.min(1000, Math.floor(maxItems || 25)))));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T)).filter((item: any) => item?.isDeleted !== true);
         onData(items);

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { FinanceTransaction } from '../../types';
 import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction } from '../../lib/firebase';
+import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 
 interface ContasPagarProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
@@ -210,6 +211,7 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
             {costCenters.map(cc => <option key={cc} value={cc}>{cc}</option>)}
           </select>
 
+          <FinanceSpreadsheetActions entity="payables" canEdit={canEdit} exportRows={filtered} compact />
           {canEdit && (
             <button
               onClick={() => handleOpenForm(null)}

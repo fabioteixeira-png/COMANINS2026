@@ -8,6 +8,7 @@ import {
   updateFinanceMeasurement,
   syncFinanceContracts
 } from '../../lib/firebase';
+import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 
 export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }: { requestAdminDelete?: (type: string, id: string, name: string) => void; canEdit?: boolean }) {
   const [showModal, setShowModal] = useState(false);
@@ -234,6 +235,7 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
             <option value="cancelada">Cancelada</option>
           </select>
 
+          <FinanceSpreadsheetActions entity="measurements" canEdit={canEdit} exportRows={filteredMeasurements} compact />
           {canEdit && <button
             onClick={handleOpenAddModal}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors"

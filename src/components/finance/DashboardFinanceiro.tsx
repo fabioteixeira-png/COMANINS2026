@@ -6,6 +6,7 @@ import {
 import { FinanceTransaction, FinanceContract, FinanceMeasurement } from '../../types';
 import { syncFinanceTransactions, syncFinanceContracts, syncFinanceMeasurements, syncFinanceCollection } from '../../lib/firebase';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, Cell } from 'recharts';
+import FinanceExportButton from './FinanceExportButton';
 
 export default function DashboardFinanceiro() {
   // Filters
@@ -24,7 +25,7 @@ export default function DashboardFinanceiro() {
     const unsubTx = syncFinanceTransactions((data) => setTransactions(data));
     const unsubContract = syncFinanceContracts((data) => setContracts(data));
     const unsubMeasurement = syncFinanceMeasurements((data) => setMeasurements(data));
-    const unsubBank = syncFinanceCollection<any>('financeBankAccounts', (data) => setBankAccounts(data));
+    const unsubBank = syncFinanceCollection<any>('financeBankAccounts', (data) => setBankAccounts(data), 1000);
 
     return () => {
       unsubTx();
@@ -153,6 +154,18 @@ export default function DashboardFinanceiro() {
     })
     .sort((a, b) => b.value - a.value);
 
+  const dashboardExportRows = monthlyData.map((item) => ({
+    'Período': item.name,
+    'Receitas': Number(item.Receitas || 0),
+    'Despesas': Number(item.Despesas || 0),
+    'Resultado': Number(item.Resultado || 0),
+    'Regime': vision === 'caixa' ? 'Caixa' : 'Competência',
+    'Ano/Filtro': period,
+    'Centro de Custo': selectedCostCenter === 'todos' ? 'Todos' : selectedCostCenter,
+    'Contrato': selectedContract === 'todos' ? 'Todos' : selectedContract,
+  }));
+
+
   return (
     <div className="space-y-6">
       {/* Visual Filters Area */}
@@ -216,9 +229,12 @@ export default function DashboardFinanceiro() {
           </div>
         </div>
 
-        <div className="text-xs text-slate-400 flex items-center space-x-1 font-mono">
-          <RefreshCw className="h-3 w-3 animate-spin" />
-          <span>Sincronizado em tempo real com o Firestore</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-xs text-slate-400 flex items-center space-x-1 font-mono">
+            <RefreshCw className="h-3 w-3 animate-spin" />
+            <span>Sincronizado em tempo real com o Firestore</span>
+          </div>
+          <FinanceExportButton rows={dashboardExportRows} fileName="DASHBOARD_FINANCEIRO_COMANINS" sheetName="Dashboard" label="Exportar XLSX" title="Exportar visão atual do Dashboard" />
         </div>
       </div>
 

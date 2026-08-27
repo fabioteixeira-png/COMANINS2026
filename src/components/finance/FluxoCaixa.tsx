@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { FinanceTransaction } from '../../types';
 import { syncFinanceTransactions, syncFinanceCollection } from '../../lib/firebase';
+import FinanceExportButton from './FinanceExportButton';
 
 export default function FluxoCaixa() {
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
@@ -154,6 +155,18 @@ export default function FluxoCaixa() {
     };
   });
 
+  const fluxoExportRows = tableData.map((item) => ({
+    'Período de Competência': item.name,
+    'Entradas Realizadas': Number(item.recReal || 0),
+    'Entradas Previstas': Number(item.recPrev || 0),
+    'Saídas Realizadas': Number(item.despReal || 0),
+    'Saídas Previstas': Number(item.despPrev || 0),
+    'Saldo Final Projetado': Number(item.balance || 0),
+    'Cenário': selectedScenario,
+    'Visualização': period,
+  }));
+
+
   return (
     <div className="space-y-6">
       {/* Top Banner Control */}
@@ -185,6 +198,7 @@ export default function FluxoCaixa() {
               <button onClick={() => setPeriod('mensal')} className={`px-2 py-1 rounded-md text-[10px] font-bold ${period === 'mensal' ? 'bg-white text-royal-blue shadow-sm' : 'text-slate-600'}`}>Mensal</button>
             </div>
           </div>
+          <FinanceExportButton rows={fluxoExportRows} fileName="FLUXO_DE_CAIXA_COMANINS" sheetName="Fluxo de Caixa" label="Exportar XLSX" title="Exportar projeção atual do fluxo de caixa" />
         </div>
       </div>
 

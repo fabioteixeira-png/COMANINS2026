@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, CheckCircle, Briefcase, BarChart, X, Percent, Calendar } from 'lucide-react';
 import { FinanceContract } from '../../types';
 import { syncFinanceContracts, deleteFinanceContract, addFinanceContract, updateFinanceContract } from '../../lib/firebase';
+import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 
 export default function FinanceContratos({ requestAdminDelete, canEdit = false }: { requestAdminDelete?: (type: string, id: string, name: string) => void; canEdit?: boolean }) {
   const [showModal, setShowModal] = useState(false);
@@ -133,6 +134,7 @@ export default function FinanceContratos({ requestAdminDelete, canEdit = false }
               className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue outline-none w-48 sm:w-64"
             />
           </div>
+          <FinanceSpreadsheetActions entity="contracts" canEdit={canEdit} exportRows={filteredContracts} compact />
           {canEdit && <button
             onClick={handleOpenAdd}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center space-x-2 transition-colors shadow-sm"

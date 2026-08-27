@@ -2319,9 +2319,16 @@ app.post('/api/finance/transactions/import', requireAuth, requireInternalAccount
   const nowIso = new Date().toISOString();
   const errors: Array<{ row: number; message: string }> = [];
   const normalized: Array<{ ref: any; data: Record<string, any> }> = [];
+  let skipped = 0;
 
   rawItems.forEach((item: any, index: number) => {
     const row = index + 2;
+    // Arquivos exportados carregam o ID do registro existente. Como a carga
+    // em lote é create-only, uma linha com ID nunca é duplicada nem sobrescrita.
+    if (asLimitedString(item?.sourceRecordId, 180)) {
+      skipped += 1;
+      return;
+    }
     const type = item?.type === 'receita' || item?.type === 'despesa' ? item.type : '';
     const description = asLimitedString(item?.description, 500);
     const amount = normalizeFinanceAmount(item?.amount);
@@ -2376,10 +2383,9 @@ app.post('/api/finance/transactions/import', requireAuth, requireInternalAccount
     });
   });
 
-  if (normalized.length === 0) return res.status(400).json({ error: 'NO_VALID_ROWS', errors });
+  if (normalized.length === 0 && skipped === 0) return res.status(400).json({ error: 'NO_VALID_ROWS', errors });
 
   let imported = 0;
-  let skipped = 0;
   try {
     for (let offset = 0; offset < normalized.length; offset += 200) {
       const chunk = normalized.slice(offset, offset + 200);
@@ -2410,6 +2416,196 @@ app.post('/api/finance/transactions/import', requireAuth, requireInternalAccount
   } catch (error) {
     console.error('Finance XLS import failed:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR', imported, skipped, errors });
+  }
+});
+
+
+app.post('/api/finance/module-import', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const entity = asLimitedString(req.body?.entity, 40);
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+  const allowedEntities = new Set(['contracts', 'measurements', 'bankAccounts', 'categories']);
+  if (!allowedEntities.has(entity)) return res.status(400).json({ error: 'INVALID_FINANCE_IMPORT_ENTITY' });
+  if (rawItems.length === 0 || rawItems.length > 1000) return res.status(400).json({ error: 'INVALID_IMPORT_SIZE' });
+
+  const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno';
+  const actorUid = asLimitedString(req.user?.uid, 160);
+  const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+  const nowIso = new Date().toISOString();
+  const errors: Array<{ row: number; message: string }> = [];
+
+  const normalizeKey = (value: unknown) => asLimitedString(value, 300).trim().toLocaleLowerCase('pt-BR');
+  const existingKeys = new Set<string>();
+  const pendingKeys = new Set<string>();
+  let targetCollection = '';
+
+  if (entity === 'contracts') targetCollection = 'financeContracts';
+  else if (entity === 'measurements') targetCollection = 'financeMeasurements';
+  else if (entity === 'bankAccounts') targetCollection = 'financeBankAccounts';
+  else targetCollection = 'financeCategories';
+
+  try {
+    const existingSnapshot = await firestoreDb.collection(targetCollection).get();
+    existingSnapshot.docs.forEach((docSnap) => {
+      const data: any = docSnap.data() || {};
+      // Registros arquivados também reservam sua chave histórica. A importação
+      // nunca ressuscita ou duplica silenciosamente um cadastro arquivado.
+      if (entity === 'contracts') {
+        const key = normalizeKey(data.contractNumber);
+        if (key) existingKeys.add(key);
+      } else if (entity === 'measurements') {
+        const key = [normalizeKey(data.contractNumber), normalizeKey(data.period), normalizeKey(data.type), Number(data.value || 0).toFixed(2), normalizeFinanceDate(data.sendDate), normalizeKey(data.invoiceNumber)].join('|');
+        existingKeys.add(key);
+      } else if (entity === 'bankAccounts') {
+        const key = [normalizeKey(data.bank), normalizeKey(data.agency), normalizeKey(data.account)].join('|');
+        existingKeys.add(key);
+      } else {
+        const key = normalizeKey(data.code);
+        if (key) existingKeys.add(key);
+      }
+    });
+
+    const contractIdByNumber = new Map<string, string>();
+    if (entity === 'measurements') {
+      const contractsSnapshot = await firestoreDb.collection('financeContracts').get();
+      contractsSnapshot.docs.forEach((docSnap) => {
+        const data: any = docSnap.data() || {};
+        if (data.isDeleted === true) return;
+        const key = normalizeKey(data.contractNumber);
+        if (key && !contractIdByNumber.has(key)) contractIdByNumber.set(key, docSnap.id);
+      });
+    }
+
+    const normalized: Array<{ ref: any; data: Record<string, any>; key: string }> = [];
+    let skipped = 0;
+
+    rawItems.forEach((item: any, index: number) => {
+      const row = index + 2;
+      // Exportações incluem o ID Sistema. Esta importação é create-only:
+      // linhas já vinculadas a um registro existente são ignoradas, nunca
+      // usadas para sobrescrever dados em lote.
+      if (asLimitedString(item?.sourceRecordId, 180)) {
+        skipped += 1;
+        return;
+      }
+      let key = '';
+      let data: Record<string, any> | null = null;
+
+      if (entity === 'contracts') {
+        const clientName = asLimitedString(item?.clientName, 240);
+        const contractNumber = asLimitedString(item?.contractNumber, 160);
+        const description = asLimitedString(item?.description, 1000);
+        const value = normalizeFinanceAmount(item?.value);
+        const startDate = normalizeFinanceDate(item?.startDate);
+        const endDate = normalizeFinanceDate(item?.endDate);
+        const status = ['ativo', 'encerrado', 'suspenso'].includes(String(item?.status || '')) ? String(item.status) : 'ativo';
+        const costCenter = asLimitedString(item?.costCenter || contractNumber, 180);
+        if (!clientName || !contractNumber || value === null || value <= 0 || !startDate || !endDate || endDate < startDate) {
+          errors.push({ row, message: 'Cliente, número do contrato, valor positivo e vigência válida são obrigatórios.' });
+          return;
+        }
+        key = normalizeKey(contractNumber);
+        data = {
+          clientId: asLimitedString(item?.clientId, 180) || 'manual', clientName, contractNumber, description,
+          value: Number(value.toFixed(2)), startDate, endDate, status, costCenter,
+          createdAt: nowIso, updatedAt: nowIso, createdBy: actorName, createdByUid: actorUid,
+          importFingerprint: createHash('sha256').update(`contract|${key}`).digest('hex'), importedAt: nowIso, importedBy: actorName,
+          isDeleted: false,
+        };
+      } else if (entity === 'measurements') {
+        const contractNumber = asLimitedString(item?.contractNumber, 160);
+        const clientName = asLimitedString(item?.clientName, 240);
+        const period = asLimitedString(item?.period, 160);
+        const type = asLimitedString(item?.type, 160) || 'Calibração';
+        const value = normalizeFinanceAmount(item?.value);
+        const status = ['em_analise', 'aprovada', 'faturada', 'cancelada'].includes(String(item?.status || '')) ? String(item.status) : 'em_analise';
+        const sendDate = normalizeFinanceDate(item?.sendDate);
+        const invoiceNumber = asLimitedString(item?.invoiceNumber, 160);
+        if (!contractNumber || !clientName || !period || value === null || value <= 0 || !sendDate) {
+          errors.push({ row, message: 'Contrato, cliente, período, valor positivo e data de envio são obrigatórios.' });
+          return;
+        }
+        key = [normalizeKey(contractNumber), normalizeKey(period), normalizeKey(type), Number(value).toFixed(2), sendDate, normalizeKey(invoiceNumber)].join('|');
+        data = {
+          contractId: contractIdByNumber.get(normalizeKey(contractNumber)) || asLimitedString(item?.contractId, 180) || 'manual',
+          contractNumber, clientName, period, type, value: Number(value.toFixed(2)), status, sendDate,
+          ...(invoiceNumber ? { invoiceNumber } : {}),
+          createdAt: nowIso, updatedAt: nowIso, createdBy: actorName, createdByUid: actorUid,
+          importFingerprint: createHash('sha256').update(`measurement|${key}`).digest('hex'), importedAt: nowIso, importedBy: actorName,
+          isDeleted: false,
+        };
+      } else if (entity === 'bankAccounts') {
+        const bank = asLimitedString(item?.bank, 180);
+        const agency = asLimitedString(item?.agency, 80);
+        const account = asLimitedString(item?.account, 100);
+        const type = asLimitedString(item?.type, 100) || 'Corrente';
+        const balanceRaw = normalizeFinanceAmount(item?.balance);
+        const balance = balanceRaw === null ? 0 : Number(balanceRaw.toFixed(2));
+        if (!bank || !account) {
+          errors.push({ row, message: 'Banco e Conta são obrigatórios.' });
+          return;
+        }
+        key = [normalizeKey(bank), normalizeKey(agency), normalizeKey(account)].join('|');
+        data = {
+          bank, agency, account, type, balance,
+          createdAt: nowIso, updatedAt: nowIso, createdBy: actorName, createdByUid: actorUid,
+          importFingerprint: createHash('sha256').update(`bank|${key}`).digest('hex'), importedAt: nowIso, importedBy: actorName,
+          isDeleted: false,
+        };
+      } else {
+        const code = asLimitedString(item?.code, 80);
+        const name = asLimitedString(item?.name, 240);
+        const type = asLimitedString(item?.type, 120) || 'Despesa Indireta';
+        const status = asLimitedString(item?.status, 60) || 'Ativo';
+        if (!code || !name) {
+          errors.push({ row, message: 'Código e Nome são obrigatórios.' });
+          return;
+        }
+        key = normalizeKey(code);
+        data = {
+          code, name, type, status,
+          createdAt: nowIso, updatedAt: nowIso, createdBy: actorName, createdByUid: actorUid,
+          importFingerprint: createHash('sha256').update(`category|${key}`).digest('hex'), importedAt: nowIso, importedBy: actorName,
+          isDeleted: false,
+        };
+      }
+
+      if (!key || !data) {
+        errors.push({ row, message: 'Não foi possível determinar a chave do registro.' });
+        return;
+      }
+      if (existingKeys.has(key) || pendingKeys.has(key)) {
+        skipped += 1;
+        return;
+      }
+      pendingKeys.add(key);
+      const fingerprint = createHash('sha256').update(`${entity}|${key}`).digest('hex');
+      const ref = firestoreDb.collection(targetCollection).doc(`finimp_${fingerprint.slice(0, 40)}`);
+      normalized.push({ ref, data, key });
+    });
+
+    let imported = 0;
+    for (let offset = 0; offset < normalized.length; offset += 200) {
+      const chunk = normalized.slice(offset, offset + 200);
+      const batch = firestoreDb.batch();
+      chunk.forEach((entry) => batch.create(entry.ref, entry.data));
+      if (chunk.length > 0) {
+        await batch.commit();
+        imported += chunk.length;
+      }
+    }
+
+    const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+    await auditRef.set({
+      action: 'FINANCE_MODULE_XLS_IMPORT', entityType: `finance:${entity}`, entityId: auditRef.id,
+      actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+      summary: `Importação ${entity}: ${imported} incluído(s), ${skipped} duplicado(s), ${errors.length} erro(s)`,
+      metadata: { entity, receivedRows: rawItems.length, imported, skipped, errors: errors.slice(0, 50) },
+    });
+    return res.json({ success: true, imported, skipped, errors });
+  } catch (error) {
+    console.error('Finance module XLS import failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR', imported: 0, skipped: 0, errors });
   }
 });
 
