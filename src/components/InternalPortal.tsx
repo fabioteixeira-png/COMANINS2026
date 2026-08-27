@@ -217,6 +217,7 @@ import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
 import FieldService from "./FieldService";
 import FinanceManagement from "./FinanceManagement";
+import RentalManagement from "./RentalManagement";
 import MySignature from "./MySignature";
 import InternalCommunication from "./InternalCommunication";
 import AccessProfileManagement from "./AccessProfileManagement";
@@ -6273,11 +6274,11 @@ Encaminhar para manuten√ß√£o especializada ou substitui√ß√£o do instrumento.`;
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             <span>Servi√ßo de Campo</span>
           </button>}
-          {(canAccessModule("inventory") || canAccessModule("hr")) && (
+          {(canAccessModule("inventory") || canAccessModule("rental") || canAccessModule("hr")) && (
             <>
               <div className="pt-4 pb-1">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
-                  RH & Estoque
+                  Opera√ß√µes & RH
                 </span>
               </div>
               {canAccessModule("inventory") && <button
@@ -6289,6 +6290,17 @@ Encaminhar para manuten√ß√£o especializada ou substitui√ß√£o do instrumento.`;
                 }`}
               >
                 Controle de Estoque
+              </button>}
+              {canAccessModule("rental") && <button
+                onClick={() => setActiveTab("locacao_instrumentos")}
+                className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center gap-2 ${
+                  activeTab === "locacao_instrumentos"
+                    ? "bg-blue-50 text-blue-600 font-semibold"
+                    : "text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <Briefcase className="h-4 w-4 text-slate-500" />
+                <span>Loca√ß√£o de Instrumentos</span>
               </button>}
               {canAccessModule("hr") && (
                 <button
@@ -6453,6 +6465,8 @@ Encaminhar para manuten√ß√£o especializada ou substitui√ß√£o do instrumento.`;
                 ? "Gest√£o de Colaboradores (RH)"
                 : activeTab === "financeiro"
                 ? "Gest√£o Financeira & Contratos"
+                : activeTab === "locacao_instrumentos"
+                ? "Loca√ß√£o Mensal de Instrumentos"
                 : activeTab === "programas_saude"
                 ? "Programas de Sa√∫de e Seguran√ßa (PGR / PCMSO / LTCAT)"
                 : activeTab === "auditoria"
@@ -11636,10730 +11650,323 @@ Encaminhar para manuten√ß√£o especializada ou substitui√ß√£o do instrumento.`;
                                           <td className="p-2 text-center">
                                             {hasData && (
                                               <span
-                                                className={`px-2 py-0.5 rounded font-bold text-[9px] ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
-                                              >
-                                                {pass ? "OK" : "EXCEDE MPE"}
-                                              </span>
-                                            )}
-                                          </td>
-                                        </tr>
-                                      );
-                                    },
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                        {/* Padr√µes de Refer√™ncia (At√© 3 padr√µes) */}
-                        <div className="space-y-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-                          <label className="block text-slate-800 font-bold mb-1 flex items-center gap-1.5">
-                            <ShieldCheck className="h-4 w-4 text-royal-blue" />
-                            <span>
-                              Padr√µes de Refer√™ncia Utilizados na Calibra√ß√£o
-                              (At√© 03 Padr√µes)
-                            </span>
-                          </label>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div>
-                              <label className="block text-slate-600 font-semibold mb-1">
-                                Padr√£o A
-                              </label>
-                              <select
-                                value={benchStandardA}
-                                onChange={(e) =>
-                                  setBenchStandardA(e.target.value)
-                                }
-                                className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-800 text-xs focus:ring-1 focus:ring-royal-blue font-sans"
-                              >
-                                <option value="">
-                                  Nenhum Padr√£o Selecionado
-                                </option>
-                                {referenceStandards
-                                  .filter(
-                                    (std) =>
-                                      !std.expirationDate ||
-                                      std.expirationDate >=
-                                        new Date()
-                                          .toISOString()
-                                          .split("T")[0] ||
-                                      benchStandardA === std.id,
-                                  )
-                                  .map((std) => (
-                                    <option key={std.id} value={std.id}>
-                                      {std.identification
-                                        ? `[${std.identification}] `
-                                        : ""}
-                                      {std.instrumentType} (Cert:{" "}
-                                      {std.certificateNumber} - Val:{" "}
-                                      {std.expirationDate})
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-slate-600 font-semibold mb-1">
-                                Padr√£o B
-                              </label>
-                              <select
-                                value={benchStandardB}
-                                onChange={(e) =>
-                                  setBenchStandardB(e.target.value)
-                                }
-                                className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-800 text-xs focus:ring-1 focus:ring-royal-blue font-sans"
-                              >
-                                <option value="">
-                                  Nenhum Padr√£o Selecionado
-                                </option>
-                                {referenceStandards
-                                  .filter(
-                                    (std) =>
-                                      !std.expirationDate ||
-                                      std.expirationDate >=
-                                        new Date()
-                                          .toISOString()
-                                          .split("T")[0] ||
-                                      benchStandardB === std.id,
-                                  )
-                                  .map((std) => (
-                                    <option key={std.id} value={std.id}>
-                                      {std.identification
-                                        ? `[${std.identification}] `
-                                        : ""}
-                                      {std.instrumentType} (Cert:{" "}
-                                      {std.certificateNumber} - Val:{" "}
-                                      {std.expirationDate})
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-slate-600 font-semibold mb-1">
-                                Padr√£o C
-                              </label>
-                              <select
-                                value={benchStandardC}
-                                onChange={(e) =>
-                                  setBenchStandardC(e.target.value)
-                                }
-                                className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-800 text-xs focus:ring-1 focus:ring-royal-blue font-sans"
-                              >
-                                <option value="">
-                                  Nenhum Padr√£o Selecionado
-                                </option>
-                                {referenceStandards
-                                  .filter(
-                                    (std) =>
-                                      !std.expirationDate ||
-                                      std.expirationDate >=
-                                        new Date()
-                                          .toISOString()
-                                          .split("T")[0] ||
-                                      benchStandardC === std.id,
-                                  )
-                                  .map((std) => (
-                                    <option key={std.id} value={std.id}>
-                                      {std.identification
-                                        ? `[${std.identification}] `
-                                        : ""}
-                                      {std.instrumentType} (Cert:{" "}
-                                      {std.certificateNumber} - Val:{" "}
-                                      {std.expirationDate})
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3 text-xs bg-blue-50/50 p-4 rounded-xl border border-blue-200">
-                          <div>
-                            <label className="block text-slate-800 font-bold mb-1 flex items-center gap-1.5">
-                              <Package className="h-4 w-4 text-blue-600" />
-                              <span>Material utilizado na calibra√ß√£o</span>
-                            </label>
-                            <p className="text-[10px] text-slate-500">Clique no campo abaixo e marque um ou mais itens efetivamente utilizados. O hist√≥rico ficar√° vinculado a esta calibra√ß√£o e ser√° exibido na Ficha do Instrumento.</p>
-                          </div>
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setShowBenchMaterialSelector((current) => !current)}
-                              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-left flex items-center justify-between gap-3 hover:border-blue-300 focus:ring-1 focus:ring-blue-500"
-                              aria-expanded={showBenchMaterialSelector}
-                            >
-                              <span className="font-semibold text-slate-700">{benchMaterialsUsed.length > 0 ? `${benchMaterialsUsed.length} item(ns) selecionado(s)` : 'Selecionar materiais utilizados...'}</span>
-                              <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${showBenchMaterialSelector ? 'rotate-180' : ''}`} />
-                            </button>
-                            {showBenchMaterialSelector && (
-                              <div className="mt-2 bg-white border border-slate-200 rounded-xl shadow-lg p-3 space-y-3 max-h-80 overflow-y-auto">
-                                <input
-                                  value={benchMaterialSearch}
-                                  onChange={(event) => setBenchMaterialSearch(event.target.value)}
-                                  placeholder="Pesquisar material..."
-                                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:ring-1 focus:ring-blue-500"
-                                />
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {CALIBRATION_CONSUMABLE_OPTIONS
-                                    .filter((material) => material.toLowerCase().includes(benchMaterialSearch.trim().toLowerCase()))
-                                    .map((material) => {
-                                      const checked = benchMaterialsUsed.includes(material);
-                                      return (
-                                        <label key={material} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors ${checked ? 'bg-blue-100 border-blue-300 text-blue-900' : 'bg-white border-slate-200 text-slate-700 hover:border-blue-200'}`}>
-                                          <input type="checkbox" checked={checked} onChange={() => setBenchMaterialsUsed((current) => checked ? current.filter((item) => item !== material) : [...current, material])} />
-                                          <span className="font-semibold">{material}</span>
-                                        </label>
-                                      );
-                                    })}
-                                </div>
-                                <div className="pt-2 border-t border-slate-200 flex flex-col sm:flex-row gap-2">
-                                  <input
-                                    value={benchCustomMaterial}
-                                    onChange={(event) => setBenchCustomMaterial(event.target.value)}
-                                    maxLength={80}
-                                    placeholder="Outro material utilizado..."
-                                    className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:ring-1 focus:ring-blue-500"
-                                  />
-                                  <button type="button" onClick={() => {
-                                    const custom = benchCustomMaterial.trim();
-                                    if (!custom) return;
-                                    if (!benchMaterialsUsed.some((item) => item.toLowerCase() === custom.toLowerCase())) setBenchMaterialsUsed((current) => [...current, custom]);
-                                    setBenchCustomMaterial('');
-                                  }} className="px-3 py-2 rounded-lg bg-blue-50 border border-blue-300 text-blue-700 font-bold hover:bg-blue-100">Adicionar outro</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          {benchMaterialsUsed.length > 0 && <div className="flex flex-wrap gap-1.5">{benchMaterialsUsed.map((item) => <span key={item} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded-full text-[10px] font-bold">{item}<button type="button" onClick={() => setBenchMaterialsUsed((current) => current.filter((value) => value !== item))} className="hover:text-blue-100" aria-label={`Remover ${item}`}><X className="h-3 w-3" /></button></span>)}</div>}
-                        </div>
-
-                        <div className="space-y-3 text-xs">
-                          <label className="block text-slate-600 font-bold mb-1">
-                            Observa√ß√µes / Coment√°rios
-                          </label>
-                          <textarea
-                            rows={2}
-                            value={benchObs}
-                            onChange={(e) => setBenchObs(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                            placeholder="Coment√°rios a serem impressos no certificado..."
-                          ></textarea>
-                        </div>
-                        {benchErrorMessage && (
-                          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold flex items-center space-x-2.5 animate-pulse">
-                            <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0" />
-                            <span>{benchErrorMessage}</span>
-                          </div>
-                        )}
-
-                        {(() => {
-                          const selectedInst = instruments.find(
-                            (i) => i.id === selectedInstId,
-                          );
-                          const isCertLocked =
-                            selectedInst?.status === "Calibrado" &&
-                            (!!issuedCertificates[selectedInstId] ||
-                              reports.some(
-                                (r: any) => r.instrumentId === selectedInstId,
-                              ));
-                          return (
-                            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                              <button
-                                type="submit"
-                                disabled={benchSubmitting || isCertLocked}
-                                className={`flex-1 py-3 px-4 font-bold rounded-lg text-xs tracking-wider uppercase shadow-md flex items-center justify-center space-x-2 transition-all ${
-                                  isCertLocked
-                                    ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-70"
-                                    : "bg-royal-blue hover:bg-blue-700 text-white cursor-pointer"
-                                }`}
-                                title="Gravar calibra√ß√£o aprovada (exige todos os campos preenchidos e status OK)"
-                              >
-                                <FileCheck className="h-4 w-4" />
-                                <span>
-                                  {isCertLocked
-                                    ? "Registro Bloqueado"
-                                    : "Gravar Calibra√ß√£o e Emitir Certificado"}
-                                </span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={handleOpenRncModal}
-                                disabled={
-                                  benchSubmitting ||
-                                  isCertLocked ||
-                                  !selectedInstId
-                                }
-                                className={`flex-1 py-3 px-4 font-bold rounded-lg text-xs tracking-wider uppercase shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                                  isCertLocked || !selectedInstId
-                                    ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-70"
-                                    : "bg-rose-600 hover:bg-rose-700 text-white border border-rose-600"
-                                }`}
-                                title="Gravar registro com dados vazios ou n√£o conforme e emitir Relat√≥rio de N√£o Conformidade (RNC) com aux√≠lio de IA"
-                              >
-                                <ShieldAlert className="h-4 w-4" />
-                                <span>Gravar Registro e Emitir RNC</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (
-                                    window.confirm(
-                                      "Deseja cancelar esta calibra√ß√£o e sair? O instrumento retornar√° √† condi√ß√£o anterior e o contador em auditoria ser√° interrompido."
-                                    )
-                                  ) {
-                                    await cancelActiveCalibration(selectedInstId);
-                                    setActiveTab("instruments");
-                                  }
-                                }}
-                                disabled={benchSubmitting}
-                                className="py-3 px-4 font-bold rounded-lg text-xs tracking-wider uppercase shadow-sm flex items-center justify-center space-x-2 transition-all bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 cursor-pointer"
-                                title="Cancelar calibra√ß√£o, interromper contador e retornar √† condi√ß√£o anterior"
-                              >
-                                <RotateCcw className="h-4 w-4 text-slate-500" />
-                                <span>Cancelar e Sair</span>
-                              </button>
-                            </div>
-                          );
-                        })()}
-                      </form>
-                    );
-                  })()}
-                {!selectedInstId && (
-                  <div className="flex flex-col items-center justify-center py-16 text-slate-400 space-y-2 text-xs">
-                    <Activity className="h-10 w-10 text-slate-300" />
-                    <p>Selecione um instrumento para iniciar a calibra√ß√£o.</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Visualizer Side Panel */}
-              <div className="xl:col-span-1 bg-white p-6 rounded-xl border border-slate-200 space-y-6 shadow-sm">
-                <h3 className="font-display font-bold text-sm text-slate-900 flex items-center space-x-2 border-b border-slate-200 pb-2">
-                  <TrendingUp className="h-4 w-4 text-royal-blue" />
-                  <span>Detalhes do Instrumento</span>
-                </h3>
-                {selectedInstId ? (
-                  (() => {
-                    const activeInst = instruments.find(
-                      (i) => i.id === selectedInstId,
-                    );
-                    if (!activeInst) return null;
-                    return (
-                      <div className="space-y-4 text-xs">
-                        <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                          <p className="text-slate-500 uppercase text-[10px] font-bold">
-                            TAG / COMA
-                          </p>
-                          <p className="font-mono font-bold text-slate-900 text-sm">
-                            [{activeInst.coma || activeInst.tag}]
-                          </p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                            <p className="text-slate-500 uppercase text-[10px] font-bold">
-                              Range
-                            </p>
-                            <p className="font-mono font-bold text-slate-900">
-                              {activeInst.rangeMin} a {activeInst.rangeMax}
-                            </p>
-                          </div>
-                          <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                            <p className="text-slate-500 uppercase text-[10px] font-bold">
-                              MPE (Tol.)
-                            </p>
-                            <p className="font-mono font-bold text-rose-600">
-                              ¬± {benchMpe} {activeInst.unit}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                          <p className="text-slate-500 uppercase text-[10px] font-bold">
-                            Marca / Modelo
-                          </p>
-                          <p className="font-sans font-bold text-slate-900">
-                            {activeInst.brand || "-"} /{" "}
-                            {activeInst.model || "-"}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <p className="text-xs text-slate-400 italic">
-                    Nenhum instrumento selecionado.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        {/* TAB: AUDITORIA DE CALIBRA√á√ÉO (Relat√≥rio de Tempos) */}
-        {activeTab === "auditoria" &&
-          (!canAccessModule("audit") ? (
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4 my-6">
-              <ShieldAlert className="h-12 w-12 text-rose-500 mx-auto" />
-              <h3 className="text-lg font-bold text-slate-900">
-                Acesso n√£o autorizado
-              </h3>
-              <p className="text-sm text-slate-600 max-w-md mx-auto">
-                A aba de Auditoria e Relat√≥rios de Tempo de Calibra√ß√£o √© de
-                visibilidade restrita aos perfis autorizados para o m√≥dulo de Auditoria.
-              </p>
-            </div>
-          ) : (<><div className="space-y-6 print:space-y-4">
-              {/* Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-0">
-                <div className="flex items-center space-x-3">
-                  <div className="p-3 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                    <ShieldCheck className="h-7 w-7" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 flex items-center gap-2">
-                      <span>Auditoria e Controle de Calibra√ß√£o</span>
-                      <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
-                        Rastreabilidade em Tempo Real
-                      </span>
-                    </h2>
-                    <p className="text-sm text-slate-600">
-                      Controle do hor√°rio de in√≠cio, t√©rmino e dura√ß√£o da
-                      calibra√ß√£o por t√©cnico de laborat√≥rio.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 print:hidden">
-                  <button
-                    onClick={() => {
-                      const exportData = auditLogs.map((log) => ({
-                        "N¬∫ Certificado": log.certNumber,
-                        "COMA/TAG": log.coma
-                          ? `[${log.coma}] ${log.instrumentTag}`
-                          : log.instrumentTag,
-                        "Descri√ß√£o do Instrumento": log.instrumentDescription,
-                        "T√©cnico Respons√°vel": log.technicianName,
-                        Data: log.date,
-                        "Hora de In√≠cio": formatDateTime(log.startTime),
-                        "Hora de T√©rmino": formatDateTime(log.endTime),
-                        "Dura√ß√£o (Tempo de Execu√ß√£o)": log.durationFormatted,
-                        "Segundos Totais": log.durationSeconds,
-                      }));
-                      const ws = XLSX.utils.json_to_sheet(exportData);
-                      const wb = XLSX.utils.book_new();
-                      XLSX.utils.book_append_sheet(
-                        wb,
-                        ws,
-                        "Auditoria Calibra√ß√£o",
-                      );
-                      XLSX.writeFile(
-                        wb,
-                        `Relatorio_Auditoria_Calibracao_${new Date().toISOString().split("T")[0]}.xlsx`,
-                      );
-                    }}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 cursor-pointer"
-                    title="Exportar dados de auditoria para arquivo Excel"
-                  >
-                    <FileSpreadsheet className="h-4 w-4" />
-                    <span>Exportar Excel</span>
-                  </button>
-
-                  <button
-                    onClick={() => window.print()}
-                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 cursor-pointer"
-                    title="Imprimir relat√≥rio oficial de auditoria"
-                  >
-                    <Printer className="h-4 w-4" />
-                    <span>Imprimir Relat√≥rio</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Stat Summary Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 print:grid-cols-4">
-                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-bold uppercase tracking-wider">
-                      Total Auditado
-                    </span>
-                    <ClipboardCheck className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <p className="text-2xl font-extrabold text-slate-900 font-mono">
-                    {auditLogs.length}
-                  </p>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Calibra√ß√µes com laudo emitido
-                  </p>
-                </div>
-
-                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-bold uppercase tracking-wider">
-                      Tempo M√©dio
-                    </span>
-                    <Clock className="h-5 w-5 text-emerald-600" />
-                  </div>
-                  <p className="text-2xl font-extrabold text-slate-900 font-mono">
-                    {(() => {
-                      if (auditLogs.length === 0) return "0 min";
-                      const totalSec = auditLogs.reduce(
-                        (acc, curr) => acc + (curr.durationSeconds || 0),
-                        0,
-                      );
-                      const avgSec = Math.round(totalSec / auditLogs.length);
-                      const mins = Math.floor(avgSec / 60);
-                      const secs = avgSec % 60;
-                      return mins > 0 ? `${mins} min ${secs}s` : `${secs} seg`;
-                    })()}
-                  </p>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    M√©dia por instrumento
-                  </p>
-                </div>
-
-                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-bold uppercase tracking-wider">
-                      Maior Dura√ß√£o
-                    </span>
-                    <Timer className="h-5 w-5 text-amber-600" />
-                  </div>
-                  <p className="text-2xl font-extrabold text-slate-900 font-mono">
-                    {(() => {
-                      if (auditLogs.length === 0) return "0 seg";
-                      const maxSec = Math.max(
-                        ...auditLogs.map((l) => l.durationSeconds || 0),
-                      );
-                      const mins = Math.floor(maxSec / 60);
-                      const secs = maxSec % 60;
-                      return mins > 0 ? `${mins} min ${secs}s` : `${secs} seg`;
-                    })()}
-                  </p>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Calibra√ß√£o mais longa
-                  </p>
-                </div>
-
-                <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="text-xs font-bold uppercase tracking-wider">
-                      T√©cnico Principal
-                    </span>
-                    <UserCheck className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <p className="text-lg font-extrabold text-slate-900 truncate">
-                    {(() => {
-                      if (auditLogs.length === 0) return "Nenhum";
-                      const counts: Record<string, number> = {};
-                      auditLogs.forEach((l) => {
-                        const name = l.technicianName || "T√©cnico";
-                        counts[name] = (counts[name] || 0) + 1;
-                      });
-                      const topTech = Object.entries(counts).sort(
-                        (a, b) => b[1] - a[1],
-                      )[0];
-                      return topTech ? topTech[0] : "N/A";
-                    })()}
-                  </p>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Maior volume registrado
-                  </p>
-                </div>
-              </div>
-
-              {/* Active Calibrations in Progress (Real-Time Timers) */}
-              {(() => {
-                const activeStartKeys = Object.keys(calibrationStartTimes);
-                const activeInsts = instruments.filter(
-                  (i) =>
-                    i.status === "Em Calibra√ß√£o" ||
-                    (activeStartKeys.includes(i.id) &&
-                      i.status !== "Calibrado" &&
-                      i.status !== "Aguardando Emiss√£o de Certificado" &&
-                      i.status !== "RNC"),
-                );
-
-                if (activeInsts.length === 0) return null;
-
-                return (
-                  <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-5 space-y-3 print:hidden">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="relative flex h-3 w-3">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
-                        </span>
-                        <h3 className="text-sm font-bold text-amber-900 uppercase tracking-wider font-mono">
-                          Calibra√ß√µes em Andamento na Bancada (
-                          {activeInsts.length})
-                        </h3>
-                      </div>
-                      <span className="text-xs text-amber-800 font-medium">
-                        Cron√¥metro ativo do sistema
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {activeInsts.map((inst) => {
-                        const startObj = calibrationStartTimes[inst.id];
-                        const startTimeFormatted = startObj
-                          ? formatDateTime(startObj.startTime)
-                          : "Recentemente";
-                        const techName =
-                          startObj?.technicianName || benchTechnician || currentUser?.name || "T√©cnico Respons√°vel";
-                        const elapsed = startObj?.startTime
-                          ? formatElapsedTime(startObj.startTime, nowTicker)
-                          : "00:00:00";
-
-                        return (
-                          <div
-                            key={inst.id}
-                            className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm flex flex-col justify-between space-y-3"
-                          >
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <span className="font-mono font-bold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                                  [{inst.coma || inst.tag}]
-                                </span>
-                                <p className="text-xs font-semibold text-slate-800 mt-1 line-clamp-1">
-                                  {inst.description}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold text-[10px] rounded-md border border-amber-300">
-                                  Em bancada
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (
-                                      window.confirm(
-                                        `Deseja interromper a calibra√ß√£o do instrumento [${inst.coma || inst.tag}] e retornar o instrumento √† condi√ß√£o anterior?`
-                                      )
-                                    ) {
-                                      await cancelActiveCalibration(inst.id);
-                                    }
-                                  }}
-                                  className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[10px] rounded border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                  title="Interromper calibra√ß√£o, parar contador e liberar instrumento"
-                                >
-                                  <RotateCcw className="h-3 w-3" />
-                                  <span>Liberar</span>
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Live Timer Counter */}
-                            <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-300/80 flex items-center justify-between">
-                              <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
-                                <Clock className="h-3.5 w-3.5 text-amber-600 animate-spin" />
-                                Tempo decorrido:
-                              </span>
-                              <span className="font-mono font-black text-xs text-amber-950 bg-white px-2 py-0.5 rounded border border-amber-300 shadow-2xs">
-                                ‚è±Ô∏è {elapsed}
-                              </span>
-                            </div>
-
-                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                              <span className="text-slate-700 font-bold flex items-center gap-1">
-                                <UserCheck className="h-3.5 w-3.5 text-amber-600" />
-                                {techName}
-                              </span>
-                              <span
-                                className="text-slate-500 font-mono text-[10px]"
-                                title="Hora de in√≠cio"
-                              >
-                                In√≠cio: {startTimeFormatted}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Filters & Search Bar */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 print:hidden">
-                <div className="flex-1 relative">
-                  <Search className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={auditSearchTerm}
-                    onChange={(e) => setAuditSearchTerm(e.target.value)}
-                    placeholder="Buscar por Certificado, TAG, Descri√ß√£o ou T√©cnico..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-800 focus:ring-2 focus:ring-royal-blue/30 focus:border-royal-blue"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <select
-                    value={auditFilterTech}
-                    onChange={(e) => setAuditFilterTech(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-800 font-medium focus:ring-2 focus:ring-royal-blue/30"
-                  >
-                    <option value="">Todos os T√©cnicos</option>
-                    {Array.from(new Set(auditLogs.map((l) => l.technicianName)))
-                      .filter(Boolean)
-                      .map((tech) => (
-                        <option key={tech} value={tech}>
-                          {tech}
-                        </option>
-                      ))}
-                  </select>
-
-                  <select
-                    value={auditFilterPeriod}
-                    onChange={(e) => setAuditFilterPeriod(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-800 font-medium focus:ring-2 focus:ring-royal-blue/30"
-                  >
-                    <option value="todos">Todo o Hist√≥rico</option>
-                    <option value="hoje">Hoje</option>
-                    <option value="mes">Este M√™s</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Audit Table */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden print:border-none print:shadow-none">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 print:bg-white">
-                  <h3 className="font-bold text-sm text-slate-900 uppercase font-mono tracking-wider flex items-center space-x-2">
-                    <ShieldCheck className="h-4 w-4 text-royal-blue" />
-                    <span>Registros do Relat√≥rio de Auditoria</span>
-                  </h3>
-                  <span className="text-xs font-semibold text-slate-500">
-                    {auditLogs.length} laudos rastreados
-                  </span>
-                </div>
-
-                {(() => {
-                  const filtered = auditLogs.filter((log) => {
-                    const matchesSearch =
-                      !auditSearchTerm ||
-                      log.certNumber
-                        ?.toLowerCase()
-                        .includes(auditSearchTerm.toLowerCase()) ||
-                      log.instrumentTag
-                        ?.toLowerCase()
-                        .includes(auditSearchTerm.toLowerCase()) ||
-                      log.instrumentDescription
-                        ?.toLowerCase()
-                        .includes(auditSearchTerm.toLowerCase()) ||
-                      log.technicianName
-                        ?.toLowerCase()
-                        .includes(auditSearchTerm.toLowerCase()) ||
-                      log.coma
-                        ?.toLowerCase()
-                        .includes(auditSearchTerm.toLowerCase());
-
-                    const matchesTech =
-                      !auditFilterTech ||
-                      log.technicianName === auditFilterTech;
-
-                    let matchesPeriod = true;
-                    if (auditFilterPeriod === "hoje") {
-                      const today = new Date().toISOString().split("T")[0];
-                      matchesPeriod =
-                        log.date === today || log.startTime?.startsWith(today);
-                    } else if (auditFilterPeriod === "mes") {
-                      const monthPrefix = new Date().toISOString().slice(0, 7); // YYYY-MM
-                      matchesPeriod =
-                        log.date?.startsWith(monthPrefix) ||
-                        log.startTime?.startsWith(monthPrefix);
-                    }
-
-                    return matchesSearch && matchesTech && matchesPeriod;
-                  });
-
-                  if (filtered.length === 0) {
-                    return (
-                      <div className="p-12 text-center text-slate-400 space-y-2">
-                        <Clock className="h-10 w-10 mx-auto text-slate-300" />
-                        <p className="text-xs font-medium">
-                          Nenhum registro de auditoria encontrado com os filtros
-                          selecionados.
-                        </p>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs text-slate-700">
-                        <thead className="bg-slate-100/80 text-slate-800 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
-                          <tr>
-                            <th className="p-3 whitespace-nowrap.5">Certificado</th>
-                            <th className="p-3 whitespace-nowrap.5">TAG / Instrumento</th>
-                            <th className="p-3 whitespace-nowrap.5">T√©cnico Calibrador</th>
-                            <th className="p-3 whitespace-nowrap.5">Hora In√≠cio</th>
-                            <th className="p-3 whitespace-nowrap.5">Hora Fim</th>
-                            <th className="p-3 whitespace-nowrap.5">Tempo de Execu√ß√£o</th>
-                            <th className="p-3 whitespace-nowrap.5 text-right print:hidden">
-                              A√ß√µes
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {filtered.map((log) => {
-                            const isRncLog =
-                              log.certNumber?.startsWith("RNC") ||
-                              rncReports.some(
-                                (r: any) => r.rncNumber === log.certNumber,
-                              );
-                            return (
-                              <tr
-                                key={log.id}
-                                className="hover:bg-slate-50/80 transition-colors"
-                              >
-                                <td className="p-3.5 font-mono font-extrabold whitespace-nowrap">
-                                  {isRncLog ? (
-                                    <span className="bg-rose-50 text-rose-800 border border-rose-300 px-2.5 py-1 rounded-lg inline-flex items-center space-x-1.5 shadow-xs">
-                                      <ShieldAlert className="h-3.5 w-3.5 text-rose-600 shrink-0" />
-                                      <span>{log.certNumber}</span>
-                                      <span className="text-[9px] bg-rose-600 text-white font-extrabold px-1 rounded uppercase">
-                                        RNC
-                                      </span>
-                                    </span>
-                                  ) : (
-                                    <span className="bg-blue-50 text-royal-blue border border-blue-200 px-2.5 py-1 rounded-lg shadow-xs">
-                                      {log.certNumber}
-                                    </span>
-                                  )}
-                                </td>
-
-                                <td className="p-3.5">
-                                  <div>
-                                    <div className="flex items-center space-x-2">
-                                      <span className="font-mono font-bold text-slate-900">
-                                        [{log.coma || log.instrumentTag}]
-                                      </span>
-                                      <span
-                                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                                          isRncLog
-                                            ? "bg-rose-50 text-rose-700 border-rose-200"
-                                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                        }`}
-                                      >
-                                        {isRncLog
-                                          ? "Finalizado: N√£o Conforme (RNC)"
-                                          : "Finalizado: Calibrado (OK)"}
-                                      </span>
-                                    </div>
-                                    <p className="text-slate-600 font-medium text-[11px] line-clamp-1 mt-0.5">
-                                      {log.instrumentDescription}
-                                    </p>
-                                  </div>
-                                </td>
-
-                                <td className="p-3.5 whitespace-nowrap">
-                                  <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                                    <UserCheck className="h-3.5 w-3.5 text-royal-blue" />
-                                    {log.technicianName}
-                                  </span>
-                                </td>
-
-                                <td className="p-3.5 font-mono text-[11px] text-slate-700 whitespace-nowrap">
-                                  <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-semibold">
-                                    {formatDateTime(log.startTime)}
-                                  </span>
-                                </td>
-
-                                <td className="p-3.5 font-mono text-[11px] text-slate-700 whitespace-nowrap">
-                                  <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-semibold">
-                                    {formatDateTime(log.endTime)}
-                                  </span>
-                                </td>
-
-                                <td className="p-3.5 whitespace-nowrap">
-                                  <span
-                                    className={`px-3 py-1 rounded-lg font-mono font-bold text-xs inline-flex items-center gap-1 shadow-xs border ${
-                                      log.durationSeconds < 1800
-                                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                        : log.durationSeconds < 3600
-                                          ? "bg-blue-50 text-blue-800 border-blue-200"
-                                          : "bg-amber-50 text-amber-800 border-amber-200"
-                                    }`}
-                                  >
-                                    <Timer className="h-3.5 w-3.5" />
-                                    {log.durationFormatted ||
-                                      `${Math.floor((log.durationSeconds || 0) / 60)} min`}
-                                  </span>
-                                </td>
-
-                                <td className="p-3.5 text-right whitespace-nowrap print:hidden">
-                                  <button
-                                    onClick={() =>
-                                      requestAdminDelete(
-                                        "audit_log",
-                                        log.id,
-                                        `Registro de Auditoria (${log.certNumber})`,
-                                      )
-                                    }
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                    title="Excluir registro de auditoria (requer senha do Administrador)"
-
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-                        {/* NOVO BLOCO: AUDITORIA DE ACESSO */}
-            <div className="space-y-6 mt-10 print:space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-0">
-                <div className="flex items-center space-x-3">
-                  <div className="p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-100">
-                    <ShieldAlert className="h-7 w-7" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 flex items-center gap-2">
-                      <span>Auditoria de Acesso ao Sistema</span>
-                      <span className="text-xs bg-rose-100 text-rose-800 font-bold px-2.5 py-0.5 rounded-full border border-rose-200">
-                        Acessos Restritos (Fora do Hor√°rio)
-                      </span>
-                    </h2>
-                    <p className="text-sm text-slate-600">
-                      Registro de acessos realizados ap√≥s o hor√°rio comercial por colaboradores com perfil padr√£o/limitado e autoriza√ß√£o de um Administrador.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden print:shadow-none print:border-slate-300">
-                <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="font-bold text-sm text-slate-900 uppercase font-mono tracking-wider flex items-center space-x-2">
-                      <ShieldCheck className="h-4 w-4 text-rose-600" />
-                      <span>Registros de Acesso Restrito</span>
-                    </h3>
-                    <span className="text-xs font-semibold text-slate-500">
-                      {accessAuditLogs.length} acesso(s) rastreado(s)
-                    </span>
-                  </div>
-                </div>
-
-                {accessAuditLogs.length === 0 ? (
-                  <div className="p-8 text-center text-slate-500">
-                    <Clock className="h-10 w-10 mx-auto text-slate-300 mb-2" />
-                    <p className="text-xs font-medium">Nenhum registro de acesso restrito encontrado.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-600">
-                      <thead className="bg-slate-50 text-slate-700 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
-                        <tr>
-                          <th className="p-3 whitespace-nowrap.5">Data e Hora</th>
-                          <th className="p-3 whitespace-nowrap.5">Usu√°rio (Solicitante)</th>
-                          <th className="p-3 whitespace-nowrap.5">A√ß√£o</th>
-                          <th className="p-3 whitespace-nowrap.5">Detalhes / Justificativa</th>
-                          <th className="p-3 whitespace-nowrap.5">Autorizado Por</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {accessAuditLogs.map(log => (
-                          <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="p-3.5 whitespace-nowrap font-mono text-xs">{new Date(log.date).toLocaleString()}</td>
-                            <td className="p-3.5 font-bold text-slate-900">{log.user}</td>
-                            <td className="p-3.5">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
-                                {log.action}
-                              </span>
-                            </td>
-                            <td className="p-3.5">{log.details}</td>
-                            <td className="p-3.5 font-bold text-emerald-700">{log.authorizedBy}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-            </>
-          ))}
-        {activeTab === "certificados" && (
-          <div className="space-y-6 print:space-y-0">
-            <div className="print:hidden flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
-                  Emiss√£o de Certificados
-                </h2>
-                <p className="text-sm text-slate-600">
-                  Laudo oficial de calibra√ß√£o do equipamento.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setSelectedCertificateId("");
-                  setFieldServiceTag("");
-                  setFieldServiceEquip("");
-                  setActiveTab("instruments");
-                }}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 border border-slate-200 shadow-sm cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-                <span>Voltar para Calibra√ß√£o</span>
-              </button>
-            </div>
-
-            <div className="w-full text-xs print:block">
-              {/* Printable Report Sheet */}
-              <div className="printable-area bg-white p-10 rounded-sm border border-slate-200 shadow-md flex flex-col justify-between min-h-[1056px] w-full max-w-[816px] mx-auto text-slate-900 font-sans relative print:min-h-0 print:h-auto print:shadow-none print:border-none print:p-0 print:max-w-none print:block">
-                {selectedCertificateId ? (
-                  (() => {
-                    const inst = instruments.find(
-                      (i) => i.id === selectedCertificateId,
-                    );
-                    const client = clients.find((c) => c.id === inst?.clientId);
-                    if (!inst) return null;
-
-                    const report = [...reports]
-                      .sort(
-                        (a, b) =>
-                          new Date(b.date).getTime() -
-                          new Date(a.date).getTime(),
-                      )
-                      .find((r: any) => r.instrumentId === inst.id);
-                    const certNumber =
-                      report?.certNumber ||
-                      `COMA-${inst.id.substring(0, 4).toUpperCase()}`;
-                    const certAuthKey = getReportAuthKey(
-                      report,
-                      inst.id + certNumber,
-                    );
-                    const points =
-                      report?.points || inst.calibrationPoints || [];
-
-                    let maxHysteresis = 0;
-                    let maxRepeatability = 0;
-                    let maxAbsError = 0;
-                    let span =
-                      Math.abs((inst.rangeMax || 0) - (inst.rangeMin || 0)) ||
-                      1;
-                    const mpeVal =
-                      report?.mpe !== undefined &&
-                      report?.mpe !== null &&
-                      report?.mpe !== ""
-                        ? Number(report.mpe)
-                        : inst.mpe !== undefined &&
-                            inst.mpe !== null &&
-                            inst.mpe !== ""
-                          ? Number(inst.mpe)
-                          : 0;
-
-                    const formattedPoints = points.map((p: any) => {
-                      const rawA1 = p.refAsc1;
-                      const rawD1 = p.refDesc1;
-                      const rawA2 = p.refAsc2;
-                      const rawD2 = p.refDesc2;
-
-                      const a1 =
-                        rawA1 !== "" && rawA1 !== undefined && rawA1 !== null
-                          ? Number(rawA1)
-                          : null;
-                      const d1 =
-                        rawD1 !== "" && rawD1 !== undefined && rawD1 !== null
-                          ? Number(rawD1)
-                          : null;
-                      const a2 =
-                        rawA2 !== "" && rawA2 !== undefined && rawA2 !== null
-                          ? Number(rawA2)
-                          : null;
-                      const d2 =
-                        rawD2 !== "" && rawD2 !== undefined && rawD2 !== null
-                          ? Number(rawD2)
-                          : null;
-
-                      const validVals = [a1, d1, a2, d2].filter(
-                        (v): v is number => v !== null && !isNaN(v),
-                      );
-                      const count = validVals.length;
-                      const sum = validVals.reduce(
-                        (acc, curr) => acc + curr,
-                        0,
-                      );
-                      const avg = count > 0 ? sum / count : 0;
-                      let absErr = count > 0 ? Math.abs(p.nominal - avg) : 0;
-                      let normalizedAbsErr = absErr;
-                      if (inst.typeSpec === "manovacuometro" && p.nominal < 0) {
-                        const minVal = inst.rangeMin || 0;
-                        if (minVal <= -700) normalizedAbsErr = absErr / 760;
-                        else if (minVal <= -25)
-                          normalizedAbsErr = absErr / 29.92;
-                      }
-
-                      if (count > 0 && normalizedAbsErr > maxAbsError) {
-                        maxAbsError = normalizedAbsErr;
-                      }
-                      const err = Number((p.nominal - avg).toFixed(2));
-
-                      // Histerese Metrol√≥gica (Diferen√ßa entre descida e subida no mesmo ciclo)
-                      let localHyst = 0;
-                      if (a1 !== null && d1 !== null) {
-                        let hyst1 = Math.abs(d1 - a1);
-                        let normalizedHyst1 = hyst1;
-                        if (
-                          inst.typeSpec === "manovacuometro" &&
-                          p.nominal < 0
-                        ) {
-                          const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedHyst1 = hyst1 / 760;
-                          else if (minVal <= -25)
-                            normalizedHyst1 = hyst1 / 29.92;
-                        }
-                        if (normalizedHyst1 > maxHysteresis)
-                          maxHysteresis = normalizedHyst1;
-                        localHyst = Math.max(localHyst, hyst1);
-                      }
-                      if (a2 !== null && d2 !== null) {
-                        let hyst2 = Math.abs(d2 - a2);
-                        let normalizedHyst2 = hyst2;
-                        if (
-                          inst.typeSpec === "manovacuometro" &&
-                          p.nominal < 0
-                        ) {
-                          const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedHyst2 = hyst2 / 760;
-                          else if (minVal <= -25)
-                            normalizedHyst2 = hyst2 / 29.92;
-                        }
-                        if (normalizedHyst2 > maxHysteresis)
-                          maxHysteresis = normalizedHyst2;
-                        localHyst = Math.max(localHyst, hyst2);
-                      }
-
-                      // Repetitividade Metrol√≥gica (Diferen√ßa entre medi√ß√µes no mesmo sentido entre ciclos)
-                      if (a1 !== null && a2 !== null) {
-                        let repAsc = Math.abs(a2 - a1);
-                        let normalizedRepAsc = repAsc;
-                        if (
-                          inst.typeSpec === "manovacuometro" &&
-                          p.nominal < 0
-                        ) {
-                          const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedRepAsc = repAsc / 760;
-                          else if (minVal <= -25)
-                            normalizedRepAsc = repAsc / 29.92;
-                        }
-                        if (normalizedRepAsc > maxRepeatability)
-                          maxRepeatability = normalizedRepAsc;
-                      }
-                      if (d1 !== null && d2 !== null) {
-                        let repDesc = Math.abs(d2 - d1);
-                        let normalizedRepDesc = repDesc;
-                        if (
-                          inst.typeSpec === "manovacuometro" &&
-                          p.nominal < 0
-                        ) {
-                          const minVal = inst.rangeMin || 0;
-                          if (minVal <= -700) normalizedRepDesc = repDesc / 760;
-                          else if (minVal <= -25)
-                            normalizedRepDesc = repDesc / 29.92;
-                        }
-                        if (normalizedRepDesc > maxRepeatability)
-                          maxRepeatability = normalizedRepDesc;
-                      }
-
-                      // --- C√ÅLCULO DA INCERTEZA EXPANDIDA (ABNT NBR ISO/IEC 17025 & GUM ISO/IEC Guide 98-3 / NIT-DICLA-021) ---
-                      // 1. Tipo A (uA): Desvio padr√£o das medi√ß√µes repetidas
-                      let uA = 0;
-                      if (count > 1) {
-                        const variance =
-                          validVals.reduce(
-                            (acc, val) => acc + Math.pow(val - avg, 2),
-                            0,
-                          ) /
-                          (count - 1);
-                        uA = Math.sqrt(variance) / Math.sqrt(count);
-                      }
-
-                      // 2. Tipo B - Resolu√ß√£o do instrumento (uB_res)
-                      const decimals = String(p.nominal).includes(".")
-                        ? String(p.nominal).split(".")[1].length
-                        : 2;
-                      const res = Math.pow(
-                        10,
-                        -Math.max(1, Math.min(decimals, 3)),
-                      );
-                      const uB_res = res / 2 / Math.sqrt(3);
-
-                      // 3. Tipo B - Histerese no ponto (uB_hist)
-                      const uB_hist = localHyst / (2 * Math.sqrt(3));
-
-                      // 4. Tipo B - Padr√£o de Refer√™ncia (uB_std)
-                      const stdErrorOrMpe =
-                        mpeVal > 0 ? (mpeVal * span) / 100 / 4 : span * 0.0025;
-                      const uB_std = stdErrorOrMpe / 2;
-
-                      // Incerteza Combinada (uc) e Incerteza Expandida U (k = 2.00, n√≠vel de confian√ßa de ~95.45%)
-                      const uc = Math.sqrt(
-                        Math.pow(uA, 2) +
-                          Math.pow(uB_res, 2) +
-                          Math.pow(uB_hist, 2) +
-                          Math.pow(uB_std, 2),
-                      );
-                      const expandedUncertainty =
-                        count > 0 ? Number((uc * 2.0).toFixed(2)) : 0;
-
-                      return {
-                        ...p,
-                        avg,
-                        err,
-                        a1: a1 ?? 0,
-                        d1: d1 ?? 0,
-                        a2: a2 ?? 0,
-                        d2: d2 ?? 0,
-                        count,
-                        expandedUncertainty,
-                      };
-                    });
-
-                    const classPct = span > 0 ? (maxAbsError / span) * 100 : 0;
-                    const hysteresisPct =
-                      span > 0 ? (maxHysteresis / span) * 100 : 0;
-                    const repPct =
-                      span > 0 ? (maxRepeatability / span) * 100 : 0;
-
-                    return (
-                      <div className="space-y-6">
-                        {/* Sheet actions - HIDDEN in printing */}
-                        <div className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
-                          <button
-                            onClick={() => window.print()}
-                            className="p-2 px-4 bg-royal-blue text-white hover:bg-blue-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
-                            title="Imprimir Certificado de Calibra√ß√£o"
-                          >
-                            <Printer className="h-4 w-4" />
-                            <span>Imprimir PDF</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              requestAdminDelete(
-                                "report",
-                                report?.id || inst.id,
-                                `Certificado N¬∫ ${certNumber}`,
-                              )
-                            }
-                            className="p-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-md cursor-pointer"
-                            title="Excluir Certificado de Calibra√ß√£o (Requer Senha do Administrador)"
-
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            <span>Excluir Calibra√ß√£o</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedCertificateId("");
-                  setFieldServiceEquip("");
-                              setActiveTab("instruments");
-                            }}
-                            className="p-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-all flex items-center text-xs font-bold shadow-sm cursor-pointer"
-                            title="Fechar e voltar para Calibra√ß√£o"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-
-                        {/* Header */}
-                        <div className="border-b border-slate-300 pb-2">
-                          <div className="flex items-start justify-between gap-4">
-                            {logoPreview ? (
-                              <img
-                                src={logoPreview}
-                                alt="Logo"
-                                className="h-16 object-contain"
-                              />
-                            ) : (
-                              <ComaninsLogo size={180} />
-                            )}
-                            <div className="flex-1 text-center mt-2">
-                              <h1 className="font-bold text-sm text-slate-900 leading-tight">
-                                Laborat√≥rio de Calibra√ß√£o Rastreada de acordo
-                                com a ABNT NBR ISO/ IEC 17025
-                              </h1>
-                              <h2 className="font-bold text-lg text-slate-900 mt-1 uppercase">
-                                CERTIFICADO DE CALIBRA√á√ÉO N¬∫ {certNumber}
-                              </h2>
-                              <p className="text-[10px] font-bold mt-1 font-mono text-slate-800">
-                                Chave de Autenticidade (QRCode):{" "}
-                                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 font-extrabold text-blue-900 tracking-wider select-all">
-                                  {certAuthKey}
-                                </span>
-                              </p>
-                            </div>
-                            <div className="text-right flex flex-col items-end">
-                              <div className="p-1 bg-white border border-slate-300 rounded shadow-xs inline-block">
-                                <QRCodeSVG
-                                  value={`https://www.comanins.com.br?chave=${certAuthKey}`}
-                                  size={56}
-                                  level="M"
-                                />
-                              </div>
-                              <p className="text-[8px] font-mono font-bold text-slate-700 mt-0.5">
-                                www.comanins.com.br
-                              </p>
-                              <p className="text-[10px] text-slate-600 mt-0.5">
-                                P√°g. 1/1
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-center mt-2 text-[8px] text-slate-500">
-                            {companyData.endereco ||
-                              "Rua A3, N¬∞ 09, Poloplast, Cama√ßari-BA - CEP: 42801-581"}{" "}
-                            - Fone: {companyData.telefone || "(71) 3621-0311"} -{" "}
-                            {companyData.email || "comercial@comanins.com.br"}
-                          </div>
-                        </div>
-
-                        <div className="space-y-4 text-[11px] leading-relaxed">
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              1. Cliente:
-                            </p>
-                            <div className="pl-4">
-                              <p>
-                                <span className="font-bold">Nome:</span>{" "}
-                                {client?.name || "Cliente Padr√£o"}
-                              </p>
-                              <p>
-                                <span className="font-bold">Endere√ßo:</span>{" "}
-                                {client?.city || "Endere√ßo n√£o informado"}
-                              </p>
-                              <p>
-                                <span className="font-bold">Contato:</span>{" "}
-                                {client?.phone || "N√£o informado"} /{" "}
-                                {client?.email}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              2. Instrumento Calibrado:
-                            </p>
-                            <div className="pl-4 grid grid-cols-2 gap-1">
-                              <p>
-                                <span className="font-bold">Descri√ß√£o:</span>{" "}
-                                {inst.description}
-                              </p>
-                              <p>
-                                <span className="font-bold">TAG do Cliente:</span>{" "}
-                                {fieldServiceTag || inst.tag || "‚Äî"}
-                              </p>
-                              {fieldServiceEquip && (
-                                <p>
-                                  <span className="font-bold">Equipamento:</span>{" "}
-                                  {fieldServiceEquip}
-                                </p>
-                              )}
-                              <p>
-                                <span className="font-bold">Marca:</span>{" "}
-                                {inst.brand || "N√£o Consta"}
-                              </p>
-                              <p>
-                                <span className="font-bold">Modelo:</span>{" "}
-                                {inst.model || "N√£o Consta"}
-                              </p>
-                              <p>
-                                <span className="font-bold">N¬∫ S√©rie:</span>{" "}
-                                {inst.serialNumber || "NAO CONSTA"}
-                              </p>
-                              <p>
-                                <span className="font-bold">Tipo:</span>{" "}
-                                ANALOGICO
-                              </p>
-                              <p>
-                                <span className="font-bold">Faixa:</span>{" "}
-                                {inst.rangeMin}{" "}
-                                {inst.typeSpec === "manovacuometro" || (inst.description || "").toLowerCase().includes("manovacu")
-                                  ? (inst.unitNegative || "mmHg")
-                                  : ""}{" "}
-                                a {inst.rangeMax} {inst.unit}
-                              </p>
-                              <p>
-                                <span className="font-bold">
-                                  Toler√¢ncia (MPE):
-                                </span>{" "}
-                                ¬±{inst.mpe} {inst.unit}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              3. Identifica√ß√£o da Calibra√ß√£o:
-                            </p>
-                            <div className="pl-4 grid grid-cols-3 gap-1">
-                              <p>
-                                <span className="font-bold">
-                                  Data de recebimento:
-                                </span>{" "}
-                                {(() => {
-                                  const raw =
-                                    inst.dataEntrada ||
-                                    (inst as any).dateOfIntake ||
-                                    (inst as any).dataDaEntrada;
-                                  if (!raw) return "N√£o informada";
-                                  if (raw.includes("-")) {
-                                    const p = raw.split("-");
-                                    if (p.length === 3 && p[0].length === 4)
-                                      return `${p[2]}/${p[1]}/${p[0]}`;
-                                  }
-                                  return raw;
-                                })()}
-                              </p>
-                              <p>
-                                <span className="font-bold">
-                                  Data de calibra√ß√£o:
-                                </span>{" "}
-                                {(() => {
-                                  const raw =
-                                    (inst as any).calibrationDate ||
-                                    inst.lastCalibrationDate ||
-                                    (inst as any).date;
-                                  if (!raw)
-                                    return new Date().toLocaleDateString(
-                                      "pt-BR",
-                                    );
-                                  if (raw.includes("-")) {
-                                    const p = raw.split("-");
-                                    if (p.length === 3 && p[0].length === 4)
-                                      return `${p[2]}/${p[1]}/${p[0]}`;
-                                  }
-                                  return raw;
-                                })()}
-                              </p>
-                              <p>
-                                <span className="font-bold">
-                                  Data de emiss√£o:
-                                </span>{" "}
-                                {new Date().toLocaleDateString("pt-BR")}
-                              </p>
-                            </div>
-                            <p className="pl-4 mt-1">
-                              <span className="font-bold">
-                                Local de calibra√ß√£o:
-                              </span>{" "}
-                              Instala√ß√£o Permanente do Laborat√≥rio Comanins
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              4. Condi√ß√µes Ambientais:
-                            </p>
-                            <div className="pl-4">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <p className="font-bold text-center">
-                                    Temperatura Ambiente
-                                  </p>
-                                  <p className="text-center">
-                                    {report?.temperature !== undefined && report?.temperature !== null && (report?.temperature as any) !== ""
-                                      ? `${report.temperature}¬∫C`
-                                      : (inst as any)?.temperature !== undefined && (inst as any)?.temperature !== null && (inst as any)?.temperature !== ""
-                                      ? `${(inst as any).temperature}¬∫C`
-                                      : '20¬∫C'} (¬± 5¬∫C)
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="font-bold text-center">
-                                    Umidade Relativa do Ar
-                                  </p>
-                                  <p className="text-center">
-                                    {report?.humidity !== undefined && report?.humidity !== null && (report?.humidity as any) !== ""
-                                      ? `${report.humidity}%`
-                                      : (inst as any)?.humidity !== undefined && (inst as any)?.humidity !== null && (inst as any)?.humidity !== ""
-                                      ? `${(inst as any).humidity}%`
-                                      : '50%'} (¬± 20%)
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              5. Resumo do M√©todo de Calibra√ß√£o:
-                            </p>
-                            <div className="pl-4">
-                              <p>
-                                <span className="font-bold">
-                                  M√©todo de Calibra√ß√£o:
-                                </span>{" "}
-                                conforme procedimento PR-001-2017 Rev. 4
-                              </p>
-                              <p>
-                                <span className="font-bold">
-                                  Descri√ß√£o do M√©todo:
-                                </span>{" "}
-                                A Calibra√ß√£o foi realizada conforme procedimento
-                                PR-001-2017 Rev. 4 comparando-se o instrumento
-                                com o padr√£o listado no item 7. A s√©rie de
-                                medi√ß√µes est√£o definidas nas tabelas de valores
-                                encontrados.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              6. Coment√°rios:
-                            </p>
-                            <p className="pl-4 text-justify">
-                              {(inst as any).calibrationObs ||
-                                "A reprodu√ß√£o deste documento somente poder√° ser feita integralmente. Os resultados apresentados referem-se exclusivamente ao equipamento em quest√£o."}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-sm uppercase mb-1">
-                              7. Equipamentos Auxiliares e Padr√µes:
-                            </p>
-                            <div className="pl-4 space-y-0.5 font-mono text-[10px]">
-                              {report?.referenceStandards &&
-                              report.referenceStandards.length > 0 ? (
-                                report.referenceStandards.map(
-                                  (std: ReferenceStandard, idx: number) => (
-                                    <p key={std.id || idx}>
-                                      <span className="font-bold">
-                                        Padr√£o {String.fromCharCode(65 + idx)}:
-                                      </span>{" "}
-                                      {std.identification
-                                        ? `[${std.identification}] `
-                                        : ""}
-                                      Certificado N¬∫ {std.certificateNumber} -
-                                      Tipo: {std.instrumentType} - Faixa:{" "}
-                                      {std.range || "‚Äî"} - Validade:{" "}
-                                      {formatDateBR(std.expirationDate)} - Lab
-                                      RBC: {std.rbcLab}
-                                    </p>
-                                  ),
-                                )
-                              ) : referenceStandards &&
-                                referenceStandards.length > 0 ? (
-                                referenceStandards
-                                  .slice(0, 3)
-                                  .map(
-                                    (std: ReferenceStandard, idx: number) => (
-                                      <p key={std.id || idx}>
-                                        <span className="font-bold">
-                                          Padr√£o {String.fromCharCode(65 + idx)}
-                                          :
-                                        </span>{" "}
-                                        {std.identification
-                                          ? `[${std.identification}] `
-                                          : ""}
-                                        Certificado N¬∫ {std.certificateNumber} -
-                                        Tipo: {std.instrumentType} - Faixa:{" "}
-                                        {std.range || "‚Äî"} - Validade:{" "}
-                                        {formatDateBR(std.expirationDate)} - Lab
-                                        RBC: {std.rbcLab}
-                                      </p>
-                                    ),
-                                  )
-                              ) : (
-                                <p className="text-slate-500 italic">
-                                  Nenhum padr√£o de refer√™ncia espec√≠fico
-                                  registrado nesta calibra√ß√£o.
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="pt-4 border-t border-slate-300">
-                            <p className="font-bold text-sm uppercase mb-2">
-                              8. Valores Encontrados:
-                            </p>
-                            <table className="w-full text-center border-collapse text-[10px]">
-                              <thead>
-                                <tr className="bg-slate-100 font-bold border border-slate-300">
-                                  <th
-                                    className="p-1 border border-slate-300"
-                                    rowSpan={2}
-                                  >
-                                    VI
-                                    <br />
-                                    (Nominal)
-                                  </th>
-                                  <th
-                                    className="p-1 border border-slate-300"
-                                    colSpan={2}
-                                  >
-                                    VRef Primeiro Ciclo
-                                  </th>
-                                  <th
-                                    className="p-1 border border-slate-300"
-                                    colSpan={2}
-                                  >
-                                    VRef Segundo Ciclo
-                                  </th>
-                                  <th
-                                    className="p-1 border border-slate-300"
-                                    rowSpan={2}
-                                  >
-                                    VRef M√©dia
-                                    <br />
-                                    de Leituras
-                                  </th>
-                                  <th
-                                    className="p-1 border border-slate-300"
-                                    rowSpan={2}
-                                  >
-                                    Erro
-                                  </th>
-                                  <th
-                                    className="p-1 border border-slate-300"
-                                    rowSpan={2}
-                                  >
-                                    Unidade
-                                    <br />
-                                    de Medida
-                                  </th>
-                                </tr>
-                                <tr className="bg-slate-100 font-bold border border-slate-300">
-                                  <th className="p-1 border border-slate-300">
-                                    Crescente
-                                  </th>
-                                  <th className="p-1 border border-slate-300">
-                                    Decrescente
-                                  </th>
-                                  <th className="p-1 border border-slate-300">
-                                    Crescente
-                                  </th>
-                                  <th className="p-1 border border-slate-300">
-                                    Decrescente
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {formattedPoints.map((p: any, idx: number) => (
-                                  <tr key={idx}>
-                                    <td className="p-1 border border-slate-300 font-bold">
-                                      {p.nominal}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {p.refAsc1 || "-"}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {p.refDesc1 || "-"}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {p.refAsc2 || "-"}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {p.refDesc2 || "-"}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {p.count > 0 ? p.avg.toFixed(2) : "-"}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {p.count > 0
-                                        ? p.err > 0
-                                          ? `+${p.err}`
-                                          : p.err
-                                        : "-"}
-                                    </td>
-                                    <td className="p-1 border border-slate-300">
-                                      {(inst.typeSpec === "manovacuometro" || (inst.description || "").toLowerCase().includes("manovacu")) && p.nominal < 0
-                                        ? (inst.unitNegative || "mmHg")
-                                        : inst.unit}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-
-                            <div className="mt-4 font-bold text-[10px]">
-                              <p>√çndice de Classe (%): {classPct.toFixed(2)}</p>
-                              <p>Repetitividade (%): {repPct.toFixed(3)}</p>
-                              <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
-                            </div>
-                          </div>
-
-                          <div className="mt-16 grid grid-cols-2 gap-8 px-12">
-                            <div className="flex flex-col items-center justify-end text-center pt-2">
-                              {report?.signaturePath ? (
-                                <img src={report.signaturePath} alt="Assinatura do T√©cnico" className="h-16 object-contain mb-2 mix-blend-multiply" />
-                              ) : (
-                                <div className="h-16 w-full flex items-center justify-center text-xs text-slate-400 italic mb-2">Assinatura Pendente</div>
-                              )}
-                              <div className="w-full border-t border-slate-400 pt-2">
-                                <p className="font-bold">{report?.technicianName || 'T√©cnico Executante'}</p>
-                                <p className="text-xs text-slate-600">T√©cnico de Laborat√≥rio</p>
-                              </div>
-                            </div>
-                            <div className="flex flex-col items-center justify-end text-center pt-2">
-                              <img src="/assinatura_rt.png" alt="Assinatura do Respons√°vel T√©cnico" className="h-16 object-contain mb-2 mix-blend-multiply" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                              <div className="w-full border-t border-slate-400 pt-2">
-                                <p className="font-bold">Fabio Henrique de Sena Teixeira</p>
-                                <p className="text-xs text-slate-600">Respons√°vel T√©cnico</p>
-                                <p className="text-xs text-slate-600">CFT-80333478568/BA</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="text-center text-[8px] text-slate-400 mt-8">
-                            Este documento foi produzido e assinado
-                            eletronicamente no Portal COMANINS.
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4">
-                    <FileCheck className="h-16 w-16 text-slate-200" />
-                    <p>
-                      Selecione um instrumento para gerar o certificado nos
-                      padr√µes da Cgcre / NBR ISO/IEC 17025.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        {/* TAB: QUANTITATIVO DIA */}
-        {activeTab === "quantitativo_dia" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
-                Quantitativo de Calibra√ß√µes por Dia
-              </h2>
-              <p className="text-sm text-slate-600">
-                Monitore o rendimento operacional, o n√∫mero de instrumentos
-                liberados e as metas di√°rias.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Stats */}
-              <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 space-y-6 shadow-sm text-xs text-slate-800">
-                <h3 className="font-display font-bold text-slate-900 text-sm">
-                  Produ√ß√£o Laboratorial Recente
-                </h3>
-
-                {/* recharts bar/line simulation */}
-                <div className="h-64 bg-slate-50 p-4 rounded border border-slate-200 flex items-end justify-between font-mono text-[10px] text-slate-500">
-                  <div className="flex flex-col items-center space-y-2 w-12">
-                    <div className="w-full bg-blue-200 h-16 rounded-t text-center pt-2 font-bold text-royal-blue">
-                      5
-                    </div>
-                    <span>16/07</span>
-                  </div>
-                  <div className="flex flex-col items-center space-y-2 w-12">
-                    <div className="w-full bg-blue-200 h-24 rounded-t text-center pt-2 font-bold text-royal-blue">
-                      8
-                    </div>
-                    <span>17/07</span>
-                  </div>
-                  <div className="flex flex-col items-center space-y-2 w-12">
-                    <div className="w-full bg-blue-300 h-10 rounded-t text-center pt-2 font-bold text-royal-blue">
-                      3
-                    </div>
-                    <span>18/07</span>
-                  </div>
-                  <div className="flex flex-col items-center space-y-2 w-12">
-                    <div className="w-full bg-blue-200 h-32 rounded-t text-center pt-2 font-bold text-royal-blue">
-                      12
-                    </div>
-                    <span>19/07</span>
-                  </div>
-                  <div className="flex flex-col items-center space-y-2 w-12">
-                    <div className="w-full bg-royal-blue h-40 rounded-t text-center pt-2 font-bold text-white">
-                      15
-                    </div>
-                    <span className="font-bold text-royal-blue">Hoje</span>
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center text-slate-600">
-                  <span>
-                    M√©dia de calibra√ß√µes di√°rias:{" "}
-                    <strong>8.6 aferi√ß√µes/dia</strong>
-                  </span>
-                  <button
-                    onClick={() =>
-                      alert(
-                        "Relat√≥rio exportado para o diret√≥rio de auditoria em PDF.",
-                      )
-                    }
-                    className="px-4 py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded-lg text-xs"
-                  >
-                    Exportar Relat√≥rio PDF
-                  </button>
-                </div>
-              </div>
-
-              {/* Day List */}
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 text-white space-y-4 text-xs">
-                <h3 className="font-display font-bold text-sm">
-                  Aferi√ß√µes Realizadas Hoje
-                </h3>
-                <div className="divide-y divide-slate-800 font-mono">
-                  <div className="py-2.5 flex justify-between">
-                    <div>
-                      <span className="text-emerald-400 font-bold">PI-102</span>
-                      <span className="text-slate-400 text-[10px] block font-sans">
-                        Man√¥metro Industrial
-                      </span>
-                    </div>
-                    <span className="text-slate-500">09:30</span>
-                  </div>
-                  <div className="py-2.5 flex justify-between">
-                    <div>
-                      <span className="text-emerald-400 font-bold">TI-203</span>
-                      <span className="text-slate-400 text-[10px] block font-sans">
-                        Term√¥metro Digital
-                      </span>
-                    </div>
-                    <span className="text-slate-500">11:15</span>
-                  </div>
-                  <div className="py-2.5 flex justify-between">
-                    <div>
-                      <span className="text-emerald-400 font-bold">PSV-08</span>
-                      <span className="text-slate-400 text-[10px] block font-sans">
-                        V√°lvula de Seguran√ßa
-                      </span>
-                    </div>
-                    <span className="text-slate-500">14:02</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
-        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService canEdit={canEditFieldService} onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
-        {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}
-        {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
-        {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && <InternalCommunication currentUser={currentUser as any} />}
-        {activeTab === "minha_assinatura" && canAccessModule("digital_signature") && <MySignature currentUser={currentUser as any} canEdit={canEditDigitalSignature} onUpdateUser={onUpdateInternalUser || (() => {})} />}
-
-        {/* TAB: CONSUMO FIREBASE */}
-        {activeTab === "consumo_firebase" && canAccessModule("firebase_usage") && (
-          <FirebaseUsagePanel onNavigateToAudit={() => setActiveTab("auditoria")} />
-        )}
-
-        {/* TAB: CONFIGURA√á√ïES E ADMINISTRA√á√ÉO */}
-        {isUserAdmin && (activeTab === "configuracoes" ||
-          activeTab === "cadastro_usuarios") && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 flex items-center space-x-2">
-                <Settings className="h-7 w-7 text-royal-blue" />
-                <span>Configura√ß√µes do Sistema e Portal</span>
-              </h2>
-              <p className="text-sm text-slate-600">
-                Gerencie o cadastro da empresa, logomarcas oficiais, galeria de
-                fotos do site institucional, operadores e prefer√™ncias gerais.
-              </p>
-            </div>
-
-            {/* Sub-navigation tabs */}
-            <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("company")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "company"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <Building2 className="h-4 w-4" />
-                <span>Cadastro da Empresa</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("logos")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "logos"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <Image className="h-4 w-4" />
-                <span>Logos do Site & Sistema</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("photos")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "photos"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <Camera className="h-4 w-4" />
-                <span>Fotos do Site Institucional</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("access")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "access"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <KeyRound className="h-4 w-4" />
-                <span>Perfis de Acesso</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("system")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "system"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <Sliders className="h-4 w-4" />
-                <span>Sequenciais & Listas</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("standards")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "standards"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                <span>Padr√µes de Refer√™ncia</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("import")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "import"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <Upload className="h-4 w-4" />
-                <span>Importa√ß√£o & Exporta√ß√£o Excel</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("backup")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "backup"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <Database className="h-4 w-4" />
-                <span>Backup & Restaura√ß√£o</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("lgpd")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "lgpd"
-                    ? "bg-royal-blue text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                }`}
-              >
-                <ShieldAlert className="h-4 w-4 text-emerald-500" />
-                <span>Governan√ßa & LGPD</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfigSubTab("maintenance")}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2 cursor-pointer ${
-                  configSubTab === "maintenance"
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "bg-white text-slate-700 hover:bg-emerald-50 border border-slate-200"
-                }`}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                <span>Seguran√ßa do Banco</span>
-              </button>
-            </div>
-
-            {configSubTab === "access" && (
-              <AccessProfileManagement
-                currentUser={currentUser as any}
-                internalUsers={internalUsers}
-                onAssignAccessProfile={onAssignAccessProfile}
-              />
-            )}
-
-            {/* SUB-TAB 1: CADASTRO DA EMPRESA */}
-            {configSubTab === "company" && (
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    localStorage.setItem(
-                      "comanins_company_data",
-                      JSON.stringify(companyData),
-                    );
-                    await saveCompanySettings(companyData);
-                    setCompanySuccessMsg(
-                      "‚úì Cadastro da empresa salvo com sucesso!",
-                    );
-                    setTimeout(() => setCompanySuccessMsg(""), 4000);
-                  }}
-                  className="space-y-6 text-xs"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Building2 className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Dados Cadastrais da Empresa (Perfil da Institui√ß√£o)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Informa√ß√µes oficiais que constam em certificados,
-                          laudos, cabe√ßalhos do site e comprovantes.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-3 self-end sm:self-auto">
-                      <span className="hidden md:inline-block text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-xl uppercase tracking-wider">
-                        Privil√©gio de Administrador
-                      </span>
-                      <button
-                        type="submit"
-                        className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-5 rounded-xl transition-all flex items-center space-x-2 text-xs shadow-md cursor-pointer active:scale-95"
-                      >
-                        <Save className="h-4 w-4" />
-                        <span>Salvar Cadastro</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {companySuccessMsg && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span>{companySuccessMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <Building2 className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>Raz√£o Social</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={companyData.razaoSocial || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            razaoSocial: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Raz√£o Social completa"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <Tag className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>Nome Fantasia</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={companyData.nomeFantasia || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            nomeFantasia: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Nome Comercial"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <Hash className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>CNPJ</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={companyData.cnpj || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            cnpj: maskCNPJ(e.target.value),
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-mono font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="00.000.000/0000-00"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <ShieldCheck className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>Inscri√ß√£o Estadual / Municipal</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={companyData.inscricaoEstadual || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            inscricaoEstadual: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-mono focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="N√∫mero da Inscri√ß√£o"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <Phone className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>Telefone / WhatsApp</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={companyData.telefone || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            telefone: maskPhone(e.target.value),
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="(71) 3634-1998"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <Mail className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>E-mail Principal / Comercial</span>
-                      </label>
-                      <input
-                        type="email"
-                        value={companyData.email || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            email: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="contato@comanins.com.br"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>Endere√ßo Completo do Laborat√≥rio / Sede</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={companyData.endereco || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            endereco: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Rua, N√∫mero, Bairro, Cidade - Estado, CEP"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                        <Globe className="h-3.5 w-3.5 text-royal-blue" />
-                        <span>Website / Portal Oficial</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={companyData.website || ""}
-                        onChange={(e) =>
-                          setCompanyData({
-                            ...companyData,
-                            website: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="www.comanins.com.br"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
-                    <span className="text-[11px] text-slate-500 italic">
-                      Os dados salvos s√£o sincronizados em tempo real no banco
-                      de dados.
-                    </span>
-                    <button
-                      type="submit"
-                      className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center space-x-2 text-xs shadow-md cursor-pointer active:scale-95"
-                    >
-                      <Save className="h-4 w-4" />
-                      <span>Salvar Cadastro da Empresa</span>
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {/* SUB-TAB 2: LOGOS DO SITE E SISTEMA */}
-            {configSubTab === "logos" && (
-              <div className="space-y-6">
-                {/* CARD 1: LOGO DO CABE√áALHO DO SITE E SISTEMA */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Image className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Logomarca do Cabe√ßalho do Site & Sistema
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Logomarca exibida na barra de navega√ß√£o do site
-                          institucional e topo do portal.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {headerLogoSuccessMsg && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span>{headerLogoSuccessMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                    <div className="md:col-span-5 bg-slate-50 p-5 rounded-xl border border-slate-200 text-center space-y-3">
-                      <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-widest block">
-                        Pr√©-visualiza√ß√£o no Cabe√ßalho (Site/Sistema)
-                      </span>
-                      <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-inner flex items-center justify-center min-h-[100px]">
-                        {siteHeaderLogoPreview ? (
-                          <img
-                            src={siteHeaderLogoPreview}
-                            alt="Logomarca do Cabe√ßalho"
-                            className="max-h-16 max-w-full object-contain"
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center space-y-1">
-                            <ComaninsLogo size={180} />
-                            <span className="text-[9px] text-slate-400 font-mono">
-                              (Logo Padr√£o COMANINS)
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="md:col-span-7 space-y-4 text-xs">
-                      <div>
-                        <label className="block font-bold text-slate-800 mb-1">
-                          URL da Imagem da Logo do Cabe√ßalho
-                        </label>
-                        <input
-                          type="text"
-                          value={siteHeaderLogoPreview.startsWith('data:') ? '' : siteHeaderLogoPreview}
-                          onChange={(e) =>
-                            setSiteHeaderLogoPreview(e.target.value)
-                          }
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                          placeholder={siteHeaderLogoPreview.startsWith('data:') ? 'Imagem local carregada...' : 'https://sua-imagem.com/logo.png'}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-800 mb-1.5">
-                          Ou Enviar Arquivo de Imagem
-                        </label>
-                        <label className="cursor-pointer bg-slate-50 hover:bg-slate-100 border border-slate-300 border-dashed rounded-xl p-3 text-center transition-colors flex items-center justify-center space-x-2 text-slate-600 font-medium">
-                          <Upload className="h-4 w-4 text-royal-blue" />
-                          <span>
-                            Clique para carregar arquivo (PNG, JPG, SVG, HEIC)
-                          </span>
-                          <input
-                            type="file"
-                            accept="image/*,.heic,.heif"
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                try {
-                                  const compressedDataUrl =
-                                    await compressImageToWebResolution(
-                                      file,
-                                      800,
-                                      800,
-                                      0.75,
-                                      file.type === 'image/png' // preserve transparency
-                                    );
-                                  setSiteHeaderLogoPreview(compressedDataUrl);
-                                } catch (err) {
-                                  console.error(
-                                    "Error compressing header logo:",
-                                    err,
-                                  );
-                                }
-                              }
-                            }}
-                            className="hidden"
-                          />
-                        </label>
-                      </div>
-
-                      <div className="flex items-center space-x-3 pt-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const uploadedUrl = siteHeaderLogoPreview;
-                              setSiteHeaderLogo(uploadedUrl);
-                              setLogoPreview(uploadedUrl);
-                              localStorage.setItem(
-                                "comanins_header_logo",
-                                uploadedUrl,
-                              );
-                              localStorage.setItem(
-                                "comanins_custom_logo",
-                                uploadedUrl,
-                              );
-                              await saveHeaderLogoConfig(uploadedUrl);
-                              await saveCustomLogoConfig(uploadedUrl);
-                              if (onSaveCustomLogo)
-                                await onSaveCustomLogo(uploadedUrl);
-                              setHeaderLogoSuccessMsg(
-                                "‚úì Logo do cabe√ßalho salva e aplicada em todo o sistema!",
-                              );
-                              setTimeout(() => setHeaderLogoSuccessMsg(""), 4000);
-                            } catch (err) {
-                              alert("Erro ao salvar a logo. Tente novamente.");
-                            }
-                          }}
-                          className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer"
-                        >
-                          <Save className="h-4 w-4" />
-                          <span>Salvar Logo do Cabe√ßalho</span>
-                        </button>
-
-                        {siteHeaderLogoPreview && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setSiteHeaderLogo("");
-                              setSiteHeaderLogoPreview("");
-                              setLogoPreview("");
-                              localStorage.removeItem("comanins_header_logo");
-                              localStorage.removeItem("comanins_custom_logo");
-                              await saveHeaderLogoConfig("");
-                              await saveCustomLogoConfig("");
-                              if (onSaveCustomLogo) await onSaveCustomLogo("");
-                              setHeaderLogoSuccessMsg(
-                                "‚úì Logo restaurada para o padr√£o COMANINS!",
-                              );
-                              setTimeout(
-                                () => setHeaderLogoSuccessMsg(""),
-                                4000,
-                              );
-                            }}
-                            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl font-bold transition-colors flex items-center space-x-1 cursor-pointer"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                            <span>Restaurar Padr√£o</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Etiqueta de Calibra√ß√£o Logo Config */}
-                  <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 space-y-6 shadow-xs mt-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl shadow-inner">
-                          <Image className="h-6 w-6 text-royal-blue" />
-                        </div>
-                        <div>
-                          <h3 className="font-display font-extrabold text-slate-900 text-base">
-                            Logomarca da Etiqueta de Calibra√ß√£o
-                          </h3>
-                          <p className="text-xs text-slate-500">
-                            Logomarca exclusiva exibida na impress√£o de etiquetas de calibra√ß√£o.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {calibrationLogoSuccessMsg && (
-                      <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                        <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                        <span>{calibrationLogoSuccessMsg}</span>
-                      </div>
-                    )}
-
-                    {calibrationLogoErrorMsg && (
-                      <div className="bg-red-50 border border-red-200 text-red-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                        <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
-                        <span>{calibrationLogoErrorMsg}</span>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                      <div className="md:col-span-5 bg-slate-50 p-5 rounded-xl border border-slate-200 text-center space-y-3">
-                        <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-widest block">
-                          Pr√©-visualiza√ß√£o na Etiqueta
-                        </span>
-                        <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-inner flex items-center justify-center min-h-[100px]">
-                          {calibrationLogoPreview ? (
-                            <img
-                              src={calibrationLogoPreview}
-                              alt="Logomarca da Etiqueta"
-                              className="max-h-16 max-w-full object-contain"
-                              onError={() =>
-                                setCalibrationLogoErrorMsg(
-                                  "A imagem informada n√£o p√¥de ser carregada. Selecione outro arquivo ou confira a URL.",
-                                )
-                              }
-                            />
-                          ) : (
-                            <img
-                              src={DEFAULT_CALIBRATION_LABEL_LOGO}
-                              alt="Logomarca padr√£o COMANINS da etiqueta"
-                              className="max-h-16 max-w-full object-contain"
-                            />
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="md:col-span-7 space-y-4 text-xs">
-                        <div>
-                          <label className="block font-bold text-slate-800 mb-1">
-                            URL da Imagem
-                          </label>
-                          <input
-                            type="text"
-                            value={calibrationLogoPreview.startsWith('data:') ? '' : calibrationLogoPreview}
-                            onChange={(e) => {
-                              setCalibrationLogoPreview(e.target.value);
-                              setCalibrationLogoSuccessMsg("");
-                              setCalibrationLogoErrorMsg("");
-                            }}
-                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                            placeholder={calibrationLogoPreview.startsWith('data:') ? 'Imagem local carregada...' : 'https://sua-imagem.com/logo-etiqueta.png'}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-800 mb-1.5">
-                            Ou Enviar Arquivo de Imagem
-                          </label>
-                          <label className="cursor-pointer bg-slate-50 hover:bg-slate-100 border border-slate-300 border-dashed rounded-xl p-3 text-center transition-colors flex items-center justify-center space-x-2 text-slate-600 font-medium">
-                            <Upload className="h-4 w-4 text-royal-blue" />
-                            <span>
-                              Clique para carregar arquivo (PNG, JPG, WebP ou SVG)
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                              onChange={async (e) => {
-                                const input = e.currentTarget;
-                                const file = input.files?.[0];
-                                if (file) {
-                                  try {
-                                    setCalibrationLogoSuccessMsg("");
-                                    setCalibrationLogoErrorMsg("");
-                                    const preserveTransparency = [
-                                      'image/png',
-                                      'image/svg+xml',
-                                      'image/webp',
-                                    ].includes(file.type);
-                                    const compressedDataUrl =
-                                      await compressImageToWebResolution(
-                                        file,
-                                        600,
-                                        240,
-                                        0.72,
-                                        preserveTransparency,
-                                      );
-
-                                    if (!/^data:image\/(png|jpeg|webp);/i.test(compressedDataUrl)) {
-                                      throw new Error('O arquivo selecionado n√£o p√¥de ser convertido em imagem.');
-                                    }
-
-                                    if (compressedDataUrl.length > 750_000) {
-                                      throw new Error('A imagem ficou muito grande. Use uma logo PNG, JPG, WebP ou SVG mais leve.');
-                                    }
-
-                                    setCalibrationLogoPreview(compressedDataUrl);
-                                  } catch (err) {
-                                    console.error(
-                                      "Error compressing calibration logo:",
-                                      err,
-                                    );
-                                    setCalibrationLogoErrorMsg(
-                                      err instanceof Error
-                                        ? err.message
-                                        : "N√£o foi poss√≠vel preparar a logomarca selecionada.",
-                                    );
-                                  } finally {
-                                    input.value = '';
-                                  }
-                                }
-                              }}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-
-                        <div className="flex items-center space-x-3 pt-2">
-                          <button
-                            type="button"
-                            disabled={isSavingCalibrationLogo || !calibrationLogoPreview.trim()}
-                            onClick={async () => {
-                              setIsSavingCalibrationLogo(true);
-                              setCalibrationLogoSuccessMsg("");
-                              setCalibrationLogoErrorMsg("");
-                              try {
-                                const uploadedUrl = calibrationLogoPreview.trim();
-                                if (!uploadedUrl) {
-                                  throw new Error("Selecione uma imagem ou informe uma URL HTTPS antes de salvar.");
-                                }
-                                await saveCalibrationLogoConfig(uploadedUrl);
-                                setCalibrationLogo(uploadedUrl);
-                                setCalibrationLogoPreview(uploadedUrl);
-                                setCalibrationLogoSuccessMsg(
-                                  "‚úì Logo da etiqueta salva e aplicada!",
-                                );
-                                setTimeout(() => setCalibrationLogoSuccessMsg(""), 4000);
-                              } catch (err) {
-                                console.error("Error saving calibration logo:", err);
-                                setCalibrationLogoErrorMsg(
-                                  err instanceof Error
-                                    ? err.message
-                                    : "Erro ao salvar a logo. Tente novamente.",
-                                );
-                              } finally {
-                                setIsSavingCalibrationLogo(false);
-                              }
-                            }}
-                            className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Save className="h-4 w-4" />
-                            <span>{isSavingCalibrationLogo ? "Salvando..." : "Salvar Logo da Etiqueta"}</span>
-                          </button>
-
-                          {calibrationLogoPreview && (
-                            <button
-                              type="button"
-                              disabled={isSavingCalibrationLogo}
-                              onClick={async () => {
-                                setIsSavingCalibrationLogo(true);
-                                setCalibrationLogoSuccessMsg("");
-                                setCalibrationLogoErrorMsg("");
-                                try {
-                                  await saveCalibrationLogoConfig("");
-                                  setCalibrationLogo("");
-                                  setCalibrationLogoPreview("");
-                                  setCalibrationLogoSuccessMsg(
-                                    "‚úì Logo restaurada para o padr√£o!",
-                                  );
-                                  setTimeout(
-                                    () => setCalibrationLogoSuccessMsg(""),
-                                    4000,
-                                  );
-                                } catch (err) {
-                                  console.error("Error restoring calibration logo:", err);
-                                  setCalibrationLogoErrorMsg(
-                                    err instanceof Error
-                                      ? err.message
-                                      : "N√£o foi poss√≠vel restaurar a logo padr√£o.",
-                                  );
-                                } finally {
-                                  setIsSavingCalibrationLogo(false);
-                                }
-                              }}
-                              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl font-bold transition-colors flex items-center space-x-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              <span>Restaurar Padr√£o</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* CARD 2: LOGO DE RELAT√ìRIO E CERTIFICADOS */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <FileCheck className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Logomarca de Relat√≥rio e Certificado (PDFs)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Altere a imagem oficial que √© exibida no topo de todos
-                          os certificados de calibra√ß√£o e laudos t√©cnicos.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {logoSuccessMsg && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span>{logoSuccessMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                    <div className="md:col-span-5 bg-slate-50 p-5 rounded-xl border border-slate-200 text-center space-y-3">
-                      <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-widest block">
-                        Pr√©-visualiza√ß√£o no Cabe√ßalho dos Documentos
-                      </span>
-                      <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-inner flex items-center justify-center min-h-[100px]">
-                        {logoPreview ? (
-                          <img
-                            src={logoPreview}
-                            alt="Logomarca de Relat√≥rio e Certificado"
-                            className="max-h-20 max-w-full object-contain"
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center space-y-1">
-                            <ComaninsLogo size={180} />
-                            <span className="text-[9px] text-slate-400 font-mono">
-                              (Logomarca Padr√£o COMANINS)
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-center space-x-2 text-[11px]">
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full font-bold font-mono text-[9px] ${
-                            logoPreview
-                              ? "bg-blue-100 text-royal-blue border border-blue-200"
-                              : "bg-slate-200 text-slate-700"
-                          }`}
-                        >
-                          {logoPreview
-                            ? "Logomarca Personalizada Ativa"
-                            : "Logomarca Padr√£o COMANINS"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="md:col-span-7 space-y-4 text-xs text-slate-700">
-                      <div>
-                        <label className="block font-bold text-slate-800 mb-1.5">
-                          Enviar Nova Imagem da Logomarca
-                        </label>
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                          <label className="flex-grow cursor-pointer bg-slate-50 hover:bg-slate-100 border border-slate-300 border-dashed rounded-xl p-3.5 text-center transition-colors flex items-center justify-center space-x-2 text-slate-600 font-medium">
-                            <Upload className="h-4 w-4 text-royal-blue" />
-                            <span>
-                              Clique para escolher imagem (PNG, JPG, WEBP, SVG)
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/*,.heic,.heif"
-                              onChange={handleLogoUpload}
-                              className="hidden"
-                            />
-                          </label>
-                          {logoPreview && (
-                            <button
-                              type="button"
-                              onClick={handleResetLogo}
-                              className="px-3.5 py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold transition-colors flex items-center justify-center space-x-1 whitespace-nowrap cursor-pointer"
-                              title="Remover logo personalizada e voltar ao padr√£o COMANINS"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              <span>Restaurar Padr√£o</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="bg-blue-50/60 p-3.5 rounded-xl border border-blue-100/80 text-[11px] text-slate-600 space-y-1">
-                        <p className="font-bold text-royal-blue">
-                          üí° Especifica√ß√µes T√©cnicas de Impress√£o:
-                        </p>
-                        <ul className="list-disc list-inside space-y-0.5 text-[10px] text-slate-500">
-                          <li>
-                            Arquivos com fundo transparente (PNG/SVG) ou fundo
-                            branco oferecem impress√£o de alta qualidade.
-                          </li>
-                          <li>
-                            Propor√ß√£o recomendada: retangular horizontal (ex:
-                            300x100px). Tamanho m√°x: 3MB.
-                          </li>
-                          <li>
-                            A altera√ß√£o √© sincronizada imediatamente e aplicar√°
-                            a nova imagem em todos os relat√≥rios emitidos ou
-                            visualizados pelos clientes.
-                          </li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 3: FOTOS DO SITE INSTITUCIONAL */}
-            {configSubTab === "photos" && (
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                      <Camera className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-display font-extrabold text-slate-900 text-base">
-                        Personaliza√ß√£o das Fotos e Galeria do Site
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Altere os t√≠tulos, selos, descri√ß√µes e URLs de imagens
-                        exibidos no site institucional para os clientes.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {photosSuccessMsg && (
-                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                    <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                    <span>{photosSuccessMsg}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {sitePhotos.map((photo: any, index: number) => (
-                    <div
-                      key={photo.id || index}
-                      className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3"
-                    >
-                      <div className="space-y-3">
-                        <div className="relative h-40 rounded-lg overflow-hidden border border-slate-200 bg-slate-900">
-                          <img
-                            src={photo.imageUrl}
-                            alt={photo.title}
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[10px] font-mono font-bold">
-                            Foto #{index + 1}
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                            T√≠tulo do Destaque
-                          </label>
-                          <input
-                            type="text"
-                            value={photo.title}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSitePhotos((prev: any[]) =>
-                                prev.map((p, i) =>
-                                  i === index ? { ...p, title: val } : p,
-                                ),
-                              );
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-medium"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                            Selo / Etiqueta
-                          </label>
-                          <input
-                            type="text"
-                            value={photo.badge}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSitePhotos((prev: any[]) =>
-                                prev.map((p, i) =>
-                                  i === index ? { ...p, badge: val } : p,
-                                ),
-                              );
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                            URL da Imagem
-                          </label>
-                          <input
-                            type="text"
-                            value={photo.imageUrl}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSitePhotos((prev: any[]) =>
-                                prev.map((p, i) =>
-                                  i === index ? { ...p, imageUrl: val } : p,
-                                ),
-                              );
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-900 font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                            Descri√ß√£o Curta
-                          </label>
-                          <textarea
-                            rows={2}
-                            value={photo.description}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSitePhotos((prev: any[]) =>
-                                prev.map((p, i) =>
-                                  i === index ? { ...p, description: val } : p,
-                                ),
-                              );
-                            }}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-900"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="cursor-pointer text-[10px] bg-white hover:bg-slate-100 border border-slate-300 rounded px-2 py-1 text-center font-bold text-slate-700 block transition-colors">
-                          Carregar Novo Arquivo
-                          <input
-                            type="file"
-                            accept="image/*,.heic,.heif"
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                try {
-                                  const compressedDataUrl =
-                                    await compressImage(file);
-                                  setSitePhotos((prev: any[]) =>
-                                    prev.map((p, i) =>
-                                      i === index
-                                        ? { ...p, imageUrl: compressedDataUrl }
-                                        : p,
-                                    ),
-                                  );
-                                } catch (err) {
-                                  console.error(
-                                    "Error compressing uploaded file:",
-                                    err,
-                                  );
-                                }
-                              }
-                            }}
-                            className="hidden"
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setSitePhotos(DEFAULT_SITE_PHOTOS);
-                      localStorage.setItem(
-                        "comanins_site_photos",
-                        JSON.stringify(DEFAULT_SITE_PHOTOS),
-                      );
-                      await saveSitePhotosConfig(DEFAULT_SITE_PHOTOS);
-                      setPhotosSuccessMsg(
-                        "‚úì Fotos restauradas para o padr√£o COMANINS!",
-                      );
-                      setTimeout(() => setPhotosSuccessMsg(""), 4000);
-                    }}
-                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center space-x-1"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    <span>Restaurar Fotos Padr√£o</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const updated = [];
-                        for (let i = 0; i < sitePhotos.length; i++) {
-                          const p = { ...sitePhotos[i] };
-                          p.imageUrl = await compressBase64Image(p.imageUrl);
-                          updated.push(p);
-                        }
-                        setSitePhotos(updated);
-                        localStorage.setItem(
-                          "comanins_site_photos",
-                          JSON.stringify(updated),
-                        );
-                        await saveSitePhotosConfig(updated);
-                        setPhotosSuccessMsg(
-                          "‚úì Galeria de fotos do site institucional salva com sucesso!",
-                        );
-                        setTimeout(() => setPhotosSuccessMsg(""), 4000);
-                      } catch (err) {
-                        console.error("Error saving site photos:", err);
-                        setPhotosSuccessMsg(
-                          '‚ö†Ô∏è Algumas imagens antigas est√£o muito grandes. Por favor, clique em "Restaurar Fotos Padr√£o" e tente enviar novamente.',
-                        );
-                      }
-                    }}
-                    className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center space-x-2 text-xs shadow-md cursor-pointer active:scale-95"
-                  >
-                    <Save className="h-4 w-4" />
-                    <span>Salvar Altera√ß√µes de Fotos</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 5: SEQUENCIAIS E LISTAS */}
-            {configSubTab === "system" && (
-              <div className="space-y-6">
-                {/* CARD: SEQUENCIAL DO N√öMERO DE ENTRADA */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Hash className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Sequencial do N√∫mero de Entrada (N¬∫ Guia / OS)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Configure a numera√ß√£o sequencial autom√°tica atribu√≠da
-                          a cada nova Entrada de Material registrada no sistema.
-                        </p>
-                      </div>
-                    </div>
-                    <span className="self-start sm:self-auto text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 rounded-full uppercase tracking-wider">
-                      Configura√ß√£o Geral
-                    </span>
-                  </div>
-
-                  {seqSuccessMsg && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span>{seqSuccessMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 items-end text-xs">
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1.5">
-                        Prefixo do Sequencial
-                      </label>
-                      <input
-                        type="text"
-                        value={intakePrefix}
-                        onChange={(e) => setIntakePrefix(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-mono font-bold text-slate-900 text-sm focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Ex: C-"
-                      />
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        Prefixo do c√≥digo (ex: C-)
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1.5">
-                        Pr√≥ximo N√∫mero da Sequ√™ncia
-                      </label>
-                      <input
-                        type="number"
-                        value={intakeNextNumber}
-                        onChange={(e) =>
-                          setIntakeNextNumber(Number(e.target.value))
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-mono font-bold text-slate-900 text-sm focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Ex: 19928"
-                      />
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        Pr√≥ximo n√∫mero a ser gerado (ex: 19928)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center space-x-3">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await saveIntakeSequenceConfig({
-                            prefix: intakePrefix,
-                            nextNumber: Number(intakeNextNumber),
-                          });
-                          setSeqSuccessMsg(
-                            "‚úì Sequencial de Entrada atualizado e salvo com sucesso!",
-                          );
-                          setTimeout(() => setSeqSuccessMsg(""), 4000);
-                        }}
-                        className="w-full bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer h-[42px]"
-                      >
-                        <Save className="h-4 w-4" />
-                        <span>Salvar Sequencial</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center space-x-2 font-mono">
-                      <span className="text-slate-500 font-semibold">
-                        Exemplo da pr√≥xima entrada:
-                      </span>
-                      <span className="bg-white border border-slate-300 px-2.5 py-1 rounded font-bold text-royal-blue">
-                        {intakePrefix}
-                        {intakeNextNumber}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-slate-400">
-                      Incrementa +1 automaticamente a cada nova grava√ß√£o de
-                      entrada.
-                    </span>
-                  </div>
-                </div>
-
-                {/* CARD: SEQUENCIAL DO N√öMERO DE CERTIFICADO */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Hash className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Sequencial do N√∫mero de Certificado de Calibra√ß√£o
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Configure a numera√ß√£o sequencial autom√°tica atribu√≠da
-                          a cada novo Certificado de Calibra√ß√£o gerado.
-                        </p>
-                      </div>
-                    </div>
-                    <span className="self-start sm:self-auto text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 rounded-full uppercase tracking-wider">
-                      Configura√ß√£o Geral
-                    </span>
-                  </div>
-
-                  {seqSuccessMsg && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span>{seqSuccessMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 items-end text-xs">
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1.5">
-                        Prefixo do Sequencial
-                      </label>
-                      <input
-                        type="text"
-                        value={certPrefix}
-                        onChange={(e) => setCertPrefix(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-mono font-bold text-slate-900 text-sm focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Ex: COMA-"
-                      />
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        Prefixo do c√≥digo (ex: C-)
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-800 mb-1.5">
-                        Pr√≥ximo N√∫mero da Sequ√™ncia
-                      </label>
-                      <input
-                        type="number"
-                        value={certNextNumber}
-                        onChange={(e) =>
-                          setCertNextNumber(Number(e.target.value))
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-mono font-bold text-slate-900 text-sm focus:ring-1 focus:ring-royal-blue focus:outline-none"
-                        placeholder="Ex: 1"
-                      />
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        Pr√≥ximo n√∫mero a ser gerado (ex: 19928)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center space-x-3">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await saveCertSequenceConfig({
-                            prefix: certPrefix,
-                            nextNumber: Number(certNextNumber),
-                          });
-                          setSeqSuccessMsg(
-                            "‚úì Sequencial de Certificado atualizado e salvo com sucesso!",
-                          );
-                          setTimeout(() => setSeqSuccessMsg(""), 4000);
-                        }}
-                        className="w-full bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer h-[42px]"
-                      >
-                        <Save className="h-4 w-4" />
-                        <span>Salvar Sequencial</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center space-x-2 font-mono">
-                      <span className="text-slate-500 font-semibold">
-                        Exemplo do pr√≥ximo certificado:
-                      </span>
-                      <span className="bg-white border border-slate-300 px-2.5 py-1 rounded font-bold text-royal-blue">
-                        {certPrefix}
-                        {certNextNumber}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-slate-400">
-                      Incrementa +1 automaticamente a cada novo certificado
-                      gravado.
-                    </span>
-                  </div>
-                </div>
-
-                {/* CARD: LISTAS SUSPENSAS (DROPDOWNS) */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Sliders className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Configura√ß√µes de Listas e Op√ß√µes
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Gerencie as op√ß√µes exibidas nas caixas de sele√ß√£o na
-                          Entrada de Material e Registro de Laborat√≥rio.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {Object.entries({
-                      ...DEFAULT_DROPDOWN_OPTIONS,
-                      ...dropdownOptions,
-                    }).map(([key, values]) => {
-                      const typedKey = key as keyof DropdownOptions;
-                      const typedValues = ensureArray(values);
-                      const isEditing = editingDropdownKey === typedKey;
-
-                      const labels: Record<keyof DropdownOptions, string> = {
-                        descricao: "Descri√ß√£o do Equipamento",
-                        unidade: "Unidades de Medida",
-                        material: "Tipos de Material",
-                        conexao: "Tipos de Conex√£o",
-                        diametro: "Di√¢metros Nomin.",
-                        estoqueCategoria: "Categorias de Estoque",
-                        fabricante: "Fabricantes",
-                        tiposExame: "Tipos de Exame M√©dico",
-                        condicaoDeEntrada: "Condi√ß√£o de Entrada",
-                        cargos: "Cargos / Fun√ß√µes",
-                      };
-
-                      return (
-                        <div
-                          key={key}
-                          className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3"
-                        >
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-bold text-slate-800 text-sm">
-                              {labels[typedKey]}
-                            </h4>
-                            {!isEditing && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingDropdownKey(typedKey);
-                                  setEditingDropdownValues(
-                                    typedValues.join("\n"),
-                                  );
-                                }}
-                                className="text-royal-blue hover:underline text-xs font-semibold"
-                              >
-                                Editar Op√ß√µes
-                              </button>
-                            )}
-                          </div>
-
-                          {isEditing ? (
-                            <div className="space-y-2">
-                              <textarea
-                                value={editingDropdownValues}
-                                onChange={(e) =>
-                                  setEditingDropdownValues(e.target.value)
-                                }
-                                rows={6}
-                                className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-royal-blue"
-                                placeholder="Uma op√ß√£o por linha..."
-                              />
-                              <div className="flex items-center space-x-2 justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingDropdownKey(null)}
-                                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-300 rounded bg-white hover:bg-slate-50"
-                                >
-                                  Cancelar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleSaveDropdowns}
-                                  className="px-3 py-1.5 text-xs font-bold text-white bg-royal-blue hover:bg-royal-blue-hover rounded shadow-sm flex items-center space-x-1"
-                                >
-                                  <Save className="h-3 w-3" />
-                                  <span>Salvar</span>
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <ul className="list-disc list-inside text-xs text-slate-600 space-y-0.5 max-h-32 overflow-y-auto font-mono bg-white p-2 border border-slate-100 rounded">
-                              {typedValues.map((v, i) => (
-                                <li key={i}>{v}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 6: PADR√ïES DE REFER√äNCIA */}
-            {configSubTab === "standards" && (
-              <div className="space-y-6">
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <ShieldCheck className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Cadastro de Padr√µes de Refer√™ncia (Rastreados / RBC)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Padr√µes e instrumentos de refer√™ncia utilizados para
-                          realizar calibra√ß√µes. Validades geram alertas no
-                          painel 30 dias antes do vencimento.
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingStandard(null);
-                        setStdCertNumber("");
-                        setStdType("");
-                        setStdValidity("");
-                        setStdRbcLab("");
-                        setStdIdentification("");
-                        setStdRange("");
-                        setShowStandardForm(true);
-                      }}
-                      className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-all flex items-center space-x-2 text-xs shadow-md cursor-pointer active:scale-95"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>Cadastrar Novo Padr√£o</span>
-                    </button>
-                  </div>
-
-                  {stdSuccessMsg && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                      <span>{stdSuccessMsg}</span>
-                    </div>
-                  )}
-
-                  {stdErrorMsg && (
-                    <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
-                      <AlertCircle className="h-4 w-4 text-rose-600 flex-shrink-0" />
-                      <span>{stdErrorMsg}</span>
-                    </div>
-                  )}
-
-                  {/* FORM MODAL / CARD */}
-                  {showStandardForm && (
-                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-300 space-y-4 animate-fadeIn">
-                      <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-                        <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                          {editingStandard
-                            ? "Editar Padr√£o de Refer√™ncia"
-                            : "Cadastrar Novo Padr√£o de Refer√™ncia"}
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => setShowStandardForm(false)}
-                          className="text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
-                        >
-                          Fechar [X]
-                        </button>
-                      </div>
-
-                      <form
-                        onSubmit={async (e) => {
-                          e.preventDefault();
-                          setStdErrorMsg("");
-                          if (
-                            !stdCertNumber ||
-                            !stdType ||
-                            !stdValidity ||
-                            !stdRbcLab
-                          )
-                            return;
-
-                          const normCert = stdCertNumber.trim().toLowerCase();
-                          const normIdent = stdIdentification
-                            .trim()
-                            .toLowerCase();
-
-                          // Duplication check for certificate number
-                          const isCertDuplicate = referenceStandards.some(
-                            (std) => {
-                              if (
-                                editingStandard &&
-                                std.id === editingStandard.id
-                              )
-                                return false;
-                              return (
-                                std.certificateNumber.trim().toLowerCase() ===
-                                normCert
-                              );
-                            },
-                          );
-
-                          if (isCertDuplicate) {
-                            setStdErrorMsg(
-                              `O n√∫mero de certificado "${stdCertNumber}" j√° est√° cadastrado para outro padr√£o de refer√™ncia.`,
-                            );
-                            return;
-                          }
-
-                          // Duplication check for identification (only if filled)
-                          if (normIdent) {
-                            const isIdentDuplicate = referenceStandards.some(
-                              (std) => {
-                                if (
-                                  editingStandard &&
-                                  std.id === editingStandard.id
-                                )
-                                  return false;
-                                return (
-                                  (std.identification || "")
-                                    .trim()
-                                    .toLowerCase() === normIdent
-                                );
-                              },
-                            );
-
-                            if (isIdentDuplicate) {
-                              setStdErrorMsg(
-                                `A identifica√ß√£o "${stdIdentification}" j√° est√° cadastrada para outro padr√£o de refer√™ncia.`,
-                              );
-                              return;
-                            }
-                          }
-
-                          if (editingStandard) {
-                            await updateReferenceStandardDoc(
-                              editingStandard.id,
-                              {
-                                certificateNumber: stdCertNumber,
-                                instrumentType: stdType,
-                                expirationDate: stdValidity,
-                                rbcLab: stdRbcLab,
-                                identification: stdIdentification,
-                                range: stdRange,
-                              },
-                            );
-                            setStdSuccessMsg(
-                              "‚úì Padr√£o de refer√™ncia atualizado com sucesso!",
-                            );
-                          } else {
-                            await addReferenceStandardDoc({
-                              certificateNumber: stdCertNumber,
-                              instrumentType: stdType,
-                              expirationDate: stdValidity,
-                              rbcLab: stdRbcLab,
-                              identification: stdIdentification,
-                              range: stdRange,
-                            });
-                            setStdSuccessMsg(
-                              "‚úì Padr√£o de refer√™ncia cadastrado com sucesso!",
-                            );
-                          }
-
-                          setShowStandardForm(false);
-                          setEditingStandard(null);
-                          setStdCertNumber("");
-                          setStdType("");
-                          setStdValidity("");
-                          setStdRbcLab("");
-                          setStdIdentification("");
-                          setStdRange("");
-                          setTimeout(() => setStdSuccessMsg(""), 4000);
-                        }}
-                        className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs"
-                      >
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1">
-                            Identifica√ß√£o (Tag/C√≥digo)
-                          </label>
-                          <input
-                            type="text"
-                            value={stdIdentification}
-                            onChange={(e) =>
-                              setStdIdentification(e.target.value)
-                            }
-                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:ring-1 focus:ring-royal-blue"
-                            placeholder="Ex: P-01, PAD-01, TAG-001"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1">
-                            N¬∫ do Certificado *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={stdCertNumber}
-                            onChange={(e) => setStdCertNumber(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue"
-                            placeholder="Ex: CAL-0149/2026"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1">
-                            Tipo de Instrumento *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={stdType}
-                            onChange={(e) => setStdType(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:ring-1 focus:ring-royal-blue"
-                            placeholder="Ex: Mult√≠metro / Transdutor Press√£o"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1">
-                            Faixa de Trabalho (Range)
-                          </label>
-                          <input
-                            type="text"
-                            value={stdRange}
-                            onChange={(e) => setStdRange(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:ring-1 focus:ring-royal-blue"
-                            placeholder="Ex: 0 a 10 bar / -50 a 300 ¬∞C"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1">
-                            Validade do Certificado *
-                          </label>
-                          <input
-                            type="date"
-                            required
-                            value={stdValidity}
-                            onChange={(e) => setStdValidity(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:ring-1 focus:ring-royal-blue font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1">
-                            Laborat√≥rio RBC / Origem *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={stdRbcLab}
-                            onChange={(e) => setStdRbcLab(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:ring-1 focus:ring-royal-blue"
-                            placeholder="Ex: TRESCAL / FLUKE / PRESYS"
-                          />
-                        </div>
-
-                        <div className="md:col-span-4 flex justify-end space-x-2 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => setShowStandardForm(false)}
-                            className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-lg text-xs hover:bg-slate-300 cursor-pointer"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            type="submit"
-                            className="px-5 py-2 bg-royal-blue text-white font-bold rounded-lg text-xs hover:bg-royal-blue-hover shadow-sm cursor-pointer flex items-center space-x-1"
-                          >
-                            <Save className="h-4 w-4" />
-                            <span>
-                              {editingStandard
-                                ? "Atualizar Padr√£o"
-                                : "Salvar Padr√£o"}
-                            </span>
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  )}
-
-                  {/* TABLE OF STANDARDS */}
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                    <table className="w-full text-left text-xs border-collapse bg-white">
-                      <thead>
-                        <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 uppercase text-[10px]">
-                          <th className="p-3 whitespace-nowrap">Identifica√ß√£o</th>
-                          <th className="p-3 whitespace-nowrap">N¬∫ Certificado</th>
-                          <th className="p-3 whitespace-nowrap">Tipo do Instrumento</th>
-                          <th className="p-3 whitespace-nowrap">Faixa (Range)</th>
-                          <th className="p-3 whitespace-nowrap">Validade</th>
-                          <th className="p-3 whitespace-nowrap">Laborat√≥rio RBC</th>
-                          <th className="p-3 whitespace-nowrap text-center">Status</th>
-                          <th className="p-3 whitespace-nowrap text-right">A√ß√µes</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {referenceStandards.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={8}
-                              className="p-8 text-center text-slate-400 italic"
-                            >
-                              Nenhum padr√£o de refer√™ncia cadastrado. Clique em
-                              "Cadastrar Novo Padr√£o" para adicionar.
-                            </td>
-                          </tr>
-                        ) : (
-                          referenceStandards.map((std: any) => {
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
-                            const rawDate =
-                              std.expirationDate || std.validity || std.date;
-                            const ymd = parseExcelDate(rawDate);
-                            const isValidDate =
-                              ymd && /^\d{4}-\d{2}-\d{2}$/.test(ymd);
-                            const expDate = isValidDate
-                              ? new Date(ymd + "T00:00:00")
-                              : null;
-                            const diffTime = expDate
-                              ? expDate.getTime() - today.getTime()
-                              : 0;
-                            const diffDays = expDate
-                              ? Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-                              : 999;
-
-                            const isExpired = expDate ? diffDays < 0 : false;
-                            const isNearExp = expDate
-                              ? diffDays >= 0 && diffDays <= 30
-                              : false;
-
-                            return (
-                              <tr
-                                key={std.id}
-                                className="hover:bg-slate-50 transition-colors"
-                              >
-                                <td className="p-3 font-semibold text-slate-700">
-                                  {std.identification || "‚Äî"}
-                                </td>
-                                <td className="p-3 font-mono font-bold text-royal-blue">
-                                  {std.certificateNumber}
-                                </td>
-                                <td className="p-3 font-semibold text-slate-800">
-                                  {std.instrumentType}
-                                </td>
-                                <td className="p-3 font-mono text-slate-700">
-                                  {std.range || "‚Äî"}
-                                </td>
-                                <td className="p-3 font-mono text-slate-700">
-                                  {expDate
-                                    ? expDate.toLocaleDateString("pt-BR")
-                                    : "‚Äî"}
-                                </td>
-                                <td className="p-3 font-semibold text-slate-700">
-                                  {std.rbcLab}
-                                </td>
-                                <td className="p-3 text-center">
-                                  {isExpired ? (
-                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" />{" "}
-                                      Vencido
-                                    </span>
-                                  ) : isNearExp ? (
-                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
-                                      <Bell className="h-3 w-3" /> Vence em{" "}
-                                      {diffDays}d
-                                    </span>
-                                  ) : (
-                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1">
-                                      <CheckCircle className="h-3 w-3" /> V√°lido
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="p-3 text-right">
-                                  <div className="flex items-center justify-end space-x-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingStandard(std);
-                                        setStdCertNumber(std.certificateNumber);
-                                        setStdType(std.instrumentType);
-                                        setStdValidity(std.expirationDate);
-                                        setStdRbcLab(std.rbcLab);
-                                        setStdIdentification(
-                                          std.identification || "",
-                                        );
-                                        setStdRange(std.range || "");
-                                        setShowStandardForm(true);
-                                      }}
-                                      className="p-1.5 text-slate-600 hover:text-royal-blue hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                      title="Editar Padr√£o"
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        requestAdminDelete(
-                                          "standard",
-                                          std.id,
-                                          std.instrumentType,
-                                        )
-                                      }
-                                      className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                      title="Excluir Padr√£o"
-
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 7: IMPORTA√á√ÉO DE DADOS & MODELOS EXCEL */}
-            {configSubTab === "import" && (
-              <div className="space-y-6">
-                {/* Download Templates Header Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Upload className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Modelos de Importa√ß√£o e Carga de Dados (Excel / CSV)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Baixe os arquivos modelo com todas as colunas
-                          necess√°rias para importar clientes, padr√µes de
-                          refer√™ncia e calibra√ß√µes de instrumentos.
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={handleDownloadUnifiedTemplate}
-                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center space-x-2 shadow-sm transition-all cursor-pointer whitespace-nowrap"
-                    >
-                      <Database className="h-4 w-4" />
-                      <span>Baixar Modelo Completo (.xlsx)</span>
-                    </button>
-                  </div>
-
-                  {/* Individual Template Cards Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                    {/* Template Clientes */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 hover:border-royal-blue transition-all">
-                      <div className="flex items-center space-x-2 text-slate-900 font-bold">
-                        <Users className="h-5 w-5 text-royal-blue" />
-                        <span>1. Modelo Clientes</span>
-                      </div>
-                      <p className="text-slate-600 text-[11px] leading-relaxed">
-                        Raz√£o Social, CNPJ, E-mail, Telefone e Endere√ßo. A senha
-                        do Portal √© gerada automaticamente na primeira Entrada de Material.
-                      </p>
-                      <button
-                        onClick={handleDownloadClientTemplate}
-                        className="w-full py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold rounded-lg flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer"
-                      >
-                        <Upload className="h-3.5 w-3.5 text-royal-blue rotate-180" />
-                        <span>Baixar Modelo</span>
-                      </button>
-                    </div>
-
-                    {/* Template Padr√µes */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 hover:border-royal-blue transition-all">
-                      <div className="flex items-center space-x-2 text-slate-900 font-bold">
-                        <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                        <span>2. Modelo Padr√µes RBC</span>
-                      </div>
-                      <p className="text-slate-600 text-[11px] leading-relaxed">
-                        N¬∫ do Certificado, Tipo do Instrumento, Validade e
-                        Laborat√≥rio RBC.
-                      </p>
-                      <button
-                        onClick={handleDownloadStandardsTemplate}
-                        className="w-full py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold rounded-lg flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer"
-                      >
-                        <Upload className="h-3.5 w-3.5 text-emerald-600 rotate-180" />
-                        <span>Baixar Modelo</span>
-                      </button>
-                    </div>
-
-                    {/* Template Calibra√ß√µes */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 hover:border-royal-blue transition-all">
-                      <div className="flex items-center space-x-2 text-slate-900 font-bold">
-                        <Activity className="h-5 w-5 text-amber-600" />
-                        <span>3. Modelo Calibra√ß√µes</span>
-                      </div>
-                      <p className="text-slate-600 text-[11px] leading-relaxed">
-                        TAG, COMA, Descri√ß√£o, Marca, Modelo, S√©rie, Faixas, MPE
-                        e Certificado.
-                      </p>
-                      <button
-                        onClick={handleDownloadCalibrationsTemplate}
-                        className="w-full py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold rounded-lg flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer"
-                      >
-                        <Upload className="h-3.5 w-3.5 text-amber-600 rotate-180" />
-                        <span>Baixar Modelo</span>
-                      </button>
-                    </div>
-
-                    {/* Template Colaboradores */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 hover:border-royal-blue transition-all">
-                      <div className="flex items-center space-x-2 text-slate-900 font-bold">
-                        <UserPlus className="h-5 w-5 text-purple-600" />
-                        <span>4. Modelo Colaboradores</span>
-                      </div>
-                      <p className="text-slate-600 text-[11px] leading-relaxed">
-                        Nome, Login, Cargo, Matr√≠cula, CPF, E-mail, Telefone e
-                        Admiss√£o.
-                      </p>
-                      <button
-                        onClick={handleDownloadEmployeesTemplate}
-                        className="w-full py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold rounded-lg flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer"
-                      >
-                        <Upload className="h-3.5 w-3.5 text-purple-600 rotate-180" />
-                        <span>Baixar Modelo</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* File Import Execution Panel */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 text-xs">
-                  <h3 className="font-display font-bold text-slate-900 text-sm flex items-center space-x-2">
-                    <Upload className="h-4 w-4 text-royal-blue" />
-                    <span>
-                      Executar Importa√ß√£o de Arquivo Excel (.xlsx, .xls, .csv)
-                    </span>
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1">
-                        Selecione o Tipo de Dado a Importar *
-                      </label>
-                      <select
-                        value={importType}
-                        onChange={(e) => {
-                          setImportType(e.target.value);
-                          setImportRows([]);
-                          setImportHeaders([]);
-                          setImportSuccessCount(null);
-                          setImportError("");
-                        }}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue font-semibold"
-                      >
-                        <option value="">
-                          Selecione o tipo de importa√ß√£o...
-                        </option>
-                        <option value="clients">Clientes (Empresas)</option>
-                        <option value="standards">
-                          Padr√µes de Refer√™ncia (RBC)
-                        </option>
-                        <option value="calibrations">
-                          Calibra√ß√µes & Equipamentos Existentes
-                        </option>
-                        <option value="instruments">
-                          Apenas Equipamentos (Sem Calibra√ß√£o Lan√ßada)
-                        </option>
-                        <option value="employees">
-                          Colaboradores & Equipe (RH)
-                        </option>
-                      </select>
-                    </div>
-
-                    {(importType === "instruments" ||
-                      importType === "calibrations") && (
-                      <div>
-                        <label className="block text-slate-700 font-bold mb-1">
-                          Cliente Padr√£o para Vincula√ß√£o (Se n√£o especificado no
-                          Excel)
-                        </label>
-                        <select
-                          value={selectedImportClient}
-                          onChange={(e) =>
-                            setSelectedImportClient(e.target.value)
-                          }
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue font-semibold"
-                        >
-                          <option value="">
-                            Selecione o cliente pr√©-cadastrado...
-                          </option>
-                          {clients.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} ({c.cnpj})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Drag & Drop Upload Zone */}
-                  {importType && (
-                    <div className="border-2 border-dashed border-slate-300 hover:border-royal-blue rounded-2xl p-8 text-center bg-slate-50 transition-all">
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        id="excel-file-upload-input"
-                        onChange={handleCSVFileChange}
-                        className="hidden"
-                      />
-                      <label
-                        htmlFor="excel-file-upload-input"
-                        className="cursor-pointer space-y-3 block"
-                      >
-                        <div className="w-12 h-12 bg-blue-100 text-royal-blue rounded-full flex items-center justify-center mx-auto">
-                          <Upload className="h-6 w-6" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-slate-800 text-sm">
-                            Clique para selecionar o arquivo Excel / CSV
-                          </p>
-                          <p className="text-slate-500 text-xs">
-                            Suporta arquivos .xlsx, .xls ou .csv no formato do
-                            modelo
-                          </p>
-                        </div>
-                      </label>
-                    </div>
-                  )}
-
-                  {/* Success / Error Messages */}
-                  {importSuccessCount !== null && (
-                    <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-bold flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <CheckCircle className="h-5 w-5 text-emerald-600 flex-shrink-0" />
-                        <span>
-                          ‚úì Importa√ß√£o conclu√≠da com sucesso! Total de{" "}
-                          {importSuccessCount} registro(s) adicionados ao
-                          sistema.
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setImportSuccessCount(null)}
-                        className="text-emerald-700 hover:text-emerald-900 font-bold"
-                      >
-                        OK
-                      </button>
-                    </div>
-                  )}
-
-                  {importError && (
-                    <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl font-bold flex items-center space-x-2">
-                      <AlertTriangle className="h-5 w-5 text-rose-600 flex-shrink-0" />
-                      <span>{importError}</span>
-                    </div>
-                  )}
-
-                  {/* Preview Table before confirm */}
-                  {importRows.length > 0 && (
-                    <div className="space-y-4 pt-4 border-t border-slate-200">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-slate-800">
-                          Pr√©-visualiza√ß√£o dos Dados ({importRows.length} linhas
-                          encontradas no arquivo)
-                        </h4>
-                        <button
-                          onClick={handleConfirmImport}
-                          disabled={isImporting}
-                          className="px-6 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center space-x-2 cursor-pointer disabled:opacity-50"
-                        >
-                          {isImporting ? (
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Save className="h-4 w-4" />
-                          )}
-                          <span>
-                            {isImporting
-                              ? "Processando Importa√ß√£o..."
-                              : "Confirmar e Importar no Banco de Dados"}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-80">
-                        <table className="w-full text-left text-[11px] border-collapse bg-white">
-                          <thead>
-                            <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase text-[10px] sticky top-0">
-                              {importHeaders.map((h: string, idx: number) => (
-                                <th
-                                  key={idx}
-                                  className="p-2.5 border-r border-slate-200"
-                                >
-                                  {h}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 font-mono">
-                            {importRows
-                              .slice(0, 15)
-                              .map((row: any, rIdx: number) => (
-                                <tr key={rIdx} className="hover:bg-slate-50">
-                                  {importHeaders.map(
-                                    (h: string, cIdx: number) => {
-                                      const key = h.trim().toLowerCase();
-                                      return (
-                                        <td
-                                          key={cIdx}
-                                          className="p-2 border-r border-slate-100 whitespace-nowrap text-slate-700"
-                                        >
-                                          {row[key] !== undefined
-                                            ? String(row[key])
-                                            : "-"}
-                                        </td>
-                                      );
-                                    },
-                                  )}
-                                </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                        {importRows.length > 15 && (
-                          <div className="p-2 bg-slate-50 text-center text-slate-500 text-[10px] italic">
-                            + exibindo as primeiras 15 de {importRows.length}{" "}
-                            linhas importadas.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Export Full System Data Section */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
-                  <div className="flex items-center space-x-3 border-b border-slate-100 pb-3">
-                    <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
-                      <FileSpreadsheet className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-display font-extrabold text-slate-900 text-sm">
-                        Exporta√ß√£o de Dados para Planilhas Excel (.xlsx)
-                      </h3>
-                      <p className="text-slate-500 text-[11px]">
-                        Exporte qualquer tabela cadastrada no sistema
-                        diretamente para planilhas formatadas do Microsoft
-                        Excel.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                    <button
-                      onClick={handleExportAllClients}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-left space-y-1 transition-all group cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-slate-900 font-bold">
-                        <span>Exportar Clientes</span>
-                        <Download className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        {clients.length} empresa(s) cadastrada(s)
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={handleExportAllIntakes}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-left space-y-1 transition-all group cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-slate-900 font-bold">
-                        <span>Exportar Entradas Material</span>
-                        <Download className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        {savedIntakes.length} guia(s) de entrada
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={handleExportAllInstruments}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-left space-y-1 transition-all group cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-slate-900 font-bold">
-                        <span>Exportar Equipamentos</span>
-                        <Download className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        {instruments.length} instrumento(s) no invent√°rio
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={handleExportAllEmployees}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-left space-y-1 transition-all group cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-slate-900 font-bold">
-                        <span>Exportar Colaboradores</span>
-                        <Download className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        {(internalUsers || []).length} usu√°rio(s) ativos
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={handleExportAllInventory}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-left space-y-1 transition-all group cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-slate-900 font-bold">
-                        <span>Exportar Estoque</span>
-                        <Download className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        {inventoryItems.length} item(ns) no almoxarifado
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={handleExportAllStandards}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-left space-y-1 transition-all group cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-slate-900 font-bold">
-                        <span>Exportar Padr√µes RBC</span>
-                        <Download className="h-4 w-4 text-emerald-600 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        {referenceStandards.length} padr√£o(√µes) RBC
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={handleExportFullDatabaseXlsx}
-                      className="p-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-left space-y-1 transition-all col-span-1 sm:col-span-2 group cursor-pointer shadow-sm"
-                    >
-                      <div className="flex items-center justify-between font-extrabold">
-                        <span>
-                          Exportar Banco de Dados Completo (Multi-Aba Excel)
-                        </span>
-                        <FileSpreadsheet className="h-5 w-5 text-emerald-100 group-hover:scale-110 transition-transform" />
-                      </div>
-                      <p className="text-[10px] text-emerald-100">
-                        Gera um √∫nico arquivo .xlsx com abas para Clientes,
-                        Entradas, Equipamentos, Colaboradores, Estoque e Padr√µes
-                      </p>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 8: BACKUP E RESTAURA√á√ÉO DE DADOS DO SISTEMA */}
-            {configSubTab === "backup" && (
-              <div className="space-y-6">
-                {/* Backup Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2.5 bg-blue-50 text-royal-blue rounded-xl border border-blue-100">
-                        <Database className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="font-display font-extrabold text-slate-900 text-base">
-                          Backup Seguro do Banco de Dados (.json)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Gere uma c√≥pia de seguran√ßa completa contendo todos os
-                          clientes, equipamentos, certificados, guias,
-                          colaboradores e padr√µes.
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={handleGenerateJsonBackup}
-                      className="px-4 py-2 sm:px-5 sm:py-3 bg-royal-blue hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs flex items-center space-x-2 shadow-md transition-all cursor-pointer whitespace-nowrap"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>Gerar & Baixar Backup Completo (.json)</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                      <span className="block text-slate-500 text-[10px]">
-                        Clientes
-                      </span>
-                      <span className="font-bold text-slate-900 text-sm">
-                        {clients.length}
-                      </span>
-                    </div>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                      <span className="block text-slate-500 text-[10px]">
-                        Equipamentos
-                      </span>
-                      <span className="font-bold text-slate-900 text-sm">
-                        {instruments.length}
-                      </span>
-                    </div>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                      <span className="block text-slate-500 text-[10px]">
-                        Guias Entrada
-                      </span>
-                      <span className="font-bold text-slate-900 text-sm">
-                        {savedIntakes.length}
-                      </span>
-                    </div>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                      <span className="block text-slate-500 text-[10px]">
-                        Colaboradores
-                      </span>
-                      <span className="font-bold text-slate-900 text-sm">
-                        {(internalUsers || []).length}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Restore Card */}
-                <div className="bg-white p-6 rounded-2xl border border-amber-200 shadow-sm space-y-5 text-xs">
-                  <div className="flex items-center space-x-3 border-b border-amber-100 pb-3">
-                    <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
-                      <RotateCcw className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-display font-extrabold text-slate-900 text-base">
-                        Recupera√ß√£o e Restaura√ß√£o de Backup
-                      </h3>
-                      <p className="text-slate-500 text-xs">
-                        Restaure todos os dados do sistema a partir de um
-                        arquivo de backup previamente gerado (.json). Requer
-                        valida√ß√£o de senha administrativa.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="border-2 border-dashed border-amber-200 hover:border-amber-400 rounded-2xl p-6 text-center bg-amber-50/50 transition-all">
-                    <input
-                      type="file"
-                      accept=".json"
-                      id="backup-json-upload-input"
-                      onChange={handleSelectBackupJsonFile}
-                      className="hidden"
-                    />
-                    <label
-                      htmlFor="backup-json-upload-input"
-                      className="cursor-pointer space-y-2 block"
-                    >
-                      <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-                        <Upload className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-800">
-                          {backupRestoreFile
-                            ? backupRestoreFile.name
-                            : "Clique para selecionar o arquivo de backup (.json)"}
-                        </p>
-                        <p className="text-slate-500 text-[11px]">
-                          Selecione um arquivo de backup v√°lido gerado pela
-                          COMANINS Metrologia
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-
-                  {backupParsedData && (
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                      <h4 className="font-bold text-slate-900">
-                        Resumo dos dados encontrados no arquivo de backup:
-                      </h4>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                        <div className="bg-white p-2 rounded border border-slate-200">
-                          Clientes:{" "}
-                          <strong>
-                            {backupParsedData.clients?.length || 0}
-                          </strong>
-                        </div>
-                        <div className="bg-white p-2 rounded border border-slate-200">
-                          Equipamentos:{" "}
-                          <strong>
-                            {backupParsedData.instruments?.length || 0}
-                          </strong>
-                        </div>
-                        <div className="bg-white p-2 rounded border border-slate-200">
-                          Guias Entrada:{" "}
-                          <strong>
-                            {backupParsedData.savedIntakes?.length || 0}
-                          </strong>
-                        </div>
-                        <div className="bg-white p-2 rounded border border-slate-200">
-                          Colaboradores:{" "}
-                          <strong>
-                            {backupParsedData.internalUsers?.length || 0}
-                          </strong>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 pt-2 border-t border-slate-200">
-                        <label className="block font-bold text-slate-800">
-                          Senha de Administrador para Autorizar Restaura√ß√£o *
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="password"
-                            value={backupRestorePassword}
-                            onChange={(e) =>
-                              setBackupRestorePassword(e.target.value)
-                            }
-                            placeholder="Digite a senha do administrador..."
-                            className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-900 focus:ring-1 focus:ring-amber-500 font-semibold"
-                          />
-                          <button
-                            onClick={handleConfirmRestoreBackup}
-                            disabled={isRestoringBackup}
-                            className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-xl shadow-xs flex items-center space-x-2 cursor-pointer disabled:opacity-50"
-                          >
-                            {isRestoringBackup ? (
-                              <RefreshCw className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4" />
-                            )}
-                            <span>
-                              {isRestoringBackup
-                                ? "Restaurando..."
-                                : "Confirmar Restaura√ß√£o"}
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {backupRestoreSuccess && (
-                    <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-bold flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <CheckCircle className="h-5 w-5 text-emerald-600 flex-shrink-0" />
-                        <span>{backupRestoreSuccess}</span>
-                      </div>
-                      <button
-                        onClick={() => setBackupRestoreSuccess("")}
-                        className="text-emerald-700 hover:text-emerald-900 font-bold"
-                      >
-                        OK
-                      </button>
-                    </div>
-                  )}
-
-                  {backupRestoreError && (
-                    <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl font-bold flex items-center space-x-2">
-                      <AlertTriangle className="h-5 w-5 text-rose-600 flex-shrink-0" />
-                      <span>{backupRestoreError}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 9: CONFORMIDADE & GOVERNAN√áA LGPD */}
-            {configSubTab === "lgpd" && (
-              <div className="space-y-6">
-                {/* Status Banner */}
-                <div className="bg-gradient-to-r from-emerald-800 to-teal-900 text-white p-6 rounded-2xl shadow-sm space-y-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2.5 bg-emerald-500/20 text-emerald-300 rounded-xl border border-emerald-400/30">
-                      <ShieldAlert className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <span className="px-2.5 py-0.5 bg-emerald-500/30 text-emerald-200 rounded-full text-[10px] font-mono uppercase tracking-wider font-bold">
-                        Lei Federal n¬∫ 13.709/2018
-                      </span>
-                      <h3 className="font-display font-extrabold text-white text-lg">
-                        Governan√ßa de Dados Pessoais & Conformidade LGPD
-                      </h3>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-200 leading-relaxed max-w-4xl">
-                    O sistema COMANINS opera sob rigorosos padr√µes de prote√ß√£o
-                    de dados pessoais e privacidade. Todos os dados coletados de
-                    clientes, t√©cnicos e colaboradores s√£o tratados estritamente
-                    para a finalidade de execu√ß√£o contratual e cumprimento de
-                    obriga√ß√µes normativas da ABNT NBR ISO/IEC 17025.
-                  </p>
-                </div>
-
-                {/* Privacy Policy & Acceptance Term */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div className="flex items-center space-x-2 text-slate-900 font-bold text-sm">
-                      <FileText className="h-5 w-5 text-royal-blue" />
-                      <span>
-                        1. Pol√≠tica de Tratamento de Dados & Termo de
-                        Privacidade
-                      </span>
-                    </div>
-                    {lgpdAcceptanceLog.accepted ? (
-                      <span className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold rounded-full text-[10px] flex items-center space-x-1">
-                        <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
-                        <span>
-                          Termo Aceito em {lgpdAcceptanceLog.date} por{" "}
-                          {lgpdAcceptanceLog.user}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-700 font-bold rounded-full text-[10px]">
-                        Pendente de Registro
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 space-y-3 font-sans leading-relaxed text-[11px]">
-                    <p>
-                      <strong>
-                        Base Legal (Art. 7¬∫, V e Art. 16, I da LGPD):
-                      </strong>{" "}
-                      Os dados pessoais mantidos nesta aplica√ß√£o (Nomes, CPFs,
-                      E-mails, Telefones, Matr√≠culas e Assinaturas de
-                      Respons√°veis T√©cnicos) s√£o processados legitimamente para
-                      garantir a rastreabilidade metrol√≥gica e autenticidade dos
-                      Certificados de Calibra√ß√£o exigidos pelos √≥rg√£os
-                      certificadores (INMETRO/RBC).
-                    </p>
-                    <p>
-                      <strong>Tempo de Reten√ß√£o:</strong> Os registros
-                      laboratoriais de calibra√ß√£o s√£o mantidos pelo prazo
-                      regulat√≥rio m√≠nimo de 5 (cinco) anos. Dados pessoais
-                      excedentes podem ser anonimizados mediante solicita√ß√£o
-                      legal.
-                    </p>
-                  </div>
-
-                  {!lgpdAcceptanceLog.accepted && (
-                    <button
-                      onClick={handleAcceptLgpdTerm}
-                      className="px-5 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-extrabold rounded-xl shadow-xs flex items-center space-x-2 cursor-pointer"
-                    >
-                      <UserCheck className="h-4 w-4" />
-                      <span>Registrar Ci√™ncia e Aceite da Pol√≠tica LGPD</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Privacy Controls & Masking Toggle */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
-                  <div className="flex items-center space-x-2 text-slate-900 font-bold text-sm border-b border-slate-100 pb-3">
-                    <Key className="h-5 w-5 text-emerald-600" />
-                    <span>
-                      2. Configura√ß√µes de Seguran√ßa e Mascaramento de Dados
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div>
-                      <span className="font-bold text-slate-900 block">
-                        Mascaramento Autom√°tico de CPF e E-mails
-                      </span>
-                      <p className="text-slate-500 text-[11px]">
-                        Oculta d√≠gitos do CPF (ex: 123.***.***-00) e e-mails em
-                        relat√≥rios de auditoria e exibi√ß√µes p√∫blicas.
-                      </p>
-                    </div>
-                    <button
-                      onClick={toggleLgpdMask}
-                      className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center space-x-2 cursor-pointer ${
-                        lgpdMaskEnabled
-                          ? "bg-emerald-600 text-white shadow-xs"
-                          : "bg-slate-200 text-slate-700 hover:bg-slate-300"
-                      }`}
-                    >
-                      <ShieldCheck className="h-4 w-4" />
-                      <span>
-                        {lgpdMaskEnabled
-                          ? "Mascaramento Ativo"
-                          : "Mascaramento Inativo"}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Subject Data Dossier Search (Art. 18 LGPD) */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
-                  <div className="flex items-center space-x-2 text-slate-900 font-bold text-sm border-b border-slate-100 pb-3">
-                    <Search className="h-5 w-5 text-purple-600" />
-                    <span>
-                      3. Direito do Titular de Dados - Dossi√™ de Portabilidade
-                      (Art. 18 LGPD)
-                    </span>
-                  </div>
-
-                  <p className="text-slate-600 text-[11px]">
-                    Pesquise pelo nome, CPF ou e-mail de um colaborador ou
-                    cliente para gerar o relat√≥rio consolidado de todos os dados
-                    cadastrais e metrol√≥gicos armazenados no sistema sob a
-                    titularidade da pessoa f√≠sica.
-                  </p>
-
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="text"
-                      value={lgpdSearchQuery}
-                      onChange={(e) => setLgpdSearchQuery(e.target.value)}
-                      placeholder="Digite o nome, CPF ou e-mail do titular..."
-                      className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-slate-900 focus:ring-1 focus:ring-purple-600 font-semibold"
-                    />
-                    <button
-                      onClick={handleSearchLgpdSubject}
-                      className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-xl shadow-xs flex items-center space-x-2 cursor-pointer"
-                    >
-                      <Search className="h-4 w-4" />
-                      <span>Gerar Dossi√™ LGPD</span>
-                    </button>
-                  </div>
-
-                  {lgpdSubjectReport && (
-                    <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 text-[11px]">
-                      <h4 className="font-bold text-purple-900 flex items-center justify-between">
-                        <span>
-                          Dossi√™ LGPD gerado em {lgpdSubjectReport.generatedAt}{" "}
-                          para "{lgpdSubjectReport.query}"
-                        </span>
-                        <button
-                          onClick={() => setLgpdSubjectReport(null)}
-                          className="text-purple-700 hover:text-purple-900 font-bold"
-                        >
-                          Fechar
-                        </button>
-                      </h4>
-
-                      <div className="space-y-2">
-                        <p className="font-bold text-slate-800">
-                          Colaboradores / Usu√°rios Encontrados (
-                          {lgpdSubjectReport.matchedUsers.length}):
-                        </p>
-                        {lgpdSubjectReport.matchedUsers.map((u: any) => (
-                          <div
-                            key={u.id}
-                            className="p-2.5 bg-white rounded border border-purple-100 flex items-center justify-between"
-                          >
-                            <div>
-                              <span className="font-bold text-slate-900">
-                                {u.name}
-                              </span>{" "}
-                              ({u.username})
-                              <span className="block text-slate-500">
-                                CPF: {maskCpfOrEmail(u.cpf || "", true)} |
-                                Email: {maskCpfOrEmail(u.email || "")}
-                              </span>
-                            </div>
-                            <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-bold rounded text-[10px]">
-                              {u.role}
-                            </span>
-                          </div>
-                        ))}
-
-                        <p className="font-bold text-slate-800 pt-2">
-                          Clientes / Contatos Encontrados (
-                          {lgpdSubjectReport.matchedClients.length}):
-                        </p>
-                        {lgpdSubjectReport.matchedClients.map((c: any) => (
-                          <div
-                            key={c.id}
-                            className="p-2.5 bg-white rounded border border-purple-100"
-                          >
-                            <span className="font-bold text-slate-900">
-                              {c.name}
-                            </span>{" "}
-                            ({c.cnpj})
-                            <span className="block text-slate-500">
-                              Email: {maskCpfOrEmail(c.email || "")} | Telefone:{" "}
-                              {c.phone}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* SUB-TAB 8: MANUTEN√á√ÉO & SEGURAN√áA */}
-            {configSubTab === "maintenance" && (
-              <div className="space-y-6">
-                <div className="bg-white p-6 rounded-2xl border border-emerald-200 shadow-sm space-y-4">
-                  <div className="flex items-center space-x-3 border-b border-emerald-100 pb-4">
-                    <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
-                      <ShieldCheck className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-display font-extrabold text-slate-900 text-base">
-                        Prote√ß√£o do Banco de Dados
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Fun√ß√µes de reset em massa foram removidas do ambiente de produ√ß√£o.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 space-y-2">
-                    <p className="font-bold">Pol√≠tica de recupera√ß√£o segura</p>
-                    <p className="leading-relaxed">
-                      Clientes, instrumentos, certificados, guias, estoque, usu√°rios, exames e demais registros n√£o podem mais ser apagados por um comando de restaura√ß√£o geral. Para recupera√ß√£o, utilize os recursos de exporta√ß√£o/backup e uma restaura√ß√£o controlada.
-                    </p>
-                    <p className="leading-relaxed">
-                      Exclus√µes individuais continuam sujeitas √†s permiss√µes de cada m√≥dulo e √†s confirma√ß√µes administrativas existentes.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB: COLABORADORES & RECURSOS HUMANOS */}
-        {activeTab === "colaboradores" &&
-          rhSubTab !== "contra_cheques" &&
-          canManageRh && (
-            <EmployeeManagement
-              currentUser={currentUser}
-              dropdownOptions={dropdownOptions}
-              internalUsers={internalUsers}
-              employeeTrainings={employeeTrainings}
-              employeeAsos={employeeAsos}
-              trainings={trainings}
-              onAddInternalUser={onAddInternalUser}
-              onUpdateInternalUser={onUpdateInternalUser}
-              onDeleteInternalUser={onDeleteInternalUser}
-              requestAdminDelete={requestAdminDelete}
-              onManagePayslips={(user) => {
-                setRhSubTab("contra_cheques");
-                setActivePayslipTab("gerenciar");
-              }}
-              activeRhTab={rhSubTab}
-              setActiveRhTab={(tab) => {
-                if (currentUser && !isUserAdmin) {
-                  const hasPendingPayslip = payslips.some(p =>
-                    p.employeeId === currentUser.id &&
-                    !p.visualized &&
-                    Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
-                  );
-                  if (hasPendingPayslip && (tab !== "contra_cheques" || activePayslipTab !== "meus")) {
-                    alert("Acesso Bloqueado: Voc√™ possui documenta√ß√£o pessoal aguardando visualiza√ß√£o h√° mais de 11 dias. Por favor, visualize os documentos pendentes para liberar o portal.");
-                    setRhSubTab("contra_cheques");
-                    setActivePayslipTab("meus");
-                    return;
-                  }
-                }
-                setRhSubTab(tab);
-                setActiveTab("colaboradores");
-              }}
-            />
-          )}
-
-        {/* TAB: TREINAMENTOS (RH) */}
-        {activeTab === "treinamentos" && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
-                  <CheckSquare className="h-7 w-7 text-royal-blue" />
-                  <span>Controle de Treinamentos</span>
-                </h2>
-              </div>
-              <div className="flex space-x-3">
-                <button
-                  onClick={() => {
-                    setEditingTraining(null);
-                    setShowTrainingForm(true);
-                  }}
-                  className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Novo Treinamento</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingEmployeeTraining(null);
-                    setShowEmployeeTrainingForm(true);
-                  }}
-                  className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  <span>Registrar Realiza√ß√£o</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Status Counters */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {["Agendado", "V√°lido", "Pr√≥ximo do vencimento", "Vencido"].map(
-                (status) => {
-                  const count = computedEmployeeTrainings.filter(
-                    (t) => t.dynamicStatus === status,
-                  ).length;
-                  let colorClass =
-                    "bg-slate-50 border-slate-200 text-slate-600";
-                  if (status === "V√°lido")
-                    colorClass =
-                      "bg-emerald-50 border-emerald-200 text-emerald-700";
-                  if (status === "Pr√≥ximo do vencimento")
-                    colorClass = "bg-amber-50 border-amber-200 text-amber-700";
-                  if (status === "Vencido")
-                    colorClass = "bg-red-50 border-red-200 text-red-700";
-                  if (status === "Agendado")
-                    colorClass = "bg-blue-50 border-blue-200 text-blue-700";
-                  return (
-                    <div
-                      key={status}
-                      className={`p-4 rounded-xl border ${colorClass} text-center flex flex-col justify-center`}
-                    >
-                      <span className="text-3xl font-display font-extrabold">
-                        {count}
-                      </span>
-                      <span className="text-xs font-semibold uppercase tracking-wider mt-1">
-                        {status}
-                      </span>
-                    </div>
-                  );
-                },
-              )}
-            </div>
-
-            {/* Registros de Treinamentos (Collaborators) */}
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-                <h3 className="font-bold text-slate-800 flex items-center space-x-2">
-                  <Users className="h-5 w-5 text-slate-500" />
-                  <span>Registros de Colaboradores</span>
-                </h3>
-              </div>
-              {employeeTrainings.length === 0 ? (
-                <div className="p-8 text-center text-slate-500">
-                  Nenhum registro encontrado.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-100 text-slate-600">
-                      <tr>
-                        <th className="px-6 py-3 font-semibold">Colaborador</th>
-                        <th className="px-6 py-3 font-semibold">Treinamento</th>
-                        <th className="px-6 py-3 font-semibold">Status</th>
-                        <th className="px-6 py-3 font-semibold">Realiza√ß√£o</th>
-                        <th className="px-6 py-3 font-semibold">Vencimento</th>
-                        <th className="px-6 py-3 font-semibold text-center">
-                          A√ß√µes
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {computedEmployeeTrainings.map((record) => {
-                        const user = internalUsers.find(
-                          (u) => u.id === record.employeeId,
-                        );
-                        const training = trainings.find(
-                          (t) => t.id === record.trainingId,
-                        );
-                        return (
-                          <tr key={record.id} className="hover:bg-slate-50">
-                            <td className="px-6 py-4 font-medium text-slate-900">
-                              {user?.name || record.employeeId}
-                            </td>
-                            <td className="px-6 py-4">
-                              {training?.name || "Desconhecido"}
-                            </td>
-                            <td className="px-6 py-4">
-                              <span
-                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                  ${record.dynamicStatus === "V√°lido" ? "bg-emerald-100 text-emerald-800" : ""}
-                                  ${record.dynamicStatus === "Vencido" ? "bg-red-100 text-red-800" : ""}
-                                  ${record.dynamicStatus === "Pr√≥ximo do vencimento" ? "bg-amber-100 text-amber-800" : ""}
-                                  ${record.dynamicStatus === "Agendado" ? "bg-blue-100 text-blue-800" : ""}
-                                `}
-                              >
-                                {record.dynamicStatus}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-slate-600">
-                              {record.completionDate
-                                ? new Date(
-                                    record.completionDate,
-                                  ).toLocaleDateString("pt-BR")
-                                : "-"}
-                            </td>
-                            <td className="px-6 py-4 text-slate-600">
-                              {record.expirationDate
-                                ? new Date(
-                                    record.expirationDate,
-                                  ).toLocaleDateString("pt-BR")
-                                : "-"}
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="flex justify-center space-x-2">
-                                {(record.certificateStoragePath || record.certificateUrl) && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        if (record.certificateStoragePath) {
-                                          void openCorporateFile(record.certificateStoragePath);
-                                        } else if (record.certificateUrl?.startsWith("data:")) {
-                                          try {
-                                            const byteString = atob(record.certificateUrl.split(",")[1]);
-                                            const mimeString = record.certificateUrl.split(",")[0].split(":")[1].split(";")[0];
-                                            const bytes = new Uint8Array(byteString.length);
-                                            for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
-                                            window.open(URL.createObjectURL(new Blob([bytes], { type: mimeString })), "_blank");
-                                          } catch (err) {
-                                            console.error("Erro ao abrir certificado", err);
-                                            alert("Erro ao abrir o certificado.");
-                                          }
-                                        } else if (record.certificateUrl) {
-                                          window.open(record.certificateUrl, "_blank", "noopener,noreferrer");
-                                        }
-                                      }}
-                                      className="p-1 text-slate-400 hover:text-royal-blue transition-colors"
-                                      title="Ver Certificado"
-                                    >
-                                      <FileText className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const name = record.certificateFileName || `Certificado_${(user?.name || record.employeeId).replace(/\s+/g, "_")}`;
-                                        if (record.certificateStoragePath) {
-                                          void downloadCorporateFile(record.certificateStoragePath, name);
-                                        } else if (record.certificateUrl) {
-                                          const link = document.createElement("a");
-                                          link.href = record.certificateUrl;
-                                          link.download = name;
-                                          link.click();
-                                        }
-                                      }}
-                                      className="p-1 text-emerald-600 hover:text-emerald-700 transition-colors cursor-pointer"
-                                      title="Baixar Certificado"
-                                    >
-                                      <Download className="h-4 w-4" />
-                                    </button>
-                                  </>
-                                )}
-                                <button
-                                  onClick={() => {
-                                    setEditingEmployeeTraining(record);
-                                    setShowEmployeeTrainingForm(true);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-royal-blue transition-colors"
-                                >
-                                  <Settings className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    requestAdminDelete(
-                                      "employee_training",
-                                      record.id,
-                                      "Registro de Treinamento",
-                                    )
-                                  }
-                                  className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Cat√°logo de Treinamentos */}
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mt-6">
-              <div
-                className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center cursor-pointer hover:bg-slate-100 transition-colors"
-                onClick={() => setIsCatalogOpen(!isCatalogOpen)}
-              >
-                <h3 className="font-bold text-slate-800 flex items-center space-x-2">
-                  <CheckSquare className="h-5 w-5 text-slate-500" />
-                  <span>Cat√°logo de Treinamentos</span>
-                </h3>
-                <div className="text-slate-400">
-                  <ChevronDown
-                    className={`h-5 w-5 transition-transform ${isCatalogOpen ? "rotate-180" : ""}`}
-                  />
-                </div>
-              </div>
-              {isCatalogOpen &&
-                (trainings.length === 0 ? (
-                  <div className="p-8 text-center text-slate-500">
-                    Nenhum treinamento cadastrado.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-                    {trainings.map((t) => (
-                      <div
-                        key={t.id}
-                        className="border border-slate-200 rounded-xl p-5 hover:border-royal-blue transition-colors group"
-                      >
-                        <div className="flex justify-between items-start mb-2">
-                          <h4 className="font-bold text-slate-900 leading-tight pr-4">
-                            {t.name}
-                          </h4>
-                          <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => {
-                                setEditingTraining(t);
-                                setShowTrainingForm(true);
-                              }}
-                              className="p-1 text-slate-400 hover:text-royal-blue"
-                            >
-                              <Settings className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() =>
-                                requestAdminDelete("training", t.id, t.title)
-                              }
-                              className="p-1 text-slate-400 hover:text-red-500"
-
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-500 mb-4 line-clamp-2">
-                          {t.description}
-                        </p>
-                        <div className="space-y-2 text-xs text-slate-600">
-                          <div className="flex justify-between">
-                            <span className="font-semibold text-slate-400">
-                              Validade:
-                            </span>
-                            <span>
-                              {t.validityMonths === 0
-                                ? "Indeterminado"
-                                : `${t.validityMonths} meses`}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="font-semibold text-slate-400">
-                              Carga Hor√°ria:
-                            </span>
-                            <span>{t.workloadHours}h</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="font-semibold text-slate-400">
-                              Institui√ß√£o:
-                            </span>
-                            <span
-                              className="truncate max-w-[120px]"
-                              title={t.institution}
-                            >
-                              {t.institution || "-"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="font-semibold text-slate-400">
-                              Modalidade:
-                            </span>
-                            <span>{t.modality || "Presencial"}</span>
-                          </div>
-                        </div>
-                        {t.mandatoryRoles && t.mandatoryRoles.length > 0 && (
-                          <div className="mt-4 pt-4 border-t border-slate-100">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                              Cargos Obrigat√≥rios
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              {t.mandatoryRoles.map((r) => (
-                                <span
-                                  key={r}
-                                  className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]"
-                                >
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
-        {/* TAB: ANIVERSARIOS (RH) */}
-        {activeTab === "controle_estoque" && canAccessModule("inventory") && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
-                  <Layers className="h-7 w-7 text-royal-blue" />
-                  <span>Controle de Estoque Avan√ßado</span>
-                </h2>
-                <p className="text-sm text-slate-600">
-                  Gest√£o de uniformes, EPIs, materiais de escrit√≥rio e outros.
-                </p>
-              </div>
-              <div className="flex space-x-3">
-                {canEditInventory && (
-                  <>
-                    <button
-                      onClick={() => {
-                        setEditingInventoryItem(null);
-                        setItemAttachments([]);
-                        setShowInventoryItemForm(true);
-                      }}
-                      className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>Novo Item</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setTransactionAttachments([]);
-                        setShowInventoryTransactionForm(true);
-                      }}
-                      className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm"
-                    >
-                      <ArrowRightLeft className="h-4 w-4" />
-                      <span>Movimentar Estoque</span>
-                    </button>
-                  </>
-                )}
-                {isUserAdmin && (
-                  <button
-                    onClick={() => {
-                      setActiveTab("configuracoes");
-                      setTimeout(() => setEditingDropdownKey("estoqueCategoria"), 100);
-                    }}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold transition-colors flex items-center space-x-2 shadow-sm border border-slate-200"
-                    title="Gerenciar Categorias no Painel de Admin"
-                  >
-                    <Settings className="h-4 w-4" />
-                    <span className="hidden sm:inline">Categorias</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Items List */}
-              <div className="lg:col-span-2 space-y-4">
-                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center bg-slate-50 gap-4">
-                    <h3 className="font-bold text-slate-800 flex items-center space-x-2 w-full sm:w-auto shrink-0">
-                      <Package className="h-5 w-5 text-slate-500" />
-                      <span>Itens no Estoque</span>
-                    </h3>
-                    <div className="flex flex-col sm:flex-row items-center w-full sm:w-auto space-y-3 sm:space-y-0 sm:space-x-3">
-                      <div className="relative w-full sm:w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                        <input
-                          type="text"
-                          placeholder="Buscar item..."
-                          value={inventorySearchTerm}
-                          onChange={(e) => setInventorySearchTerm(e.target.value)}
-                          className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-1 focus:ring-royal-blue focus:border-royal-blue"
-                        />
-                      </div>
-                      <select
-                        value={inventoryCategoryFilter}
-                        onChange={(e) =>
-                          setInventoryCategoryFilter(e.target.value)
-                        }
-                        className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-royal-blue focus:border-royal-blue w-full sm:w-auto"
-                      >
-                        <option value="Todos">Todas as Categorias</option>
-                        {(
-                          dropdownOptions.estoqueCategoria || [
-                            "EPI",
-                            "Uniforme",
-                            "Material de Escrit√≥rio",
-                            "Ferramenta",
-                            "Outros",
-                          ]
-                        ).map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {inventoryItems.filter(
-                    (i) =>
-                      (inventoryCategoryFilter === "Todos" ||
-                        i.category === inventoryCategoryFilter) &&
-                      (!inventorySearchTerm || i.name.toLowerCase().includes(inventorySearchTerm.toLowerCase()))
-                  ).length === 0 ? (
-                    <div className="p-8 text-center text-slate-500">
-                      Nenhum item encontrado nesta busca.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100">
-                      {inventoryItems
-                        .filter(
-                          (i) =>
-                            (inventoryCategoryFilter === "Todos" ||
-                              i.category === inventoryCategoryFilter) &&
-                            (!inventorySearchTerm || i.name.toLowerCase().includes(inventorySearchTerm.toLowerCase()))
-                        )
-                        .map((item) => {
-                          const isLowStock = item.quantity <= item.minQuantity;
-                          return (
-                            <div
-                              key={item.id}
-                              className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between"
-                            >
-                              <div className="flex items-center space-x-4">
-                                <div
-                                  className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isLowStock ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-600"}`}
-                                >
-                                  {isLowStock ? (
-                                    <AlertTriangle className="h-6 w-6" />
-                                  ) : (
-                                    <Package className="h-6 w-6" />
-                                  )}
-                                </div>
-                                <div>
-                                  <h4 className="font-bold text-slate-900">
-                                    {item.name}
-                                  </h4>
-                                  <div className="flex items-center space-x-3 text-xs mt-1">
-                                    <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-medium">
-                                      {item.category}
-                                    </span>
-                                    <span className="text-slate-500">
-                                      {item.location}
-                                    </span>
-                                  </div>
-                                  {item.attachments && item.attachments.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 mt-2">
-                                      {item.attachments.map((attRaw: string, attIdx: number) => {
-                                        let name = `Anexo ${attIdx + 1}`;
-                                        if (attRaw.includes("||data:")) name = attRaw.split("||")[0];
-                                        return (
-                                          <button
-                                            key={attIdx}
-                                            type="button"
-                                            onClick={() => openStockAttachment(attRaw)}
-                                            className="inline-flex items-center space-x-1 text-[11px] bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer"
-                                            title="Clique para visualizar/baixar arquivo"
-                                          >
-                                            <Paperclip className="h-3 w-3" />
-                                            <span className="truncate max-w-[120px]">{name}</span>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-center space-x-6">
-                                <div className="text-right">
-                                  <div
-                                    className={`text-lg font-bold ${isLowStock ? "text-red-600" : "text-slate-900"}`}
-                                  >
-                                    {item.quantity} {item.unit}
-                                  </div>
-                                  <div className="text-xs text-slate-500">
-                                    Min: {item.minQuantity}
-                                  </div>
-                                </div>
-                                {canEditInventory && (
-                                <div className="flex space-x-2">
-                                  <button
-                                    onClick={() => {
-                                      setEditingInventoryItem(item);
-                                      setItemAttachments(item.attachments || []);
-                                      setShowInventoryItemForm(true);
-                                    }}
-                                    className="p-2 text-slate-400 hover:text-royal-blue hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="Editar Item"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      requestAdminDelete(
-                                        "inventory",
-                                        item.id,
-                                        item.name,
-                                      )
-                                    }
-                                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Excluir Item"
-
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Transactions */}
-              <div className="space-y-4">
-                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
-                    <h3 className="font-bold text-slate-800 flex items-center space-x-2">
-                      <ArrowRightLeft className="h-5 w-5 text-slate-500" />
-                      <span>√öltimas Movimenta√ß√µes</span>
-                    </h3>
-                  </div>
-                  {inventoryTransactions.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 text-sm">
-                      Nenhuma movimenta√ß√£o registrada.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-                      {inventoryTransactions.slice(0, 50).map((tx) => {
-                        const item = inventoryItems.find(
-                          (i) => i.id === tx.itemId,
-                        );
-                        const isEntrada = tx.type === "entrada";
-                        return (
-                          <div
-                            key={tx.id}
-                            className="p-4 hover:bg-slate-50 transition-colors"
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <div
-                                className={`flex items-center space-x-1.5 text-xs font-bold ${isEntrada ? "text-emerald-600" : "text-amber-600"}`}
-                              >
-                                {isEntrada ? (
-                                  <TrendingUp className="h-3.5 w-3.5" />
-                                ) : (
-                                  <TrendingDown className="h-3.5 w-3.5" />
-                                )}
-                                <span className="uppercase">{tx.type}</span>
-                              </div>
-                              <span className="text-xs text-slate-500 font-mono">
-                                {new Date(tx.date).toLocaleDateString("pt-BR")}
-                              </span>
-                            </div>
-                            <div className="text-sm font-bold text-slate-900 mb-1">
-                              {item?.name || "Item Removido"}
-                            </div>
-                            <div className="flex justify-between items-end">
-                              <div className="text-xs text-slate-600">
-                                Resp: {tx.responsible}
-                                {tx.employeeId && (
-                                  <span className="block text-slate-500">
-                                    Para:{" "}
-                                    {internalUsers.find(
-                                      (u) => u.id === tx.employeeId,
-                                    )?.name || "Desconhecido"}
-                                  </span>
-                                )}
-                              </div>
-                              <div
-                                className={`font-mono font-bold ${isEntrada ? "text-emerald-600" : "text-amber-600"}`}
-                              >
-                                {isEntrada ? "+" : "-"}
-                                {tx.quantity} {item?.unit}
-                              </div>
-                            </div>
-                            {tx.attachments && tx.attachments.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-2 pt-1 border-t border-slate-100">
-                                {tx.attachments.map((attRaw: string, attIdx: number) => {
-                                  let name = `Comprovante ${attIdx + 1}`;
-                                  if (attRaw.includes("||data:")) name = attRaw.split("||")[0];
-                                  return (
-                                    <button
-                                      key={attIdx}
-                                      type="button"
-                                      onClick={() => openStockAttachment(attRaw)}
-                                      className="inline-flex items-center space-x-1 text-[10px] bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer"
-                                      title="Clique para visualizar/baixar"
-                                    >
-                                      <Paperclip className="h-2.5 w-2.5 text-slate-500" />
-                                      <span className="truncate max-w-[100px]">{name}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "aniversarios" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
-                <Calendar className="h-7 w-7 text-royal-blue" />
-                <span>Aniversariantes da Equipe</span>
-              </h2>
-              <p className="text-sm text-slate-600">
-                Controle de datas de anivers√°rio
-              </p>
-            </div>
-
-            {bdaySuccessMsg && (
-              <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl border border-emerald-200 font-medium flex items-center">
-                <CheckCircle className="h-5 w-5 mr-2 shrink-0" />
-                {bdaySuccessMsg}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="md:col-span-1 bg-white rounded-2xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden h-fit relative">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-royal-blue to-blue-400"></div>
-                <div className="p-6">
-                  <h3 className="text-lg font-extrabold text-slate-900 mb-6 flex items-center">
-                    <div className="bg-blue-50 p-2 rounded-lg mr-3 text-royal-blue">
-                      <Plus className="h-5 w-5" />
-                    </div>
-                    Cadastrar Anivers√°rio
-                  </h3>
-                  <form onSubmit={handleAddBirthday} className="space-y-5">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                        Nome do Colaborador
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <Users className="h-4 w-4 text-slate-400" />
-                        </div>
-                        <input
-                          type="text"
-                          required
-                          value={newBdayName}
-                          onChange={(e) => setNewBdayName(e.target.value)}
-                          className="w-full pl-9 bg-slate-50 border-slate-200 text-slate-900 rounded-xl focus:bg-white focus:border-royal-blue focus:ring-royal-blue sm:text-sm transition-colors py-2.5"
-                          placeholder="Ex: Maria Alice"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                          Dia
-                        </label>
-                        <input
-                          type="number"
-                          required
-                          min="1"
-                          max="31"
-                          value={newBdayDay}
-                          onChange={(e) => setNewBdayDay(e.target.value)}
-                          className="w-full bg-slate-50 border-slate-200 text-slate-900 rounded-xl focus:bg-white focus:border-royal-blue focus:ring-royal-blue sm:text-sm transition-colors py-2.5 text-center font-medium"
-                          placeholder="Dia"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                          M√™s
-                        </label>
-                        <select
-                          required
-                          value={newBdayMonth}
-                          onChange={(e) => setNewBdayMonth(e.target.value)}
-                          className="w-full bg-slate-50 border-slate-200 text-slate-900 rounded-xl focus:bg-white focus:border-royal-blue focus:ring-royal-blue sm:text-sm transition-colors py-2.5 font-medium"
-                        >
-                          <option value="1">Janeiro</option>
-                          <option value="2">Fevereiro</option>
-                          <option value="3">Mar√ßo</option>
-                          <option value="4">Abril</option>
-                          <option value="5">Maio</option>
-                          <option value="6">Junho</option>
-                          <option value="7">Julho</option>
-                          <option value="8">Agosto</option>
-                          <option value="9">Setembro</option>
-                          <option value="10">Outubro</option>
-                          <option value="11">Novembro</option>
-                          <option value="12">Dezembro</option>
-                        </select>
-                      </div>
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full mt-2 bg-gradient-to-r from-royal-blue to-blue-600 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center group"
-                    >
-                      <Save className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />
-                      Salvar Anivers√°rio
-                    </button>
-                  </form>
-                </div>
-              </div>
-
-              <div className="md:col-span-2 bg-white rounded-2xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
-                <div className="px-6 py-5 border-b border-slate-100 bg-white flex items-center justify-between">
-                  <h3 className="font-extrabold text-slate-800 text-lg flex items-center">
-                    Anivers√°rios Cadastrados
-                  </h3>
-                  <div className="flex items-center space-x-3">
-                    <button
-                      onClick={handleTestNotificationEmail}
-                      className="text-xs font-bold text-royal-blue hover:text-blue-800 flex items-center bg-blue-50/80 hover:bg-blue-100 px-4 py-2 rounded-xl transition-colors border border-blue-100/50"
-                    >
-                      <Send className="h-3.5 w-3.5 mr-1.5" /> Testar Alertas por
-                      E-mail
-                    </button>
-                    <span className="text-xs bg-slate-50 border border-slate-200/60 px-3 py-2 rounded-xl font-bold text-slate-600 shadow-sm">
-                      Total: {employeeBirthdays.length}
-                    </span>
-                  </div>
-                </div>
-                {employeeBirthdays.length === 0 ? (
-                  <div className="p-16 flex flex-col items-center justify-center text-slate-400 bg-slate-50/30">
-                    <Calendar className="h-12 w-12 text-slate-300 mb-4" />
-                    <p className="font-medium">
-                      Nenhum anivers√°rio cadastrado.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-                    <table className="min-w-full divide-y divide-slate-100">
-                      <thead className="bg-slate-50/50 sticky top-0 backdrop-blur-sm">
-                        <tr>
-                          <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            Colaborador
-                          </th>
-                          <th className="px-6 py-4 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            Data de Anivers√°rio
-                          </th>
-                          <th className="px-6 py-4 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            A√ß√µes
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-slate-50">
-                        {employeeBirthdays
-                          .sort((a, b) =>
-                            a.month === b.month
-                              ? a.day - b.day
-                              : a.month - b.month,
-                          )
-                          .map((bday) => {
-                            const monthNames = [
-                              "Jan",
-                              "Fev",
-                              "Mar",
-                              "Abr",
-                              "Mai",
-                              "Jun",
-                              "Jul",
-                              "Ago",
-                              "Set",
-                              "Out",
-                              "Nov",
-                              "Dez",
-                            ];
-                            return (
-                              <tr
-                                key={bday.id}
-                                className="hover:bg-slate-50/80 transition-colors group"
-                              >
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                  <div className="flex items-center">
-                                    <div className="h-9 w-9 rounded-full bg-blue-50 flex items-center justify-center text-royal-blue font-bold text-sm mr-3 border border-blue-100/50">
-                                      {bday.name.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="text-sm font-bold text-slate-900">
-                                      {bday.name}
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-center text-slate-600 font-semibold whitespace-nowrap">
-                                  <div className="inline-flex items-center px-3 py-1 rounded-full bg-slate-50 border border-slate-100">
-                                    <Calendar className="h-3.5 w-3.5 text-slate-400 mr-2" />
-                                    {String(bday.day).padStart(2, "0")} de{" "}
-                                    {monthNames[bday.month - 1]}
-                                  </div>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-right whitespace-nowrap">
-                                  <button
-                                    onClick={() =>
-                                      handleDeleteBirthday(bday.id)
-                                    }
-                                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                    title="Excluir"
-
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB: AI ASSISTANT (Assistente Metrologico) */}
-
-        {/* TAB: EXAMES (RH) */}
-        {activeTab === "exames" && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
-                  <Activity className="h-7 w-7 text-royal-blue" />
-                  <span>Controle de Exames M√©dicos</span>
-                </h2>
-                <p className="text-sm text-slate-600">
-                  Acompanhamento de exames admissionais, demissionais,
-                  peri√≥dicos, etc.
-                </p>
-              </div>
-              <div className="flex space-x-3">
-                {examSubTab === "registros" && (
-                  <button
-                    onClick={() => {
-                      setEditingExam(null);
-                      setShowExamForm(true);
-                    }}
-                    className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm"
-                  >
-                    <Plus className="h-5 w-5" />
-                    <span>Novo Exame</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="flex border-b border-slate-200 mb-6">
-              <button
-                className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 ${
-                  examSubTab === "registros"
-                    ? "border-royal-blue text-royal-blue"
-                    : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
-                }`}
-                onClick={() => setExamSubTab("registros")}
-              >
-                Registros de Exames
-              </button>
-              <button
-                className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 ${
-                  examSubTab === "catalogo"
-                    ? "border-royal-blue text-royal-blue"
-                    : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
-                }`}
-                onClick={() => setExamSubTab("catalogo")}
-              >
-                Cat√°logo de Tipos
-              </button>
-            </div>
-
-            {examSubTab === "registros" && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                  <div className="relative w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por colaborador..."
-                      value={examSearchTerm}
-                      onChange={(e) => setExamSearchTerm(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 text-sm border-slate-200 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                    />
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
-                          Colaborador
-                        </th>
-                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
-                          Tipo de Exame
-                        </th>
-                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
-                          Data do Exame
-                        </th>
-                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200">
-                          Vencimento
-                        </th>
-                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200 text-center">
-                          Status
-                        </th>
-                        <th className="p-3 whitespace-nowrap font-semibold border-b border-slate-200 text-right">
-                          A√ß√µes
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm divide-y divide-slate-100">
-                      {medicalExams
-                        .filter((e) => {
-                          const emp = internalUsers.find(
-                            (u) => u.username === e.employeeId,
-                          );
-                          const searchStr =
-                            `${emp?.name || ""} ${e.examType}`.toLowerCase();
-                          return searchStr.includes(
-                            examSearchTerm.toLowerCase(),
-                          );
-                        })
-                        .map((exam) => {
-                          const emp = internalUsers.find(
-                            (u) => u.username === exam.employeeId,
-                          );
-                          return (
-                            <tr
-                              key={exam.id}
-                              className="hover:bg-slate-50 transition-colors group"
-                            >
-                              <td className="p-3">
-                                <div className="font-medium text-slate-900">
-                                  {emp?.name || exam.employeeId}
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                  @{exam.employeeId}
-                                </div>
-                              </td>
-                              <td className="p-3 text-slate-700">
-                                {exam.examType}
-                              </td>
-                              <td className="p-3 text-slate-700">
-                                {exam.examDate
-                                  ? new Date(
-                                      exam.examDate + "T00:00:00",
-                                    ).toLocaleDateString("pt-BR")
-                                  : "-"}
-                              </td>
-                              <td className="p-3 text-slate-700">
-                                {exam.nextExamDate
-                                  ? new Date(
-                                      exam.nextExamDate + "T00:00:00",
-                                    ).toLocaleDateString("pt-BR")
-                                  : "-"}
-                              </td>
-                              <td className="p-3 text-center">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                    exam.status === "Apto"
-                                      ? "bg-emerald-100 text-emerald-800"
-                                      : exam.status === "Inapto"
-                                        ? "bg-rose-100 text-rose-800"
-                                        : "bg-amber-100 text-amber-800"
-                                  }`}
-                                >
-                                  {exam.status}
-                                </span>
-                              </td>
-                              <td className="p-3 text-right">
-                                <div className="flex justify-end space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={() => {
-                                      setEditingExam(exam);
-                                      setShowExamForm(true);
-                                    }}
-                                    className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-blue-50 rounded transition-colors"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      requestAdminDelete("exam", exam.id, `Exame M√©dico (${exam.examDate})`);
-                                    }}
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      {medicalExams.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={6}
-                            className="p-8 text-center text-slate-500"
-                          >
-                            Nenhum exame cadastrado.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {examSubTab === "catalogo" && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800">
-                      Cat√°logo de Tipos de Exame
-                    </h3>
-                    <p className="text-sm text-slate-500">
-                      Defina informa√ß√µes, descri√ß√£o e validade de cada tipo de
-                      exame.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setEditingExamType(null);
-                      setShowExamTypeForm(true);
-                    }}
-                    className="p-2 text-royal-blue bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200 flex items-center space-x-1"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span className="text-sm font-semibold">Novo Tipo</span>
-                  </button>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-white text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
-                        <th className="p-4 font-semibold w-1/4">
-                          Nome do Exame
-                        </th>
-                        <th className="p-4 font-semibold w-1/2">
-                          Informa√ß√µes / Descri√ß√£o
-                        </th>
-                        <th className="p-4 font-semibold w-1/4 text-center">
-                          Validade (Meses)
-                        </th>
-                        <th className="p-4 font-semibold text-right">A√ß√µes</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {examTypesCatalog.map((tipo) => (
-                        <tr
-                          key={tipo.id}
-                          className="hover:bg-slate-50 transition-colors group"
-                        >
-                          <td className="p-4 font-medium text-slate-900">
-                            {tipo.name}
-                          </td>
-                          <td className="p-4 text-slate-600 text-sm whitespace-pre-wrap">
-                            {tipo.description || "-"}
-                          </td>
-                          <td className="p-4 text-center text-slate-700 font-medium">
-                            {tipo.validityMonths ? tipo.validityMonths : "-"}
-                          </td>
-                          <td className="p-4 text-right">
-                            <div className="flex justify-end space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={() => {
-                                  setEditingExamType(tipo);
-                                  setShowExamTypeForm(true);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-royal-blue hover:bg-blue-50 rounded transition-colors"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  requestAdminDelete("exam_type", tipo.id, `Tipo de Exame: ${tipo.name}`);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {examTypesCatalog.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="p-8 text-center text-slate-500"
-                          >
-                            Nenhum tipo de exame cadastrado.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Exam Form Modal */}
-            {showExamForm && (
-              <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-                  <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                    <h3 className="text-lg font-display font-bold text-slate-900">
-                      {editingExam ? "Editar Exame" : "Novo Exame M√©dico"}
-                    </h3>
-                    <button
-                      onClick={() => setShowExamForm(false)}
-                      className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-
-                  <form
-                    className="p-5 overflow-y-auto"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      const formData = new FormData(
-                        e.target as HTMLFormElement,
-                      );
-                      const data = {
-                        employeeId: formData.get("employeeId") as string,
-                        examType: formData.get("examType") as string,
-                        examDate: formData.get("examDate") as string,
-                        status: formData.get("status") as
-                          "Apto" | "Inapto" | "Pendente",
-                        nextExamDate:
-                          (formData.get("nextExamDate") as string) || undefined,
-                        notes: (formData.get("notes") as string) || undefined,
-                      };
-                      try {
-                        if (editingExam) {
-                          await updateMedicalExamDoc(editingExam.id, data);
-                        } else {
-                          await addMedicalExamDoc(data);
-                        }
-                        setShowExamForm(false);
-                        setEditingExam(null);
-                      } catch (err) {
-                        console.error(err);
-                        alert("Erro ao salvar exame.");
-                      }
-                    }}
-                  >
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                          Colaborador
-                        </label>
-                        <select
-                          name="employeeId"
-                          defaultValue={editingExam?.employeeId || ""}
-                          required
-                          className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                        >
-                          <option value="">Selecione um colaborador...</option>
-                          {internalUsers.map((u) => (
-                            <option key={u.username} value={u.username}>
-                              {u.name} (@{u.username})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                          Tipo de Exame
-                        </label>
-                        <select
-                          name="examType"
-                          defaultValue={editingExam?.examType || ""}
-                          required
-                          className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                        >
-                          <option value="">Selecione...</option>
-                          {examTypesCatalog.map((opt) => (
-                            <option key={opt.id} value={opt.name}>
-                              {opt.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                            Data do Exame
-                          </label>
-                          <input
-                            type="date"
-                            name="examDate"
-                            defaultValue={editingExam?.examDate || ""}
-                            required
-                            className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                            Vencimento (Opcional)
-                          </label>
-                          <input
-                            type="date"
-                            name="nextExamDate"
-                            defaultValue={editingExam?.nextExamDate || ""}
-                            className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                          Status
-                        </label>
-                        <select
-                          name="status"
-                          defaultValue={editingExam?.status || "Apto"}
-                          required
-                          className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                        >
-                          <option value="Apto">Apto</option>
-                          <option value="Inapto">Inapto</option>
-                          <option value="Pendente">Pendente</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                          Observa√ß√µes
-                        </label>
-                        <textarea
-                          name="notes"
-                          defaultValue={editingExam?.notes || ""}
-                          rows={3}
-                          className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                          placeholder="Anota√ß√µes adicionais..."
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end space-x-3">
-                      <button
-                        type="button"
-                        onClick={() => setShowExamForm(false)}
-                        className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-100 rounded-lg transition-colors"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-royal-blue hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium transition-colors shadow-sm"
-                      >
-                        Salvar Exame
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Exam Type Form Modal */}
-        {showExamTypeForm && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="text-lg font-display font-bold text-slate-900">
-                  {editingExamType
-                    ? "Editar Tipo de Exame"
-                    : "Novo Tipo de Exame"}
-                </h3>
-                <button
-                  onClick={() => setShowExamTypeForm(false)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <form
-                className="p-5 overflow-y-auto"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const formData = new FormData(e.target as HTMLFormElement);
-                  const name = formData.get("name") as string;
-                  const description = formData.get("description") as string;
-                  const validityMonths = formData.get("validityMonths")
-                    ? parseInt(formData.get("validityMonths") as string, 10)
-                    : undefined;
-
-                  let updated = [...examTypesCatalog];
-                  if (editingExamType) {
-                    updated = updated.map((t) =>
-                      t.id === editingExamType.id
-                        ? {
-                            ...t,
-                            name,
-                            description,
-                            ...(validityMonths !== undefined
-                              ? { validityMonths }
-                              : {}),
-                          }
-                        : t,
-                    );
-                  } else {
-                    const newType: any = {
-                      id: "type_" + Date.now(),
-                      name,
-                      description,
-                    };
-                    if (validityMonths !== undefined)
-                      newType.validityMonths = validityMonths;
-                    updated.push(newType);
-                  }
-
-                  try {
-                    await saveExamTypes(updated);
-                    setShowExamTypeForm(false);
-                    setEditingExamType(null);
-                  } catch (err) {
-                    console.error(err);
-                    alert("Erro ao salvar tipo de exame.");
-                  }
-                }}
-              >
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Nome do Exame
-                    </label>
-                    <input
-                      type="text"
-                      name="name"
-                      defaultValue={editingExamType?.name || ""}
-                      required
-                      className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                      placeholder="Ex: Admissional"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Validade em Meses (Opcional)
-                    </label>
-                    <input
-                      type="number"
-                      name="validityMonths"
-                      defaultValue={editingExamType?.validityMonths || ""}
-                      min="1"
-                      className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                      placeholder="Ex: 12"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Informa√ß√µes / Descri√ß√£o
-                    </label>
-                    <textarea
-                      name="description"
-                      defaultValue={editingExamType?.description || ""}
-                      rows={4}
-                      required
-                      className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                      placeholder="Descreva sobre este exame..."
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowExamTypeForm(false)}
-                    className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-royal-blue hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium transition-colors shadow-sm"
-                  >
-                    Salvar Tipo
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* TAB: CONTRA-CHEQUES (RH & Estoque) */}
-        {activeTab === "colaboradores" && rhSubTab === "contra_cheques" &&
-          (canAccessModule("personal_documents") || canManagePayslips) && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
-                  <FileText className="h-7 w-7 text-royal-blue" />
-                  <span>Portal de Demonstrativos (RH)</span>
-                </h2>
-                <p className="text-sm text-slate-600">
-                  Acesso seguro e audit√°vel de holerites em conformidade com a
-                  LGPD.
-                </p>
-              </div>
-              {canManagePayslips && (
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => {
-                      if (currentUser && !isUserAdmin) {
-                        const hasPendingPayslip = payslips.some(p =>
-                          p.employeeId === currentUser.id &&
-                          !p.visualized &&
-                          Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11
-                        );
-                        if (hasPendingPayslip) {
-                          alert("Acesso Bloqueado: Voc√™ possui documenta√ß√£o pessoal aguardando visualiza√ß√£o h√° mais de 11 dias. Por favor, visualize os documentos pendentes para liberar o portal.");
-                          return;
-                        }
-                      }
-                      setRhSubTab("cadastro");
-                    }}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm cursor-pointer"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>Voltar</span>
-                  </button>
-                  <button
-                    onClick={() => setShowCreatePayslipModal(true)}
-                    className="bg-royal-blue hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 shadow-sm cursor-pointer"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>Anexar Documento PDF</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Subtabs for HR/Admin users */}
-            {canManagePayslips && (
-              <div className="flex border-b border-slate-200 mb-6">
-                <button
-                  className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 ${
-                    activePayslipTab === "meus"
-                      ? "border-royal-blue text-royal-blue"
-                      : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
-                  }`}
-                  onClick={() => setActivePayslipTab("meus")}
-                >
-                  Meus Documentos
-                </button>
-                <button
-                  className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 ${
-                    activePayslipTab === "gerenciar"
-                      ? "border-royal-blue text-royal-blue"
-                      : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
-                  }`}
-                  onClick={() => setActivePayslipTab("gerenciar")}
-                >
-                  Gerenciar Contra-cheques & Auditoria (LGPD)
-                </button>
-              </div>
-            )}
-
-            {/* MEUS CONTRA-CHEQUES */}
-            {(!canManagePayslips ||
-              activePayslipTab === "meus") && (
-              <div className="space-y-6">
-                {payslips.some(p => p.employeeId === currentUser?.id && !p.visualized && Math.floor((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)) >= 11) && (
-                  <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-r-lg flex items-start space-x-3 shadow-sm">
-                    <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="text-sm font-bold text-rose-800">Acesso Restrito: Documenta√ß√£o Pendente</h4>
-                      <p className="text-sm text-rose-700 mt-1">
-                        Voc√™ possui documenta√ß√£o pessoal (como contra-cheques, espelhos de ponto, etc.) que est√° aguardando visualiza√ß√£o h√° mais de 11 dias.
-                        <strong>O seu acesso √†s demais √°reas do portal foi temporariamente bloqueado.</strong><br/>
-                        Para liberar o seu acesso, por favor visualize todos os documentos pendentes abaixo (clicando no bot√£o "Visualizar Documento").
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {!lgpdConsentChecked ? (
-                  <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm text-center space-y-6">
-                    <div className="w-16 h-16 bg-blue-50 text-royal-blue rounded-full flex items-center justify-center mx-auto">
-                      <ShieldCheck className="h-9 w-9" />
-                    </div>
-                    <div className="space-y-2">
-                      <h3 className="text-xl font-bold text-slate-900">
-                        Termo de Consentimento e Privacidade (LGPD)
-                      </h3>
-                      <p className="text-sm text-slate-500 max-w-lg mx-auto">
-                        Para garantir a seguran√ßa, integridade e
-                        confidencialidade dos seus dados de folha de pagamento,
-                        o acesso aos contra-cheques √© registrado em conformidade
-                        com a Lei Geral de Prote√ß√£o de Dados (Lei n¬∫
-                        13.709/2018).
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 rounded-xl p-4 text-left border border-slate-100 text-xs text-slate-600 leading-relaxed max-w-lg mx-auto space-y-2">
-                      <p>
-                        <b>Ao prosseguir, voc√™ concorda que:</b>
-                      </p>
-                      <ul className="list-disc pl-4 space-y-1">
-                        <li>
-                          O sistema registrar√° seu endere√ßo de IP, data, hora e
-                          navegador no momento do acesso.
-                        </li>
-                        <li>
-                          Uma notifica√ß√£o oficial contendo este comprovante de
-                          auditoria ser√° enviada ao e-mail{" "}
-                          <b>financeiro@comanins.com.br</b>.
-                        </li>
-                        <li>
-                          Os dados coletados ser√£o usados exclusivamente para
-                          fins de auditoria de conformidade legal e preven√ß√£o a
-                          fraudes de seguran√ßa.
-                        </li>
-                      </ul>
-                    </div>
-
-                    <div className="flex items-center justify-center space-x-3 max-w-md mx-auto py-2">
-                      <input
-                        type="checkbox"
-                        id="consent-checkbox"
-                        checked={lgpdConsentChecked}
-                        onChange={(e) =>
-                          setLgpdConsentChecked(e.target.checked)
-                        }
-                        className="h-4 w-4 text-royal-blue border-slate-300 rounded focus:ring-blue-500"
-                      />
-                      <label
-                        htmlFor="consent-checkbox"
-                        className="text-xs text-slate-700 font-medium cursor-pointer select-none"
-                      >
-                        Li e concordo com o registro audit√°vel do meu acesso
-                        para fins de LGPD.
-                      </label>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        if (lgpdConsentChecked) {
-                          // Proceed
-                        } else {
-                          alert(
-                            "Voc√™ precisa aceitar os termos da LGPD para continuar.",
-                          );
-                        }
-                      }}
-                      disabled={!lgpdConsentChecked}
-                      className={`px-6 py-3 rounded-lg font-semibold shadow-sm transition-all text-sm ${
-                        lgpdConsentChecked
-                          ? "bg-royal-blue text-white hover:bg-blue-700 cursor-pointer"
-                          : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                      }`}
-                    >
-                      Entrar na √Årea de Documentos
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                      <div>
-                        <h3 className="font-bold text-slate-900">
-                          Seus Documentos Dispon√≠veis
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Colaborador: {currentUser?.name} | CPF:{" "}
-                          {currentUser?.username || "N/D"}
-                        </p>
-                      </div>
-                      <div className="bg-blue-50 text-royal-blue text-xs font-semibold px-3 py-1 rounded-full flex items-center space-x-1 border border-blue-100">
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        <span>Auditoria Ativa (LGPD)</span>
-                      </div>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm text-slate-600">
-                        <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-100">
-                          <tr>
-                            <th className="px-6 py-4">M√™s de Refer√™ncia</th>
-                            <th className="px-6 py-4">Tipo</th>
-                            <th className="px-6 py-4">Cargo / Fun√ß√£o</th>
-                            <th className="px-6 py-4">Arquivo Anexo</th>
-                            <th className="px-6 py-4">Data de Publica√ß√£o</th>
-                            <th className="px-6 py-4">Status</th>
-                            <th className="px-6 py-4 text-right">A√ß√µes</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {payslips
-                            .filter(
-                              (p) =>
-                                (currentUser?.id && p.employeeId === currentUser.id) ||
-                                (currentUser?.username && p.employeeCpf === currentUser.username) ||
-                                ((currentUser as any)?.cpf && p.employeeCpf === (currentUser as any).cpf) ||
-                                (currentUser?.name && p.employeeName?.toLowerCase().trim() === currentUser.name.toLowerCase().trim())
-                            )
-                            .map((p) => (
-                              <tr
-                                key={p.id}
-                                className="hover:bg-slate-50 transition-colors"
-                              >
-                                <td className="px-6 py-4 font-semibold text-slate-900">
-                                  {p.month}
-                                </td>
-                                <td className="px-6 py-4 font-semibold text-slate-800">{p.documentType === "alimentacao" ? "Alimenta√ß√£o" : p.documentType === "transporte" ? "Transporte" : p.documentType === "espelho_ponto" ? "Espelho de Ponto" : "Contra-cheque"}</td>
-                                <td className="px-6 py-4">{p.employeeRole}</td>
-                                <td className="px-6 py-4">
-                                  <span className="inline-flex items-center space-x-1.5 text-xs text-slate-700 font-medium font-mono">
-                                    <FileText className="h-4 w-4 text-red-500" />
-                                    <span>
-                                      {p.pdfName || "contra_cheque.pdf"}
-                                    </span>
-                                  </span>
-                                </td>
-                                <td className="px-6 py-4 text-xs font-medium text-slate-500">
-                                  {p.createdAt
-                                    ? new Date(p.createdAt).toLocaleDateString(
-                                        "pt-BR",
-                                      )
-                                    : "N/D"}
-                                </td>
-                                <td className="px-6 py-4">
-                                  {p.visualized ? (
-                                    <span className="inline-flex items-center space-x-1 text-xs text-slate-500 font-medium">
-                                      <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
-                                      <span>Visualizado</span>
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center space-x-1 text-xs text-blue-600 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full">
-                                      <span>N√£o Lido</span>
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-6 py-4 text-right space-x-3">
-                                  <button
-                                    onClick={() => handleViewPayslip(p)}
-                                    className="text-royal-blue font-bold hover:underline inline-flex items-center space-x-1"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                    <span>Visualizar</span>
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          {payslips.filter(
-                            (p) =>
-                              (currentUser?.id && p.employeeId === currentUser.id) ||
-                              (currentUser?.username && p.employeeCpf === currentUser.username) ||
-                              ((currentUser as any)?.cpf && p.employeeCpf === (currentUser as any).cpf) ||
-                              (currentUser?.name && p.employeeName?.toLowerCase().trim() === currentUser.name.toLowerCase().trim())
-                          ).length === 0 && (
-                            <tr>
-                              <td
-                                colSpan={7}
-                                className="px-6 py-8 text-center text-slate-400 italic text-xs"
-                              >
-                                Nenhum holerite / contra-cheque publicado para o seu perfil no momento.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* DEMAIS DOCUMENTOS ANEXADOS DO COLABORADOR */}
-                    <div className="p-6 border-t border-slate-200 bg-slate-50/50">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h4 className="font-bold text-slate-900 text-sm flex items-center space-x-2">
-                            <Paperclip className="h-4 w-4 text-royal-blue" />
-                            <span>Documentos Pessoais & Anexos Cadastrais</span>
-                          </h4>
-                          <p className="text-xs text-slate-500">
-                            C√≥pias de RG, CNH, ASO, Comprovante de Resid√™ncia, Contratos e Certificados.
-                          </p>
-                        </div>
-                        <span className="bg-blue-100 text-royal-blue font-bold px-2.5 py-1 rounded-full text-xs">
-                          {myEmployeeDocs.length} arquivo(s)
-                        </span>
-                      </div>
-
-                      {isLoadingMyDocs ? (
-                        <div className="p-6 text-center text-slate-400 text-xs italic">
-                          Carregando seus documentos anexados...
-                        </div>
-                      ) : myEmployeeDocs.length === 0 ? (
-                        <div className="p-6 text-center text-slate-400 italic text-xs border border-dashed border-slate-200 rounded-xl bg-white">
-                          Nenhum documento pessoal anexado ao seu perfil. O setor de RH pode incluir seus arquivos no cadastro geral.
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                          {myEmployeeDocs.map((doc) => (
-                            <div key={doc.id} className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-sm flex flex-col justify-between hover:border-blue-300 transition-all">
-                              <div>
-                                <div className="flex items-start justify-between gap-2 mb-2">
-                                  <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded text-[10px] uppercase tracking-wide">
-                                    {doc.type || "Documento"}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 font-mono">
-                                    {doc.date || ""}
-                                  </span>
-                                </div>
-                                <h5 className="font-bold text-slate-800 text-xs line-clamp-2 mb-1" title={doc.name}>
-                                  {doc.name}
-                                </h5>
-                              </div>
-                              <div className="pt-3 border-t border-slate-100 mt-2 flex items-center justify-between">
-                                <span className="text-[11px] text-slate-400 font-mono">
-                                  Anexo Digital
-                                </span>
-                                {doc.url ? (
-                                  <a
-                                    href={doc.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="bg-royal-blue hover:bg-blue-700 text-white font-bold px-3 py-1 rounded-lg text-xs transition-colors flex items-center space-x-1"
-                                  >
-                                    <Eye className="h-3.5 w-3.5" />
-                                    <span>Visualizar</span>
-                                  </a>
-                                ) : (
-                                  <span className="text-slate-400 text-xs italic">Indispon√≠vel</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* GERENCIAR CONTRA-CHEQUES (RH / Admin) */}
-            {canManagePayslips &&
-              activePayslipTab === "gerenciar" && (
-                <div className="space-y-6">
-                  {/* Complete List with Audit Log */}
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <h3 className="font-bold text-slate-900">
-                          Hist√≥rico Geral de Emiss√µes & Logs de Seguran√ßa (LGPD)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Acompanhamento em tempo real de contra-cheques gerados e
-                          quem os visualizou.
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-600">M√™s:</span>
-                        <select
-                          className="px-3 py-1.5 border border-slate-300 rounded-md text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-royal-blue"
-                          value={payslipMonthFilter}
-                          onChange={(e) => setPayslipMonthFilter(e.target.value)}
-                        >
-                          <option value="all">Todos os Meses</option>
-                          {Array.from(new Set(payslips.map((p) => p.month).filter(Boolean))).sort().map((m) => (
-                            <option key={m} value={m as string}>{m}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm text-slate-600">
-                        <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-100">
-                          <tr>
-                            <th className="px-6 py-4">Colaborador</th>
-                            <th className="px-6 py-4">M√™s</th>
-                            <th className="px-6 py-4">Tipo</th>
-                            <th className="px-6 py-4">Arquivo PDF</th>
-                            <th className="px-6 py-4">Visualizado</th>
-                            <th className="px-6 py-4">
-                              Trilha de Auditoria (IP / Data e Hora)
-                            </th>
-                            <th className="px-6 py-4 text-right">A√ß√µes</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {[...payslips]
-                            .filter((p) => payslipMonthFilter === "all" || p.month === payslipMonthFilter)
-                            .sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""))
-                            .map((p) => (
-                            <tr
-                              key={p.id}
-                              className="hover:bg-slate-50 transition-colors"
-                            >
-                              <td className="px-6 py-4">
-                                <div className="font-semibold text-slate-900">
-                                  {p.employeeName}
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                  {p.employeeRole} ‚Ä¢ Reg:{" "}
-                                  {p.employeeRegister || "N/D"}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-slate-900 font-semibold">
-                                {p.month}
-                              </td>
-                              <td className="px-6 py-4 font-semibold text-slate-800">
-                                {p.documentType === "alimentacao" ? "Alimenta√ß√£o" : p.documentType === "transporte" ? "Transporte" : p.documentType === "espelho_ponto" ? "Espelho de Ponto" : "Contra-cheque"}
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="flex items-center space-x-1.5 text-xs text-slate-700 font-medium font-mono">
-                                  <FileText className="h-4 w-4 text-red-500" />
-                                  <span>
-                                    {p.pdfName || "contra_cheque.pdf"}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                {p.visualized ? (
-                                  <span className="inline-flex items-center space-x-1 text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold border border-emerald-100 font-sans">
-                                    <CheckCircle className="h-3.5 w-3.5" />
-                                    <span>Sim</span>
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center space-x-1 text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
-                                    <span>N√£o</span>
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-6 py-4 text-xs">
-                                {p.visualized ? (
-                                  <div className="space-y-0.5 text-slate-600">
-                                    <div className="flex items-center space-x-1">
-                                      <Clock className="h-3 w-3 text-slate-400" />
-                                      <span>
-                                        <b>Acesso:</b> {p.visualizedAt}
-                                      </span>
-                                    </div>
-                                    <div className="font-mono text-[10px] text-slate-500">
-                                      <b>IP:</b> {p.visualizedIp}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-400 font-mono text-[11px]">
-                                    -
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-6 py-4 text-right space-x-3">
-                                <button
-                                  onClick={() => handleViewPayslip(p)}
-                                  className="text-royal-blue font-bold hover:underline"
-                                >
-                                  Visualizar
-                                </button>
-                                <button
-                                  onClick={() => handleDeletePayslip(p.id)}
-                                  className="text-red-600 font-bold hover:underline"
-
-                                >
-                                  Excluir
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {payslips.length === 0 && (
-                            <tr>
-                              <td
-                                colSpan={6}
-                                className="px-6 py-10 text-center text-slate-400"
-                              >
-                                Nenhum documento cadastrado no sistema.
-                                Anexe um novo PDF para iniciar.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-          </div>
-        )}
-
-        {activeTab === "ai" && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center space-x-2">
-                  <Bot className="h-7 w-7 text-blue-400" />
-                  <span>Metrology Copilot AI</span>
-                </h2>
-                <p className="text-sm text-slate-400">
-                  Pergunte √† nossa IA sobre f√≥rmulas, normas metrol√≥gicas
-                  Inmetro/RBC e procedimentos de calibra√ß√£o.
-                </p>
-              </div>
-              <span className="text-[10px] uppercase tracking-widest font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full font-bold">
-                Gemini 3.5 Active
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[550px]">
-              {/* Chat suggestions column */}
-              <div className="lg:col-span-1 bg-white p-4 rounded-xl border border-slate-200 space-y-4 flex flex-col justify-between shadow-sm">
-                <div className="space-y-3">
-                  <span className="text-[10px] text-slate-500 font-mono tracking-widest uppercase font-semibold">
-                    T√≥picos Sugeridos
-                  </span>
-                  <button
-                    onClick={() =>
-                      triggerQuickPrompt(
-                        "Explique como calcular a Incerteza Combinada Tipo A e Tipo B para man√¥metro anal√≥gico de 10 bar de acordo com as normas.",
-                      )
-                    }
-                    className="w-full text-left bg-slate-50 hover:bg-slate-100 p-3 rounded-lg border border-slate-200 text-xs text-slate-700 transition-all hover:border-blue-500 block"
-                  >
-                    üí° Incerteza Tipo A e B
-                  </button>
-                  <button
-                    onClick={() =>
-                      triggerQuickPrompt(
-                        "Quais s√£o as especifica√ß√µes de toler√¢ncia de erro m√°ximo admiss√≠vel para man√¥metros da Classe A de acordo com a NBR 14105?",
-                      )
-                    }
-                    className="w-full text-left bg-slate-50 hover:bg-slate-100 p-3 rounded-lg border border-slate-200 text-xs text-slate-700 transition-all hover:border-blue-500 block"
-                  >
-                    üí° Toler√¢ncias da NBR 14105
-                  </button>
-                  <button
-                    onClick={() =>
-                      triggerQuickPrompt(
-                        "Me mostre a tabela de convers√£o Ohms / Celsius aproximada para PT100 em pontos cruciais como 0¬∞C, 50¬∞C, 100¬∞C e 150¬∞C.",
-                      )
-                    }
-                    className="w-full text-left bg-slate-50 hover:bg-slate-100 p-3 rounded-lg border border-slate-200 text-xs text-slate-700 transition-all hover:border-blue-500 block"
-                  >
-                    üí° Resist√™ncia PT100 (Ohms x ¬∞C)
-                  </button>
-                </div>
-
-                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 text-[10px] text-slate-500 leading-relaxed">
-                  <strong>Rastreabilidade Inmetro:</strong> Nosso assistente
-                  possui intelig√™ncia de padr√µes de calibra√ß√£o para garantir
-                  excel√™ncia operacional.
-                </div>
-              </div>
-
-              {/* Chat dialog panel */}
-              <div className="lg:col-span-3 bg-white rounded-xl border border-slate-200 flex flex-col overflow-hidden shadow-sm">
-                {/* Messages container */}
-                <div className="flex-grow p-4 overflow-y-auto space-y-4 font-sans text-xs">
-                  {aiMessages.map((m, i) => (
-                    <div
-                      key={i}
-                      className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}
-                    >
-                      <div
-                        className={`max-w-[85%] rounded-xl p-3.5 leading-relaxed shadow-md ${
-                          m.sender === "user"
-                            ? "bg-blue-600 text-white font-semibold"
-                            : "bg-slate-50 border border-slate-200 text-slate-800"
-                        }`}
-                      >
-                        <div className="whitespace-pre-line">{m.text}</div>
-                        <span className="text-[9px] text-slate-500 font-mono block text-right mt-1">
-                          {m.timestamp}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {chatLoading && (
-                    <div className="flex justify-start">
-                      <div className="bg-slate-50 border border-slate-200 text-slate-500 rounded-xl p-4 flex items-center space-x-2">
-                        <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
-                        <span className="font-mono text-[10px] uppercase tracking-wider font-bold">
-                          O Metrologista AI est√° calculando...
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Send bar */}
-                <form
-                  onSubmit={handleSendChat}
-                  className="p-3 border-t border-slate-200 bg-white flex items-center space-x-2"
-                >
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Fa√ßa uma pergunta metrol√≥gica para o assistente..."
-                    className="flex-grow bg-slate-50 border border-slate-300 text-xs text-slate-900 px-4 py-3 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={chatLoading || !chatInput.trim()}
-                    className="p-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors shadow-md disabled:opacity-45"
-                  >
-                    <Send className="h-4 w-4" />
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB: IMPORTA√á√ÉO DE DADOS (CSV/XLSX) */}
-        {activeTab === "importar_dados" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 flex items-center gap-2">
-                <Database className="h-7 w-7 text-emerald-400" />
-                <span>Importa√ß√£o de Dados Metrol√≥gicos</span>
-              </h2>
-              <p className="text-sm text-slate-400">
-                Insira ou importe dados em lote para sua base do portal COMANINS
-                via arquivos de texto delimitados (CSV ou planilhas exportadas).
-              </p>
-            </div>
-
-            {/* Warning/Privacy Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-xl flex items-start gap-3">
-                <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg">
-                  <ClipboardCheck className="h-5 w-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-200">
-                    Seguran√ßa de Dados Corporativos (LGPD)
-                  </h4>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Em conformidade com a Lei Geral de Prote√ß√£o de Dados (Lei n¬∫
-                    13.709/2018), todo o tr√°fego e grava√ß√£o de informa√ß√µes do
-                    portal s√£o resguardados por criptografia de ponta a ponta.
-                    Certifique-se de que possui autoriza√ß√£o corporativa ao
-                    importar cadastros e e-mails de contato de clientes.
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-blue-950/30 border border-blue-850 p-4 rounded-xl flex items-start gap-3">
-                <div className="p-2 bg-blue-500/10 text-blue-400 rounded-lg font-mono text-xs font-bold">
-                  MDB
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-200">
-                    Como Importar Base Microsoft Access (.mdb / .accdb)?
-                  </h4>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    O Microsoft Access possui uma ferramenta nativa de
-                    exporta√ß√£o super r√°pida! No MS Access, clique com o bot√£o
-                    direito na tabela de Clientes ou Instrumentos, escolha{" "}
-                    <strong className="text-blue-400">
-                      Exportar &gt; Arquivo de Texto (ou Excel)
-                    </strong>
-                    , salve como delimitado (.csv ou .txt) com ponto-e-v√≠rgula
-                    (;) e carregue o arquivo gerado aqui no portal!
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Configuration and Upload Form */}
-              <div className="lg:col-span-1 space-y-6">
-                <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-900 uppercase font-mono tracking-wider">
-                    Passo 1: Tipo de Cadastro
-                  </h3>
-
-                  <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImportType("clients");
-                        setImportRows([]);
-                        setImportHeaders([]);
-                        setImportSuccessCount(null);
-                        setImportError("");
-                      }}
-                      className={`py-2 text-xs font-semibold rounded-md transition-all ${
-                        importType === "clients"
-                          ? "bg-emerald-600 text-white shadow"
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
-                    >
-                      Clientes (Empresas)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImportType("instruments");
-                        setImportRows([]);
-                        setImportHeaders([]);
-                        setImportSuccessCount(null);
-                        setImportError("");
-                      }}
-                      className={`py-2 text-xs font-semibold rounded-md transition-all ${
-                        importType === "instruments"
-                          ? "bg-emerald-600 text-white shadow"
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
-                    >
-                      Instrumentos
-                    </button>
-                  </div>
-
-                  {/* Client Selector (Only for instruments) */}
-                  {importType === "instruments" && (
-                    <div className="space-y-1.5 pt-2">
-                      <label className="text-xs font-semibold text-slate-300 block">
-                        Cliente Associado *
-                      </label>
-                      <select
-                        value={selectedImportClient}
-                        onChange={(e) =>
-                          setSelectedImportClient(e.target.value)
-                        }
-                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      >
-                        <option value="">
-                          Selecione o cliente de destino...
-                        </option>
-                        {clients.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.cnpj})
-                          </option>
-                        ))}
-                      </select>
-                      <span className="text-[10px] text-slate-500 block leading-tight">
-                        Todos os instrumentos contidos no arquivo importado
-                        pertencer√£o ao cliente selecionado acima.
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Upload CSV Card */}
-                <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-900 uppercase font-mono tracking-wider">
-                    Passo 2: Upload do Arquivo
-                  </h3>
-
-                  <div className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50 rounded-xl p-6 text-center transition-all relative">
-                    <input
-                      type="file"
-                      accept=".csv, .txt, .xlsx, .xls"
-                      onChange={handleCSVFileChange}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                    <Upload className="h-8 w-8 text-slate-500 mx-auto mb-2" />
-                    <span className="text-xs font-bold text-slate-800 block">
-                      Escolha ou arraste o arquivo XLSX ou CSV
-                    </span>
-                    <span className="text-[10px] text-slate-500 mt-1 block font-mono">
-                      Suporta delimitadores , ou ;
-                    </span>
-                  </div>
-
-                  {/* Instruction / Guidelines on CSV structure */}
-                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                    <span className="text-xs font-bold text-slate-800 block">
-                      Modelo do Cabe√ßalho CSV:
-                    </span>
-
-                    {importType === "clients" ? (
-                      <div className="space-y-2">
-                        <code className="block bg-white border border-slate-200 p-2 rounded text-[10px] text-emerald-700 font-mono break-all leading-relaxed">
-                          nome;cnpj;email;telefone;endereco_completo;senha
-                        </code>
-                        <p className="text-[10px] text-slate-500 leading-normal">
-                          Insira um registro por linha. A senha padr√£o caso n√£o
-                          enviada ser√° <strong>123456</strong>.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <code className="block bg-white border border-slate-200 p-2 rounded text-[10px] text-emerald-700 font-mono break-all leading-relaxed">
-                          tag;descricao;marca;modelo;serie;grandeza;faixa_min;faixa_max;unidade;tolerancia
-                        </code>
-                        <p className="text-[10px] text-slate-500 leading-normal">
-                          <strong>Grandeza:</strong> use "pressure" para Press√£o
-                          e "temperature" para Temperatura.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Spreadsheet Preview & Actions */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Status/Success alerts */}
-                {importError && (
-                  <div className="bg-rose-500/10 border border-rose-500/35 text-rose-400 p-4 rounded-xl text-xs font-medium">
-                    ‚ö†Ô∏è {importError}
-                  </div>
-                )}
-
-                {importSuccessCount !== null && (
-                  <div className="bg-emerald-500/10 border border-emerald-500/35 text-emerald-400 p-4 rounded-xl text-xs font-bold flex items-center gap-2">
-                    <CheckCircle className="h-5 w-5" />
-                    <span>
-                      Importa√ß√£o conclu√≠da com sucesso! Cadastrados{" "}
-                      {importSuccessCount} registros na base de dados.
-                    </span>
-                  </div>
-                )}
-
-                {/* Spreadsheet Grid Panel */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm flex flex-col min-h-[400px]">
-                  <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Database className="h-4 w-4 text-emerald-400" />
-                      <h3 className="text-xs font-bold text-white font-mono uppercase tracking-wider">
-                        Visualiza√ß√£o da Planilha ({importRows.length} linhas
-                        carregadas)
-                      </h3>
-                    </div>
-
-                    {importRows.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleConfirmImport}
-                        disabled={isImporting}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-                      >
-                        {isImporting ? (
-                          <>
-                            <RefreshCw className="h-3 w-3 animate-spin" />
-                            <span>Processando...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckSquare className="h-3.5 w-3.5" />
-                            <span>
-                              Confirmar Importa√ß√£o de {importRows.length}{" "}
-                              Registros
-                            </span>
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="overflow-auto max-h-[450px] flex-grow">
-                    {importRows.length > 0 ? (
-                      <table className="w-full text-left border-collapse text-[11px] font-mono">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-600 border-b border-slate-200">
-                            <th className="p-2 text-center border-r border-slate-200 w-10">
-                              #
-                            </th>
-                            {importHeaders.map((header, idx) => (
-                              <th
-                                key={idx}
-                                className="p-2 border-r border-slate-200 text-slate-800 uppercase tracking-tight"
-                              >
-                                {header}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {importRows.map((row, rIdx) => (
-                            <tr
-                              key={rIdx}
-                              className="hover:bg-slate-50 transition-colors"
-                            >
-                              <td className="p-2 text-center border-r border-slate-200 text-slate-500 font-bold bg-slate-50">
-                                {rIdx + 1}
-                              </td>
-                              {row.map((cell: any, cIdx: number) => (
-                                <td
-                                  key={cIdx}
-                                  className="p-2 border-r border-slate-200 text-slate-700 max-w-xs truncate"
-                                >
-                                  {cell || (
-                                    <span className="text-slate-600 font-sans italic">
-                                      vazio
-                                    </span>
-                                  )}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center text-slate-500 p-12 h-full space-y-2">
-                        <Database className="h-12 w-12 text-slate-700 animate-pulse" />
-                        <p className="font-sans text-xs">
-                          Nenhum arquivo XLSX/CSV carregado para visualiza√ß√£o.
-                        </p>
-                        <p className="font-sans text-[10px] text-slate-600">
-                          Selecione o tipo de importa√ß√£o √† esquerda e envie o
-                          arquivo correspondente para obter o preview da
-                          planilha.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {showInventoryItemForm && canEditInventory && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">
-              {editingInventoryItem ? "Editar Item" : "Novo Item"}
-            </h3>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!canEditInventory) {
-                  alert("Seu perfil possui somente permiss√£o de visualiza√ß√£o no m√≥dulo Controle de Estoque.");
-                  setShowInventoryItemForm(false);
-                  return;
-                }
-                const formData = new FormData(e.currentTarget);
-                const itemData = {
-                  name: formData.get("name") as string,
-                  description: formData.get("description") as string,
-                  category: formData.get("category") as string,
-                  quantity: Number(formData.get("quantity")),
-                  minQuantity: Number(formData.get("minQuantity")),
-                  unit: formData.get("unit") as string,
-                  location: formData.get("location") as string,
-                  attachments: itemAttachments,
-                };
-
-                if (editingInventoryItem) {
-                  await updateInventoryItemDoc(
-                    editingInventoryItem.id,
-                    itemData,
-                  );
-                } else {
-                  await addInventoryItemDoc(itemData);
-                }
-                setShowInventoryItemForm(false);
-              }}
-              className="space-y-4"
-            >
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Nome do Item
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  defaultValue={editingInventoryItem?.name}
-                  required
-                  className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Descri√ß√£o
-                </label>
-                <textarea
-                  name="description"
-                  defaultValue={editingInventoryItem?.description}
-                  className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                  rows={2}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Categoria
-                  </label>
-                  <select
-                    name="category"
-                    defaultValue={editingInventoryItem?.category || "EPI"}
-                    required
-                    className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                  >
-                    {(
-                      dropdownOptions.estoqueCategoria || [
-                        "EPI",
-                        "Uniforme",
-                        "Material de Escrit√≥rio",
-                        "Ferramenta",
-                        "Outros",
-                      ]
-                    ).map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Unidade (ex: un, par)
-                  </label>
-                  <input
-                    type="text"
-                    name="unit"
-                    defaultValue={editingInventoryItem?.unit}
-                    required
-                    className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Quantidade Atual
-                  </label>
-                  <input
-                    type="number"
-                    name="quantity"
-                    min="0"
-                    defaultValue={editingInventoryItem?.quantity ?? 0}
-                    required
-                    readOnly={!!editingInventoryItem}
-                    className={`w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue ${editingInventoryItem ? "bg-slate-100 text-slate-500 cursor-not-allowed" : ""}`}
-                  />
-                  {editingInventoryItem && (
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      O saldo √© alterado somente por Movimentar Estoque, preservando o hist√≥rico.
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Qtd M√≠nima (Alerta)
-                  </label>
-                  <input
-                    type="number"
-                    name="minQuantity"
-                    defaultValue={editingInventoryItem?.minQuantity ?? 5}
-                    required
-                    className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Localiza√ß√£o no Estoque
-                </label>
-                <input
-                  type="text"
-                  name="location"
-                  defaultValue={editingInventoryItem?.location}
-                  placeholder="Ex: Arm√°rio 1, Prateleira A"
-                  className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Anexar Arquivos / Fotos / Notas Fiscais
-                </label>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.txt"
-                  onChange={(e) => handleInventoryFileChange(e, false)}
-                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-royal-blue hover:file:bg-blue-100"
-                />
-                {itemAttachments.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs font-semibold text-slate-600">
-                      {itemAttachments.length} arquivo(s) anexado(s):
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {itemAttachments.map((att, idx) => {
-                        let name = `Arquivo ${idx + 1}`;
-                        if (att.includes("||data:")) name = att.split("||")[0];
-                        return (
-                          <div key={idx} className="flex items-center space-x-1 bg-slate-100 border border-slate-200 px-2 py-1 rounded text-xs">
-                            <Paperclip className="h-3 w-3 text-slate-500" />
-                            <span className="truncate max-w-[120px]">{name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setItemAttachments(prev => prev.filter((_, i) => i !== idx))}
-                              className="text-red-500 hover:text-red-700 ml-1 font-bold"
-                            >
-                              √ó
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowInventoryItemForm(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 font-bold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-royal-blue text-white rounded-lg hover:bg-blue-700 font-bold"
-                >
-                  Salvar Item
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showInventoryTransactionForm && canEditInventory && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center space-x-2">
-              <ArrowRightLeft className="h-5 w-5 text-royal-blue" />
-              <span>Registrar Movimenta√ß√£o</span>
-            </h3>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!canEditInventory) {
-                  alert("Seu perfil possui somente permiss√£o de visualiza√ß√£o no m√≥dulo Controle de Estoque.");
-                  setShowInventoryTransactionForm(false);
-                  return;
-                }
-                const formData = new FormData(e.currentTarget);
-                const itemId = formData.get("itemId") as string;
-                const type = formData.get("type") as "entrada" | "saida";
-                const quantity = Number(formData.get("quantity"));
-
-                try {
-                  const result = await moveInventoryAtomically({
-                    itemId,
-                    type,
-                    quantity,
-                    reason: formData.get("reason") as string,
-                    employeeId: formData.get("employeeId") as string,
-                    attachments: transactionAttachments,
-                  });
-                  setInventoryItems((prev) =>
-                    prev.map((item) =>
-                      item.id === itemId ? { ...item, quantity: result.newQuantity } : item,
-                    ),
-                  );
-                  setTransactionAttachments([]);
-                  setShowInventoryTransactionForm(false);
-                } catch (err: any) {
-                  console.error("Erro ao movimentar estoque:", err);
-                  alert(err?.message || "N√£o foi poss√≠vel concluir a movimenta√ß√£o.");
-                }
-              }}
-              className="space-y-4"
-            >
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Item do Estoque
-                </label>
-                <select
-                  name="itemId"
-                  required
-                  className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                >
-                  <option value="">Selecione o item...</option>
-                  {inventoryItems.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} (Estoque: {i.quantity} {i.unit})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Tipo de Movimenta√ß√£o
-                  </label>
-                  <select
-                    name="type"
-                    required
-                    className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                  >
-                    <option value="saida">Sa√≠da (-)</option>
-                    <option value="entrada">Entrada (+)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Quantidade
-                  </label>
-                  <input
-                    type="number"
-                    name="quantity"
-                    min="1"
-                    required
-                    className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Motivo / Observa√ß√£o
-                </label>
-                <input
-                  type="text"
-                  name="reason"
-                  placeholder="Ex: Entrega de EPI, Compra de material..."
-                  required
-                  className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Atribuir a Colaborador (Opcional)
-                </label>
-                <select
-                  name="employeeId"
-                  className="w-full border-slate-300 rounded-lg focus:ring-royal-blue focus:border-royal-blue"
-                >
-                  <option value="">Nenhum espec√≠fico</option>
-                  {internalUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Utilize para registrar entrega de EPIs ou Uniformes para um
-                  funcion√°rio.
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Anexar Comprovante / Assinatura / Recibo
-                </label>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.txt"
-                  onChange={(e) => handleInventoryFileChange(e, true)}
-                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-royal-blue hover:file:bg-blue-100"
-                />
-                {transactionAttachments.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs font-semibold text-slate-600">
-                      {transactionAttachments.length} arquivo(s) anexado(s):
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {transactionAttachments.map((att, idx) => {
-                        let name = `Comprovante ${idx + 1}`;
-                        if (att.includes("||data:")) name = att.split("||")[0];
-                        return (
-                          <div key={idx} className="flex items-center space-x-1 bg-slate-100 border border-slate-200 px-2 py-1 rounded text-xs">
-                            <Paperclip className="h-3 w-3 text-slate-500" />
-                            <span className="truncate max-w-[120px]">{name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setTransactionAttachments(prev => prev.filter((_, i) => i !== idx))}
-                              className="text-red-500 hover:text-red-700 ml-1 font-bold"
-                            >
-                              √ó
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowInventoryTransactionForm(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 font-bold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-royal-blue text-white rounded-lg hover:bg-blue-700 font-bold"
-                >
-                  Registrar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showTrainingForm && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">
-              {editingTraining ? "Editar Treinamento" : "Novo Treinamento"}
-            </h3>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const formData = new FormData(
-                    e.currentTarget as HTMLFormElement,
-                  );
-                  const mandatoryRolesStr =
-                    (formData.get("t_roles") as string) || "";
-                  const data: any = {
-                    name: (formData.get("t_name") as string) || "",
-                    description: (formData.get("t_desc") as string) || "",
-                    validityMonths:
-                      parseInt(formData.get("t_validity") as string) || 0,
-                    workloadHours:
-                      parseInt(formData.get("t_workload") as string) || 0,
-                    institution: (formData.get("t_inst") as string) || "",
-                    mandatoryRoles: mandatoryRolesStr
-                      ? mandatoryRolesStr
-                          .split(",")
-                          .map((r: string) => r.trim())
-                          .filter((r: string) => r)
-                      : [],
-                    modality:
-                      (formData.get("t_modality") as string) || "Presencial",
-                  };
-                  if (editingTraining) {
-                    await updateTrainingDoc(editingTraining.id, data);
-                  } else {
-                    await addTrainingDoc(data);
-                  }
-                  setShowTrainingForm(false);
-                } catch (err) {
-                  console.error("Error saving training:", err);
-                  alert("Erro ao salvar o treinamento.");
-                }
-              }}
-              className="space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Nome do Treinamento *
-                </label>
-                <input
-                  required
-                  name="t_name"
-                  defaultValue={editingTraining?.name || ""}
-                  type="text"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Descri√ß√£o
-                </label>
-                <textarea
-                  name="t_desc"
-                  defaultValue={editingTraining?.description || ""}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm h-20"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Validade (Meses) *
-                  </label>
-                  <input
-                    required
-                    name="t_validity"
-                    defaultValue={editingTraining?.validityMonths || 0}
-                    type="number"
-                    min="0"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    0 para n√£o expirar
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Carga Hor√°ria (h) *
-                  </label>
-                  <input
-                    required
-                    name="t_workload"
-                    defaultValue={editingTraining?.workloadHours || 0}
-                    type="number"
-                    min="0"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Institui√ß√£o
-                  </label>
-                  <input
-                    name="t_inst"
-                    defaultValue={editingTraining?.institution || ""}
-                    type="text"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Modalidade *
-                  </label>
-                  <select
-                    required
-                    name="t_modality"
-                    defaultValue={editingTraining?.modality || "Presencial"}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  >
-                    <option value="Presencial">Presencial</option>
-                    <option value="Online">Online</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="pt-4 flex space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowTrainingForm(false)}
-                  className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold hover:bg-slate-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-royal-blue text-white rounded-lg font-semibold hover:bg-blue-700"
-                >
-                  Salvar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showEmployeeTrainingForm && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">
-              {editingEmployeeTraining
-                ? "Editar Registro"
-                : "Registrar Realiza√ß√£o"}
-            </h3>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const formData = new FormData(
-                    e.currentTarget as HTMLFormElement,
-                  );
-                  const data: any = {
-                    employeeId: (formData.get("et_employee") as string) || "",
-                    trainingId: (formData.get("et_training") as string) || "",
-                    status:
-                      (formData.get("et_status") as string) || "Programado",
-                  };
-
-                  const comp = formData.get("et_completion") as string;
-                  if (comp) data.completionDate = comp;
-
-                  const exp = formData.get("et_expiration") as string;
-                  if (exp) data.expirationDate = exp;
-
-                  const sched = formData.get("et_scheduled") as string;
-                  if (sched) data.scheduledDate = sched;
-
-                  const res = formData.get("et_result") as string;
-                  if (res) data.result = res;
-
-                  if (editingEmployeeTraining) {
-                    await updateEmployeeTrainingDoc(
-                      editingEmployeeTraining.id,
-                      data,
-                    );
-                  } else {
-                    await addEmployeeTrainingDoc(data);
-                  }
-                  setShowEmployeeTrainingForm(false);
-                } catch (err) {
-                  console.error("Error saving employee training:", err);
-                  alert("Erro ao salvar o registro de treinamento.");
-                }
-              }}
-              className="space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Colaborador *
-                </label>
-                <select
-                  required
-                  name="et_employee"
-                  defaultValue={editingEmployeeTraining?.employeeId || ""}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value="">Selecione...</option>
-                  {internalUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Treinamento *
-                </label>
-                <select
-                  required
-                  name="et_training"
-                  defaultValue={editingEmployeeTraining?.trainingId || ""}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  onChange={(e) => {
-                    const t = trainings.find((tr) => tr.id === e.target.value);
-                    if (t && t.validityMonths > 0) {
-                      const comp = e.target.form.et_completion.value;
-                      if (comp) {
-                        const d = new Date(comp + "T00:00:00");
-                        d.setMonth(d.getMonth() + t.validityMonths);
-                        e.target.form.et_expiration.value = d
-                          .toISOString()
-                          .split("T")[0];
-                      }
-                    }
-                  }}
-                >
-                  <option value="">Selecione...</option>
-                  {trainings.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Status (Autom√°tico)
-                </label>
-                <input
-                  disabled
-                  value="Calculado automaticamente"
-                  type="text"
-                  className="w-full bg-slate-100 text-slate-500 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                />
-                <input type="hidden" name="et_status" value="Agendado" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Data Realiza√ß√£o
-                  </label>
-                  <input
-                    name="et_completion"
-                    defaultValue={
-                      editingEmployeeTraining?.completionDate
-                        ? new Date(editingEmployeeTraining.completionDate)
-                            .toISOString()
-                            .split("T")[0]
-                        : ""
-                    }
-                    type="date"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    onChange={(e) => {
-                      const form = e.target.form as any;
-                      const tId = form.et_training.value;
-                      const t = trainings.find((tr) => tr.id === tId);
-                      if (t && t.validityMonths > 0 && e.target.value) {
-                        const d = new Date(e.target.value + "T00:00:00");
-                        d.setMonth(d.getMonth() + t.validityMonths);
-                        form.et_expiration.value = d
-                          .toISOString()
-                          .split("T")[0];
-                      }
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Data Vencimento
-                  </label>
-                  <input
-                    name="et_expiration"
-                    defaultValue={
-                      editingEmployeeTraining?.expirationDate
-                        ? new Date(editingEmployeeTraining.expirationDate)
-                            .toISOString()
-                            .split("T")[0]
-                        : ""
-                    }
-                    type="date"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Data Programada
-                  </label>
-                  <input
-                    name="et_scheduled"
-                    defaultValue={
-                      editingEmployeeTraining?.scheduledDate
-                        ? new Date(editingEmployeeTraining.scheduledDate)
-                            .toISOString()
-                            .split("T")[0]
-                        : ""
-                    }
-                    type="date"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Resultado (Nota)
-                  </label>
-                  <input
-                    name="et_result"
-                    defaultValue={editingEmployeeTraining?.result || ""}
-                    type="text"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    placeholder="Ex: Aprovado, 9.5"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-4 flex space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowEmployeeTrainingForm(false)}
-                  className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold hover:bg-slate-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-royal-blue text-white rounded-lg font-semibold hover:bg-blue-700"
-                >
-                  Salvar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-
-      {/* MODAL: ACESSO FORA DE HOR√ÅRIO */}
-      {showAfterHoursModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 flex flex-col items-center text-center space-y-4 shadow-2xl">
-            <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mb-2">
-              <ShieldAlert className="h-8 w-8 text-rose-600" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900">Acesso Restrito - Fora do Hor√°rio</h3>
-            <p className="text-sm text-slate-600">
-              O acesso ao sistema ap√≥s as 17:30 √© restrito para colaboradores com perfil Padr√£o/Limitado. Sem autoriza√ß√£o, voc√™ s√≥ tem acesso aos recibos e contra-cheques.
-            </p>
-            <p className="text-sm text-slate-600 font-semibold">
-              Para prosseguir para <b>{afterHoursTargetTab}</b>, justifique o acesso e insira a senha de um Administrador.
-            </p>
-
-            <form
-              className="w-full space-y-4 text-left mt-2"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!afterHoursJustification) {
-                  alert("Por favor, preencha a justificativa de trabalho.");
-                  return;
-                }
-                if (!afterHoursAdminUsername.trim()) {
-                  alert("Por favor, digite o usu√°rio do administrador.");
-                  return;
-                }
-                if (!afterHoursPassword) {
-                  alert("Por favor, digite a senha do administrador.");
-                  return;
-                }
-
-                try {
-                  const valid = await verifyAdminCredentials(afterHoursAdminUsername, afterHoursPassword);
-                  if (!valid) {
-                    alert("Credencial administrativa inv√°lida.");
-                    return;
-                  }
-                } catch (error: any) {
-                  alert(error?.message || "N√£o foi poss√≠vel validar a autoriza√ß√£o administrativa.");
-                  return;
-                }
-                const adminUser = { name: afterHoursAdminUsername.trim() };
-
-                try {
-                  await addAccessAuditLog({
-                    date: new Date().toISOString(),
-                    user: currentUser?.name || currentUser?.username || "Usu√°rio",
-                    action: "ACESSO FORA DO HOR√ÅRIO",
-                    details: `Justificativa: ${afterHoursJustification} | Aba destino: ${afterHoursTargetTab}`,
-                    authorizedBy: adminUser.name
-                  });
-                  setAfterHoursBypass(true);
-                  setShowAfterHoursModal(false);
-                  setRawActiveTab(afterHoursTargetTab);
-                  if (afterHoursTargetSubTab) setRhSubTab(afterHoursTargetSubTab as any);
-                  setAfterHoursJustification("");
-                  setAfterHoursAdminUsername("");
-                  setAfterHoursPassword("");
-                } catch (err) {
-                  console.error(err);
-                  alert("Erro ao registrar auditoria de acesso.");
-                }
-              }}
-            >
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Justificativa do Trabalho Extra</label>
-                <textarea
-                  required
-                  value={afterHoursJustification}
-                  onChange={(e) => setAfterHoursJustification(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-rose-500 min-h-[80px]"
-                  placeholder="Ex: Plant√£o, manuten√ß√£o urgente, etc."
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Usu√°rio do Administrador</label>
-                <input
-                  type="text"
-                  required
-                  autoComplete="username"
-                  value={afterHoursAdminUsername}
-                  onChange={(e) => setAfterHoursAdminUsername(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-rose-500"
-                  placeholder="Ex: master"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Senha do Administrador</label>
-                <input
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={afterHoursPassword}
-                  onChange={(e) => setAfterHoursPassword(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-rose-500"
-                  placeholder="Senha autorizadora..."
-                />
-              </div>
-              <div className="flex items-center space-x-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAfterHoursModal(false)}
-                  className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition-colors text-sm shadow-sm"
-                >
-                  Autorizar Acesso
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: EXCLUS√ÉO RESTRITA COM SENHA DE ADMINISTRADOR */}
-      {showAdminDeleteModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95">
-            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-rose-100 rounded-xl text-rose-600">
-                  <ShieldCheck className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="font-display font-bold text-slate-900 text-base">
-                    Autentica√ß√£o do Administrador
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    A√ß√£o administrativa restrita e auditada
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAdminDeleteModal(false);
-                  setDeleteTarget(null);
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-900 space-y-1">
-              <p className="font-bold flex items-center gap-1.5">
-                <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
-                <span>Aten√ß√£o: Apenas o Administrador do Sistema pode confirmar!</span>
-              </p>
-              <p className="text-[11px] text-rose-700">
-                {deleteTarget?.type === "report"
-                  ? "Voc√™ est√° prestes a excluir definitivamente este certificado e liberar o instrumento para uma nova ficha de calibra√ß√£o: "
-                  : deleteActionIsArchive
-                    ? "Voc√™ est√° prestes a arquivar, ocultar das listas operacionais e preservar para auditoria: "
-                    : "Voc√™ est√° prestes a remover: "}
-                <strong>{deleteTarget?.name}</strong>.
-              </p>
-            </div>
-
-            <form
-              onSubmit={handleConfirmAdminDelete}
-              className="space-y-4 text-xs"
-            >
-              <div>
-                <label className="block text-slate-700 font-bold mb-1.5 flex items-center gap-1">
-                  <Key className="h-3.5 w-3.5 text-royal-blue" />
-                  <span>Digite a Senha do Administrador:</span>
-                </label>
-                <input
-                  type="password"
-                  required
-                  autoFocus
-                  value={adminPasswordInput}
-                  onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  placeholder="Senha do administrador do sistema"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 text-sm focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono"
-                />
-              </div>
-
-              {adminPasswordError && (
-                <div className="p-2.5 bg-red-100 border border-red-200 text-red-700 rounded-lg text-xs font-semibold flex items-center gap-1.5">
-                  <X className="h-4 w-4 flex-shrink-0" />
-                  <span>{adminPasswordError}</span>
-                </div>
-              )}
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAdminDeleteModal(false);
-                    setDeleteTarget(null);
-                  }}
-                  className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 shadow-md flex items-center space-x-1.5 cursor-pointer"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>Confirmar Exclus√£o</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-
-      {/* MODAL: ENTREGA / EVID√äNCIAS DE DEVOLU√á√ÉO */}
-      {showDevolutionModal && selectedIntakeForDevolution && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-4xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
-            <div className="bg-slate-900 text-white p-5 sm:p-6 flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-emerald-600/20 rounded-xl border border-emerald-500/30 text-emerald-400">
-                  <CheckCircle className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">
-                    {selectedIntakeForDevolution.deliveryFinalizedAt
-                      ? "Entrega Finalizada"
-                      : "Concluir Entrega"}{" "}
-                    ‚Äî Entrada #{selectedIntakeForDevolution.numEntrada}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {clients.find(
-                      (c) => c.id === selectedIntakeForDevolution.clientId,
-                    )?.name || "Cliente"}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDevolutionModal(false);
-                  setSelectedIntakeForDevolution(null);
-                  setDeliveryInstrumentPhotosDraft([]);
-                  setDeliveryFormPhotosDraft([]);
-                }}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="p-5 sm:p-6 space-y-6">
-              {selectedIntakeForDevolution.deliveryFinalizedAt || selectedIntakeForDevolution.deliveryLocked ? (
-                <>
-                  <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex gap-3 text-sm text-emerald-900 leading-relaxed">
-                    <ShieldCheck className="h-5 w-5 text-emerald-700 flex-shrink-0" />
-                    <div>
-                      <p className="font-bold">Entrega conclu√≠da e registro bloqueado.</p>
-                      <p className="text-xs mt-1">
-                        Finalizada em {selectedIntakeForDevolution.deliveryFinalizedAt
-                          ? new Date(selectedIntakeForDevolution.deliveryFinalizedAt).toLocaleString("pt-BR")
-                          : "data n√£o informada"}
-                        {selectedIntakeForDevolution.deliveryFinalizedBy
-                          ? ` por ${selectedIntakeForDevolution.deliveryFinalizedBy}`
-                          : ""}.
-                        Nenhum dado, foto ou formul√°rio desta entrada pode mais ser alterado.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenIntakePrint(selectedIntakeForDevolution)}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
-                    >
-                      <FileText className="h-4 w-4" />
-                      Formul√°rio de Entrada
-                    </button>
-                    {selectedIntakeForDevolution.devolutionGeneratedAt && (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDevolutionPrint(selectedIntakeForDevolution)}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
-                      >
-                        <Printer className="h-4 w-4" />
-                        Formul√°rio de Devolu√ß√£o
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenPhotosModal(selectedIntakeForDevolution)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
-                    >
-                      <Camera className="h-4 w-4" />
-                      Fotos da Entrada
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
-                        Fotos dos Instrumentos / Material Entregue
-                      </h4>
-                      {(selectedIntakeForDevolution.deliveryInstrumentPhotos || []).length > 0 ? (
-                        <div className="grid grid-cols-2 gap-3">
-                          {(selectedIntakeForDevolution.deliveryInstrumentPhotos || []).map((photo: string, index: number) => (
-                            <button
-                              type="button"
-                              key={`delivered-inst-${index}`}
-                              onClick={() => setFullscreenPhoto(photo)}
-                              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square cursor-pointer"
-                              title="Ampliar foto"
-                            >
-                              <img src={photo} alt={`Instrumentos entregues ${index + 1}`} className="w-full h-full object-cover" />
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500 bg-slate-50 border rounded-xl p-4">Nenhuma foto de instrumentos registrada.</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
-                        Formul√°rio de Devolu√ß√£o Assinado
-                      </h4>
-                      {(selectedIntakeForDevolution.deliveryFormPhotos || []).length > 0 ? (
-                        <div className="grid grid-cols-2 gap-3">
-                          {(selectedIntakeForDevolution.deliveryFormPhotos || []).map((photo: string, index: number) => (
-                            <button
-                              type="button"
-                              key={`delivered-form-${index}`}
-                              onClick={() => setFullscreenPhoto(photo)}
-                              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square cursor-pointer"
-                              title="Ampliar comprovante"
-                            >
-                              <img src={photo} alt={`Formul√°rio assinado ${index + 1}`} className="w-full h-full object-cover" />
-                            </button>
-                          ))}
-                        </div>
-                      ) : selectedIntakeForDevolution.photoDevolution ? (
-                        <button
-                          type="button"
-                          onClick={() => setFullscreenPhoto(selectedIntakeForDevolution.photoDevolution)}
-                          className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 w-full max-w-sm aspect-video cursor-pointer"
-                        >
-                          <img src={selectedIntakeForDevolution.photoDevolution} alt="Comprovante legado de devolu√ß√£o" className="w-full h-full object-contain" />
-                        </button>
-                      ) : (
-                        <p className="text-xs text-slate-500 bg-slate-50 border rounded-xl p-4">Nenhum formul√°rio assinado registrado.</p>
-                      )}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 flex gap-3 text-sm text-blue-900 leading-relaxed">
-                    <ShieldCheck className="h-5 w-5 text-blue-700 flex-shrink-0" />
-                    <div>
-                      <p className="font-bold">Registro obrigat√≥rio para concluir a entrega.</p>
-                      <p className="text-xs mt-1">
-                        Anexe pelo menos uma foto dos instrumentos/material sendo entregues e uma foto do Formul√°rio de Devolu√ß√£o assinado pelo cliente ou transportador.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
-                    <strong>Aten√ß√£o:</strong> ao clicar em ‚ÄúConcluir Entrega‚Äù, todos os instrumentos desta entrada ser√£o marcados como Entregue e a entrada ser√° bloqueada definitivamente para edi√ß√£o. Depois disso ser√° permitida apenas a visualiza√ß√£o dos documentos. A exclus√£o da entrada continuar√° restrita ao perfil Administrador.
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenDevolutionPrint(selectedIntakeForDevolution)}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-2"
-                    >
-                      <Printer className="h-4 w-4" />
-                      Imprimir Formul√°rio de Devolu√ß√£o
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-5 space-y-4">
-                      <div>
-                        <h4 className="font-bold text-slate-800 text-sm">1. Fotos dos instrumentos/material entregue</h4>
-                        <p className="text-xs text-slate-500 mt-1">Registre o estado e o conjunto de materiais no momento da retirada/entrega.</p>
-                      </div>
-                      <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer text-xs">
-                        <Camera className="h-4 w-4" />
-                        Adicionar Fotos
-                        <input
-                          type="file"
-                          accept="image/*,.heic,.heif"
-                          multiple
-                          disabled={isUploadingDevolution || isFinalizingDelivery}
-                          onChange={(e) => handleAddDeliveryPhotos(e, "instruments")}
-                          className="hidden"
-                        />
-                      </label>
-                      {deliveryInstrumentPhotosDraft.length > 0 && (
-                        <div className="grid grid-cols-3 gap-2">
-                          {deliveryInstrumentPhotosDraft.map((photo, index) => (
-                            <div key={`draft-inst-${index}`} className="relative rounded-lg overflow-hidden aspect-square bg-slate-100 border">
-                              <img src={photo} alt={`Foto instrumento ${index + 1}`} className="w-full h-full object-cover" />
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveDeliveryDraftPhoto("instruments", index)}
-                                className="absolute top-1 right-1 p-1.5 bg-rose-600 text-white rounded-md"
-                                title="Remover antes de concluir"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-5 space-y-4">
-                      <div>
-                        <h4 className="font-bold text-slate-800 text-sm">2. Formul√°rio de Devolu√ß√£o assinado</h4>
-                        <p className="text-xs text-slate-500 mt-1">Ap√≥s imprimir e colher a assinatura, fotografe todas as p√°ginas assinadas.</p>
-                      </div>
-                      <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl cursor-pointer text-xs">
-                        <FileCheck className="h-4 w-4" />
-                        Adicionar Fotos do Formul√°rio
-                        <input
-                          type="file"
-                          accept="image/*,.heic,.heif"
-                          multiple
-                          disabled={isUploadingDevolution || isFinalizingDelivery}
-                          onChange={(e) => handleAddDeliveryPhotos(e, "form")}
-                          className="hidden"
-                        />
-                      </label>
-                      {deliveryFormPhotosDraft.length > 0 && (
-                        <div className="grid grid-cols-3 gap-2">
-                          {deliveryFormPhotosDraft.map((photo, index) => (
-                            <div key={`draft-form-${index}`} className="relative rounded-lg overflow-hidden aspect-square bg-slate-100 border">
-                              <img src={photo} alt={`Foto formul√°rio ${index + 1}`} className="w-full h-full object-cover" />
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveDeliveryDraftPhoto("form", index)}
-                                className="absolute top-1 right-1 p-1.5 bg-rose-600 text-white rounded-md"
-                                title="Remover antes de concluir"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2 border-t border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDevolutionModal(false);
-                        setSelectedIntakeForDevolution(null);
-                        setDeliveryInstrumentPhotosDraft([]);
-                        setDeliveryFormPhotosDraft([]);
-                      }}
-                      disabled={isFinalizingDelivery}
-                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleFinalizeDelivery}
-                      disabled={
-                        isUploadingDevolution ||
-                        isFinalizingDelivery ||
-                        deliveryInstrumentPhotosDraft.length === 0 ||
-                        deliveryFormPhotosDraft.length === 0
-                      }
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2"
-                    >
-                      {isFinalizingDelivery ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <CheckCircle className="h-4 w-4" />
-                      )}
-                      {isFinalizingDelivery ? "Finalizando..." : "Concluir Entrega e Bloquear"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: FOTOS DA ENTRADA DE MATERIAL */}
-      {showPhotosModal && selectedIntakeForPhotos && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-3xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 space-y-0 text-slate-900">
-            {/* Modal Header */}
-            <div className="bg-slate-900 text-white p-5 sm:p-6 flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-blue-600/20 rounded-xl border border-blue-500/30 text-blue-400">
-                  <Camera className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">
-                    Fotos da Entrada #{selectedIntakeForPhotos.numEntrada}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {clients.find(
-                      (c) => c.id === selectedIntakeForPhotos.clientId,
-                    )?.name || "Cliente"}{" "}
-                    ‚Ä¢ Data Entrada: {selectedIntakeForPhotos.dataEntrada}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPhotosModal(false);
-                  setSelectedIntakeForPhotos(null);
-                }}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Upload & Gallery Body */}
-            <div className="p-6 space-y-6">
-              {/* Upload Action Box - entradas finalizadas ficam somente leitura */}
-              {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
-              <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center space-y-3 hover:border-blue-500 transition-colors">
-                <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                  {isUploadingPhotos ? (
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                  ) : (
-                    <Upload className="h-6 w-6" />
-                  )}
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-800 text-sm">
-                    Carregar Fotos (Celular ou Computador)
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                    Ao carregar, as fotos da c√¢mera ou galeria s√£o automaticamente compactadas e otimizadas em alta resolu√ß√£o para salvamento r√°pido na base de dados.
-                  </p>
-                </div>
-
-                <label className="inline-flex items-center space-x-2 px-4 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-semibold text-xs rounded-xl transition-colors cursor-pointer shadow-sm">
-                  <Plus className="h-4 w-4" />
-                  <span>
-                    {isUploadingPhotos
-                      ? "Otimizando e Salvando..."
-                      : "Selecionar Fotos do Dispositivo"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*,.heic,.heif"
-                    multiple
-                    disabled={isUploadingPhotos}
-                    onChange={handleUploadPhotos}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-              )}
-
-              {(!canEditMaterialIntake || selectedIntakeForPhotos.deliveryFinalizedAt || selectedIntakeForPhotos.deliveryLocked) && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-800 font-semibold flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4" />
-                  {!canEditMaterialIntake
-                    ? "Seu perfil permite somente visualizar as fotos desta entrada."
-                    : "Entrada finalizada: fotos dispon√≠veis somente para visualiza√ß√£o."}
-                </div>
-              )}
-
-              {/* Photo Gallery Grid */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center space-x-2">
-                    <Image className="h-4 w-4 text-slate-400" />
-                    <span>
-                      Fotos Armazenadas (
-                      {selectedIntakeForPhotos.photos?.length || 0})
-                    </span>
-                  </h4>
-                </div>
-
-                {selectedIntakeForPhotos.photos &&
-                selectedIntakeForPhotos.photos.length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                    {selectedIntakeForPhotos.photos.map(
-                      (photo: string, index: number) => (
-                        <div
-                          key={index}
-                          className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square shadow-xs"
-                        >
-                          <img
-                            src={photo}
-                            alt={`Foto da Entrada ${index + 1}`}
-                            className="w-full h-full object-cover"
-                          />
-
-                          {/* Overlay Controls */}
-                          <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2 p-2">
-                            <button
-                              type="button"
-                              onClick={() => setFullscreenPhoto(photo)}
-                              className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-lg shadow-sm transition-transform hover:scale-105 cursor-pointer"
-                              title="Visualizar em tamanho cheio"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePhoto(index)}
-                                className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition-transform hover:scale-105 cursor-pointer"
-                                title="Excluir foto"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ),
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                    <Camera className="h-8 w-8 text-slate-400 mx-auto" />
-                    <p className="text-xs font-medium text-slate-600">
-                      Nenhuma foto salva para esta entrada de material.
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      Clique em "Selecionar Fotos do Dispositivo" acima para
-                      adicionar as fotos dos instrumentos/equipamentos.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPhotosModal(false);
-                  setSelectedIntakeForPhotos(null);
-                }}
-                className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: FOTO DO INSTRUMENTO (CADASTRO / CALIBRADO) */}
-      {instrumentSheetInstrument && (() => {
-        const instrument = instrumentSheetInstrument;
-        const historical = instrument.registrationSnapshot?.data as Record<string, any> | undefined;
-        const data = historical || (instrument as unknown as Record<string, any>);
-        const sheetClient = clients.find((client: any) => client.id === data.clientId) || clients.find((client: any) => client.id === instrument.clientId);
-        const materialHistory = reports
-          .filter((report: any) => report.instrumentId === instrument.id && report.isDeleted !== true && Array.isArray(report.materialsUsed) && report.materialsUsed.length > 0)
-          .sort((a: any, b: any) => String(b.date || '').localeCompare(String(a.date || '')));
-        const knownSheetKeys = new Set(INSTRUMENT_SHEET_FIELDS.map(({ key }) => key));
-        const additionalFields = Object.entries(data)
-          .filter(([key]) => !knownSheetKeys.has(key) && !['clientId', 'photoRegistration', 'photoRegistrationPath', 'registrationSnapshot'].includes(key))
-          .sort(([a], [b]) => a.localeCompare(b, 'pt-BR'));
-        const additionalFieldLabel = (key: string) => key
-          .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-          .replace(/[_-]+/g, ' ')
-          .replace(/\b\w/g, (letter) => letter.toUpperCase());
-        const renderValue = (key: string, value: any) => {
-          if (value === undefined || value === null || value === '') return '‚Äî';
-          if (key.toLowerCase().includes('photo') || key.toLowerCase().includes('image')) return 'Imagem / arquivo registrado';
-          if (Array.isArray(value)) return value.length ? value.map((item) => typeof item === 'object' ? JSON.stringify(item) : String(item)).join(', ') : '‚Äî';
-          if (typeof value === 'object') return JSON.stringify(value, null, 2);
-          if (key.toLowerCase().includes('data') || key.toLowerCase().includes('date')) return formatDateBR(String(value));
-          if (typeof value === 'boolean') return value ? 'Sim' : 'N√£o';
-          return String(value);
-        };
-        return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/70 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden border border-slate-200">
-              <div className="p-5 border-b border-slate-200 flex items-start justify-between gap-4 bg-slate-50">
-                <div>
-                  <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><ClipboardCheck className="h-5 w-5 text-blue-600" /> Ficha do Instrumento</h3>
-                  <p className="text-xs text-slate-500 mt-1">Consulta do cadastro de entrada e hist√≥rico de materiais utilizados em calibra√ß√£o.</p>
-                </div>
-                <button onClick={() => setInstrumentSheetInstrument(null)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500"><X className="h-5 w-5" /></button>
-              </div>
-              <div className="p-5 overflow-y-auto max-h-[calc(92vh-82px)] space-y-5">
-                <div className={`p-3 rounded-xl border text-xs ${historical ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                  {historical
-                    ? `Registro hist√≥rico preservado desde ${formatDateBR(instrument.registrationSnapshot?.capturedAt?.slice(0, 10))}. Altera√ß√µes posteriores no cadastro n√£o modificam esta ficha.`
-                    : 'Instrumento legado: n√£o havia snapshot hist√≥rico no momento do cadastro. Os dados abaixo foram reconstru√≠dos a partir do cadastro atual e est√£o identificados como tal.'}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><div className="text-[10px] uppercase font-bold text-slate-500">Cliente / Propriet√°rio</div><div className="text-sm font-bold text-slate-900 mt-1">{sheetClient?.name || '‚Äî'}</div></div>
-                  {INSTRUMENT_SHEET_FIELDS.map(({ key, label }) => <div key={key} className={`bg-slate-50 border border-slate-200 rounded-lg p-3 ${key === 'observacoes' || key === 'condicaoDeEntrada' ? 'sm:col-span-2 lg:col-span-3' : ''}`}><div className="text-[10px] uppercase font-bold text-slate-500">{label}</div><div className="text-sm font-semibold text-slate-900 mt-1 break-words whitespace-pre-wrap">{renderValue(key, data[key] ?? (key === 'certificateNumber' ? data.coma : undefined))}</div></div>)}
-                </div>
-
-                {additionalFields.length > 0 && (
-                  <div className="border-t border-slate-200 pt-5">
-                    <h4 className="font-extrabold text-slate-900 flex items-center gap-2"><FileText className="h-4 w-4 text-blue-600" /> Dados adicionais do registro</h4>
-                    <p className="text-xs text-slate-500 mt-1">Campos existentes no registro hist√≥rico que n√£o fazem parte da grade principal tamb√©m s√£o exibidos, garantindo consulta integral do snapshot.</p>
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {additionalFields.map(([key, value]) => (
-                        <div key={key} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                          <div className="text-[10px] uppercase font-bold text-slate-500">{additionalFieldLabel(key)}</div>
-                          <div className="text-sm font-semibold text-slate-900 mt-1 break-words whitespace-pre-wrap max-h-48 overflow-auto">{renderValue(key, value)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {(data.photoRegistration || data.photoRegistrationPath) && (
-                  <div className="border-t border-slate-200 pt-5">
-                    <h4 className="font-extrabold text-slate-900 flex items-center gap-2"><Camera className="h-4 w-4 text-blue-600" /> Foto registrada na entrada</h4>
-                    {data.photoRegistration ? (
-                      <img src={String(data.photoRegistration)} alt="Instrumento no registro" className="mt-3 max-h-72 rounded-xl border border-slate-200 object-contain bg-slate-50" />
-                    ) : (
-                      <div className="mt-2 text-xs text-slate-500">A imagem possui refer√™ncia segura no Storage e permanece vinculada ao registro hist√≥rico.</div>
-                    )}
-                  </div>
-                )}
-
-                <div className="border-t border-slate-200 pt-5">
-                  <h4 className="font-extrabold text-slate-900 flex items-center gap-2"><Package className="h-4 w-4 text-blue-600" /> Material utilizado na calibra√ß√£o</h4>
-                  <p className="text-xs text-slate-500 mt-1">Hist√≥rico por calibra√ß√£o. Uma calibra√ß√£o sem consumo informado permanece registrada sem itens.</p>
-                  {materialHistory.length === 0 ? (
-                    <div className="mt-3 p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-500">Nenhum material de consumo foi registrado nas calibra√ß√µes deste instrumento.</div>
-                  ) : (
-                    <div className="mt-3 space-y-2">{materialHistory.map((report: any) => <div key={report.id} className="p-3 rounded-lg border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4"><div className="sm:w-44 shrink-0"><div className="font-bold text-slate-800">{formatDateBR(report.date)}</div><div className="text-[10px] text-slate-500">{report.certNumber || 'Calibra√ß√£o'}</div></div><div className="flex flex-wrap gap-1.5">{report.materialsUsed.map((item: string) => <span key={item} className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">{item}</span>)}</div></div>)}</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {photoModalInstrument && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
-            {/* Modal Header */}
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-blue-600/20 rounded-xl border border-blue-500/30 text-blue-400">
-                  <Camera className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <span>
-                      {photoModalType === "registration"
-                        ? "Foto P√≥s-Cadastro do Instrumento"
-                        : "Foto Ap√≥s Laborat√≥rio"}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                        (
-                          photoModalType === "registration"
-                            ? photoModalInstrument.photoRegistration
-                            : photoModalInstrument.photoCalibrated
-                        )
-                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                          : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                      }`}
-                    >
-                      {(
-                        photoModalType === "registration"
-                          ? photoModalInstrument.photoRegistration
-                          : photoModalInstrument.photoCalibrated
-                      )
-                        ? "‚úì Anexada"
-                        : "‚ö†Ô∏è Pendente"}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Certificado:{" "}
-                    <span className="font-mono text-slate-200 font-bold">
-                      {photoModalInstrument.certificateNumber ||
-                        photoModalInstrument.coma}
-                    </span>{" "}
-                    ‚Ä¢ TAG:{" "}
-                    <span className="font-mono text-slate-200">
-                      {photoModalInstrument.tag || "N/A"}
-                    </span>
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPhotoModalInstrument(null)}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 space-y-5">
-              <div className="text-xs text-slate-600 bg-slate-50 p-3.5 rounded-xl border border-slate-200 leading-relaxed">
-                {photoModalType === "registration" ? (
-                  <p>
-                    <strong className="text-slate-800">Instru√ß√£o:</strong> Anexe
-                    a foto do equipamento logo ap√≥s o seu cadastro no sistema.{" "}
-                    <span className="text-amber-800 font-semibold">
-                      Esta foto √© obrigat√≥ria para liberar a calibra√ß√£o na
-                      bancada.
-                    </span>
-                  </p>
-                ) : (
-                  <p>
-                    <strong className="text-slate-800">Instru√ß√£o:</strong> Anexe
-                    a foto do instrumento ap√≥s a finaliza√ß√£o no laborat√≥rio.{" "}
-                    <span className="text-amber-800 font-semibold">
-                      Esta foto √© obrigat√≥ria para abrir e emitir o certificado
-                      ou imprimir o RNC.
-                    </span>
-                  </p>
-                )}
-              </div>
-
-              {(() => {
-                const currentPhoto =
-                  photoModalType === "registration"
-                    ? photoModalInstrument.photoRegistration
-                    : photoModalInstrument.photoCalibrated;
-                const isConcluded =
-                  photoModalInstrument.status === "Calibrado" ||
-                  photoModalInstrument.status ===
-                    "Aguardando Emiss√£o de Certificado" ||
-                  photoModalInstrument.status === "Dispon√≠vel para Retirada" ||
-                  photoModalInstrument.status === "Entregue" ||
-                  photoModalInstrument.status === "N√£o Conforme";
-                const isRegPhoto = photoModalType === "registration";
-
-                // Registration: cannot edit if calibration completed and non-admin
-                // Laboratory: once inserted, can only be changed/deleted by admin
-                const isDeliveredLocked = photoModalInstrument.status === "Entregue";
-                const cannotModify = isDeliveredLocked || (isRegPhoto
-                  ? isConcluded && !isUserAdmin
-                  : !!currentPhoto && !isUserAdmin);
-
-                if (currentPhoto) {
-                  return (
-                    <div className="space-y-4">
-                      <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 max-h-80 flex items-center justify-center shadow-inner group p-2">
-                        <img
-                          src={currentPhoto}
-                          alt={
-                            photoModalType === "registration"
-                              ? "Foto do Cadastro"
-                              : "Foto Ap√≥s Laborat√≥rio"
-                          }
-                          className="max-h-72 w-auto object-contain rounded-lg"
-                        />
-                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-3">
-                          <button
-                            type="button"
-                            onClick={() => setFullscreenPhoto(currentPhoto)}
-                            className="px-3 py-2 bg-white text-slate-800 rounded-xl text-xs font-bold shadow-md hover:bg-slate-100 transition-transform hover:scale-105 flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Eye className="h-4 w-4 text-blue-600" />
-                            <span>Ver em Tamanho Cheio</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {cannotModify ? (
-                        <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-xs font-medium space-y-1">
-                          <div className="flex items-center gap-2 font-bold text-amber-900">
-                            <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
-                            <span>
-                              {isDeliveredLocked
-                                ? "Registro Bloqueado ap√≥s Entrega"
-                                : "Altera√ß√£o Restrita (Somente Administrador)"}
-                            </span>
-                          </div>
-                          {isDeliveredLocked ? (
-                            <p>
-                              A entrega desta entrada foi conclu√≠da. Este registro
-                              fotogr√°fico √© imut√°vel e permanece dispon√≠vel apenas
-                              para visualiza√ß√£o e rastreabilidade.
-                            </p>
-                          ) : isRegPhoto ? (
-                            <p>
-                              Como a calibra√ß√£o j√° est√° conclu√≠da e o
-                              certificado foi emitido, a foto de cadastro n√£o
-                              pode ser alterada ou exclu√≠da por t√©cnicos para
-                              garantir a rastreabilidade.
-                            </p>
-                          ) : (
-                            <p>
-                              Como a foto ap√≥s laborat√≥rio j√° foi inserida, ela
-                              s√≥ pode ser alterada ou exclu√≠da por um
-                              administrador para garantir a integridade dos
-                              dados.
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between pt-2">
-                          <label className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-300 transition-colors cursor-pointer">
-                            <Upload className="h-4 w-4 text-slate-600" />
-                            <span>
-                              {isUploadingInstPhoto
-                                ? "Substituindo..."
-                                : "Substituir Foto"}
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/*,.heic,.heif"
-                              disabled={isUploadingInstPhoto}
-                              onChange={handleUploadInstrumentPhoto}
-                              className="hidden"
-                            />
-                          </label>
-
-                          <button
-                            type="button"
-                            onClick={handleDeleteInstrumentPhoto}
-                            disabled={isUploadingInstPhoto}
-                            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Trash2 className="h-4 w-4 text-rose-600" />
-                            <span>Excluir Foto</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center space-y-4 hover:border-blue-500 transition-colors bg-slate-50/50">
-                    <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shadow-xs">
-                      {isUploadingInstPhoto ? (
-                        <RefreshCw className="h-7 w-7 animate-spin" />
-                      ) : (
-                        <Camera className="h-7 w-7" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm">
-                        {photoModalType === "registration"
-                          ? "Nenhuma Foto do Cadastro Anexada"
-                          : "Nenhuma Foto Ap√≥s Laborat√≥rio Anexada"}
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                        {cannotModify
-                          ? "A calibra√ß√£o est√° conclu√≠da e nenhuma foto de cadastro foi anexada."
-                          : "Clique abaixo para selecionar a foto no seu computador. A imagem ser√° comprimida automaticamente para carregamento r√°pido."}
-                      </p>
-                    </div>
-
-                    {!cannotModify && (
-                      <label className="inline-flex items-center space-x-2 px-5 py-2.5 bg-royal-blue hover:bg-blue-700 text-white font-semibold text-xs rounded-xl transition-all shadow-md cursor-pointer">
-                        <Plus className="h-4 w-4" />
-                        <span>
-                          {isUploadingInstPhoto
-                            ? "Otimizando e Salvando..."
-                            : "Selecionar Foto (Celular ou Computador)"}
-                        </span>
-                        <input
-                          type="file"
-                          accept="image/*,.heic,.heif"
-                          disabled={isUploadingInstPhoto}
-                          onChange={handleUploadInstrumentPhoto}
-                          className="hidden"
-                        />
-                      </label>
-                    )}
-
-                    {cannotModify && (
-                      <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-xs font-medium max-w-md mx-auto">
-                        <div className="flex items-center justify-center gap-1.5 font-bold text-amber-900 mb-1">
-                          <ShieldAlert className="h-4.5 w-4.5 text-amber-600 shrink-0" />
-                          <span>Adi√ß√£o Bloqueada</span>
-                        </div>
-                        <p>
-                          A calibra√ß√£o foi conclu√≠da, portanto novos registros
-                          fotogr√°ficos de cadastro n√£o podem ser inseridos.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-slate-50 px-6 py-3.5 border-t border-slate-200 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setPhotoModalInstrument(null)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL / OVERLAY: Editar Instrumento */}
-      {showEditInstrumentModal && editingInstrumentData && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-3xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center space-x-3">
-                <Edit className="h-5 w-5 text-royal-blue" />
-                <h3 className="font-display font-extrabold text-lg text-white">
-                  Editar Instrumento (
-                  {editingInstrumentData.tag ||
-                    editingInstrumentData.certificateNumber}
-                  )
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEditInstrumentModal(false);
-                  setEditingInstrumentData(null);
-                }}
-                className="text-slate-400 hover:text-white p-1 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const condList = Array.isArray(
-                    editingInstrumentData.condicaoDeEntrada,
-                  )
-                    ? editingInstrumentData.condicaoDeEntrada
-                    : editingInstrumentData.condicaoDeEntrada
-                      ? [editingInstrumentData.condicaoDeEntrada]
-                      : [];
-
-                  const detectedTypeOnEdit = detectInstrumentType({
-                    ...editingInstrumentData,
-                    typeSpec: editingInstrumentData.typeSpec,
-                  });
-
-                  await updateInstrumentDoc(editingInstrumentData.id, {
-                    tag: editingInstrumentData.tag || "",
-                    certificateNumber:
-                      editingInstrumentData.certificateNumber || "",
-                    coma: editingInstrumentData.certificateNumber || "",
-                    description: editingInstrumentData.description || "",
-                    brand: editingInstrumentData.brand || "",
-                    model: editingInstrumentData.model || "",
-                    serialNumber: editingInstrumentData.serialNumber || "",
-                    clientId: editingInstrumentData.clientId || "",
-                    category: editingInstrumentData.category || "pressure",
-                    typeSpec: detectedTypeOnEdit,
-                    rangeMin: Number(String(editingInstrumentData.rangeMin).replace(",", ".")) || 0,
-                    rangeMax: Number(String(editingInstrumentData.rangeMax).replace(",", ".")) || 0,
-                    unit: editingInstrumentData.unit || "bar",
-                    unitNegative:
-                      editingInstrumentData.unitNegative ||
-                      (detectedTypeOnEdit === "manovacuometro" ||
-                      (editingInstrumentData.description || "").toLowerCase().includes("manovacu") ||
-                      (editingInstrumentData.description || "").toLowerCase().includes("mano-vacu")
-                        ? "mmHg"
-                        : ""),
-                    rangeMin2:
-                      editingInstrumentData.rangeMin2 !== undefined &&
-                      editingInstrumentData.rangeMin2 !== "" &&
-                      editingInstrumentData.rangeMin2 !== null &&
-                      !isNaN(Number(String(editingInstrumentData.rangeMin2).replace(",", ".")))
-                        ? Number(String(editingInstrumentData.rangeMin2).replace(",", "."))
-                        : undefined,
-                    rangeMax2:
-                      editingInstrumentData.rangeMax2 !== undefined &&
-                      editingInstrumentData.rangeMax2 !== "" &&
-                      editingInstrumentData.rangeMax2 !== null &&
-                      !isNaN(Number(String(editingInstrumentData.rangeMax2).replace(",", ".")))
-                        ? Number(String(editingInstrumentData.rangeMax2).replace(",", "."))
-                        : undefined,
-                    unit2: editingInstrumentData.unit2 || "",
-                    accuracyClass: editingInstrumentData.accuracyClass || "A1",
-                    mpe: Number(editingInstrumentData.mpe) || 0,
-                    status:
-                      editingInstrumentData.status || "Aguardando Calibra√ß√£o",
-                    material: editingInstrumentData.material || "",
-                    conexao: editingInstrumentData.conexao || "",
-                    diametro: editingInstrumentData.diametro || "",
-                    numeroDaEntrada:
-                      editingInstrumentData.numeroDaEntrada || "",
-                    dataEntrada:
-                      editingInstrumentData.dataEntrada ||
-                      editingInstrumentData.dataDaEntrada ||
-                      "",
-                    condicaoDeEntrada: condList,
-                    observacoes: editingInstrumentData.observacoes || "",
-                    materialDeRetorno:
-                      editingInstrumentData.materialDeRetorno || "N√£o",
-                    dataDeRetorno: editingInstrumentData.dataDeRetorno || "",
-                  });
-                  setShowEditInstrumentModal(false);
-                  setEditingInstrumentData(null);
-                } catch (err) {
-                  console.error("Erro ao atualizar instrumento:", err);
-                }
-              }}
-              className="p-6 space-y-6 max-h-[78vh] overflow-y-auto"
-            >
-              {/* Se√ß√£o 1: Identifica√ß√£o & Cliente */}
-              <div>
-                <h4 className="font-display font-bold text-xs uppercase text-slate-500 tracking-wider mb-3 pb-1 border-b border-slate-100 flex items-center space-x-1.5">
-                  <Tag className="h-3.5 w-3.5 text-royal-blue" />
-                  <span>Identifica√ß√£o do Instrumento</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      N¬∫ do Certificado *
-                    </label>
-                    <input
-                      type="text"
-                      value={editingInstrumentData.certificateNumber || ""}
-                      readOnly
-                      disabled
-                      className="w-full bg-slate-100 border border-slate-300 rounded px-3 py-2 text-slate-500 font-mono font-bold cursor-not-allowed"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Tag do Cliente
-                    </label>
-                    <input
-                      type="text"
-                      value={editingInstrumentData.tag || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          tag: e.target.value.toUpperCase(),
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Descri√ß√£o do Equipamento *
-                    </label>
-                    <select
-                      value={editingInstrumentData.description || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          description: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                      required
-                    >
-                      <option value="">Selecione...</option>
-                      {(dropdownOptions.descricao || []).map((opt, i) => (
-                        <option key={i} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                      {editingInstrumentData.description &&
-                        !(dropdownOptions.descricao || []).includes(
-                          editingInstrumentData.description,
-                        ) && (
-                          <option value={editingInstrumentData.description}>
-                            {editingInstrumentData.description}
-                          </option>
-                        )}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Cliente / Propriet√°rio *
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={(() => {
-                        const cid = editingInstrumentData.clientId;
-                        if (!cid) return "";
-                        const selectedClient = clients.find(
-                          (c) => c.id === cid || c.name === cid,
-                        );
-                        return selectedClient
-                          ? selectedClient.name ||
-                              (selectedClient as any).razaoSocial ||
-                              selectedClient.id
-                          : cid;
-                      })()}
-                      placeholder="Preenchido automaticamente pela Entrada"
-                      className="w-full bg-slate-100 border border-slate-300 rounded px-3 py-2 text-slate-700 font-semibold cursor-not-allowed"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Categoria
-                    </label>
-                    <select
-                      value={editingInstrumentData.category || "pressure"}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          category: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue font-semibold"
-                    >
-                      <option value="pressure">Press√£o</option>
-                      <option value="temperature">Temperatura</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Status
-                    </label>
-                    <select
-                      value={
-                        editingInstrumentData.status || "Aguardando Calibra√ß√£o"
-                      }
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          status: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue font-bold text-royal-blue"
-                    >
-                      <option value="Aguardando Calibra√ß√£o">
-                        Aguardando Calibra√ß√£o
-                      </option>
-                      <option value="Em Calibra√ß√£o">Em Calibra√ß√£o</option>
-                      <option value="Calibrado">Calibrado</option>
-                      <option value="Aguardando Emiss√£o de Certificado">
-                        Aguardando Emiss√£o de Certificado
-                      </option>
-                      <option value="Dispon√≠vel para Retirada">
-                        Dispon√≠vel para Retirada
-                      </option>
-                      <option value="N√£o Conforme">N√£o Conforme</option>
-                      <option value="Entregue">Entregue</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Se√ß√£o 2: Especifica√ß√µes T√©cnicas */}
-              <div>
-                <h4 className="font-display font-bold text-xs uppercase text-slate-500 tracking-wider mb-3 pb-1 border-b border-slate-100 flex items-center space-x-1.5">
-                  <Sliders className="h-3.5 w-3.5 text-royal-blue" />
-                  <span>Especifica√ß√µes T√©cnicas</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Marca
-                    </label>
-                    <select
-                      value={editingInstrumentData.brand || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          brand: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    >
-                      <option value="">Selecione...</option>
-                      {(dropdownOptions.fabricante || []).map((opt, i) => (
-                        <option key={i} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                      {editingInstrumentData.brand &&
-                        !(dropdownOptions.fabricante || []).includes(
-                          editingInstrumentData.brand,
-                        ) && (
-                          <option value={editingInstrumentData.brand}>
-                            {editingInstrumentData.brand}
-                          </option>
-                        )}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Modelo
-                    </label>
-                    <input
-                      type="text"
-                      value={editingInstrumentData.model || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          model: e.target.value.toUpperCase(),
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                      placeholder="Ex: 1009"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      N√∫mero de S√©rie
-                    </label>
-                    <input
-                      type="text"
-                      value={editingInstrumentData.serialNumber || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          serialNumber: e.target.value.toUpperCase(),
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                      placeholder="Ex: SN-123456"
-                    />
-                  </div>
-
-                  {/* Range 1 */}
-                  <div className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="col-span-2">
-                        <label className="block text-slate-700 font-semibold mb-1">
-                          Faixa de Medi√ß√£o (Min / Max)
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="text"
-                            placeholder="Min"
-                            value={editingInstrumentData.rangeMin ?? ""}
-                            onChange={(e) =>
-                              setEditingInstrumentData({
-                                ...editingInstrumentData,
-                                rangeMin: e.target.value,
-                              })
-                            }
-                            className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 font-mono text-center focus:ring-1 focus:ring-royal-blue"
-                          />
-                          <span className="text-slate-400 font-bold text-base">
-                            /
-                          </span>
-                          <input
-                            type="text"
-                            placeholder="Max"
-                            value={editingInstrumentData.rangeMax ?? ""}
-                            onChange={(e) =>
-                              setEditingInstrumentData({
-                                ...editingInstrumentData,
-                                rangeMax: e.target.value,
-                              })
-                            }
-                            className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 font-mono text-center focus:ring-1 focus:ring-royal-blue"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-slate-700 font-semibold mb-1">
-                          Unidade
-                        </label>
-                        <select
-                          value={editingInstrumentData.unit || ""}
-                          onChange={(e) =>
-                            setEditingInstrumentData({
-                              ...editingInstrumentData,
-                              unit: e.target.value,
-                            })
-                          }
-                          className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 font-mono focus:ring-1 focus:ring-royal-blue"
-                        >
-                          <option value="">Selecione...</option>
-                          {(dropdownOptions.unidade || []).map((opt, i) => (
-                            <option key={i} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {((editingInstrumentData.description || "").toLowerCase().includes("manovacu") ||
-                      (editingInstrumentData.description || "").toLowerCase().includes("mano-vacu") ||
-                      (editingInstrumentData.description || "").toLowerCase().includes("compound") ||
-                      editingInstrumentData.typeSpec === "manovacuometro") && (
-                      <div className="bg-amber-50 border border-amber-300 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in shadow-xs">
-                        <div>
-                          <label className="block text-amber-950 font-bold mb-0.5 text-xs flex items-center gap-1.5">
-                            <Sliders className="h-4 w-4 text-amber-600" />
-                            <span>Unidade do Valor Negativo (Manovacu√¥metro) *</span>
-                          </label>
-                          <p className="text-[11px] text-amber-800">
-                            Equipamento manovacu√¥metro. Especifique a unidade de medida para a escala negativa (v√°cuo):
-                          </p>
-                        </div>
-                        <div className="w-full sm:w-48 shrink-0">
-                          <select
-                            value={editingInstrumentData.unitNegative || "mmHg"}
-                            onChange={(e) =>
-                              setEditingInstrumentData({
-                                ...editingInstrumentData,
-                                unitNegative: e.target.value,
-                              })
-                            }
-                            className="w-full bg-white border border-amber-400 rounded-md px-3 py-2 text-slate-900 font-bold focus:ring-2 focus:ring-amber-500 text-xs shadow-xs"
-                          >
-                            <option value="">Selecione a unidade...</option>
-                            {Array.from(
-                              new Set([
-                                "mmHg",
-                                "inHg",
-                                "bar",
-                                "psi",
-                                "kPa",
-                                "mbar",
-                                "kgf/cm¬≤",
-                                ...(dropdownOptions.unidade || []),
-                              ]),
-                            ).map((opt, i) => (
-                              <option key={i} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Range 2 */}
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="col-span-2">
-                        <label className="block text-slate-700 font-semibold mb-1">
-                          Faixa 2 (Opcional)
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="text"
-                            placeholder="Min"
-                            value={editingInstrumentData.rangeMin2 ?? ""}
-                            onChange={(e) =>
-                              setEditingInstrumentData({
-                                ...editingInstrumentData,
-                                rangeMin2: e.target.value,
-                              })
-                            }
-                            className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 font-mono text-center focus:ring-1 focus:ring-royal-blue"
-                          />
-                          <span className="text-slate-400 font-bold text-base">
-                            /
-                          </span>
-                          <input
-                            type="text"
-                            placeholder="Max"
-                            value={editingInstrumentData.rangeMax2 ?? ""}
-                            onChange={(e) =>
-                              setEditingInstrumentData({
-                                ...editingInstrumentData,
-                                rangeMax2: e.target.value,
-                              })
-                            }
-                            className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 font-mono text-center focus:ring-1 focus:ring-royal-blue"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-slate-700 font-semibold mb-1">
-                          Unidade 2
-                        </label>
-                        <select
-                          value={editingInstrumentData.unit2 || ""}
-                          onChange={(e) =>
-                            setEditingInstrumentData({
-                              ...editingInstrumentData,
-                              unit2: e.target.value,
-                            })
-                          }
-                          className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 font-mono focus:ring-1 focus:ring-royal-blue"
-                        >
-                          <option value="">Selecione...</option>
-                          {(dropdownOptions.unidade || []).map((opt, i) => (
-                            <option key={i} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Material
-                    </label>
-                    <select
-                      value={editingInstrumentData.material || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          material: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    >
-                      <option value="">Selecione...</option>
-                      {(dropdownOptions.material || []).map((opt, i) => (
-                        <option key={i} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                      {editingInstrumentData.material &&
-                        !(dropdownOptions.material || []).includes(
-                          editingInstrumentData.material,
-                        ) && (
-                          <option value={editingInstrumentData.material}>
-                            {editingInstrumentData.material}
-                          </option>
-                        )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Conex√£o
-                    </label>
-                    <select
-                      value={editingInstrumentData.conexao || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          conexao: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    >
-                      <option value="">Selecione...</option>
-                      {(dropdownOptions.conexao || []).map((opt, i) => (
-                        <option key={i} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                      {editingInstrumentData.conexao &&
-                        !(dropdownOptions.conexao || []).includes(
-                          editingInstrumentData.conexao,
-                        ) && (
-                          <option value={editingInstrumentData.conexao}>
-                            {editingInstrumentData.conexao}
-                          </option>
-                        )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Di√¢metro
-                    </label>
-                    <select
-                      value={editingInstrumentData.diametro || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          diametro: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    >
-                      <option value="">Selecione...</option>
-                      {(dropdownOptions.diametro || []).map((opt, i) => (
-                        <option key={i} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                      {editingInstrumentData.diametro &&
-                        !(dropdownOptions.diametro || []).includes(
-                          editingInstrumentData.diametro,
-                        ) && (
-                          <option value={editingInstrumentData.diametro}>
-                            {editingInstrumentData.diametro}
-                          </option>
-                        )}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Se√ß√£o 3: Registro de Entrada & Condi√ß√µes */}
-              <div>
-                <h4 className="font-display font-bold text-xs uppercase text-slate-500 tracking-wider mb-3 pb-1 border-b border-slate-100 flex items-center space-x-1.5">
-                  <Database className="h-3.5 w-3.5 text-royal-blue" />
-                  <span>Registro de Entrada & Condi√ß√£o</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      N¬∫ da Entrada
-                    </label>
-                    <select
-                      value={editingInstrumentData.numeroDaEntrada || ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const intake = savedIntakes.find(
-                          (s) =>
-                            (s.numEntrada || "").trim().toLowerCase() ===
-                            val.trim().toLowerCase(),
-                        );
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          numeroDaEntrada: val,
-                          dataEntrada: intake
-                            ? intake.dataEntrada ||
-                              editingInstrumentData.dataEntrada
-                            : editingInstrumentData.dataEntrada,
-                          clientId: intake
-                            ? intake.clientId || editingInstrumentData.clientId
-                            : editingInstrumentData.clientId,
-                        });
-                      }}
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    >
-                      <option value="">Selecione...</option>
-                      {savedIntakes.map((intake) => (
-                        <option key={intake.id} value={intake.numEntrada}>
-                          {intake.numEntrada} ({intake.dataEntrada || "S/ Data"}
-                          )
-                        </option>
-                      ))}
-                      {editingInstrumentData.numeroDaEntrada &&
-                        !savedIntakes.some(
-                          (s) =>
-                            s.numEntrada ===
-                            editingInstrumentData.numeroDaEntrada,
-                        ) && (
-                          <option value={editingInstrumentData.numeroDaEntrada}>
-                            {editingInstrumentData.numeroDaEntrada}
-                          </option>
-                        )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Data da Entrada
-                    </label>
-                    <input
-                      type="text"
-                      value={
-                        editingInstrumentData.dataEntrada ||
-                        editingInstrumentData.dataDaEntrada ||
-                        ""
-                      }
-                      onChange={(e) => {
-                        let val = e.target.value.replace(/\D/g, "");
-                        if (val.length > 8) val = val.substring(0, 8);
-                        if (val.length > 4)
-                          val =
-                            val.substring(0, 2) +
-                            "/" +
-                            val.substring(2, 4) +
-                            "/" +
-                            val.substring(4);
-                        else if (val.length > 2)
-                          val = val.substring(0, 2) + "/" + val.substring(2);
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          dataEntrada: val,
-                          dataDaEntrada: val,
-                        });
-                      }}
-                      placeholder="DD/MM/AAAA"
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    />
-                  </div>
-
-                  <div className="col-span-full relative">
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Condi√ß√£o de Entrada
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setIsEditCondicaoDropdownOpen(
-                          !isEditCondicaoDropdownOpen,
-                        )
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue text-left flex items-center justify-between min-h-[38px] cursor-pointer"
-                    >
-                      <span className="text-xs truncate">
-                        {Array.isArray(
-                          editingInstrumentData.condicaoDeEntrada,
-                        ) && editingInstrumentData.condicaoDeEntrada.length > 0
-                          ? editingInstrumentData.condicaoDeEntrada.join(", ")
-                          : "Selecione a(s) condi√ß√£o(√µes)..."}
-                      </span>
-                      <ChevronDown
-                        className={`h-4 w-4 text-slate-500 transition-transform ${isEditCondicaoDropdownOpen ? "rotate-180" : ""}`}
-                      />
-                    </button>
-
-                    {isEditCondicaoDropdownOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setIsEditCondicaoDropdownOpen(false)}
-                        />
-                        <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 p-2 max-h-56 overflow-y-auto space-y-1">
-                          {(dropdownOptions.condicaoDeEntrada || []).map(
-                            (opt, i) => {
-                              const currentConds = Array.isArray(
-                                editingInstrumentData.condicaoDeEntrada,
-                              )
-                                ? editingInstrumentData.condicaoDeEntrada
-                                : [];
-                              const isSelected = currentConds.includes(opt);
-                              return (
-                                <label
-                                  key={i}
-                                  className={`flex items-center space-x-2.5 p-2 rounded-lg text-xs cursor-pointer select-none transition-colors ${
-                                    isSelected
-                                      ? "bg-blue-50 text-blue-900 font-bold"
-                                      : "hover:bg-slate-50 text-slate-700"
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setEditingInstrumentData({
-                                          ...editingInstrumentData,
-                                          condicaoDeEntrada: [
-                                            ...currentConds,
-                                            opt,
-                                          ],
-                                        });
-                                      } else {
-                                        setEditingInstrumentData({
-                                          ...editingInstrumentData,
-                                          condicaoDeEntrada:
-                                            currentConds.filter(
-                                              (item: string) => item !== opt,
-                                            ),
-                                        });
-                                      }
-                                    }}
-                                    className="rounded border-slate-300 text-royal-blue focus:ring-royal-blue h-4 w-4"
-                                  />
-                                  <span>{opt}</span>
-                                </label>
-                              );
-                            },
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Se√ß√£o 4: Retorno & Observa√ß√µes */}
-              <div>
-                <h4 className="font-display font-bold text-xs uppercase text-slate-500 tracking-wider mb-3 pb-1 border-b border-slate-100 flex items-center space-x-1.5">
-                  <ClipboardCheck className="h-3.5 w-3.5 text-royal-blue" />
-                  <span>Retorno de Material & Observa√ß√µes</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Material de Retorno
-                    </label>
-                    <select
-                      value={editingInstrumentData.materialDeRetorno || "N√£o"}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          materialDeRetorno: e.target.value,
-                        })
-                      }
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    >
-                      <option value="N√£o">N√£o</option>
-                      <option value="Sim">Sim</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Data de Retorno
-                    </label>
-                    <input
-                      type="text"
-                      value={editingInstrumentData.dataDeRetorno || ""}
-                      onChange={(e) => {
-                        let val = e.target.value.replace(/\D/g, "");
-                        if (val.length > 8) val = val.substring(0, 8);
-                        if (val.length > 4)
-                          val =
-                            val.substring(0, 2) +
-                            "/" +
-                            val.substring(2, 4) +
-                            "/" +
-                            val.substring(4);
-                        else if (val.length > 2)
-                          val = val.substring(0, 2) + "/" + val.substring(2);
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          dataDeRetorno: val,
-                        });
-                      }}
-                      placeholder="DD/MM/AAAA"
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue"
-                    />
-                  </div>
-
-                  <div className="col-span-full">
-                    <label className="block text-slate-700 font-semibold mb-1">
-                      Observa√ß√µes
-                    </label>
-                    <textarea
-                      value={editingInstrumentData.observacoes || ""}
-                      onChange={(e) =>
-                        setEditingInstrumentData({
-                          ...editingInstrumentData,
-                          observacoes: e.target.value,
-                        })
-                      }
-                      placeholder="Ex: Riscos na carca√ßa, visor trincado..."
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue h-20 resize-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowEditInstrumentModal(false);
-                    setEditingInstrumentData(null);
-                  }}
-                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 font-semibold text-xs cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-royal-blue hover:bg-blue-600 text-white rounded-lg font-semibold text-xs shadow-sm flex items-center space-x-1.5 cursor-pointer"
-                >
-                  <Save className="h-4 w-4" />
-                  <span>Salvar Altera√ß√µes</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: VISUALIZADOR DE CONTRA-CHEQUE (HOLERITE) */}
-      {showPayslipModal && selectedPayslip && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full border border-slate-200 overflow-hidden flex flex-col my-8">
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center print:hidden">
-              <div className="flex items-center space-x-2">
-                <FileText className="h-5 w-5 text-royal-blue" />
-                <span className="font-bold text-slate-800 text-sm">
-                  Demonstrativo de Pagamento ({selectedPayslip.month})
-                </span>
-              </div>
-              <div className="flex space-x-2">
-                {(selectedPayslip.pdfStoragePath || selectedPayslip.pdfBase64) ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const name = selectedPayslip.pdfName || `contra_cheque_${selectedPayslip.month.replace("/", "_")}.pdf`;
-                      if (selectedPayslip.pdfStoragePath) {
-                        void downloadCorporateFile(selectedPayslip.pdfStoragePath, name);
-                        return;
-                      }
-                      const link = document.createElement("a");
-                      link.href = pdfBlobUrl || selectedPayslip.pdfBase64 || "";
-                      link.download = name;
-                      link.click();
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors flex items-center space-x-1.5 shadow-sm"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>Baixar PDF</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors flex items-center space-x-1 shadow-sm"
-                  >
-                    <Printer className="h-4 w-4" />
-                    <span>Imprimir / PDF</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPayslipModal(false);
-                    setSelectedPayslip(null);
-                    if (pdfBlobUrl) {
-                      URL.revokeObjectURL(pdfBlobUrl);
-                      setPdfBlobUrl("");
-                    }
-                  }}
-                  className="text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 bg-slate-100 overflow-y-auto max-h-[85vh] print:p-0 print:max-h-full">
-              {(selectedPayslip.pdfStoragePath || selectedPayslip.pdfBase64) ? (
-                <div className="space-y-4">
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-[70vh]">
-                    <iframe
-                      src={pdfBlobUrl || selectedPayslip.pdfBase64 || ""}
-                      className="w-full h-full border-0"
-                      title={selectedPayslip.pdfName || "Contra-cheque PDF"}
-                    />
-                  </div>
-                  {/* Digital Audit Log Footnote under PDF */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-4 text-[10px] leading-relaxed text-slate-500 shadow-sm">
-                    <p className="font-bold text-slate-700 uppercase mb-1">
-                      PROVA DE AUDITORIA DIGITAL (Compliance LGPD):
-                    </p>
-                    <p>
-                      Em conformidade com a Lei Geral de Prote√ß√£o de Dados (Lei
-                      n¬∫ 13.709/2018), registramos que este documento foi
-                      liberado para acesso pessoal e exclusivo ao colaborador
-                      mediante autentica√ß√£o por senha individual. O portal
-                      registrou a assinatura eletr√¥nica de visualiza√ß√£o em{" "}
-                      <b>{selectedPayslip.visualizedAt}</b> sob o IP{" "}
-                      <b>{selectedPayslip.visualizedIp}</b> utilizando o browser{" "}
-                      <b>
-                        {selectedPayslip.visualizedUserAgent?.substring(0, 80)}
-                        ...
-                      </b>
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                /* Print Body Legacy Fallback (Holerite Layout) */
-                <div className="p-4 bg-white border-2 border-slate-800 rounded-md space-y-4 text-xs font-sans text-slate-900 print:border">
-                  {/* Company & Doc Info Header */}
-                  <div className="grid grid-cols-3 border-b border-slate-800 pb-3 gap-4">
-                    <div className="col-span-2 space-y-1">
-                      <h4 className="font-extrabold text-[13px] text-slate-900 uppercase">
-                        COMANINS CALIBRA√á√ÉO E MANUTEN√á√ÉO INDUSTRIAL
-                      </h4>
-                      <p className="text-[10px] text-slate-600 leading-normal">
-                        Rua A3, N¬∞ 09, Poloplast, Cama√ßari - BA, CEP 42801-581
-                        <br />
-                        CNPJ: 02.401.101/0001-08 ‚Ä¢ Telefone: (71) 3621-0311
-                      </p>
-                    </div>
-                    <div className="text-right space-y-1 self-center">
-                      <div className="font-bold border border-slate-800 px-2 py-1 inline-block bg-slate-50">
-                        RECIBO DE PAGAMENTO
-                      </div>
-                      <p className="text-[10px] font-semibold text-slate-700 mt-1">
-                        M√™s Ref: {selectedPayslip.month}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Employee Details Block */}
-                  <div className="grid grid-cols-4 border-b border-slate-800 pb-3 gap-2">
-                    <div>
-                      <span className="text-[9px] text-slate-500 block uppercase font-bold">
-                        Matr√≠cula
-                      </span>
-                      <span className="font-mono text-slate-900 font-bold">
-                        {selectedPayslip.employeeRegister || "MAT_N/A"}
-                      </span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="text-[9px] text-slate-500 block uppercase font-bold">
-                        Nome do Colaborador
-                      </span>
-                      <span className="text-slate-900 font-bold uppercase">
-                        {selectedPayslip.employeeName}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-500 block uppercase font-bold">
-                        Cargo
-                      </span>
-                      <span className="text-slate-900 font-semibold">
-                        {selectedPayslip.employeeRole}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Items Grid Table */}
-                  <div className="border border-slate-800 rounded-sm">
-                    <table className="w-full text-left text-[11px] border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-800 text-slate-800 font-bold uppercase text-[9px]">
-                          <th className="px-2 py-1.5 border-r border-slate-800 w-16">
-                            C√≥d
-                          </th>
-                          <th className="px-2 py-1.5 border-r border-slate-800">
-                            Descri√ß√£o
-                          </th>
-                          <th className="px-2 py-1.5 border-r border-slate-800 w-24">
-                            Refer√™ncia
-                          </th>
-                          <th className="px-2 py-1.5 border-r border-slate-800 w-28 text-right">
-                            Vencimentos
-                          </th>
-                          <th className="px-2 py-1.5 w-28 text-right">
-                            Descontos
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-300">
-                        {selectedPayslip.items?.map((it, idx) => (
-                          <tr key={idx} className="font-mono text-[10px]">
-                            <td className="px-2 py-1 border-r border-slate-300">
-                              {it.code}
-                            </td>
-                            <td className="px-2 py-1 border-r border-slate-300 uppercase">
-                              {it.description}
-                            </td>
-                            <td className="px-2 py-1 border-r border-slate-300">
-                              {it.reference}
-                            </td>
-                            <td className="px-2 py-1 border-r border-slate-300 text-right text-slate-900">
-                              {it.type === "vencimento"
-                                ? `R$ ${it.value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
-                                : ""}
-                            </td>
-                            <td className="px-2 py-1 text-right text-red-600">
-                              {it.type === "desconto"
-                                ? `R$ ${it.value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
-                                : ""}
-                            </td>
-                          </tr>
-                        ))}
-                        {/* Blank rows */}
-                        {Array.from({
-                          length: Math.max(
-                            0,
-                            8 - (selectedPayslip.items?.length || 0),
-                          ),
-                        }).map((_, i) => (
-                          <tr key={`blank-${i}`} className="h-6">
-                            <td className="border-r border-slate-300">
-                              &nbsp;
-                            </td>
-                            <td className="border-r border-slate-300">
-                              &nbsp;
-                            </td>
-                            <td className="border-r border-slate-300">
-                              &nbsp;
-                            </td>
-                            <td className="border-r border-slate-300">
-                              &nbsp;
-                            </td>
-                            <td>&nbsp;</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Subtotals & Calculations Footer */}
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div className="space-y-1">
-                      <div className="flex justify-between border-b border-slate-300 pb-1 font-mono text-[10px]">
-                        <span>Sal√°rio Base:</span>
-                        <span className="font-bold">
-                          R${" "}
-                          {selectedPayslip.baseSalary
-                            ? selectedPayslip.baseSalary.toLocaleString(
-                                "pt-BR",
-                                { minimumFractionDigits: 2 },
-                              )
-                            : "0,00"}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-[9px] text-slate-600 pt-1 font-mono leading-relaxed">
-                        <div>
-                          <span>Base C√°lc. INSS:</span>
-                          <br />
-                          <span className="font-bold text-slate-900">
-                            R${" "}
-                            {selectedPayslip.inssBase
-                              ? selectedPayslip.inssBase.toLocaleString(
-                                  "pt-BR",
-                                  { minimumFractionDigits: 2 },
-                                )
-                              : "0,00"}
-                          </span>
-                        </div>
-                        <div>
-                          <span>Base C√°lc. IRRF:</span>
-                          <br />
-                          <span className="font-bold text-slate-900">
-                            R${" "}
-                            {selectedPayslip.irpfBase
-                              ? selectedPayslip.irpfBase.toLocaleString(
-                                  "pt-BR",
-                                  { minimumFractionDigits: 2 },
-                                )
-                              : "0,00"}
-                          </span>
-                        </div>
-                        <div>
-                          <span>Base C√°lc. FGTS:</span>
-                          <br />
-                          <span className="font-bold text-slate-900">
-                            R${" "}
-                            {selectedPayslip.fgtsBase
-                              ? selectedPayslip.fgtsBase.toLocaleString(
-                                  "pt-BR",
-                                  { minimumFractionDigits: 2 },
-                                )
-                              : "0,00"}
-                          </span>
-                        </div>
-                        <div>
-                          <span>FGTS do M√™s:</span>
-                          <br />
-                          <span className="font-bold text-slate-900">
-                            R${" "}
-                            {selectedPayslip.fgtsValue
-                              ? selectedPayslip.fgtsValue.toLocaleString(
-                                  "pt-BR",
-                                  { minimumFractionDigits: 2 },
-                                )
-                              : "0,00"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 border border-slate-800 p-3 rounded-md space-y-2 flex flex-col justify-between">
-                      <div className="space-y-1 font-mono">
-                        <div className="flex justify-between text-slate-700">
-                          <span>Total Vencimentos:</span>
-                          <span>
-                            R${" "}
-                            {selectedPayslip.grossSalary
-                              ? selectedPayslip.grossSalary.toLocaleString(
-                                  "pt-BR",
-                                  { minimumFractionDigits: 2 },
-                                )
-                              : "0,00"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-red-600">
-                          <span>Total Descontos:</span>
-                          <span>
-                            R${" "}
-                            {selectedPayslip.totalDescontos
-                              ? selectedPayslip.totalDescontos.toLocaleString(
-                                  "pt-BR",
-                                  { minimumFractionDigits: 2 },
-                                )
-                              : "0,00"}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex justify-between items-center border-t border-dashed border-slate-400 pt-2 font-mono">
-                        <span className="font-bold text-slate-900 uppercase">
-                          VALOR L√çQUIDO:
-                        </span>
-                        <span className="font-extrabold text-[14px] text-emerald-600">
-                          R${" "}
-                          {selectedPayslip.liquidSalary
-                            ? selectedPayslip.liquidSalary.toLocaleString(
-                                "pt-BR",
-                                { minimumFractionDigits: 2 },
-                              )
-                            : "0,00"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Audit & Signature Section */}
-                  <div className="border-t border-slate-800 pt-4 grid grid-cols-3 gap-4 text-[9px] leading-relaxed text-slate-500">
-                    <div className="col-span-2 text-justify">
-                      <p>
-                        <b>PROVA DE AUDITORIA DIGITAL (Compliance LGPD):</b>
-                      </p>
-                      <p>
-                        Em conformidade com a Lei Geral de Prote√ß√£o de Dados
-                        (Lei n¬∫ 13.709/2018), registramos que este documento foi
-                        liberado para acesso pessoal e exclusivo ao colaborador
-                        mediante autentica√ß√£o por senha individual. O portal
-                        registrou a assinatura eletr√¥nica de visualiza√ß√£o em{" "}
-                        <b>{selectedPayslip.visualizedAt}</b> sob o IP{" "}
-                        <b>{selectedPayslip.visualizedIp}</b> utilizando o
-                        browser{" "}
-                        <b>
-                          {selectedPayslip.visualizedUserAgent?.substring(
-                            0,
-                            50,
-                          )}
-                          ...
-                        </b>
-                      </p>
-                    </div>
-                    <div className="text-center self-end border-t border-slate-800 pt-6">
-                      Assinatura / Libera√ß√£o Eletr√¥nica
-                      <br />
-                      <b>RH COMANINS</b>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: LAN√áAR CONTRA-CHEQUE MANUALMENTE (ATTACH PDF) */}
-      {showCreatePayslipModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col my-8">
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-              <span className="font-bold text-slate-800">
-                Anexar Novo Documento (PDF)
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowCreatePayslipModal(false);
-                  setNewPayslipEmployeeId("");
-                  setNewPayslipMonth("");
-      setNewPayslipDocumentType("holerite");
-                  setNewPayslipPdfBase64("");
-                  setNewPayslipPdfName("");
-                }}
-                className="text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1 rounded-lg transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveManualPayslip} className="p-6 space-y-5">
-              {/* Employee selection */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1 text-xs">
-                  Colaborador
-                </label>
-                <select
-                  required
-                  value={newPayslipEmployeeId}
-                  onChange={(e) => setNewPayslipEmployeeId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue text-sm"
-                >
-                  <option value="">Selecione o colaborador...</option>
-                  {internalUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Reference Month */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1 text-xs">
-                  M√™s de Refer√™ncia
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Julho/2026"
-                  value={newPayslipMonth}
-                  onChange={(e) => setNewPayslipMonth(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue text-sm"
-                />
-              </div>
-              {/* Document Type */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1 text-xs">
-                  Tipo de Documento
-                </label>
-                <select
-                  required
-                  value={newPayslipDocumentType}
-                  onChange={(e) => setNewPayslipDocumentType(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue text-sm"
-                >
-                  <option value="holerite">Contra-cheque (Holerite)</option>
-                  <option value="alimentacao">Recibo de Alimenta√ß√£o</option>
-                  <option value="transporte">Recibo de Vale Transporte</option>
-                  <option value="espelho_ponto">Espelho de Ponto</option>
-                </select>
-              </div>
-
-              {/* PDF File Dropzone */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-2 text-xs">
-                  Arquivo do Documento (PDF)
-                </label>
-
-                {!newPayslipPdfFile ? (
-                  <div
-                    onDragOver={handlePdfDragOver}
-                    onDragLeave={handlePdfDragLeave}
-                    onDrop={handlePdfDrop}
-                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${
-                      isPdfDragOver
-                        ? "border-royal-blue bg-blue-50/50"
-                        : "border-slate-300 hover:border-slate-400 bg-slate-50"
-                    }`}
-                  >
-                    <Upload className="mx-auto h-8 w-8 text-slate-400 mb-2 animate-bounce" />
-                    <p className="text-xs text-slate-600 font-medium mb-1">
-                      Arraste e solte o PDF aqui ou
-                    </p>
-                    <label className="inline-block bg-royal-blue hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold cursor-pointer transition-colors shadow-sm mb-1">
-                      <span>Selecionar Arquivo</span>
-                      <input
-                        type="file"
-                        accept="application/pdf"
-                        onChange={handlePdfUploadChange}
-                        className="hidden"
-                      />
-                    </label>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Apenas arquivos no formato PDF s√£o aceitos.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <div className="bg-emerald-100 p-2 rounded text-emerald-600 shrink-0">
-                        <FileCheck className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <p
-                          className="text-xs font-bold text-slate-800 truncate"
-                          title={newPayslipPdfName}
-                        >
-                          {newPayslipPdfName}
-                        </p>
-                        <p className="text-[10px] text-emerald-600 font-semibold">
-                          PDF carregado com sucesso
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewPayslipPdfBase64("");
-                        setNewPayslipPdfFile(null);
-                        setNewPayslipPdfName("");
-                      }}
-                      className="text-xs font-bold text-slate-500 hover:text-red-600 hover:underline px-2"
-                    >
-                      Remover
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Actions footer */}
-              <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreatePayslipModal(false);
-                    setNewPayslipEmployeeId("");
-                    setNewPayslipMonth("");
-      setNewPayslipDocumentType("holerite");
-                    setNewPayslipPdfBase64("");
-                    setNewPayslipPdfName("");
-                  }}
-                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 font-semibold text-xs cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={payslipSubmitting}
-                  className={`px-5 py-2 text-white rounded-lg font-semibold text-xs shadow-sm flex items-center space-x-1.5 ${payslipSubmitting ? "bg-slate-400 cursor-not-allowed" : "bg-royal-blue hover:bg-blue-700 cursor-pointer"}`}
-                >
-                  <Save className="h-4 w-4" />
-                  <span>{payslipSubmitting ? "Salvando..." : "Salvar e Publicar"}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* LIGHTBOX: FOTO EM TAMANHO CHEIO */}
-      {fullscreenPhoto && (
-        <div
-          className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in"
-          onClick={() => setFullscreenPhoto(null)}
-        >
-          <div
-            className="relative max-w-4xl max-h-[90vh] flex flex-col items-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setFullscreenPhoto(null)}
-              className="absolute -top-12 right-0 text-white hover:text-slate-300 p-2 text-sm font-semibold flex items-center space-x-1 cursor-pointer bg-slate-800/80 rounded-lg px-3"
-            >
-              <X className="h-5 w-5" />
-              <span>Fechar</span>
-            </button>
-            <img
-              src={fullscreenPhoto}
-              alt="Foto da entrada em tamanho cheio"
-              className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl border border-slate-800"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: REGISTRAR E EMITIR RNC (Relat√≥rio de N√£o Conformidade) */}
-      {showRncModal && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in print:hidden">
-          <div className="bg-white w-full max-w-xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-8 text-slate-900">
-            <div className="bg-rose-900 text-white p-5 flex items-center justify-between border-b border-rose-800">
-              <div className="flex items-center space-x-3">
-                <ShieldAlert className="h-6 w-6 text-rose-300 shrink-0" />
-                <div>
-                  <h3 className="font-display font-extrabold text-base text-white">
-                    Emitir Relat√≥rio de N√£o Conformidade (RNC)
-                  </h3>
-                  <p className="text-xs text-rose-200">
-                    Registre a falha, defeito ou motivo do impedimento de
-                    calibra√ß√£o do instrumento.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowRncModal(false)}
-                className="text-rose-300 hover:text-white p-1 rounded-xl hover:bg-rose-800 transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleGenerateAndSaveRnc} className="p-6 space-y-4">
-              {(() => {
-                const inst = instruments.find((i) => i.id === selectedInstId);
-                const client = clients.find((c) => c.id === inst?.clientId);
-                return (
-                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-xs space-y-1.5 text-slate-800">
-                    <div className="font-bold text-rose-900 text-sm flex items-center justify-between">
-                      <span>{inst?.description || "Instrumento"}</span>
-                      <span className="font-mono text-xs px-2 py-0.5 bg-rose-200 text-rose-900 rounded font-semibold">
-                        TAG: {inst?.tag || "N/A"}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 font-sans">
-                      <div>
-                        <span className="font-semibold text-slate-700">
-                          Cliente:
-                        </span>{" "}
-                        {client?.name || "N√£o informado"}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-slate-700">
-                          Cert/COMA:
-                        </span>{" "}
-                        {inst?.certificateNumber || inst?.coma || "N/A"}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-slate-700">
-                          Marca/Modelo:
-                        </span>{" "}
-                        {inst?.brand} {inst?.model}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-slate-700">
-                          Faixa:
-                        </span>{" "}
-                        {inst?.rangeMin} a {inst?.rangeMax} {inst?.unit}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  T√©cnico Respons√°vel *
-                </label>
-                <input
-                  type="text"
-                  value={rncTechnician}
-                  onChange={(e) => setRncTechnician(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:ring-1 focus:ring-rose-600 focus:outline-none"
-                  placeholder="Nome do T√©cnico que inspecionou o instrumento"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Motivo do Impedimento / N√£o Conformidade do Instrumento *
-                </label>
-                <textarea
-                  rows={4}
-                  value={rncReason}
-                  onChange={(e) => setRncReason(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 text-xs text-slate-900 focus:ring-1 focus:ring-rose-600 focus:outline-none"
-                  placeholder="Exemplo: Ponteiro travado na faixa de 50 bar, rosca de conex√£o danificada, erro superior a 15% fora da toler√¢ncia metrol√≥gica MPE, falta de resposta na sa√≠da de 4-20mA, etc..."
-                  required
-                ></textarea>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  * A IA Metrol√≥gica COMANINS utilizar√° estas informa√ß√µes para
-                  formular o Diagn√≥stico T√©cnico, Avalia√ß√£o do Impacto e
-                  Recomenda√ß√µes de A√ß√£o Corretiva.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setShowRncModal(false)}
-                  disabled={isGeneratingRnc}
-                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 font-semibold text-xs cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isGeneratingRnc || !rncReason.trim()}
-                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs shadow-md flex items-center space-x-2 cursor-pointer transition-all disabled:opacity-50"
-                >
-                  {isGeneratingRnc ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin text-white" />
-                      <span>Gerando RNC com IA...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Bot className="h-4 w-4 text-rose-200" />
-                      <span>Gerar RNC com IA e Salvar Registro</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: VISUALIZA√á√ÉO E IMPRESS√ÉO DO RELAT√ìRIO DE N√ÉO CONFORMIDADE (RNC) */}
-      {showRncViewModal &&
-        selectedRncForView &&
-        (() => {
-          const currentInst =
-            selectedRncInstrument ||
-            instruments.find((i) => i.id === selectedRncForView.instrumentId);
-          const hasLabPhoto = !!currentInst?.photoCalibrated;
-          return (
-            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in">
-              <div className="bg-white w-full max-w-4xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-6 text-slate-900 flex flex-col max-h-[92vh] print:max-h-none print:shadow-none print:border-none print:m-0 print:w-full">
-                {/* Header Modal Bar (Hidden on print) */}
-                <div className="bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800 shrink-0 print:hidden">
-                  <div className="flex items-center space-x-3">
-                    <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0" />
-                    <h3 className="font-display font-extrabold text-sm text-white">
-                      Relat√≥rio de N√£o Conformidade (RNC) -{" "}
-                      {selectedRncForView.rncNumber}
-                    </h3>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!hasLabPhoto) {
-                          alert(
-                            "A impress√£o do RNC est√° bloqueada. Insira a Foto Ap√≥s Laborat√≥rio no instrumento para habilitar a impress√£o.",
-                          );
-                          return;
-                        }
-                        window.print();
-                      }}
-                      className={`px-3.5 py-1.5 rounded-lg font-bold text-xs shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer ${
-                        hasLabPhoto
-                          ? "bg-rose-600 hover:bg-rose-700 text-white"
-                          : "bg-slate-300 text-slate-500 border border-slate-200 cursor-not-allowed opacity-60"
-                      }`}
-                      title={
-                        hasLabPhoto
-                          ? "Imprimir RNC"
-                          : "A impress√£o do RNC s√≥ √© liberada ap√≥s anexar a Foto Ap√≥s Laborat√≥rio no instrumento."
-                      }
-                    >
-                      <Printer className="h-4 w-4" />
-                      <span>Imprimir RNC</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowRncViewModal(false);
-                        setSelectedRncForView(null);
-                        setSelectedRncInstrument(null);
-                        setActiveTab("instruments");
-                        setSelectedInstId("");
-                      }}
-                      className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Printable Document Body */}
-                <div className="p-8 overflow-y-auto space-y-6 text-slate-900 font-sans text-xs bg-white print:p-0 print:overflow-visible">
-                  {/* Warning block if hasLabPhoto is false */}
-                  {!hasLabPhoto && (
-                    <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl text-xs font-semibold flex items-center gap-2.5 print:hidden">
-                      <ShieldAlert className="h-5 w-5 text-rose-600 shrink-0" />
-                      <div>
-                        <p className="font-bold text-rose-900">
-                          Impress√£o Bloqueada
-                        </p>
-                        <p className="font-medium text-[11px] text-rose-800 mt-0.5">
-                          Este √© um Relat√≥rio de N√£o Conformidade (RNC). A
-                          impress√£o s√≥ √© permitida ap√≥s anexar a{" "}
-                          <strong className="underline">
-                            Foto Ap√≥s Laborat√≥rio
-                          </strong>{" "}
-                          no painel de instrumentos.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Document Header */}
-                  <div className="border-b-2 border-rose-600 pb-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      {siteHeaderLogo ? (
-                        <img
-                          src={siteHeaderLogo}
-                          alt="COMANINS Logo"
-                          className="h-12 object-contain"
-                        />
-                      ) : (
-                        <ComaninsLogo className="h-12 w-auto" />
-                      )}
-                      <div>
-                        <h1 className="text-base font-extrabold text-slate-900 uppercase tracking-wide">
-                          COMANINS - SERVI√áOS DE METROLOGIA E MANUTEN√á√ÉO
-                        </h1>
-                        <p className="text-[10px] text-slate-600">
-                          Laborat√≥rio de Calibra√ß√£o Industrial & Ensaios
-                          Metrol√≥gicos
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="inline-block px-3 py-1 bg-rose-100 text-rose-900 font-mono font-extrabold text-sm rounded border border-rose-300">
-                        {selectedRncForView.rncNumber}
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-1">
-                        Data de Emiss√£o:{" "}
-                        {selectedRncForView.date
-                          ? selectedRncForView.date
-                              .split("-")
-                              .reverse()
-                              .join("/")
-                          : new Date().toLocaleDateString("pt-BR")}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Document Title Banner */}
-                  <div className="bg-rose-50 border-l-4 border-rose-600 p-3 rounded-r-lg">
-                    <h2 className="text-sm font-extrabold text-rose-900 uppercase tracking-wide flex items-center space-x-2">
-                      <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0" />
-                      <span>
-                        RELAT√ìRIO DE N√ÉO CONFORMIDADE METROL√ìGICA (RNC)
-                      </span>
-                    </h2>
-                    <p className="text-[11px] text-rose-800 mt-0.5 font-medium">
-                      Status:{" "}
-                      <span className="font-extrabold underline uppercase">
-                        N√ÉO CONFORME / REPROVADO
-                      </span>{" "}
-                      - Este equipamento n√£o atende aos requisitos de
-                      calibra√ß√£o.
-                    </p>
-                  </div>
-
-                  {/* Instrument Identification Box */}
-                  {(() => {
-                    const inst =
-                      selectedRncInstrument ||
-                      instruments.find(
-                        (i) => i.id === selectedRncForView.instrumentId,
-                      );
-                    const client = clients.find((c) => c.id === inst?.clientId);
-                    return (
-                      <div className="border border-slate-300 rounded-xl overflow-hidden shadow-xs">
-                        <div className="bg-slate-100 px-4 py-2 font-bold text-slate-800 border-b border-slate-300 text-xs uppercase tracking-wide">
-                          1. Identifica√ß√£o do Instrumento e Cliente
-                        </div>
-                        <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-slate-50/50">
-                          <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">
-                              Cliente / Empresa:
-                            </span>
-                            <span className="font-extrabold text-slate-900">
-                              {client?.name ||
-                                selectedRncForView.clientName ||
-                                "N√£o Informado"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">
-                              TAG Cliente:
-                            </span>
-                            <span className="font-mono font-extrabold text-slate-900">
-                              {inst?.tag ||
-                                selectedRncForView.instrumentTag ||
-                                "N/A"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">
-                              N√∫mero de S√©rie / COMA:
-                            </span>
-                            <span className="font-mono font-bold text-slate-800">
-                              {inst?.serialNumber ||
-                                selectedRncForView.coma ||
-                                "N/A"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">
-                              Descri√ß√£o do Instrumento:
-                            </span>
-                            <span className="font-bold text-slate-800">
-                              {inst?.description ||
-                                selectedRncForView.instrumentDescription}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">
-                              Fabricante / Modelo:
-                            </span>
-                            <span className="text-slate-800 font-medium">
-                              {inst?.brand || "N/A"} - {inst?.model || "N/A"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">
-                              Faixa de Medi√ß√£o (Range):
-                            </span>
-                            <span className="font-mono text-slate-800 font-semibold">
-                              {inst
-                                ? `${inst.rangeMin} a ${inst.rangeMax} ${inst.unit}`
-                                : "N/A"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Motivo Registrado */}
-                  <div className="border border-slate-300 rounded-xl overflow-hidden shadow-xs">
-                    <div className="bg-slate-100 px-4 py-2 font-bold text-slate-800 border-b border-slate-300 text-xs uppercase tracking-wide">
-                      2. Descri√ß√£o da Falha / Ocorr√™ncia Registrada pelo T√©cnico
-                    </div>
-                    <div className="p-4 bg-white text-slate-800 whitespace-pre-wrap leading-relaxed font-medium">
-                      {selectedRncForView.reason}
-                    </div>
-                  </div>
-
-                  {/* An√°lise T√©cnica com IA */}
-                  <div className="border border-rose-200 rounded-xl overflow-hidden shadow-xs bg-rose-50/30">
-                    <div className="bg-rose-100 px-4 py-2 font-bold text-rose-950 border-b border-rose-200 text-xs uppercase tracking-wide flex items-center justify-between">
-                      <span className="flex items-center space-x-1.5">
-                        <Bot className="h-4 w-4 text-rose-700 shrink-0" />
-                        <span>
-                          3. An√°lise T√©cnica Metrol√≥gica e Recomenda√ß√µes (IA
-                          COMANINS)
-                        </span>
-                      </span>
-                    </div>
-                    <div className="p-4 text-slate-800 whitespace-pre-wrap leading-relaxed text-xs font-sans">
-                      {selectedRncForView.aiAnalysis}
-                    </div>
-                  </div>
-
-                  {/* Assinaturas */}
-                  <div className="pt-8 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
-                    <div>
-                      <div className="border-b border-slate-400 pb-1 font-bold text-slate-900">
-                        {selectedRncForView.technicianName ||
-                          "T√©cnico de Laborat√≥rio"}
-                      </div>
-                      <span className="text-[10px] text-slate-500 uppercase block mt-1">
-                        T√©cnico Respons√°vel / Inspetor
-                      </span>
-                    </div>
-                    <div>
-                      <div className="border-b border-slate-400 pb-1 font-bold text-slate-900">
-                        Garantia da Qualidade / Laborat√≥rio COMANINS
-                      </div>
-                      <span className="text-[10px] text-slate-500 uppercase block mt-1">
-                        Ger√™ncia Metrol√≥gica
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-      {/* MODAL: EDIT ROLES */}
-      {isEditingRoles && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in print:hidden">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <Settings className="w-5 h-5 text-royal-blue" />
-                Editar Cargos / Fun√ß√µes
-              </h3>
-              <button
-                onClick={() => setIsEditingRoles(false)}
-                className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
-                Op√ß√µes (uma por linha)
-              </label>
-              <textarea
-                value={editingRolesStr}
-                onChange={(e) => setEditingRolesStr(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 text-sm text-slate-800 font-mono h-48 focus:ring-2 focus:ring-royal-blue focus:outline-none"
-              />
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingRoles(false)}
-                  className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveRoles}
-                  className="px-4 py-2 bg-royal-blue text-white font-bold rounded-lg hover:bg-royal-blue-hover transition-colors cursor-pointer flex items-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  Salvar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: EDIT USER */}
-      {editingUserId && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in print:hidden">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <Edit className="w-5 h-5 text-royal-blue" />
-                Editar Usu√°rio
-              </h3>
-              <button
-                onClick={() => setEditingUserId(null)}
-                className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const updates: any = {
-                  name: editingUserData.name,
-                  username: editingUserData.username.trim().toLowerCase(),
-                  role: editingUserData.role,
-                  permissionLevel: editingUserData.permissionLevel || "Padr√£o",
-                };
-                onUpdateInternalUser(editingUserId, updates);
-                setEditingUserId(null);
-              }}
-              className="p-6 space-y-4"
-            >
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold text-sm">
-                  Nome Completo
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editingUserData.name}
-                  onChange={(e) =>
-                    setEditingUserData({
-                      ...editingUserData,
-                      name: e.target.value,
-                    })
-                  }
-                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-slate-800"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold text-sm">
-                  Nome de Usu√°rio (Login)
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editingUserData.username}
-                  onChange={(e) =>
-                    setEditingUserData({
-                      ...editingUserData,
-                      username: e.target.value,
-                    })
-                  }
-                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-slate-800 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold text-sm">
-                  Fun√ß√£o / Cargo
-                </label>
-                <select
-                  value={editingUserData.role}
-                  onChange={(e) =>
-                    setEditingUserData({
-                      ...editingUserData,
-                      role: e.target.value,
-                    })
-                  }
-                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-slate-800"
-                >
-                  <option value="">Selecione...</option>
-                  {(dropdownOptions.cargos || []).map((cargo, idx) => (
-                    <option key={idx} value={cargo}>
-                      {cargo}
-                    </option>
-                  ))}
-                  {editingUserData.role &&
-                    !(dropdownOptions.cargos || []).includes(
-                      editingUserData.role,
-                    ) && (
-                      <option value={editingUserData.role}>
-                        {editingUserData.role}
-                      </option>
-                    )}
-                </select>
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold text-sm">
-                  N√≠vel de Permiss√£o
-                </label>
-                <select
-                  value={editingUserData.permissionLevel || "Padr√£o"}
-                  onChange={(e) =>
-                    setEditingUserData({
-                      ...editingUserData,
-                      permissionLevel: e.target.value,
-                    })
-                  }
-                  className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-slate-800"
-                >
-                  <option value="Administrador">Administrador (Total)</option>
-                  <option value="Padr√£o">Padr√£o (Intermedi√°rio)</option>
-                  <option value="Limitado">Limitado (Restrito)</option>
-                </select>
-              </div>
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingUserId(null)}
-                  className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-royal-blue text-white font-bold rounded-lg hover:bg-royal-blue-hover transition-colors cursor-pointer flex items-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  Salvar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {selectedInstLabelToPrint && (
-        <CalibrationLabelPrintModal
-          certificateNumber={selectedInstLabelToPrint.certificateNumber}
-          calibrationDate={selectedInstLabelToPrint.calibrationDate}
-          calibrationLogo={calibrationLogo}
-          onClose={() => setSelectedInstLabelToPrint(null)}
-        />
-      )}
-    </div>
-  );
-}
+                                                className={`px-2 py-0.5 rounded font-bold text-[9px] ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-10xúÏΩ€rIñ ¯æ_·	À*ÅYÄ¢§dQ“Ä ï….Ò“$ïUª2ôúDT"ê^í≈µõá~õá›yõá≠Ìá≤l≥6õ∂û1[Î«‚üÙÏ/Ï9ÓqÒà[ÄêD™V•$Äè„ÓÁÊÁ⁄!1Ωà[a—÷ìNßq˝˛˙!µÆÁ5Ô'‰jÍDyA{økê5“ÿ˙√`ksãÏÏo5Íæ|}9ö:~=ñÍºd}9Ÿwá∂w/˝÷Í∆Îá∑YL	@;Fó&Ë‡6Áÿ£˙€÷óGÓôÓ<ÜgØñø!˚Œ(º˘ü4"#JË	o˛…∫iˆ„õ_»
+ô&ø/ëoñ5/Ç˜ê°®∂ÎLË≥  ê∂.[+„/"r|⁄ä<'¶≠’ô∂ë0ò˘#:j]x‰8G4L˛ì‹’Ú–Mz›sé©'æÚÿÜ?Ú◊Ò!ûv:‰$„÷q‡ç»‰∏’%'Ω nL'QkH˝^zÍL[›ˆ™ˆ]∂√±KΩ—`L·¬;«0ës¯B÷óé◊:ˆf¥Añ„Ÿíjg^«ÆÁ˛ÏåÇà¯8û{:7π˘«¿0 ﬂ“ŒJ6ÚíÒLPÆ/≥]–ﬁRBå”–¸ß5º∂d2ZÀ?Æ∞˝X1ÌÜÅ ÿ=f¸xú‚GD'nÜ#Üw„≈ñÔ“7í∑qyÿmıË06æˆÃ‘zvuL˝·¯0v¸ëé˙f^¯É±„ü¬ìM∫DûŸpÃà∆Ö∑4i;v¬S∑zº¡Àñ∞3Á≠ìôÁ!á8qJ˘¡
+lV 2ºS2Ωhı⁄´dzŸÍïI>e8'¡p≠ÖÆäÑü»…4Ÿ}«èpÕã∂Lc7ìMjX`!ª‘œ&:"¿@ŸÜøœ¸ö´YÏ&Mw3≤ ≠}‚z¿õVR≥≈#KÃ¬Î+∏ΩM/¶nË‡6a„»ü˛d˘∞‰ŸÁœ¨Uüû|¶i∆‡¸j«¡ˆ·ﬁaåÿSÔ¡hÍπq≥q‘Xz”yk?«"Öìgœû±iª#+Ìƒfw'Œ¥ôÓ±€‰¡§óœÆ88◊)KJ>⁄"@r?`˜ƒ≤ç¥^’‰˝õØ%\ø%Ô≠5ÿZ˘ÂÔÚ£8úM‡ÖGóSzMö∆kWRoò!<≈!¶ª≥…1ØIã¸‡xıG*í¿µV⁄3@#£ñÍì[V⁄ÎΩêÁü^ûo|yæÒEûõ¶ÛEûëÁï!œ7æ»sÒ˙"œø»Û%œü^û>ä<|ëÁ¶È|ëÁ_‰yÂ¡E»Û¡y.^_‰˘ΩîÁsﬂ`“¨C»Ï[´ùeìkà›gÙµèèÎ;Ç˜Ì;√ùS™Ù±yÅ∫cÙ•û£Ä1tèÃR_∫ÇÜÇ+»∆Wk•ˇ¨OE∞∏o∫ùÈ≈[qπVqOû˚m? @&”Ä8«é{J&Nà?Ä(f¡çp˝àÄ‡ã›3…ñÊ3â⁄dèå›(æ˘◊–È1º˘39s˝·Ã√©:ÑFqq∫ñà‚]Ù¬=v˘rºtácá¿ﬂ€w⁄ÎÀ”[`{üC
+‡ûQìÀÍx«F6Ûdd∑öTP=w¯#hçLHÄJx8ŒôZòbSX‚ l6á≥Tåò›˘U˙¡ƒ@n≠Æ0˝‘@Ü)=â%DÙ«Y<˜≤uL„sJ}Ó $„‡åÜk"ŸØ0äî´å	ˇËò÷ÃÅUikvHã™”Øåâä´W<ƒdÉ1 œ˘Å!!z—Q€£˛i<&œIÍ◊Í[ÆŸb6˝hâDπz⁄åñﬁÉ}êi¨!ê{hO ¥v˚¡µ]P«˙`LœBêf¡π8µ´˜>ñ1á†µª(ÃZÏœì úêØ’+”|1>ﬁ}⁄yÄ¿?∏~mÙ£/sb—ﬂ•yÌØmTØ ?â·L£•Ñû@	 √¢1,ˆ9£	¿Ï\ Núã÷$A\?Ò‡ñÀñ3ãã≥…∫ÎOgÊiÒLöOﬁ	ácuF<öû•¸#=|á„7O°6Øòz∞c†>kÏ”ËßôÂËÍäöà/	´™¡°™ÇˇvlÜò≈∏E`D4#zå/ˆ¨é≠WÉ˛´ÌçÉ˛—ˆﬁÓª¡ﬁÓ·Îù˛∆´≠w{˚¯Õ°ï*öû/õÈF∞≠œv%^Á48’@˚z≥çö4k√±l˜ûX≤”á˘1® ¡ï•>@Êì!∆Î–yF$4É:{Å]å!!çg°oy.√+Q8Ÿ—,}€uÅç ïÀ^¡é"†nÇ› …£ lMó="0]@ö åÄ„¶K ¸5U¥ªÄ‚e…ö´°ﬂv8˚-q8ÅµòDT√M»ºÎ
+rÜñ(@Ê„‡¢ën‡≥t◊"Kír#∂∑EÖ'_Ç‰€πq¡Ÿ-¯˘
+ŒÒ9≤≠ë7¿|í'f?º]2
+•“Ã¥⁄ àˇ!ÍÜWZö/”À6“*º—¬¬[eqS&99¢ƒUºb4Äˇ ˆ"˚cá¡yﬁg-ã¢q Jh0Iq»Ó§Øé≈ÁéuÑWL—{vı¥c˜HA¢ÓÕ‚0»ê7◊˝,ÂjA≤≤ÌËŒwô∆∑±VB6;xèVÂ√ìùTId
+€ŸT§˜9vvÑÊûêÊW|¥•D§‘xP"–¢`BK<≠(vô•íø±,èm¯hÅÚaﬁZŒUAX=}]‡"Nâ1Cô…®(·ûl;â¯ ec„y‰&ß¶ …«ÓêÅó_¥∏IÀåœîp‰)3ÊúÛûáŒ4∑k…Fb:YÜd\∫1≈ø+lîÎ{ÆO[
+ªSmpªŸÊ=N∑âÛót{ô>/û≤ÕŸ[≠à‹FS(ÈúS„/Ï/¶!∞©/& Q(G0D"nk`‘ª:¡{@cÇn¥˛á¢5pN—+hˇÀ∞-QñÆ˘ÜÉ¸Á7¡ﬁ6–˛q≈Xjê’{«œ–rá·ÌÀd†qÓÊœ°Ëú_6·ÊñRG˚~–)¢gW=Ω<ı XsŸâõa<YvŒÍGíZ›≤Ã	ÉÃ≠/pÖ§-X≠B‹/‚†Â‘gw2iaVB@2OäQ’ <O˜ÃËeP˝Ã7i+Ép@@Sª¡∞SQM[+pÃ:>ÂπYïÖfﬂñÃ:y*W—´ù“AïÔq¬„':«wQ+kMg^d4˜=XŒ#`(˛©WÚ"¨ﬂX`AZå∆∞µ?∂ÃÓÓL®Æû≈Qƒ∞#Ä‰Í›jöµ.Ækq°4Æ‹ÀãˆG˙x”ÂjP€q≠0ÿ∂÷U´UJ8dnÑ∆W7/h·ﬂ˚¢≈N<ã@ç$ug4 ]ıs˘Í+7äft4»=î—õ‚å,ÿ!ù!,”ç⁄L3\4Ωd´
+.÷Ì∫Îâ◊ívQ≠,*j≠Ev^6[Ì3©k&öO‹ÿ|8π&ˆç“h ˆX¸ˆ®Ä;u‚p∏ï5'î›¿È	‹F–ÖSVáŒG‰ÒÁ.≤≤ŸtJ√!Ë˚©Az"„Q©;¶Ã≤D„íBÈkõ3ì8S´s¬“»§]…‘Ù®£ñ~âÃbÑŒ5# ‡n|	 æ›9wçΩYà=*ûûU”¢·Õ¸õDﬂÿç=@±ÔBÁNÁ¶3É3g‰ê&ΩpA∏≈&ˇ¡ˇò£5" xÕ\¸∂ó≥òΩﬂ-- lÍ•ÎQU⁄£Öª⁄2’Ø´y∞ÂÄû∫ö86º‡ßE^jª›…Bä^‰- TæÕıã¿KZvé\(O≤scPTG›õRˇ¿Ó#ÉWŒ–,ñ∑ ÛjÚ
+ª'æ*J 3ﬁW^[2Û◊fΩ(tÍ.^üû'
+m∆ã” 	"/ñhÍèmàıyrò2õa0!#ñÄ}Ê¸åg†`F|‰†¢ßõ#°úë`|F≤ò∆ΩÀ¬í˘M.å@IÛ`w∞ƒtf7ˇÏÒ˚∂˚`›<gùùn«ºìÈgº6„í ˚˝b}NtÈâΩ—M≠V{«ë‡ºç˚ÔÜ[œ`cìFÙè…‰OBy\ì„Ü/»ûp˙	P_BüÖE›¸ﬂàu#7—êC∏åD6∆Ä•±k‰¬3ÆìƒI1Vì)(ñÆ ßÌí•-›9w‹8ôwàTâF¶◊,Ú*{3È»9n6Ñ≥b√Œ»lfuƒdI÷ä∑_êÃâ&∑ê9„Ôä¸WÈ6»kE9a∏Éî DZxò#-˙æ3‰Œ®AA`•,4i0<WÜpÊqêˆ|5õ%%á@‰uY©˛.S—5M\/5ï6 ıe]ÚÅ•C ª*©#*sù˛»ØClt,<.k,©Âªg∞|Ø3F
+KqªªÿÔn˜W4æ>}û‡±‡WëÅOù–Å/‹°€_d˘™U≈ñVVWÓ¿R??∏—^Ù3,œ!∞≤Ô¯‘ìîı)Ø˙Ö∑À›BÏ˝ø”÷cã*>Ÿ¢?Œ˘ídŸ◊«+ï 	‡¶Sœπ∏ _˘I≈∏≠6µf~¿*`”cÖ}h˝(§¿E¸”◊S%Ωã˝pﬂ§±„ç±ÜO!YEÍÎÀ„ïÍ∑W%by!•≠Uï[-&kZSÁ±£*∏Û\Á@§no‚œ<O˛Ñ¡0®rm=≤pmïü-®Z…\*sUß™ÕÁ±±π†V85µú˝®ˇzÃˆvt’áLQÓ”
+≠M?®ZF`	›@{sïÔ-®¬û¬W±sz˝v^®My(˙pJõ¯…â%9@ﬂ£A!–bD}ú0¬$"CàÌ∏˛5»∫Í˜ŒÖ^=^tŒ∆=⁄ÿù˝-“<
+º∂©T€bv7≥ûò‡˙Îø§a&òn'nÈÃw„πù5˘¿=·Í;<|}'QOó^\ü≥c˛ÙºT,n,Ëß>3%6Zçk≤lNâû‡º“á?à–¸®<òTïi≤&?áTw‡≈”Ö™û;T¨híK.ûÑÑù∂Tﬂó,ÖJ€◊~U˙BOG˝ç5“Ωπ}¥w∞›'õ[$…∏˘áõˇ¥GöEÊEèS±h≤—GŒ1˜kg∂¶í_ª˘’–Ò˚√!ç"¿ÛôGõ¸÷∆RE•ïêqzËxö:z∫SGfaªT8†~8ÅIe´‘&”nè~=ÅK"ÕO.x¬NıP:Œ∏”:dÿ«e
+∏Y_≤∏› ÓWœ2.U81°EsèòW"ùÇ L‡ƒ-Ôg¶C*ò≥£èÇÌÊ¯™2ﬁôπ«Æ«Õﬁ!: Ç!∫/ix‚F¬,#~>»‰Ê_OÇeZ©–IˇUØ?WìiË˙ÒZÜï≈@2˘û:àhÊ”≤:,˛6¶>>íüØÌP=ôˇÏ£ŸÅì<"|3m…pN:ÈπZ^¢UU%FÊñŒÜ<ÔÆR:©´Ò>*}¢:ê´Ñ:a|}‹´Ú}∂ßÏO‹î™°~	ù
+çØ ¨˙3	∑ à‘7ÄÒ√¿£eä”[+(BÊ=ù––ÒFÃ ÀæNø(&¿ÁiH¯O!0∑∏sÈ„zUÍ¿ÍßN∆Ë$·$‘ÒîÚ]=G`É=ïŒÃïÄÊÀêq≤xG\z◊ø˘g‹I|ÛK8q}Ù“åf)˜©bO~ùi‚„CS‹aLP&LX´LP™F
+¥VBøe)håaå›—à˙r™◊¯Ï,-∏yä^`x⁄¶b·wXΩ
+N#qÓßºä⁄ø‘ÿ˝Îø7÷<≈äzjÍµ⁄Sñè˙ﬂ•œ]1/ríﬁx˝ñBÁÙZWÓÑø•pø∏M√ƒ©Q¥#6 Ò[YÕÄG)‚–h
+KÛÁ3Í%c≈t8fviD=nbt§yŸ˜Ä◊ÃßÕ©^É.˜ôπä[ãaëaåüñ,F:J»N>ıG¶Å63bmfÃ÷ŒÿóK…J I„BædÔà©&∆±qHOÅ'Ç‚rƒéïF8§ËñäTœ_´É#9aúG@xu¯á6&pEÌ?FÅˇ.ﬁEcJ„fN6¶aéã√¡èÔ|zÆŒX*ﬂÏ¿!◊%ÔUÆ∆˘±z•Œï´ ´òÀ:Q∫5TOË¡>˝íb¯⁄|Äæg™. ºÀ¿zóÄ5tÇw__Â≈™ä®äe•Æ€^tÒæÊæÊRTö,ÚB∏L˙e)b¶t
+M†Z≠Ä˚óEè∞ZÏ6éﬁƒπª≈’	ì†Ω<8ÅÈ˝X.∆=Ä$á¿ñ$C)d=nˆ·ãC–:A/\◊  coVk⁄pñ‚0âaVÂsUoy^∞†‰üˇˆNm˜ˆÊ7q1|*3$'(aº¬ﬁ◊ÿË˝êG¬’ﬁ‡ñ¸k≥À’_$:ó⁄Ôz;19úM&Nx	ú-E«HS=ÔT¯¯(9;r]M¯ﬁ‚ê'ú7W%”÷jA&kı°ôì›Íàh.T.3•ﬁ^Ÿ'G~¡@[úQ™ˇ( =nwPï|‘JÄ‘ß«ñ¨TÖ¥CÒ/ı±µz¥…§Ú3hz§CÀøb÷Wπ⁄ù≤µLJz”ÌV+Ö%@–ë;SysÒè	ÇÈ`™îÓÖ&€C–Pë ”éwn~πs@†¡{Acπ®oHK√‡Ö2u0{w'ãchtúKz-<F∂'Ç¬7§£ŸP£©6ù·!ÀOf0¬'Ú¬róÀát≤t4áüNmm:â9;Â@Ô8Ò∏ÕË°ôMeôîW∆0,Sîéu‚AÿL∆_&è;Üg#:ƒgì~®ÓO∂ÖΩ,´•ÜüÆÒ;¨GC]GX+Ì}ÚF?}Ø–…qqû2tòÕHp }·ÇíÎCp¡#™3£A}FàˆàP…¥M}fl®»¿'ŒÖ¿O‡ìö˘µ€Ì≤5êÅË’„}µYR¢=KJ¯[`Iá´ÈÍ˛©Ãh˙Ö'}Õ,5·‚YxËN~-[z—P6ôŒ¬©∑®”IÍˇV≤&l>f∂@Œƒ√0¨i(Gk‰ ∏J8Zèò]Ô!Òô·9–˘’µjÄ¸˝'A∏Â«)ØRª-¯;}X'Ÿ+ŸﬂY»L∫◊J∞IÚÂ-”,|f\Ù≈ÆÍ˘k{ãÉÈÄÔˇë„6CË“(yÕR;
+Bç=∏È<$«léﬂtﬂíq‡?J.˝¶Û÷¿<Sp^§aı˛5ÿ‹Âæbâ>°Í∆tá≥¿ù-M î[t|R˙•ƒ“ƒ†àêKÅ∆<"8≈⁄,Ã„x-TG”I§]}’t&Fë¢«ÊwÙ2 ±‚G¯‘ÊÔ>Lù:ëø ÈQ%$]’‡Ç§KW€-‘◊ÿö˝™¥‚fiFyiPz_RÁ»^˜ïm9è‚˝”ôé`Fe1-¯0má:ÿ4$ö,|Â;∆'ÛuósJí_yVè/›\≥]Ì,?-gàÒ_ƒä:(øQ∫Á’©åéÁ9∂:ÿ¬:ÙED^ëÙiyxnNOÀ|i#8ÀCdïÇ0ïﬁ9éÄïƒÉêWÛHå§\T1:#›PÃ≤∞Wœ-*¸(Á"æª∂d~Dÿ˙é˘U∆ﬂ%±tò€Xtk~[åƒ-fHöé>¸*⁄ÈÑÙ˝ë√#6}ál8†¢`%ÕWUÍ“t ëÁ¸§øÈ"^Uj•∞O≠Ñõv¯7ˇcB1¡∑ôÖD Æ®2Bí£.JWØ'x…’aj^X|^¨ê•YË`,dH"©{É#ÅDPÍ'ÖÅë,tÄ<ÀF◊ Œãr<C˙å°y|Î°0n≈Zjh’E¶÷ÅÍƒîL]´ÑÕîe e_„WI	E<Zºh˚e∂pbÇ¯Õ4*¨›ã|!,ñqã?ØXIPËÉÛ#w¯#ã⁄È¨±ˇ5$1Ω,*X!⁄k~&IMéc÷EÖ≤¶sN.oK…·Y†j˘dõ…amÒ>-îô v¡Z8ãöÓëEe∫K1ÜeG!Ì=≠P*ƒ<Œô#ƒØ7|s”Ã8◊&'.ôíeipyûÇ≤ˇJáIó…sxr2µj∞à≈ö¯QmfS$…ê£dë…≈n2jjI˝⁄º‚8#Ó}¶ŒdQ≤π≤Q¬®$Ì'•√Ia¯É+ñòcÆo,C,¨‘-±rã"+5 ¨Ã[hÖê˜I©±ÑD©‘
+Ë;bzŒõØU‰*ñú(>#/@Ò¬∂Ûù][€+¶*+â§±Ì`qóEÖîr@ìHdiÌ’bπßåË≤‚O~V§;Uı÷jÉUqÍ∫uKÚh'±DI°x	Ü∂ ñ¿èø»¸"∂°*Wí’ò∂É±ìWDkÊbY)›Çœ€ÙFã◊+<êrˇ⁄ çë“ù“–*C`Z*¶“^+eéwŒon»`ëû·c£ÚÑ´¿Z9'â…¿ò¬sˆo—ô’(é¶ÆoÖ6i0ı0·º¨—¿™‡çIùÛú¥yÒÏã97πvl‘Â≤ùMU‰û°2:ø˛˝ø¸Àˇ˜ˇ˛rïV,∫rZÙe¥Î±mŸ[•+≈©'ã#ﬁúXõWÉ“¡∂∆TÖwJÖ≠Vzïy±M…:_™Œœ1Yb÷E≤“tà$ÈˆeÆíç5la[6`,ØÁæA©©®z©ΩìäZJÂpøëƒ—Úíy'"Úk¬€úë«&7TzX∑Û\OÎìQûVöû®A'@‡ã˛ö€∫ÏåZë∂ŸÈz≤˙
+iháŒåÿÿîìr LaπGx≥Hv„%~°Ú:´ª<ÒSæPNIWÊßÂ —p"GYSá~ÒAªﬁÖÊ	≥h»Ç¡\Ç£Á!ˆyHƒTØ`ñy˘ï=n’-ÕDS+öMC
+£iZ"ˆ‰Ì#ñW“ª2≠[◊YB≤ØãKY‘ZÁı´å»¡)çõ5ë#–9≈JlˆN›¿2≥¯€Ì\ç‹ã§Õ<_™F„˘QZã<≈’Hﬂ∆¸™ÜŒe˚ŒHMÃ†:§qS›U48´ªF¶æ‚ç ®„+ocÉ„†<ìTÌëIÊ»Ï±xˇuäÏÉNÇÒ;4æ}áwyW˜ºì˚≠Òy
+an¿h˛Ëﬂ N≥Í˙±I@æœ:ëÎ7Ø4»8¯#à…Ô·ﬂZèM(ºy+Ÿ∏sÛOZJ ë¢˙KΩò‹brÑukÎh0ı¥ó¨≈1W9îu)Ñ⁄j	+ó!≠ÔhwÊpsÎCq†í •á§L•Æ2eÓãt˝íW∫v§Å∫˛Eùï©ç'-ÎÕjTã˝dâØ∫$9π˜ZÛ(sF®„'´II<("!/$1í∂SŸîÎ∫¯BÓê‰rÜy$Ö@ø§Y\Z°@WÄŒR√1çMYÂv˝™§ù™€!Î(≈ŒãbªGÂ}y‡S	ÇRªH=@Ö≤w&°B¬Å≠®Ê‹†¥0ä¬Ø^†Ä™•ò\ÛÆ≥‡,≠Ùº èf‡pm†UWª≠®^<2ëij?Nu;r.·vuT∂ëº ΩJ+y0 ˘´ˇÙ'R®ÕëD_Døw„qì›¢™^@®"O≥ ®ÁòÊ¬2ÔáÙƒΩ–ÆÇÁi≥Ûê<Y˙-Y^&ˇ+\≠ùù-GaŒDÚ!öUGP¨ùı“ºëÇ ˘ıØ‘ë‰”ìó=î‚6nU*›J°ÚM™YòyöœKtUev]p•ƒwëñdO ÿŸñfg√©c%å¡rY=«¨%L°äı—Õá°¿,w\€P€‹T®…@1†’Aµ` @ª≠ÂMÕîze¡‰πò.™∂*ûBObôŸÈâ6Hb=Éﬁ'=h&n<Ÿ˘QõkS$+À∆ÎÉw„–`è«E≤X!Ï∞¡Òﬂ–¢ÖùóÀ‡˙r<^Ã†ºtx°˝¬ÜN¸≤ ¯pqÉ3GG‚úX®/›…°ZKjQÉ'g:˜t€ƒ≈ÁWü«1¸2z ·wZ„”@ä:R=FÖV¿GÄ‡Zó$˘#£[ÌtÆ2U®ßÜI€µ¯C8≠ZµñT—ÕS,,ö¨˙√É[ÙYÖ«˘Àô¸µ-`«/C(èUóU∆ƒå03”(;X’ja⁄(U*‚©!ï∞útÏâG%™*‰yàÇ≥åÅL±JﬁêCUŸ("=€IKòVíàT^™+Ü®à	 íMY•'´…1pïÂêKN¯˙ùßKkÚ¸™àË®µÎ %˘∑Lê}ÀE±rò^‰+ö+÷+E∞û-∞5¶fØ™rπdL	™*ÙJ Úˆ‘hX√ €æËE±âJéG∆ÆÑr~b5KªêıÙŒ€g†ï∆¥Ö∑ÔÎë_o≤®©©†X’◊û@Yüÿ≠a[∫J30“Ø‘6N1ﬂ™◊jz•Ú†∆#iì’™»ªÍeÒ´vm”ã˜PM´,≠ñÍ;√ã5õ≠ﬂ`”=ï_ˆ¯t5«¬ÚΩt}Ïjºg≠–`5iÆZg’÷ä£eá“ƒn⁄∂3Æ«·ÌÑ™˝»„í{Tå!3;0◊£c…∑∫RZŒmµ1„Éﬂfó÷3?ßûS¡ìsOU"ç2≈rΩ--¸zÂÎ™jÙ∂Ÿ@˚®Ô˘7¶YÆ≤Ä|jAª7onW—eiπõW⁄"◊_ñˇ,Z¸Æ,˛-÷’jD’'´)ËÎ∫ºHÂëíÁ«‰eÉÎ*Jí∫ËdùtÅÉZÀÈZÕÊÈ-5iÈv qÂqS +ˆA /=O’‘PÑÍ
+ÂTˇr∂Ø›»v∫ú•ì‘∫À$X=âU©øo∂Ω•◊˚ØØÑ:nMŸÜÚ¢H¨∂+ΩfµÉ-ñﬁ
+á®g˚eØ∞Œ˜,W'∑\Íê˛4£Q‹¡nRè∆œÙ‚Ìøﬁ¡ˆ(k¸W/nu¥øˇ˝Å‡£À;4ø.ñîE˙Àó]û¶ùí\tí¶˚ü{Fπ≈¥hf+&HÆvD¶^Õq¨üÀ(îÍz3V∫]ÊÊl≤ΩID˝±É—c	í
+W!º»UB'*6c2|/`ôôòíÆÒÉüOkâW•´$C£∑DÌ‰eæTmÕ+hd—lz	/å››˚aèlº⁄Ïï⁄ˆ[áá{ïòRu6,E–16c˚“oM˘|“o≠jLz\≤ñxå›÷$^Äœ∫€
+ﬁÇ—	»!ØÉ4ü5I&˚ú÷2c†ö*9‹€¡&ãWÛ%À»˜I3ï˚]÷DÒÏ$êá4±¡Eƒôﬁ¸kDÑl√ L÷=S®ÄÊYÁ48Iß ÷M~tF·Õ?Àû;a˝ÕL&Â(ôMä"kÅç◊§_8Y∆âTúG‰N¶ÿz%W ££n`ﬂãÂH…Õ&˛ˆ>è;êoíÈjÈ≤q !˘JâŸ@°äRrã«g5÷®~%,ü”o3Z #Û·ÉVuJA≠éÜ
+`x¯¢¬5_≈Ûß™ËDMYÁ⁄Òàdr‹RÂ¥Z$ ¢9z$u!ˆ∞]èq){_œıgÛg/'4´ù≤ÕRÌ'∏ˇJ$?O¥ü!÷œ6håµª§(òcñÂêØ£ïÕ√ Ù ˛ ©ó5zﬂ*∞Õz˙4vº1àÓeÚwL`∏CL1_ÿZÙ≥¶“dﬂì®;÷¢‹„VaeËÊaÿö.]ï°b!"kéà+Sê¢ç˝∫ÏN¿@êºKbQøƒí?ÜéG”˛kÛô[ÌΩêÜ0∞ÖòE,êhû°ÎW@ë94‰Ò ”ÄÖ=èÕúö]∞v9Ê[nû uΩhAõ'ƒ%$„Ép#È“—∆•Ò%zãå<≠:yNmn—[T2t>ì zA#°M™Ÿ9«<ofò«ÖGXº¿l‹ó1≠¢	FÊ9{˘	°ß{)©(J®WcüÂŸπ±ØXk:°•eπ™ ˝iÊNy	ÈÍ	S¢§…èê
+CæEáÌà∆á,Wúé≤uâÈˆ®ŸhHÌîpˇK<Õ“ÃÚùZﬁπÖ’‹€OëπŸJ˝ÀnóT,2[ÓÕ‰us∑rIÿı:≈0U∞Â∂sy‘¥≤®Ÿ4®7∫K∞Ô∂∆m~D¸!∞Q-Îó+69ê≥}π˘[v¢*ÛQká≈J,	x©–ÉYgV¶˘Ûxr»:ÒöÎ
+L”[E£l7∑{¿∫V~22î5û∏~kåByı1äÂdzÁ¢uﬁzÛ¥Àæîﬁ≤RØ`HV)Y>fjπÛákŸÜ”Å‚Õ“ÖÜ•édÙ¨8Ïj€Ê$˘¯OπˇÜ?RÈúº¡ÓL,I°ë;”éë§ÒéÁ¬ª±¸:˚#¢9do¶oC(_¥˘-€™Ú•ò–¯Ø¸ÆÔhëø=‰˚åºi∑€¸C§
+aµÌx£QY2≈¯8QãO)Ç›jŸ<ÊîSv‘QÕÅØn!˚$«ÄÌ|±’EbìmÀ|® ¸æú/w´⁄ôˇ~∞∑”o}ùVBoG≥cﬁÇ	ì|·Ò·5ûÈyÓ¯µ¢3Zú «ø£òH+≈πRÚïjˇ8∞™ÂL¿"ø!¶ƒÌ¢1…,π-≠?,Ù%ÿœ~yÛVõØ~Ò˝eÑySëã=vùÈí[a}®|ÿı‹¯“xwˇ8⁄
+√ ‘ﬂ»éJ™y≤0Á8‚m⁄! ⁄q.íåøv}˛µ&	K—‚*I(ü“@C3-9‹∆zÍ†ÃÅÉú≤O˘‰1ˆw7‘æ¯Ñ#Vì?Éè®É÷8n‘Äõ_ÖßÙ†K–@/¿ü>¢o±–—2Êì4 (A˘g	Ò<¿iŒøÙıBÁºﬂ≈áÅπüÙ£°≤Zv˚fv;∆>õÔÔ˜Ñ·{Ê·{‚=ewâ§UVWìΩ»Á∆∑èÖ˘gÑØqªmˆè=°ﬂ<.Xu†è†oñ@ﬂîÉæYÙÕ[ÉÓÙ´ﬁ+≠zOæÍΩ⁄´ﬁªı™@ﬂ,Åæ)}≥6ËõV†ka?97fçƒ˛∆È>z{ˇÌΩ’¥Ü„WÛliçúw~¢ï<áèì#_πpÏÿÖ˚ÊÏÀ˙hòâ”…–%v6)<3W”o¸¯A∫{£⁄Õ¶≈€“"∞À…7k*ÒŒº√‘Ä“Ûô`ü∂˝`ÇI5ÿ¯ÒÏt…4öè‹ﬁCª_?óø@ı™˙º9√ÂîN±©0+1„¯¡ô3ú¨ßCÚîuueì|Q‡V¶/ê™¢ÔBhí◊ü¥9,©ß+¸D›+ò‰etÑ{´:Í“Ω™˜m˚[•TR‘ù· 7V±ÚäÁ¢.®[÷¢ XGô¸˚§Iõc¬|*»áÖóÓ5{ *SãaïGTë)ŸAlÒn˛ıé±§πÈû¿◊˛Õ_∞®KRÇ-o‹zÏ‡XÇ¯ô–hê°;Ùîq5àÿ:=PW´ÀI—®nÅYçÚè∫≈≈WåaÙn⁄ƒâûÖÖËj¬ã$˜}2 Hè‰$¥¢FÕÛ:U[ıµ•nA¬&".,íâÑÁ!b¢yôñàuA«AyÿÁ≈„°¶Ú9≤4î¡¥œzΩg_>‰Sóv◊—IØH'ΩZt“+–IÈ§WãNz…Æhv„ùdãÙ1ËD|ŸÈ§∑8:—@dC'jUäonh‘â›„úëQ¬a¨Q“¸4ìm¸‰¢'ã›¡$ùr$Ã±ßÃêN·Ï,í¶”´'¬“¯P_àSNú•e˙–‰Y}›Ç4¯y≈zi “≤•≥<‚<i‘ùW ¡™†®"íFµ>"ÏÊ+1ø∏P˜+/\ˆ≥ã˛:Ï—	öV´E7ˇÒ’‡ı´=≤Ÿ'€ªÉ≠É£≠ˇ≠O∂˛∞ﬂﬂ›‹ÜÔö˝ç›#≤ªq@∂˜ñ∑∑§˚§”[%ø&ﬂΩﬁ…æ˚nÊÇ§˙ˆik÷jw˚®µπ=x’ouz›%|ãÑnõπ”Ä¿ãf˝•5l®rÊi6 9ë(‡B&·KÕ±m÷7ù◊“”q◊lR8sB€1j—Ÿ[à‚V"xF01&2ŒõgÈI¯!È)ç]¸RöéZ"Àö_ìh∑bÎ» ã~
+„f∫òÉõÀöK…È%ø`Pl0$ÌÍŸúmº’LEâÂî›	7>&1äK[ kZ7⁄5ëΩê<ô‘kÜ«ﬁtﬂ&CçS«‰@†Q∫†∏” Å∫öçmeäf˜a¢t∫~3ù˛C≤≤4ØÖî/3cy€€+ÏÚä÷≥"Ïdnó]t§;8ÜØı[ò‹Dû	zı2iˆ»78¥Ä< ŸOF∂Ä∆|ÛO˛S`·=Q<“√70õ◊^∏3’Q~‚ü‰ˆ”fÚÈÊ?E*¡ ' 
+0ÉyTø!ùv8ßq‡ı¨Ö∫ƒ2Qªõñ±F,˙∂Èœìc¿ﬁNu∏D®”÷Ä1Bÿk“¸^—xˇÊüœ(èÉ√&Ω;Z¿ßˇ˝€’ˆ£’_∂mX` • –~÷GŒF~£·N˘Ω'k›è8TÎXf´5PeKJGØŸ";Æè≤Y#Rrs{j Ö¸7¢`˘‘xX≥™†j…’n∑ßjÇ≤Emø÷˘*úÓ:5_º–âû‹42›‰Ù÷åi	nônbK™ôOuT7_+ ªÎõ∞à∏˝!Ú-F‰)/ÁÀ	C¯Ü1•3Öè7ŒLlP¨•W	ˆãZ/m™∆[ä®‰E“aj÷ùœB†uYÀﬂ$aä<≤>Bπ≥ΩππµöƒAÆm+\~m÷·∞Öù^œ˛–‰j{êü[]C©qã¬•ÿ‡§w:{O5˚øx‚ı{òû¸àg.dµAÖb™Yÿ-´hÛ§£*H!™-d∫±–\ﬁ≈/È¨S¡"Ì√=ÅiN‹BèE.ƒ Í2d4∞8◊rùªÇ<~7ÉoÛ•9U√¶|ÖBÓò¸F˝2÷™3Oòèl≤(¸íÜMπ£,Œ¶˛À{qÁwˇ˙o‰Î+°ÿã±÷ã˛p_óxV
+uàãı[û+ﬂûtÑjœÛOZˆEC;§y¿ãøŒQ¸≈@ Û{·¥ïÅoåã/<ª ≥H»Ø[&ghS.JœŸß_àó$CºJ∏^H«(Â^H≤3náÏ∂È≈+AÚót8vB8—ú)R)n!¨ì9ÑgåËgjèzÃ˜‘¡Ùà:∫ä<˜ôUõ?6îö÷îo`µ.Âwyéò¸ÏáÙÃ•Áïı◊›âπ^püâ„öKs9^¸¨Ò
+û0◊À* xLÇ„?9∑0N¶ÁÕ¶Æ˚:“H·%ë˚3}v’}⁄π6é≠_Ep±N¬$∂(Fæ>Ó÷*—·cj~å:≥ERÏ+V &ÔZYSI
+á◊J ÃLàC
+vjí™Mì]wÕ“”,≤¬‚Ç`]¨ZM	–Íæ˝r{–ﬂ‹√B\É˛´ÌçÉ˛Õ?‹¸ß=¶	]Ÿó‹W˝Ó©fNV≤ûŸJ˘·YÌdõ)çù3 +¯≈Ëår_vÛÔ¡à.≠]5àE}ncQZu%¯
+wî%®≤ÛnY©æOêBπf◊YD»[±ia`Sî“Xå€¢wô#•*ãYw\Pﬂ\ÆW“(éhÎ 	˝¢Ö*¥IπZUæ\Â≠m¯Œb7í.⁄Ô«q<ç÷ñóœœœY”‰∏¯G˚8|1DÙ|ˆua„¨*ärnΩ˙ÿÊ^èûQÔYc«,íå5≠jÆÀË˙iF÷Í.O8œ≤+5/YÕ€b≤é#ï Ê[ÉπÛÁ”6È.w?8ôôoêQ° êâ∞Sñù¯uÀú‰K“`µl“a`.∫€8òÅ¥\y¢ÂøìŒ∑…~‡SÄ/~≤xÇÿ	›÷Fü¥@0ÌØëGΩßùnkıi∑qmÊ⁄-Ú2ÈZ∂ÿÈ	f…˛ÈO§—|“]"+è{›Vg•cíñy‘‚L'éÎ±°≤“rˇ°Ñë⁄·fR€U&ÀG≈>âRÑ©«TœWÕ=gäÙQ’»Ú¢Iì„V◊H›6∞t\∫f¿}qî•Åg<.‡d,æ¥ï/(øªæñQ;5‚ä'øh˚ÿ?1'ô~Í&4éa≈√n7≠-F¿7	Êú€ÕÚ8∑l ‚£FÌ≤Ê* xÔ¬$x»äÁù‚tú2ë›“Ã»rÕ°πıÇÿ
+áªD¸Ω∂ÿR4ÔôÛX9›˚µÃD3w~p¡;ﬂ∞eMLc÷Íë}„úè@2ÿvdªﬁ|Näua2É|Ãˇn¸˚ˇÒ-Ç-ﬁ√LúÂZGä°ÌÈ∏f^´ßﬁ“»Ä∂9ª!6ˆ+π-BÏ8@ÌÛ‡5êπ? ŸÁ ù¿Œ]ê
+;p∂ÛÊ"’	>yßÑfõ√õ_B∑.≈≤iE4≠6+º≥ÎÔë¡ﬁÓ·Qˇ.L£¨ÍM´ø€µ˜›ˆ`Ô”ˇ“q/Ê"ü4úŸ‚î?§ÀÜ≠mñE€ÔØ∫xûñM¢”14¡å˘ı"ÊªÒ.=ÂUêì…˜ßV#¨0ñ3v
+Â\\'üÒÂw k-&{x4º˘x®‡Œ˛÷í^)‚Ä◊@§ø˛ÀUZ`c°ãsı––CGhFj˚[tË}çtÂ#i§∏«
+è(	Èêª\£Y,ˆ]i+ãØ¨Ëâ±;ø8É)l±b÷émÔ'∆ûà±ö0¨B÷ﬁ…6ú§sè‡l¶@ò|Ïp,<ÛÃÍéœñN√vC‡“≠∆í>a&øí˙R{C$AÁ-sÑ@˛Í©XC}ÖUNx”y+~˘»ÆRØ˜˛Î´Èõﬁ€Îe¸o7˘oÁ≠™zWÒ≤Qæì˜¿åÕ# zﬂîØª!?RZs1˚!‚")	µÀ∞Äù-=2NÄ÷‰¡|œW9B-2∂zGZb0≠Õó◊∏∆èI&à%≈4¶qk„¿≤!öQ·&‚ıÖõ–§PÚ¢9â˝ºæ˝ZŸ8™ßEÍóuØ≥¿l∆uπuçF+´„%™Ì>m¬g>áQPÅI£Ån£ÌﬁA˝˛QÕ1YÍfråL«ç>âœ©Ùê‘0m∆fì˚tã…ùøñ≠ëè(úYf°ì."µ¿≤ô{’Û^∫´4⁄;Œ¿¨Vµ$™õ“Ã˚¶ÏÜD0ØØ(lí"ú¬`◊˝∑¡{À!÷ä*àajÜ{≥Ío´7ø¢ä4˜4Ù:pˇÉk“¸ÎøêU¯”F¨[·ïU∏ ß ¶◊áv¿+ÇÛ@xS ü—«%ßÒ EèÆíñ
+wT)˚ı÷Tîét˝´π	H=›ç
+“)‹s∫ôgbV;øJ¶◊QÊ∆ä◊‚Ë≈Fè∫áv¿’6Êˇœ&,ıÁÊó8®fØ‹«0‹òk∂ÏΩuÙ|LÎ¬	ˆ(ÜtƒMãdˇ†’Èt[ΩN˜	¨ˇYõ<∫g¢‹µ/‡ÀÇW¨_åI?	‹¨√©#_N„ê’Â&,¶]≤Ah•Pˆ¬bO'$Øí‚πkôÍ,íó<i√"Ê}‹2&X°QÃ´& á∆:+ƒáˇ«Œ1àK÷‹ÚÃÒ∞q´q»º´a$o“ö_ü•s„1~p+Ycø[y™«cWíÆcÑÊJiÿ€;élÏrç>™a0Jã¥ û‡AvòElÆ@¡àÜ7&∂e•nÏÃÔ:è˝ﬁ&{X√'öyq“+KÖ¯¸Càe:ËiÅbB`Í’)¥d"Ä‡,} ià˘˛ùöÅtÖê86œ.\œu∞*K≠d˙!cY≥±¥◊[û˜¡C±ÕXñÍû|'˝!=åÅª9·(25*HìÜ%è¶v«Á Ê∞∂a˜	”å‚—/#>ˇê∏£ãµ§B˘í©√c~~∞Vè0jö=∫∏∂;‹ZZÚ+≠Ös≈-{Ìì0ò∆Nà)Õ«´‰7““µYà&0’≥¬+ô}ÍÌEŒc=hÓoæñp˝ñÿÍÌIÉÂ›Â<tˆÓaûÎõ$biª˛àãñIñ ÒGó–"<•ˆZ≤ã<Ç˙ãê¡—∂ﬁXºUZ}7Ò€ÙbÍÊ>õ%˘ïsl9‹¡∆ ôhx<Ñ«Ï¿∞<Z °±[w`rÊ<ÃâHû™œó #XÃπyÓêb•õ≥¶-ã[8ìª-õ[£≥fu5F¥ÂäsÒ≈€q∆Ò∆z‹qÒ¸q·r±<r·\r^>iÕ)≠x•∑¥	·Æ∂aMÛ◊‡4
++>¥¢‡]Íègìº'Â3©€G£)ﬁ¸3 ò˘låºˆ4)lB|8(8üÈ<∫à ÔYJ:ñ£J2k„Jä≠©xùCäπB¿”6í»V~–øÌ©Ñ˜!UÙ2MÚ%ìyœs¶≠u>Y◊vÑÔ+‘â*§úm¡ÂπŒV∏æÆ©#*^Â<k≈+≠∆
+ÉÛCOœÆz6‹∆éÕ¸∞mß‡áÊg~5wì‚´Vñıx|WWtÒ´Í6ÏùP7» ã˙Y• ≈VÈêûŒ¸—Á±HÑpqëvn~πŒ¢)˜+Íb¥ÇÕÁom·±$Ëóe©\Ø}¶ó \‹°XÒxaKwÖwDÉ∞›Tª•Ä27¥-≤∆Œ≈πIá˜ÃøŸµ¥°…B_èèÉ—•˘ïW•f√bè·˘¨YHºÃîeo¿ZèGñõCÍõµÆ≤é∂Ê‘ÿ‚êSÏ:¿&Õöô·•eieπ0≥é—˜hl[}ﬂ`fΩ≥Ô–b›˛i€9;jı£ÌÙﬁÕ£ÜÔm⁄¶¨c¨˝3Ã*˝õØØÿì◊ıÃ–ÏÎ'ÓÕ“€¥;æ]*¯R•]rç=æmä8ø÷àu>3øl˜ƒNÁ^≤HT±–)‡&4CjM≥U„ÏÑı
+(öUm≠í”Á7ˇŸπCV-sÄcR“¸’ñPKöKÏÊ⁄.
+Ø‘Aí«€=dÉ≠ÿñ˜Ù·„zT‘ÇÌò≈1MË±ºŒ–SV ‘dÕñ÷D.∆LåœiudÍBœ…‘¶™nπß>÷ﬂw@ß∑qc…d^9	n)qÕk˜£»ıyñ»( G7ø}w|E_ÌòŸ˚…ƒΩh“˚£÷dÊ≈Ó‘ª4Vn∑vïñó¡êˆ´%√”.UºJè2ØR‚™ÊΩè5·A´hj3ª(Aû -w¡ XVh†Ù≈4û©4√1lûÎ¯ªIΩ∫È~í≠:ú≈ÃÚÅ˘J˝s≈}åí,ÕwBröáX@X˙«#√åñÀNÜ9ÔÄ¶¶˛iCFI4ö~tÛglíu{≤
+|÷ËŸUìÚ4nB€√Y¢√€	O)w|È—ˆ»ç¶ûÉù¯ÅO¸ñ\ÎÉú}Èª˘û˙°˚”åI∞CÍ;‰àÇLpCgÅ*›áé?xy‘z⁄YYYyÙ‰ÈÍ„ßÀ˝èÑ˚ıeûàÙÚ⁄±èx©‹ßÜ≠›*FÒbú;Ú˝ôıé&ú@ÿ±}L¿f$¡∫~@ˆÅãÅ:ÿ€ÈÔnÔÍÓvµXkˇ(Õv«ƒÔ ◊*)6?J>éØuæYïX≈ñ¨øt=:”·èi	ˇ√ı ]U¨@ùÅ¡öñ∏X?s6)tÿd}4NiËÑ$ C!∂«TúiáÃ
+ˆúCÏOXÈ+ﬂvQ)ˆ≤"§%˜Uæ*}!åÅ7é˙k‰Ô_˜wè∂è˙G€?ÏëÕÌ~°«ïìˆ]·'µüf nAÁÄ/Éw#◊iîk⁄61ììózpÓ‰ëh≤∆˛Ï¡ﬂå›¶Ú@V≈>È<∞*;ë˛Ω |1œ˜Ù≤YÒ z»¬|&&Zy˝pÜ81ΩD\ö{`æ*"£„=$X¶ˆﬂ&4d‡	àYE>Äú≤H∆õú1)≈≈ßífRA4ü5§Öwâw∫V.Ue™¨!,q$È„R~cµ0Rêwﬂ·ïÛß≠«YoùOjqË	\‰±–JG"–‰-÷«+)^@´
+Fe-Å&RÆµü'Ñ$:cÄeAeíª ØV$Çó/dÕ}`èùp[ê»•âÖÿIª„TœèÂÕåVA≥ÅπÆ%.ßp Ae≤‹˝FöaS¢ΩÜHw¥ál^•ä©‘∫§ÅNÖIäÉ‚ä^\ﬁ‡º/†REêwN—]ﬁÃ´˚xπÛD›‚B˘¸'Y≥ﬁ£≈ÆŸ”9◊Ï…ΩX≥égù≈ÆŸ úkˆÙ^¨«≥ïﬁb◊¨€õs—æΩÎã&4,É‚\cŸò UØÿ|ÏL6+n”˜¡iÌeU¸§ã]ñM’N{:5,›ÈDyX±SÓÕJ-ø·ŸÔÙ˘”ˆc‚ú–0I#Üâ¡—?˘M∫  •“4l¥jqÍxT◊áº¡
+∫KÙÕmx“aG –?›êÊm…úŸ»e
+&úÓoæl+Kº…}$Ú]Kÿ£wz…’@Ô+›yÖn£	#:q"äÌπ(ã·íØ’ü~HÑ%ÅiJ∑K’ÍPäŸrºF-o4ÕWn[Ë…ô*áJ®Öv¸¥∏L•¶,∞.∑”áÂ
+p?GyX≈§@@Dê(îﬂ ∑•iè–eÄì‰è|rô2j•q"Za"ØÑuhX≤““RfÖlQ(⁄oƒÃÇIpTÑûæ…ô|¿‹Z"Í€¨GXÇ˜é/€»Ù⁄q¸õˇ¡‹©d€¡¨Ò4¢4©·´# ßÅŒ∑k+ùHÿO∏ÅG€†µ¨|ä<¢·$›¡M˜˝<y˚∫›µÓÍ˝ﬁæ˝√Zùßüb˚~∏˘≥wávÓ8ùÖ@èQ≈ﬁ~∞|¥¶„>z]Ã¯•Ö±±jm|πΩ€ﬂlmÏë-≤∞˜›Aßàù>˚Ø·_ùÒëı(yÒ&%ÃÚ8t¸˛pH£h'Õ<⁄,›¬"A÷≈ñ”¯ƒË2œÆí?ƒØA≠⁄]?öY?„+€£á$vN±
+ÈC^ÄÌr¯1Ò\)[aÛßó~[n~}‰ú6ì´?ÚŒÿ≈˜¸∂‘[0OclÓ”-ûÔ¯CLóQ≠˚=[3ˆ	§àsJRVhÑuJﬂDGE|˘ªÎ W∆ø&âèÔ5l‹ñ–O Hœ:¡;—,*ü
+éÁx…Lÿa"ºÎUÙ,iÈ‡QM&}√5öÒ=;ÛÈÁ2É”–ô8—ªTk.èAãä«Ôí{£d>ﬂ≥o˜˘ó‚¥ìH*›\≥Í3°Ôx¯%ÃæQ-LkÜN-æ˙Ï19ƒÈòÔ‡	˛⁄,¿∑ì‚of∞uÄ⁄çùwπÔZ’àKœwY§H–ŒÂa˙çå2&$"9y«Î)VËÊc§ü∂ÖefqmI≈ÚÎ%>µ*áƒ÷6ØwˆÄSlmÙı,+\œ&¡ª8ÆcÉemÛ_ﬂÕ"@>˝Ç”Êer√k¸}ﬂÒ©”ŸuŒ‹Sò¬Q–ü±©s–ã\(;6ñ
+>y)Ûá©Ω‹˛Ó5kÁ¸_∑AÙ7w∂w∑è“œÖπ∫Æ„.‚Í‹O\î¨√ÄFçbÈ¶Ú≠xM
+`Ê`*…‹«ï$à√r!OX?§qÏ˙ßQ—Ñú√ˇÀ∆ô´î[CÈb¶èÄb¨€ƒ¡ZKÃâ-W$Ë ˚é‡p—AñnzUÈKcÅ‹ıÇ”`Çø"ú`Lê=$ßhÂ`&õ x'Vça[˘òª”‹xñπ⁄¶Ã∆ãIMÖ¸˙à9Ä›˘úhÃ˝5;n˘úvê√≈Œq’¶6"ûáŒî˘÷zÈ°˛∏Í¨ô 2”Uˆ"åµ}÷‡?VM"EKR7GòW3∏Lì’>œ·øzüpÚÓ„≠Ìs$G◊h¬∞∞2ÿR\áÏ»î£ lM&W»◊≤¢ˇCÿLZ1Ä•*Û“(òD;IÍFî?∫∆Â∑ñFgV™<µM·f´]mµ-!—çôÎa›^ë»ë?“µ@E[úäTDúZµ>
+N!!G˜£8∏ü>mO@Œ◊√•W∏\, ¿øN•√ù¿ßÈ9˝˝A®ﬁœ	£Z`Í°‘ÀT>3î⁄ÂÛù@+á)—˜≠x?'¥˙Ω<¿5≠áX˚4<qYçﬁ>ÆHp'∞)¬Të…˝¡¶ﬁœ	õ=ÜâÍ!”!π|v⁄ ±á.;'∫ïOºG8ïÅ¸Y°’M∑íÄe#ü bá)Ø?…O†wª‹	∫ƒÔj%~NxızÍNM—∑Õñ!)÷ˇÎ4∞Å‹∫“ª°Y;√g”˚É\	ºür°ìMæı–kÉ- ÷÷íú%e$ÔNyß”—˝¡(ÌÁÑO\ˆ1‰LÇR§‡•_UdÌp˚AıôøÆÔˆ7Ô~M‹‡‘âyO–LZÉmÈ∆<.Eé››Ú-ø+JWçÅ¶áX#ˇ*~+±˙+œ‚e/Å;Áˆ√‡ƒı{•N… ZØ·1ª˜‘/ÄÉûK…◊ÂßK´+z˚ÿÇ†‰ıFÎ®øA∫kd–ﬂÏÏëÕ>Ÿ⁄Ÿ?ÿ:ÏW<"í5L-˘“E¨∆HV≥áz∫Ù°,iHÂÈcØ¡íZ‰| tÇNQ'∫Ùá$Õ`ñ“	mOCzÜqÙƒôyqS—Ä#º√8!⁄¿∂Å®¬wqqXß‘w…*Ω√nÔ ∞‹ø;‹€mG¨º{rŸÂ± :Áéì»9£>DÍ},)ñqT˛–åªß#ecÈ∆øˇ∑ˇì™N@xµw∞ñO—åŸvæRÃYƒë;°¡,n
+|æU£±Ùê<Ít:Ú‰YY8≥Ãu¨DÆüXM÷ÿﬂapéK≥n”Äx÷¿U·>Ïr˜°2˜VÑT$≠(£ﬂ*ÄL¶A‹´ù≤[ZœÃËjÀ©|cò+¸XS∫CüN≠œƒ6KÀ]˚©leqÍ—±◊5Êu&ÿèfß‹}GöÃ∂È·Wâ¡ú7ÄS◊&í[gøö
+®Ú˙“kõuÄK√Rø<v•‚Ì◊ù	Êà¡j∫z¸û3√;»–9¶ °Ω±‡¿ß,ÿ*Œ∞‚á¶ïö¶VÅ.òRSz†Q ?ÒNX%)˚€ô≈Ú8u6r9ÑsÏéF@¡ì—öÎcÓgãáúäA®y*¶P?ı¥Â`e«å∫¯ß'5üœbZPRªE%5/∏7¸´uéVSÏáÓôÎ›¸r ìEX¿N“s@U¿Ãí´…|¡ã+Úì¿ÍBΩEÌ@ñTí◊bﬂUíKÿ⁄&ä<¨Wa°jËÓ)Y%:«dT÷Êy∏“ZÑmÁ[ﬂÆ™Ê§!„C…∂zpˆ◊áA¢:a&l;£L·ø™B¬ïƒï∆LÊ¬W¶Ì%£Tu>ÂÒ"˝°ór›Ùãß,áf•àÙÈÂõ^/+ÅèùFn8Ùd{QÑ„qís›ä∆†ï˝ÿR◊±H7™∫T◊séóïu˘‚V“ˇÅ%Ÿ6â◊∆Ô{ÿA≥∞çyP}Yf‚fa´@…v‡˚ÅuÕ°‡ﬁü≥m¬„≤—ÿJ8?£%ı0 )ß0•f,≥ô*v˝È¨zÊK/Œ‚@5É√k7§#ÂgÃ™ñ‹ùüùÄÉœ+*™K˛`åmÉ“˙L±ù+—¯í¶¸î^Ìv[ÄHﬂùG wŒQ1/≈Ê•{Z≠©Á+Õ¡Õj(®ä\$ï®Ωµr≈èÀl:rg¯{8ã÷(Üàù$ˇ)L¿¢Wj, µsH«@84|÷(‡'”ó<
+«B≈√™¬9UËêˆës∫8¢ﬁ&îº≠“âTŒ∑|iÓ"Q˚0Å˛˚@’"º_»Z~»öa(6QëÆ??r˛ﬁâ∆ã£Á¡Ó˛ﬂ›G2˙”?ﬁÚE8◊»ƒâ~ƒïnÈW€nÔépvñ˛§‹È¥;¸ˇÀˇNK›jÊ˛í≥“7s™ﬁˆ±x…≈ŒhŒ2Ÿ¡\2w˙Èµq	Aª‰°dﬁÍÆ ˝HhN‡P>ßU˚òU6E”œè∞˜«X4sa$}D=zÇ#.ìﬂèù8ÍOßwêä„ {@º)¨\<≥Ì˙‰Ûáó Õ'›%≤ÚxÂQ´˚Ì∑O??¬›q\oqtª’ö‡xX+Åâ^†ﬂÏpÚ·	ò‚ÀkQ0{‚>ê/Ù3ê∑û`Yq˘8¯iÆq˚8\0Â∫kåÑjµj¿«§ÈÈæÎ/ê™a{CzÛó âÌÜ∫^≈@Áát§©Ó«◊Ù»h `˜Ç»Xø–π¸*¥gŒCí®◊…Ü„Ü¯ﬂÔÂ”‚A¸bkˇoâÙøÛÇ„Í·øß«,¬b9mW∞«¬8Ó‚ë˙<ı–yÍ2ó_2???o/Dî+ê˝RéSãÛ®πRònGVóEwßÚâKãµΩÈv´u‘ì¶NJ∞áa"∆Ç!·?hã@«ﬁ#?Û¶ Xne2≈N@Œ~@é1ŒY1pR6û™KÖ&∆@®c¶≥¯ ù«ü4HG…ÎËH√så•<íg5q: ≤»WÇØ‹¨ˆÓ≠ëW{ﬂÌíÕ=r∏}¥E∂‡?áG[;Vﬂº–ÜM∏∑.f·Ù61ÚÅAX˝ç≠õËø˙~œ2Ÿ_.óËãç˙]˘[â˙ïT0π«øØ“ Vx‚d±Ø’r+j?lîo ΩpèA˚&æÉ˝IBV‡‘ﬁvö$ô&—∫ö±
+Ö∏%q0eè±LUÔ≈ı*ê¸rÖMŸiàs˛ñhKî≠÷ßãLÏÚ–ƒ«ÖU≤d{‚9oµ‘Ag’Tu=€“RÛ«T®Ñyîwô£<*x¥°⁄QÃÎk#∂o~iùπ—å’iÁÑÎ8O˘Œr¬uTß√˘P-Bâ’˙‘ı}¯’ÿu‚˙≠1.û°”rßÔ3î›ÈôKœΩg±S¶ˆ¨«:“JG÷∑VeM6‹_}t¬KD[Á¢≈z·…∞ÿÉS7î∆:`jk;G+îÆ©Ò 9‚¢Ä$˘é›ßcøO-}+i©Ô ^M´“íˆp‘∑◊”øC´k(õÒ.(yEdrO¨öC‰„h4åyå_⁄x}ä˘”Q—õ‡_l3
+¢Q¥¶)£q Œ<ï®§ÑﬂébÏ‚ˆ{77`rÊ⁄É%`3 Q’Ê5ÏYÃ¢u({AŸ¨3Di~[úΩI¨ëk>µ9≠Nıˆ-ADñ§KÜ†˙Ç ;r⁄Ì6nËÉqO£µÂe©-ó›âf¨e<—b;ÂÍ5ùW>9jmŒÑÏÕ»ñÊ:!Èá?Õíö|UnAà@KV∑,ãX¨dﬂ∑FN4¶£ÚÓâjö`!∂ÑëY’(Ÿå≤í∆¢µTªíÍ >µå˜©Æeèu£fmù¨âìl`s˜ªá‰Ôˆ·ü√‡üÔ∑∂:∂`!‹Lå5e≠XU@Ø·`	Ö)®GåúñøyÿSw»˛=—?ò3Kã‰¸¸bÈ™·"œrõ=~é^¥ﬂtﬁ  ÛÀ=!Mº{…¯&XÉ“‚Æ&ñ˜
++:BØ√Î–#œ,ûM≥ı”ß©øß«4
+º‚ºNª/úóﬁ€ë_¿N>¿≠ùˆìU€{⁄6¢3+>‡Ñ\ò,/c≠oÏB9Â]Pxi5∞¢§@ÒR
+ﬂ &Zá}‚·08m–ä#L ≥áÇ–nw[xoÜ& ^	?“≥ÇÎk ö≈^hs£Õ§wËóg»ØJ™ıúG#ìÛ”(ªmÛ…±Ω£ŒjHï6U= Ø¨˛Q¬4-x¶„l∆1ﬁ%WMàQ!¨¶0®≠‡iëÎ<Zß,K~ÂZ81ΩCb≤†%2”ÕrP¨„`Ú) œÎÃ‰˚ÕÀq’⁄:°\õ ú√†d¸√¬0z+@˛ÚÚsu±ˆ{âu’b±~Nz`Œãi0è1vÙp¶„`˝<„ ÓA[≥ı©ÍÈ‰ó‘ï;“iËÀÏ‰W=1»€û2©Fúd †Ú2i÷&G»`âú9Xsã∂¶wÎN…ñ«‰y∂)<€sû[r_w4)˘∫’rB´˚œSÑ¢‰ÁÆyLge¿¸Rÿ|ïùd`£hµÆsâWôÃkòU£Å⁄=[ÛâÇå	Èôâπ¸[¿p¢P∫ç±òõF|X<-ï*©`∑7∑aRµ“ÁyZ2n/ñ˝A3À„(?n	≥˝ôMó»å/”‡Ü‹U2NeÓ¿º(¶ÖiT∞œY˜î°w≠Ÿ∑ûÅœ;b k0<WDóxyV'%A¥0ıûÿ∏Et•Ö∫ÖgD˘É‰å⁄ä—j≥ËÜA÷	ËÑëÁ“∏!ç€SÂÁ£â–q=≠M[OÛ≤î©îy=â•O≤◊
+ÿ¬⁄ñ≠wÎNU—DäU–∫z<˛A§—ˇ´7ß™ÇÅÍÖBÎ›rz{˚á*	9J’ò.DhAB≈0°°7ã‹≥B¿êÀ-L,LàöLÅµ?
+sPá iÉÄL^ÛπOØ»ê€F›˝ò†˙QAˇ?   ˇˇÏ}[oIñÊ_â‚4™©.â∫¯Æ∂À†%⁄•iY“à≤ªw›û™"≥*ô… L R©,∞ÏÀ{yôóù⁄óAP¿µ,˙±˘OÊÏ˛Ñ='"23Úó$)Y∂ïË.ãd^"#Nú8qŒwæcç
+JqA é”ÇÉ¥U*Ûh÷¢êV~ô~∏⁄aaÍÜa¡V,bHínZ¸Ä\fÎΩ£∂ﬁ'nKÅ‹ ñçj4Ï¢o$X´<≥ÌZà-ÅŸ™æΩ)QÑme†w,∂ÖG‡≥,JwJòÈT≠ lEç6·¿‚r _\”Q¸∆”ˇ8Ú“g®“•EÑ/%∞DGúà8^• 6üB|Zéeì´U?Z⁄˝ä	·f/H€ùÁÌWªG_oµwwû∂èvˆ˜æﬁm?ÎÏ~ç95™∏+gË◊/a˙ÆSøìç6ÉrØÉV≥0ÿéX+`÷¥V¨SHa¬®eiîï™NSõE9ëj6>Œ≠ Á·j~ß-ï…iÈ_S©G„’ˆ§2W Õ’£ôQs+âæ3¿ÁQzùÆπ"aÄ—Õ§≥”ü"ònÅp:+@ù=§ÓèÙ¯ ûÓÎÛb∆≠÷{h]\SlôˇıÌò&æ£«cÒgt:¯‚l§!›·«å¿ª$¬ﬁêaÔD±£#¶˛Õà°rè›•lØpœ∫7ˇÇ§∫ã˝≤îºÉ‰€ë|É{cu"„ËlÅxøÕâO›ÀP -Øy€r˝û7ÅMt3ˇ’ÍõY!ñãY÷ÉYrﬂ=I»∆›'Øµlÿü]%W∂W√ YùâsÙ≥’øgñìé?Ø6AD}ı#
+ “ÔW›VL£∏hi7±ÒàáòiÌ”wÑM≤Êo˜S≈â≠”J˚ﬁ¿?≈7nèπ!Û[K˘Sx–™:†Ùf-è˙ÉxHæ$Ó≠}ç@öŸﬂ4›ﬁü∏=X¥F7» Ü¥O[‰UD…dƒ14§rÖÉ=¶èû“EøπzÉ0§vPÌL∞⁄J`≠d<◊B◊Z„k-Q Û:ÉDãX.7óN∏YÎåßxyk›2g}’&iÏ·‘;	\2¢h˙À)ÿª–ªhã%/ÓB…¶´c„c¬√RzN\ﬂÒ<[#Äõ#lkÌokı„9Få¥ÈÑZ8hÉ'»ú‰c±[z—∞≠æ9«Ì?πp£Æs
+s∏0kêâÍ3≈û8›QS„'√cV\ÿNusöqx√]%∂tp\€œvÜ˛g2˛÷Œ‡/¨îçÃ∑çK¢X5a‰~q˛-zø:::ËV≠w¯àjú‚aV 4-ﬂ'3¿õ´∆sÓÃÇ¥7¶Mê"√=gÛÍŸr≥Z*kâÍ¶ïÿπæÅí7NÑ’1ÌPep‡ ;”P‘1f6ÍõƒÎΩÄaØ≥˛k‘Ùâ„Ef=Ω®TßÄûÆªõ‚{?àë¡-xG˚Ÿo‹œçœWÓ)kh‡a´ÕZO!*≥‡)i0HªﬂZ≠V•4qóB∆¯{ò‰ÆéïpÓv&S£…¬l2≠p3ôEÛFãp⁄ÕÎ∞≥u0öL KÔ`≈⁄?Ûï5Ú™oPoµ∑Ç∂€,ˆˆπΩ÷»v<,≠´{Ÿ¿‹Ò∏Ü¨baa`è·|F∆¸~à9º≥¯ ™=a
+w.2!{vû´!´„uò€ÓX¨É·√HöX§…a2:ëh1G™ÖM≤≈‹ üZ?)9i´G)≈ÎFBÒ⁄!áù›ˆ—ÙøÓÏìŸÍÌ<ﬂŸjoÔwo˘]?@~◊ÁÆG+
+»}ØîR/©©A…∆éN–3ÅÅÌÁë-p≈4ØmdÅíÃ©≈Î Ñ;LŒR9A⁄JYÚx§πcë^ˆz•Tx{œô‡ÒÙÁûÔˆT,‰¸ÂØã ÷ª•~µ¢~Õ˜”-ÈÎN˙äÛp;ËM–[¶ú’$È´∑`™WÈ~ı^’™ø&›Î∆⁄-›ÎU–ΩÚq˙ 8_m¨:Ωˇï1%:iﬁ*{ˆ≈7∞…€‡õº5i%c¬)≠ay¥2ØﬂË∑¥“T3åﬂS“HÃ—ıµ≤=ZaÑn®´/'«&ih∂ß∫´/øQ´m ìÌ√˚JKa”Í3’Z;vOô"õπ´ÚÆ)≠4sÆ‡Iäã£pçú≈t∑ vÔßEÍb÷—ö^5a(¨˜ëI“H—…W‹U¢ùd Pî∫Ö›zÄ˜æz<yRÉÍìEî”^tÔ!ˆ`2†ºÛÏ`˘Äì◊‡jïA„Oﬂ£8Wx˜ﬂ(S¡à|1µ4$∆˚Èê
+≤¶ô<±wãˇF˘©Àæê÷Œ® Àæﬁò«´ò∞ÎÑm¯G?x:„ƒ6¨;›ÿÉ◊<dºQ°p≈ÁFJN/FG}ô˚Ë÷£´_‘Ì∑|¬%∏zø¬≥QÌ\}∏&•E’m≥ü»{ø
+ã∏§±u=Ùˇ˛«˘ât¢1Ì±]líˇïF‰à˚¶8S…NJb≤9ãß
+~ú‰Wœçò£±Gÿ_∞r,&^x-YÖá†Ü3Ô±ÁÍEFdüEàP&'0@Åƒâ[v\yVqµAp˚]{ª„kí‡´€2ºÃˆaá|èæ,›™ßx—7‹¯^a0BÓ‡¿Bª#Í√3ùM¯√J3Ò`fÉ–˝wÀi“3ıH‚&Às1,µ»ë˚’a@F”üŒ6…ùóœÆÙM⁄ÿm4ÒïNñ´<¢ìl'Ê‡¶ﬁN“{$ *±.ˇgÑé⁄0ıL`IÛ‡˚âˆn©?	œS•…s±AGÆ©gØNLÃ µ~“Góå_Í
+ﬁŸ$œ˜è§Çá∞éÌΩ⁄⁄ŸﬂkÔ⁄=Éÿ≤Í·ÇTUÙa7 D5ÄÍ√Sè∑tô◊âLÈ§V∑^iLJrà⁄}∞¬=GieÚit]')A®úçÍx‘ú—(ãb°°_‚	hñeLÍ¿˙∞G
+]±8SƒZ≥ïô©4_ç‚·+∏°œk*rÿêY)˜ÖE∑πJ0†nv¯ÈäÇO"ÙTÏ#MI—˝UÅßzaß‚§èwx™≤;Òksk‰åõM÷˛M‚¯ÁÀ á}∞Aà?”êa∆‘·FÖP~Gœü>iAã¸ëﬂSeÔ+à«yÑØjU…Ø≈5 ÅU>‹÷ômEƒU∏Ü0Ó)% bkr¥	wÉ'¨Ñ‹O†|≥¥3ôlk´(ëTKØBœ(∞]l]Bëa!t™ﬂ-Îù!Ö~uéY*3+’äBOOb¯á≠≠NÔª’–qoÃn\<C¥7$$9F
+qR
+z≤†@™mÓ9\£»ﬂ\0'_êu]_ôh=Øà!DﬁÀV˙ìÿ1
+Òµó·mt|?—!ﬂØêµ–÷¶‚)`π {™%:W∏†lCz tÌõ∑VLixæP”†ù≠.!ƒeˆ< ß‰Ç¥Z-∏öıÀ&{âK≤I∆)(◊∆fùq©äe¨%h“,Ã∑ûx&ÚF›£Ç£}6t”ßeQ≤j¶]|ØSÚÿÈnßdyJ≤~˘$ß$¢ >Œ	y£ô˜ÍÿÅü‰åL∫Ê£ûîÂ»∆ß01∑_⁄&·‹k%∂¿	©Ó6‚]Ù‰bC?¿π……]Jcå[ﬁŒœ“¸îzÁ#ö¢Rr~RŒ7µ?jºuÄJéºùNª† 'Ÿñ'[ııG9˝Ö¶(F¸µa+!L‹NÉ$πà’¯∂†{)(Ã[X£2Ó¨ÍèôTíZ≥ºÇTö'Âé3Sµ$áï∆ƒ√*#¯WN(_òËﬂ÷Æ<ÏÍ◊˙i©ﬁ£ZuJ—“xÂn≤,ƒÂ∏≠¬•´&•É¿ôÅoµ Ú∫%·‚«Ä¸◊_a|^)7ıj‰fe1ûÛµà›´˜oª˚{≠(∆,yË≠ Ü©.V∂8„}»^YP>‘yqx◊ÉBMÛﬁ»≥¿C√—BTøà†Æ5%.•RÛLJäπõ@ﬁù1=≥Ç*‚§e‘c¡B”‰°WâøbÍœ1,˘P·ÖZ⁄ôkúﬁzÎ&aäÎCﬂÙë–XcYù¿Z’ÙhåY˚=¸ÛòH°YŒß
+_ÒÖ~≈å pf$d∑x„æ%ó∫Ejú:Ç‡‚ºAıÃâË˝ª‹¨ N”.y‚≠[„I4lé5ß™óµºÓ7‘‹©nUÒ∫:≥§5ì&©/—¥V£-ÕØZKG
+-ôgêCgYøm¬9ÈyM÷Zû}ÁWúˆ∂¢ékéΩ%^3LÕÆ˝Ìø˝„?˝ﬂˇÛüI€LF∞Ú¨≤+∫¯öW ôµ8jëh‹âsÑÀàÍ¡:"Öl
+˙úA)yOFßa!W˜ËåK‘Ç∏⁄Ó+∏⁄L»ScyäÃl£~q%sz±ÿå@	–ïG˜j¨^uô÷rÖ¡€	ˆ_9õ&:õï´¸À¸®œ{õ§€˘ªWùΩ≠ùˆNót»ÓN˜®]f©Ä{FÁtº‹SáŸLP§ÜÏ"uo˙è/;áå•≥wtÿﬁnﬂ“ü|ÄÙ'_9—£a>ÈR–º>#Åµpo˙óYN@«èa[sÔØ!/&∞hÆí}MÆı≥üp≥`¬P¸…(≈›GY˚ùIå¶?≈nœ!(«ìÈ/}],+ƒÙ‰>y]xÛó–ûo“ÅÒØ*ïÉsm(âÙıND≈hòëÏæ¥	±Ö3¡A¯b:¯ßr˙ˇû’{E≠÷ÛÈ‚
+ÜuA–d‹ƒpΩ@D©¢—ä_.`Ùo©`ÃT0πn∫V&SíõCËrHÓ]—Y‘Ô
+j¡¯O?Èâ{∆¿}ôéTNoΩ√P&±,àx(XyŒwî7MΩi,ÖAq#(]Y,ﬁßæ”‚j„¡¥©“LUkÿ-Æì'◊»ktŒ6…÷äÍd˝TRqhMF14€L˘ì
+Xo˙kﬂ,€⁄¶Zd-&Óçò8”_œ‹ëdL8lMˇß–Œ —∑úC{V{Ï˚y§1%“ñ›∑)˛)L6µıÈM√ıGè6ﬁÑô($÷Î∞ QXo˚bR≤ñ^≈ºú{Îc†2∞#1®ÕËùyÓ∏ÿã%í
+Ôù>û9föoì»´ô>æËß≥jìàiUú∆⁄¿Ï•÷OãNVŸB“Wô#Qﬁ6e{%'NÚm	/)ÿ:¡”*Gbæ…6,4·”JÛÅï%ÆºπªÅ§Yä∑‘ÏNg©3êÛÄeÚ`¢`“1AÃ@áY±µëR∆¥ÙÖhZ5π√|>!e˙°µÊ€∞‡à´^RøøCDGÆ!}©sFGcè,cæ$8ÑÚ©≠"!0åv±aFúMMÅ_≥∞eXÓ¨ç°ôˆåµñjÂÀÏ¯Ωê¢´ﬂ!_¨s'èÉ>Œ¨ ˚p°södK´2±ƒxV{qjß©ö8∞5`â˚÷|Îæ°^`ô˛?JÙ–ß'8–Ω≤ÿ‹∫Äo]¿∑.`E«ﬁ∫Ä+^ò˚gq o•◊›∫yÎN~˚‰<¿8ÖÔˇ› ›ı÷˚[< ﬁﬂõ0o=ø3{~Q‡gÚ˚fKXmØo~ÍæOüØºM∏ı˚ﬁ˙}o˝ææﬂ7H¸æÅ\ÎÉÛ˝⁄l,ç†¿Ôõ+≈ΩògXÂ∏πØØÄw_u:{]¯´π}∏∞Ωˇ«ΩÓ“≠∑˜Ùˆv=tqEç√Wˆ…	–˛Æ≈ò¨Aˆ«¸À˜Â‡}AC\RaéG$'L≤ººaD|¯œqœ8·{D=*™•È¸ªUË^¨ˆ≈ΩÃÕªù
+ÜÌPÂ ∏NAKÌ3 F¬\)mˆV´ï§¨& ÎÎ˝É£ù˝ΩÆ ûÖKêhëøœI¢Í3/ó8Q¿õÔË˘2ﬂïGoµ;û“á[ö˛Ë9yÇú™(OpB∂ÛUY¬“M^≥g"ıÉMB⁄CÁº…¢4§˘Ân‘ÈÉ)Îb˛WÚx÷≤'O“f˛^≈(¬Ôƒ¸—&àa—„ WY&<’ÓKLfTä%ßÄÈ9¡&i»ú>`–tæü∏c∂föm»ƒgÃˇp˘+˛õ\/·˝˙éÊ≤ëòKp›ë;ÊDì˘•π^üû±∆¶Wm·WòÁ•æ™Ô¬k¿l≈wtßˇì˝ëΩ`‰˙∫RﬁXlÙ-h÷ ÄÜ¡ÂÈﬂÏ—~ÇÊ'Œ1ˆ.,LpÒÛÙÉ.O2∆ÎúAãÂ∑d_êó”ü˚nO˜™–A}Œm*6øKÇ€âB”›√	Aƒﬁˇ ´‰˘ƒÁ Ty’•RbCOB_SVGCå£@ÜˇËdÛGaÂ‰ Q›Õ˘¡‘∆xË˚z}:VÈ~√ªöä'ô3U8€åı/∏∂xìËñ∑z*X¢ÔÍoyÒY¶…åìÃﬁ¶‰®S4IÚ>ô˝N…—∏SRªÕ§[l…n
+∑‡ÀÅ©ä¥~¥æ\øŸ¯≥ﬂX-åô≤¶h\ïº58EBt»ÊCìÈFÿì$Ç5ùÁÑf;ë6≈è¥ÂèÙÆT~\d¬¨/![ûÈâ‚–ﬁcWZÒ€·!¥J Ã#\#ÓêJë.ƒÃh<ÉÛ˜›Ø%®5‡rÙorƒ¢m∞àQòïP.0Òj‰M¨≥„ $®°v≠È6ÊÚa5\_…RC}€:ª≥•jÆ´úKÍπZı˙0≤⁄ŸõÖZwER‹úí*∫#πf+luMR§b€ªg,,k£ë.œÔQœ	Õ#d•ŸôW?ñºB!zæìQ¥PIv£óçúòÊñ±Ñd¿2'VMJû¸a3vÆˇ;»”cQê].l* ≤k,•¿P¡ÍSπpbWÈÆ¬{#W¸√™º‚˘ùç¨é«9G§ez[rfnTN⁄ıl“öaŸ˛b^ÑSA7h¥aÎ‡Ú≠à{˘Â≈È•©ÎIÉn”’Cc◊œX◊QE£Uyø+,¢vì¥∑ßˇΩ”EÿÚaÁyÁp˙ü—l≈®É∂q¬æ]µ:Ö–>˘›O∆C>t©◊g(∆è«KéDz¬AÃààÑ´¸êû–ê£ôHÛO°¨∆‚*9|∂ıﬁ(2“r:´p¬º~¨¡°‘‡IÏ¶5!ùP∑óÅ∑¬3C“K1–ˇäÃMØE°–àeFIµ0t‡Î∏Ç«Ìπ≥Üé<∆E˝÷)˙˙YKØ»Ì^˝õ÷Œ≤±≠¨]ô’‹ êõÃZ˙≠n‹gx2ézi4ågAìmŒccÁ∆Á6Á˜vùcõ3w˙0Ä,ã^k´{„◊|‚0xóÙ⁄Û 5A™’Ñ∆JÁ…‚ºTñÎ`“‘i;&Ö•	œ¬Y°ËÊoã“÷:cVá÷è˚∑h}¥æ‹MãDÎ„ù/`›ÓO —+ ÕS"¢W⁄Îm\hΩŒ1[ó'≥–S˙˘˛·KÚrªΩD*! 88uWkÑ$¯ó¸uG⁄ƒ›Öµÿ≈Hﬁ 	¨È;Í¿F•MZ¥ysCZm˙np”WÁoµâû§f»UÌú$÷›4ø,k∑yOIC∏ΩÖr,ÿÅzØ√U©ÿ‚]tõE]D«Ï7≤ıï}~•E¯ƒÒ"]⁄H9Fë¡≤Kéº˚“0f„ú_gÈ=ßΩ!t˜õ?Ω’t™ﬁ%c(rΩ°ºw‡√Fx‰∆5
+S–QÄπ≥MOúâ7çÊLiÈm)^∞B+£üE≤ÕI~¸—x6⁄ú6Á%6ßÕπ‹Ê‘˘S¥∑‡qjeæaËm…í{ÔV∫£ÊR+vÉw4‹ù¢ÖÏvÃÊ˜À€√⁄ãŒ…∑FsÚÍ*Ÿûå=Òd“c˚q$÷NAí`—Ú<„KπˆKr;,î¬ˆëà˜OÙA‘äÇ’V:ƒ*ºkQ<
+JñH„%|,ºå©¬’µ…˝géáqhSä¶ ØF!7Y1çl‚koóHªÈeüyÌS'S’ìÇz34˝õ˝4áñT	Løπ»ÕÀ˘v˙#•˛âÅà≈g Í%L–›3Œg…s“˙F‰7Ù^¢ö‘gTê…°úÿnN◊êf‡{Áÿﬂ'ÆÁ—æN~qPR≈eéD%∞ìÁ÷	5¥Ç•^òI3Ãßl¥C=˝PCClFˇ«	ÿ€-<ŸπEïì≠xÊN2ΩµVØò4K¢[Úri.©TOΩÄÇiK3ç„∏f…Øı’⁄≈ô_ªXÙ£Y√ËÒZ˝ÉΩ\ò!¶NÊ©Çºí√aQKl=Sßó'§©ãÃ∫§¥®nÊÌ?3é+Û≠£˝À.«?Ã“≥±2!Ÿvb~abõ/ô]Ã.‚&≤ECsÇπY∂K-ûä^Z˛P¸ÀtÅy"Î~Ê3“6%S$eTN&9#”:”–¿KBAÉ[âº”ÔW ª±(·ú¬9£hŒ!òµ≈rn°¨%í˙‡≈äúdJ.L‰t
+YÌô18jF£Í∆£Ï#RıbRu¢R≥ƒ•jD¶âŸ9IZ\bˆLå:	èé‚O‚å5©Á©CΩS0¨öGŒ`uãS¢Ë‘˜R0ælÚiØ™	Ê≠î€: ﬁ+.úŒâDT~¯y·∏%éêÉïµıe ±è⁄/V÷÷¥¿˜Pç}…«‚*˝<Á‹Ônå¿áÙ˚âR˝68õíã•÷å(Ø/÷Ux\ëHg≈+Ó≠ˆ.àı›G´k˜?"°∆|7¥év2“á+’h∆Ã$œÃ˛π	í|eÚ˚r‚≈”_X"&Y%GàÇÈO‚ Db≥(¬lŒèG¶üc 9
+5ºÊ±„˛¡†ﬂDÛÑ5l&ôÂ∂ÔG-¥kƒ!Îk‰ÿ	Af.·l”_ˇ◊÷G$≠	BÛ}ŸËÒ[®N∂à3Iu∫ø¸∞[b@˙x$SÊŸ@¥4V›}∏wHÃ¶oπ/„√íÀö
+˜Ë∞”›b–∑ÁªØ˛–Å‡õ◊ΩB°ñ˚h‘ﬂÏﬁ
+˙VÓíf˘Ü3hÓ86§ €‰ÊŸgÂ-gULÀªÀá6E¶–ÃléfìWíädâí(;∂H,S⁄ùE≤§MÇú˝ D}•Ñ|Ô›K{OR¬ï@p]◊ï†‰J‚¬ì©Å≥p≤m≤ka&ÒxJmãI°ìÊŒM“ã…%¶$<S„Õ≤•œCZE¨ﬂ¬¡GÌgª≤ˇútè⁄{€Ì√ÌryjqÔÇ6Kì,œxí•ô(Eï`;«yµXLò<{Ù$N%[‹¥®Áå#ö.7j†p<§N_””q®¬.Y(≥˙J(±Ñ˝ÕHıä<ŒUÓ@;ˆB|ˆ˘¡ª–7æ,8•Ø∆√˘oä˛>… _ÃMπø%ê˝-ãπ1ﬂÙäçÓbnôÏLs∑¢5πàªr1‚
+πÒ%(∫x-Óæ`Î„∆ómûKßø/¸™íví=éèÉ˛π‹&P$nüÆúÒGöÜ™c≠¿vy‘¿€"hÕ¿µÚX›¸‰”Jßö˝…≈CGAÆ˚ ÉXdwcê¡û~2≠É{‘NF
+(è
+n∞Úæ3Ç™Å‚¸P$48r»Èª=7ùPù$âHÖFÔÍ% LP!,ˆ@õƒÒœ-‡|ÇÇ/Ë;H‚Á”w!zÑ5·Á∑¿D˛* ™π∂Lƒˇ◊ÒßÖŒªmU4Öﬁ‚~+Ö@8~{öÿŸgtoÿ<˘|‘á∑ÑåhÁ¨_ˆÆ¢9VMw#¶/≠öè˚¸s≤˙˜Ó_‹Ω\Åˇnàˇ˛fµ™(n¬VOÖN‡Oîüox˙”l0±!_ê∆—⁄⁄&˚üè∏IÇ`”≤æ{rÇqw‰^‰ç46Kú◊à=Ï∂VÑ<•ﬂõ∑f€∂mÁ<™—∂óN<lı®Î5”[%M–…k‰w‰~˙üçªö∫I=zd¿I¶¸ï(„¥üµZí6˛1hıM∞jr∑=ÍÑp«où>ÎK\B@d≥á?!w÷åo*gp·X¡haÖ2ÓE_á⁄÷‚º*ëïiÁßbÉ¥hx(yî¯í„BÅ+˛∑ˇﬂ€0÷"√§owUe+“ÛBÛKH∫´nxUá?¨’·9ÏﬁµÙÛ¨≤¡ x◊+≥4’NÒ#['Èé…˜¯°À∏wõçqºÚÏ–Vøy=Ω2˜-º÷s53∑ç≤iU∂2ô(”ßÀTîPêºryƒ§("K_œe∞ók"¶iÓÆœ®Àé;›ôBRªY"˚QË¬D*¶≤ß,db!E¸xç$* ÍÖá[“ïÒ˝@∂¿_„†îÈ®è5•*5.œ®Á)ÜÉı1Ó„ÍåÀEb⁄\ö=•¨µ∆Ê⁄∆#a≤HGD¶ÿP≥q,jTîd“‡LÚÆ`\µzﬁ ã¶ÿÛSÁ¢ZñùlO;âG]ÍI<f`zÊG`3mxû”‰—ÖïˆaÌ2xWŸp´}üúPv?‘æó'gÀ{Ì;Ä«÷W'âîÂdDbl~‘]ÜV [§zÿ~˘.µ¶äá[7?rs?•M≠§∑≠bß*±d≤¿c©®ö}®V>b7ˆ†]yvªã≠58ﬁ|ñòdzk]vˆ5k3kÅC`	ç‚v‰˙€‘£±1KZ>R2Õs*ôóµØ»)µsÿvÊ\≈ƒâ‰Ô$Œ™+ú4g=o‚J≥f±”Ê(t¢·∆uMﬁa~öŸ‚—«–ÁΩ©≈Hií¡#1‰•
+—≥p∑Ü¨ŒÍÎö‘π6…ŒÀÉ˝√£ˆÙ¶ˇqÈs∑€€˚]Ú9≤Åuv·ØŒü∂:ª6D∫ÓhÑÒ‹,∫ÿºÌ‡ùÔNüaŸCy8ø¢⁄[HõpMÂÈ™ÀS›íÔŒDæ˚jÃÙc·›}Ù©«ôkwò‹ãº@ä:`0¸mF`€da5d’Îæ~oºªœ˜åhç~?qO·èk?K∆PSÑï @~'æ£+ñ‚SÃù˛ƒ
+S±®/üÙH¿Îπ(x—2è8sbS§V£iûæ;O¶æ9¨ªÖ
+âözÂ√éÇˆee¡Òö!˘åìy8S€ ˘ÚA"î*àüÃ^©!vÕ\Å∂Ä˘+ÉX*ﬂGŸÒ∞/tp˛Ã¬ÚäÇ
+¬ƒgŸ
+†CiêfÎÃãŒñÆÄÌõü·M&éó.7lôâ»Lk∂CΩô2†s’Ô2†´ﬂà°“âÈ•hNï6œ≥®Wñ÷'Kd0q-gH”ú‡‘£·‘—r≈êøäJÖNÔÅx›+„ÃE≤◊[©∞â6U…÷-Ie=]`êï¨=0fbùzŒô∂¢ƒ°Û.+› x/ì≠ΩÉø]&ùïë„¬ß#ÿ†ù`ç!¨∂CEßˇ¥HõD‘™Y”˚9@ùÌëÈœåΩÔîj˚áÓà∫†‚+*ì™4≤Nvº
+’ G≈§Y´R†te}ùuMmûB˘ªJHµuqx‹
+≈{fªì´iE!ëÒ;ˆﬂ≤¡≥ó}®#ÆTΩ(o÷ii5Ä[ù¶)N!i6…L∞–çTµ•Õß7IΩï…ñIVx9KT€îE§Ìı)©lx´ßD?ZË)ŸÊΩ·äj+∑;π’V‰qk@ ‹T•™x‡€NQ›…l0π£oñ¶:jø Ûkˇe{ôHı´ó¡$
+{Œ≤xÅe“ù˛∫tô'„√f¯ÂAGyK*ÎΩk4©x'≥‚›∑
+Kt•Ö¬JE˙∆´´¿cKa?o’ª=nÀÖg$u5ûÑcèZÍ´ªôæí{˙fÈ´Ω`jh7∏˛2ÛI2]á”_z÷÷¡Û™ç§Ú~då)◊ß®: œ¡9•∑Z*ÈG-ïIÚ˚US÷?®‘+K„zâùtŒho¬@ñiªÆ ê÷Kg3(#⁄
+≤*PT• ‰*]_⁄jﬁ« πòÏ∫⁄<n@x0Éªcó	˛ˇÌEß’ëµÒx«,~’ï‰w§jÇdJVá(©ƒ!]–†ò˛FIêíãa à8I_ÜJ˙u»„Ô≠Ê4<£GÊó8>t ∑à∆;È=ã ÊQ~·a.jæykw2⁄ü/àL∑`V«V±¸2FßÆÁNµ„<ÕòM¥&”ùº…Ñ‰&≠{
+:?;∫ùW?√˙åôÂ”–ÜeÅéÖ@ªíVhµta9˛ Îñ‡!®ÿ4Ã—Ñ≈l*'Z™}≥¨†ØÓ˝‘≈RııQÎæô¥Ÿ2rï}üì(‹±#Í£vŒ‹(f≥∏ñeV}√⁄cÍ;Qæ=Õ.I-Ü5b◊ÒßˇÏÙùvMÃ?}øÂ6;¢ﬂ(„W≥7÷-¶rgÿá535,P1R7´´KØ âÕí∫»û±‡eé$a≤îbú° ^ª>Ó*5róüa!¢1®¡Î¶≠ºÀÃ
+›x∏µLKd∆Ö≈Œ£}æw—˝jQ##X∑‚˛5∏ë-÷›ÿ•G¨≥¸‰ .!„p˙ÛäD]†YÉl¬ÿ¯ √YzÃ&“^ìó`9∑=Ã∏Mdã}0¡·,∆í4·Øû?˛V$¥}â%Mà^ïi›ïw’C)∂Cg :x;∆DlU˛=é†¢ò®§ıÏÀàr	ﬂHDdaH˚e¡Wy§‰]`ëÖCë	≠ı\È9˝8r˚∂±Í)„Ä;éü4¯¶äÌ©pK•æ¿Ì√‚àsoº2aΩ¬¢æ(”d‹…≤’}çªk˛•ï¡;t˚}™ƒü´Å=Lw+0åGﬁÛ ú·ç§¶Lô_í≠v≥U»+‹ı2ƒˇ$H)≥$ZL9]D#Œè•ßÅö5iÑII5«%üFEﬁx‚∆0®qA.√ÃÑH®tÿ	ëH¯H≠2WzÀMŒ##0´‰ËNÿÊ&ÉHJNLòõÉ∞‘ˇp‰ƒ°÷ﬁé,g}#”õ∆öÅÍMÏ§aÿÊòºÑŒ@:j[ﬁìœ∞‹äΩµ·ÜŸj¶KVçÆ^wpΩàÉ. †L≠ÜpXóˇ68Ì¿¢?9ü]/{ﬁd˙Kﬂ…ï˙!Gø˙‘î"\1»ó$§ÿáÜA3ZJÈû„ÏË‰<¬≠Î»—yfèõÿRSïÔ»jÃç‡É|nOÚu>&U{ÂŸˇ√bùÓäYÔfæ∞⁄S6…YRdôN5f™y~È	r‡Oëbe;π¯‘í;‰R3Æ≠^BzÍ“w‰à—YSX@(aÈ3·HØb—ö∞Ÿ}…âàÏF*1ÄÓ"epöbó‚shD[›ä1íª6ˆÑﬁ[áøS7‚4≠",öG‰Xî˚ÎíxÆ?‘&3PÅA[#\◊≈∫ØÕ—ò´º}! π≈%Ä+$ù*ÓªJNˇ…ÖÒ≥aknÈ)Ä=ˇ})œ†*sóô≥U9YÜLE¢Åîç¥ìπòYêº…f g∏Ò9hëŸ<	rOY?“ìêF√≠wUq3«wG(Å—ÿı9ãfBãôçµ$§«rw¸OI„ pÒ!r6C´’2ÂñníÜ[0·iŸÇÈÛÃÅÈî¶=imªÖ)#TœØ>?19g+C–I:•fIN,pµ	ä˘3Ù$≈¸új¢‚ı5≠zM¶böæ˜›9âÉÒäôæIËbŒ„éµ!V√Dè‚2q˚gH¶»-Ãﬁ6—∆s‹‹&mªúÙ(lòÚiºõ©;∏Z±¥h˘{Ò–9˙ƒ=¥9ÕF^vä=+ØT¸√§û“’ŸÇ≠VHäÏ©Î˜Ly˙\≤¬‡#v]&·Œírπ¡k/µÃàñ¸`%—∑∏äy~ÙäØaÀC√Ÿ.·u»2ï”ÛE—m9CjxÁáô$Y>∏Á|«n™&G~ *&,
+•Ç‘:£ü≥~®Õà'«»·x±∑ÃÇ…âÎ ≥èßDê˘%˜≤e™‡¨Õ+÷¨_ƒíäñíc®≠-Óe•
+‘&U®eZ'®ÿ¯Qπ[øßãƒ≤˚ñsÍÛQÖjŒÔ{Ãì-∏Çˇ[ﬂ	_zÊªh∆a6∂H◊ã∞ï`ÜUlâÃ¥p|œî‡<`c§èØi˝»Sf∂’Õt∏¡ŒÉ>GÉ¨{é˛'‰}vHóˆXÓö∞É˜ÙÿA{=IÑä‚A!åíÀµ"GAÒ ÒÎ©ùPÍéCX˛¢!•qÖìFK‘ÖŒ8ÕÉ6z¡Ö(√@r_dx∞mÙp™»ÄHïæ÷ë;ò|al'%ﬂOÔ˚	*åHˇÓœÑVyóæÀæ»˛eÔ8NﬂëG<òütÕK∑Qp¢z≤>©7·Ü-fP≠2‰<	_9wÍ@h{|D6ã!/ñı¬V5€n&JgΩHÔ0Ä”«VÿÛÖygJ“`N1ÈBÀt|∏,Â
+RÅ¢e˝∆˙ÇΩ⁄åêCye}=Îg¢¿œLKSû–bQ∑ÊkIA)â+ìr,$Ü]≤IüÍO±ƒ±≤@ôﬂÒcÁ;z+Ûê˘N‚éNx>E·èúS⁄BïŒÄ¡ƒe‚è	‡ºìnàÏß‡Œ[˘_Ä¸K„OQÙ%¨p*˘N ∞‰\ˇ>!	ó*Ï~Ωì M”ªù0{Ï3J?Œ9–dÂ;'y˙ÒGÚÊÌR:&—Ñ	>C†ƒ”∫S`áM… Tˇæù5VÅ(`˚)
+øõ»—vq∂¿ß¶œµø„çÇ3'tO% Òze?%øπï˝˘eﬂû©È„ú  jûóI!À&vœˆœ˚ó~Ù/'lóÚ"e@´j‘°¸¨'˘i-yÊˇJ?mTNâÃk}’ì#Ôé5N	M‡!ù-yÃâD˙r‚≈ÓJ˚ÿ1gñÊòŸ•ùüjÎ7a™Ÿ8Î	y'ë…àLˇ‚ªΩèœ\Ÿ4årÕ}¡â3N‡K\ÀπM‹rﬁû]N÷víëˇÕ>ã≠˚lDÈ7…≥ˆ÷^ê9Ïtè⁄ØãîÈ€˚§ª”=Íºl€∞•;ΩÔ&„Ö∞•?c∑∫VjÙ{∑‘Ëã£FØ&L˛Ä…—Ö@vÈ`2*«Ç¢n∂æçˇΩ±°É‚£†¯“õ˛:v±mÑMe)Ï®˘p¡?@Z0∫ÿhÂVèå˝úÊ‘_/#xÉOË≈‘ËPVK\Jfß)ï˙çe@A}XEb˙∑0û|‘Îêü£Ä˜ÿø,]oëe.ÙQˇ™π–’&∫1'◊Áê|N3S¢Â3Nt6âœânà™n‰£™"åZF∂(Ó  ıNnK®‘•i≈BÇ%∂É“F£'õG9ª¥YK≈Üò»†jÑghê]ÒåÜlUæˇ©p‘í£Ú¥ƒˆˇ√R:¸$«%∑Îzˇ„¢ıÈ/rÄf†<§∞%È¬wOYÂﬂÎƒfeâÎ·˘ÓÜ_ùlodæ[ÖTßèSKı!#°‹ÍΩ´≥ªy?h@√æÊêˆ&c¶ÖûPrúIòπÖ¶îÁy@ÄZˆ—önTHüm≥˙)Íè8Ë«â›õ9)Ôî¯Ä‡,Óü cL^∞@V+$5<[\Ñ*ov (˚”ﬁaEIàÉÖ%1â£w §´	Í	d≤iõ#ê·_ﬂïÊÁèπ_‰èI¶–™-Öåñ@∆Lìí«‡ò®NB¬>û+xöøJë/Ü3[q«›:F-ˆz:“’‰◊∆§t1uﬂ«Ã≥°cã±ıΩmàL1k "Ò$!ZSL%Oåp=ü…ä!FÎÑπ‡(ñ_î&Õ…òS:üii/¬tU˝L¶ÍÑ^”§HË)[ÊGrÀ§gìQEOy˘Dè©ßtV≠`ogØK^“8º`‡™œû’è§d¢—ÖÒó9p¬àˆYZF]äY8ÍUÓbb≈OH+Õ îì'$‡+oJ-»‘Ÿ@n™ç%≈¿,nôK¡”ÿ∏Ig÷ﬁ–‡ë8Q6MπGèëW∆ËÓU!9-·yö‰h¡÷bÕêznxéw÷ïÙîÏ‡∏™ﬁí‹AèÂúW’e≤K·#Ë≥úc‡ÍƒL⁄Ì_Wß’#Ö»læqúmj‰%µÓL÷Póméêh?›¡q≥•∂_Ë˛ VK~«©¢ì◊.À’›1·ôaÛ¬æÖ√£ﬁAﬂÍ≥ØëjŒ“;WÍWkÒÙ2¶ﬁgU©A’´'Î%ò>◊£C
+õïmwÄ≥◊õ`Ãÿï«Ÿ»ºR™ïı¨≤…’ˇ&€ÿ5[ﬁ_(fv$?í!}pë2Qø^≈Ê¬|lÚ^Z;&ÛÄ•°»lgãÃjø\Míâß†‹F¬$≤8 $“$2+míëL¿Ç:©™É0•D˚}ﬁ§sRNèRÚM5}î79√ºp÷˙IAvóS‹	´Ë-#Ë’1ÇVˆ∏ñø–$µ	5üU¥ À´|bÑöπÅ∏Â’¨–˘Ë5≠Œ≠	Î|¥I∂ˆ˜ûÔæ‹Ÿnow»Á‰≈˛ÎŒ·^{o˙m≤˚‚`€ÀÈ∆˝Ö 9ª±O"ÑÀ˘0xñ—»ÿêËYâÉïêúÑ¡(ß·€ò:^Ê™é^ñ£î’·√˘·ï c¶˘◊V7
+:˛é.ôút.º£âEÚ€L‡Ø#Y°Émπ¡ÌµÚﬂ)ºF1L £ºSÊ5ô∞/Ñ©Ü∂˚;ª∆&˘dó∫‰9Ì„âˇ◊øêı;≠kè†Ô◊*ï¶vi©Âí»S:ò	Æ
+>ág¶ “$¥v\¨˘ÉñUéxÅpú¥j˜™"[Q`ÅB≈,îÎdƒí`◊û©ÇÅ˚i¿6ı›r&QpLBw ÛJî¬B±3∆aSfHVﬁŒ‡.Èq“]xâ{
+Ï≠9 «å{b_ô'ª:∂í!]„Èœ=Ã¿[ÊÅ´X&Âëﬂà"µù†ñ©º%Ûr8‰ƒıì"ÔòÊè•S.sºŸ§û41™+)¯´ÔCW%ï¥|F^/åoH⁄œˆé»ﬁ≥C≤”›_›Èlëık˜™¬–ïê‰ÄıÍ99¿B:©l≥–¨„˜(9¢
+™ÁH:UÑ‚/ÑzjñÇæFdKŒ9Çì4Vã±¶qó∏ﬁ¬!ù˛ª=¶}éPÆ˘∫Ës6¬JÅƒ„ õt3ËVÕtÅ÷G&kª¡†≈A†o‘;˝™≈È.MÎ≥Ì¡Ú≥ÍÖK)∫™cÍ}T°¯≠¥óöØûŒvè∫0ÃtT’…},HL∆Ah,•Pæv—P[≥IªSˇ™s∂ËG<Ö~©PlÉy¨5„y@·
+D±⁄ãº¶ƒ,o[Ø@ï)òl∆nï≥:C‹KÍ¯Qi…7`´#Ô¶à»34¸vÈ V∆f;å[‰¡_ˇ≤L^,ÿü÷Ô/ì\ˆ–&ZRù≈ctÇºÌàë„«.p£7ã8cXˆí
+ÄX|<b5∆ïÈ.ºÙxî’á?≥˙‰hS¥£,ÇxÇúñJ•	;Àq‡G”üN)¥È(1Iñ∏2TÁÿL-vG≈ù‚ñ¯…G¨úCB‰⁄¢Œ±+ÏíRL‡Z@â3¡¢únO-Jd˙ñîÑ2ü´úIœ‹ÅÀ{÷ÉˇNµÍVRBZZÕùΩóù£√˝U¨ZZç¶ScÈåráu◊>I·EYs7SiAëH
+¬®ZÀçBÙ≠¢ƒ¿çzÚõ≥!J≈_Ã˘A•
+‡a 1têóMÒ]∂‚í{§Ÿs˝^∞D?àZ	O£êS≈Õ∞⁄Xüóö}–†ëÒz∏©˚ª¡àˆ]E%BÉŒDê™≈9X´ˇ5¯òœ4+∫⁄©T'mãﬂ|Éù] ÷ΩÖ÷ëò%0Rôá·gf8Ãí|%ñ%d‰qEe` Ì‹PI!™÷Ys∞j≤⁄&;å-‹öù/ù˜¸∞ã†˜Óö∂wÑ_7€˛3Ó>˛@œm¸ÌjèèŒ €h1áÉ;ò§ÂöAu≥Rä√“ÉU$øKPàáÍQˆÜåyWﬂ‘—ÏÎÊO·8[µYìÎ>Ñ?å¶?≈.œ õ:XX≥y©ÊjÓÉç6O˙ÿièÌj“≥M≤æqßıªﬂ˝ˇø≤∂∂ç•º±∞èPﬁ≠Eæ≤1ar&}ó≠öx5í|9Oˇråfñ2!∏>pﬁzÂàôä¡5ïéyÕ∏¯&ÀÛ≠åV2ok»£Æâ‡âˆu|B◊lÀûíFÅÜEZ∏“ÂIŸ›$YΩïä›AÅ⁄Ëé∫ˆ¿Â7’›ipdœº∏)ﬂÈ¢V˜Âß)≤±z+w¡éœ‹î;é9õ_Wá]&«ﬂ“^Ã9‚∑ÿwÄêu©ˆÜb_µ˛êÔ°nWX——;™Ev<	«ù}çΩfº2ÔË÷#7À?Ã¸m+|î¶ˇÇ_ P≤ES‹/?äã[âUK…}´•‰ÄFﬂO\ÿ¬≥Ωèõf∂g∆j≥|Õ‡ÈZ≤w~”πÂπ/}¿òiUa’a÷ElÕgäUﬂQ0M≥êÅ¥Ò≈zü·»˘Å˙	º=âY`ê¢zSÛ˚dGlŒ»…ÙóV3•˚}>—ü=·
+GN• F%ü7°jﬁ«".ª˘KãòC’≠™ Ö
+°	í◊@ì*!Ö⁄ƒä˘QÖôV∞Å™ÙFùç.Ôg÷„\«◊ŸÎbèHMN◊sÒ›M⁄ÎV©„:,#â:ùg7´ÒhxŸ RVö•.8FÙ˘Ωµ’˚EÈ?)Ú~ÓXôÙ˙ ÒÑG˛2s!TS‘AÖ$«+	>‰∫Ø5º;˝vl,Î√ñÑF≈MægöKm≥…ÒÏKû6s OnÖ©¸r/&M?	.&èë	-¶«Ã>ßΩ°£Nk6Wßƒ.’è™<ùÿÃülôK˚ ´‰ï†Q∆Ùô,SM”≠üë˜Ü¥œ≤<2eêA≥5µπ=´ı7aï˛åµ˝∞è5?ãtìñk»)®Ç(Â¯8´ı–∫ïñ–<YX÷'Êäsl=1U°£0œ÷TµMË
+sâ1∞≈·ñ e∑5’∏≥bE±x∞ê6…≈∂∂[„ì˝∞ÉÜRs“ÍçO01©—X&qà∆˘—x+vm’Õ(≥æÿÌåUÓÃ∞nRWúRÖ1ìfíL ZÚaU◊2xÀCÿƒ¬ªÆØ!Wç∂◊ZÈEñ‡eï£
+z=ÎNºµ∏ï'ÌZºbL¿Tcoë™±wÖ™q≈∑0•/hVi÷
+≠	∑Î˘„o™l1äL°{zy›C~L£Í∆O<‡∆C8˘fsÌØ˛pìºlÔΩ:ÍÏqzﬂœI∑Û‚’!Ñ[`¡aê6∑sC¬gt,  ≠
+◊‚¬IßdÓÎƒº∏Ô2¶læÇîJ?˘H?uê}Àå∫Í≠HŒ©:,∫œ'~˚ÑMçqß
+j)r∞^§3Ç/G¡©+äF:£c7A|ç√†œëΩß™¯°<ÖÍ∞áå3Oº
+¸•Ù3Võ'ç/sh“0G*∆ià5à˘ñ§ôr∞RÚvπñîÇõ¡⁄H–æúV⁄¡ÔŒ‡yËÓ„*#°~àœ@V?√~a ö±3‡ú ‰ŒÎfI
+9ëÚ◊—¡·µ»∫'r› è]œ˝Å¢É	#•RE÷UAâ√ôúÛwÓqÄÑ”Wå-∏É;g=o±…‡˙ onÇùÅ≠p˝	LÖhÚ-ucò	”B`R8r£(ô;Ëf'£ÈØ˝âá§rxFO$ää	ñßLã0 ≈lDgY}]Ωf*ó◊S\Ka≈º™›ˆ≥˝√ˆˆ˛aßÀËagÎ’awøKæz,¸+/¶N^é¶´h.ü ◊QÈ··P¨∑üÒ3—Nˇ,b€‚©=«È¯ŒÄÀkÒ„§p?ßE°@ÚB¯]`gäñG?∆∞ ˙˚cåfGO.
+_œœd<π»},ûKE#èB0,@·¸“W™k⁄0o≤”ÒSÒÃ8ªk¨∫[‡∑˚HÅí∂Ò…EÈ´Ú5Ø∆ê.^V˛∂|Â6òÆÂ+ÀﬂØôƒåAÉü˝‰¢¸]˘y|¯úÛ»s«–MtN∞≠Tf Î‹°øfQÙñ~_uzõ	∂∏;ªl¿*‹∏NXæ‚≤ÿ:>-áp!ºåxrÒ§Ù)‚ºfÏ+⁄Ôûê¶$»8)>s#¸ìu—R≈%Ñ≈c2t"ƒmÉÑàó!O»XtZ+
+F¥9Voå[âÓÙŸ¸ñö {Õ¸úÕéœ∆≠S7ö8∏(OzÈƒ√÷âa≥π≤’ÚÉwÕ%≤B|˙˙–¨V/§‹Wæ‘–¯»Ö∂.-¡vø	∆„˘πü˛g„.¸Â≤æ^µ„(0Ô—r◊†≤âU*
+viNA*¯â#:1™êÃ[l6⁄àh–√u‰&yÙ¶ˇÀmM\0∂zlÖK!è¥zƒLú∞œ‚§O≈√ÈO|ÒÜ≈h}ùÙ¡¿åóêú8ßA∏úûŒV„‰Ó`Î' Z\¡=˜XDùŸÌµ™Ê5ßê∏§<çxgU_“x˙Uøï7çÂo‰‚T“ÃkÒÚbeö‘π=GÂ ytÿŸŸkøÏÏ¡*Ÿ<¸jIªT∆!u}AV⁄q⁄Ó6kC
+K∆Pı∆ËÒp£ºÕ`•`ÿü	 ÃnõT7ÿœÛÜ∫ﬂÉËÚÜ¿˛ÔÅeé€	–-Â)`Yó´º"∞˜⁄∞0´]ØÀ°Vá›
+·∂j5≤€Èª`ô˚Åá‡îSØ;ﬁ%ß>¬Qìy +'WïßjÛı®è{XHO/aΩA4 „a°U≈è™:gïÉ~ &Ω}<ùÀ»^p»¬°ñUqac€)ÿàc\ºdÓ±∂ÕxÔcçv»,„ù%	“lE≠;ÍZ°
+J!ÒClA7≈»§_ÙG9BG˝GhŸ]wÒ¶—¿ÍùÿX&ç◊útˇ<ßøû±¥0#–àebŒN¬Op“[è(Ω{3b-Wä.71{¯^`Vb	¶	lEâåZ'Æ/^‚h∆Ïˆq´ÛœÌâŒ¬Eí?Ω*-)CP%‚÷˚Ci€¬%O*üZ·Q™Ü#Re@FYS”ÓÆ'€Cr∞Ê¨M∫Ã]´v)∆ﬁ‹L÷†B~©2±‘ÆãÑ∞Y>;§rG‡ßåOá⁄w@:',õ‘äì+¡•NÙ`Âìπ˘™H)FûEÔxì≠˘† ˛ıﬂ\dorô£∑œóÛÀìî◊E∞£aÏ9wÙÊ†∂F™éY†‰™∂ Z/∑)ôVF±6y›0 ≥±!ï•Ê≤®›
+Ò1’írò:sÜ-in^ö¿ï°Ô Ëî+wñB√ ∂ÔÔVD• ìy∆¬}4T’!7í}B1*g+HJª ¬Æ‰TAjÔGx˝h>ãªX"ìXﬁzj∂"•0P•hï=ã	y/*¿µJ:ârTÔaπú>¢¥G˝·dîÜ$ˆÙ≤Éª≤›’¥≈ñ•í¶)ß8∆ºó|AáåÿÄ’]÷≥í<éá4_à!W€º`(URjÄÒ∞jB‹)`™øîd„Òj<úˇÜπùÕ"n»-¥≈‹+oÅ/‚éØS#g˜ì'ÖÊ—Êaı„4çÅﬂÇÉWÅ`™Ñˆ8ËÁ2fYãÆúÒG*¡ ¶_®çvÜP
+i‘¥fÔäﬂ†ˇl®\X,øØÉ65'ÏﬁÎd⁄ä?Or<´ÎÆ*∂≈YÉí–4*ñ∂"Ü%€ë|ÉíÃÿ ≠i»P‹Ot˚óπ%'Ôw©\ Û∑ÎWØøúÑéˆ]–›uX8ƒO
+Ω·•±2ëbÖ õ⁄lnX2<Y„€41R∂Âxo-cãø·úºyÔ˙ûÎ”ï≤ëíÁ!,Û˜$¶/[„3	lƒñwﬁÈv∂êoª^‹Ü"ÑsDç`5„≈ÊP<wxÎÚvoaRlà≈s+k?-ÏŸÈ^T<-)3.m.k<K±yÀòxU[ÇûuJŸ[≈W¿›¿«°ÒÕüfëFãA%§Ú)∫¢‡…±‘äÉ›†ÁxØË∆òR◊lå„ïgá
+óÑ|Ä$¨\ôˆöµ´ÈŸÿEXÀ’vu˛)EW[ÿëÏ&U±•Bu9ªJ¸∏h&“õ`«∞w`èÅ¯	^„•|¬´–[RÁ˚ln;Õ¢úDv§^~âô©üY∏Öl÷‚A[X3˙võû8/nj¨π‚Å.Gm´∞’«i ∂g0¶˛Vé—è√ÍÊû`ﬂ⁄KBΩà*£˛¥≈NGt„a≥—wbgSçn®>‚º÷˘â≈~|ûL[∞Ÿù88Æna+{n‹l,7ñﬁ¨ø≠ÒÍŸìF∞ÏßO2>dÌmÚiì=2˘Ù{ˆ€,œ«7Eè3j∆W∞ezÿCÁºôuÄp·‘|πì $MÄ∏pÔµﬂ√?èIÈûı_,Ò&ºqﬂ¬ô“)òDπÙi;n∫5˛∂V¡ªJnÛ’·Æ¿ÔÏ≥$¯‹ƒw}Ê¡†æaè~ªL.ÿ$ﬂîG„riiô4æ>ˆˇ;N§˙ÄÌ¶ÿê&√z‚JœmQ§∫o6êÒû8ø„–eƒmcô‡›Îıã@ Âo»∑U¢no∫∞π^Øü‰Æº]6ró‡â4\ˆÉêû@∑—
+Ë‹¸/Y—Æ:rﬁŒuŸˆπõœIñ‡• ∂ÌBª±z+µD#iwµ›bJTD v5x“õÀ–‰Œæ∆ºÊŒı*€˛WitÏ´=·¯FíØ√ë£∑∆R+§å∆£π˙ÁËã’JycÈÚõ˜k  P´◊0ñY˜,–T®◊l>BûÎ#î@≈*—ÒíªŸpÍ©Bº[k˙Eµå◊æY“Ø∏8Co’ææá‚[«zºE'¶UTÎa–ûX«Ü€§|’˜Ãqœú´‘~€…@]ìˆ{lqOcy:ì*‘`…Ñ/ﬂN2gBó+ëΩ¶uŸjàª4∆Æ´)+‹¿ZûfKJ1¬ŒÛBH#YˆæN\Íœ®à[ÿ^–Hb‚ÉÂÕ;›j/êT°(j∂É‰∞í>òdQy}≤g√Oas©ñx(U√•B=¬Ì0íYù˛∆B˚ñ	pñ‡ô-'û˛‰É¢‡ôëôÀ Ù®ú7^	´â†ëAçf4MÅûµadaâˇ  ˇˇÏ}[oI≤ﬁ_Iµ«ãÊ.ŸdS¢fD›Nã§f∏%.…/ 4…Ó"ª<’U=U’ºGÄ?¯—Ä_úÔ?ú006`¯Òüú?`ˇG‰•Æy´Í&Ei¶v1bw◊%+3222‚ã/Ïj∂Œµõ@ˇRËﬁ7∏OºÁ?÷‡Q<⁄¨Ç∆X≠¸4ÅÚ‘Ö´¨y¥/qG!⁄> ©Tå$foñè"˚ãnëœÆJÉ©8JŸ¿!#P  ì¢_\ìQY’÷‚C…a›‘ƒ¥Sd*d‰d,ö*,ìVÉÍ ∏X‡›˝2º{ùßÖè˜9⁄õ®ﬂ¢O”2d#5Ú…πd˛ 5Ú»ï°K"˛Ü‘+≤.¶ﬁÜÉ>âf”ÊµBç·í≤Êcûm29∂H7Ú
+Ê…02’<ıO«)ô∆V@ tÆç√Ü—~7%ıâ,>Ω∆{sÖ˜æ¸∂¢‘≈◊6(âì©⁄x∑¢»hJvçRõäáu3“b#bﬁvX-±y∂nÊ^õ±≥Åb{—…∑;Öˇeé õïæ∏A·÷π≈∑I{‹e@,∂∑ÌgÚTnÉ¡πì©E”ÅBy…0ˆÂÅ©∏ôÅÌLKè©"a±\¥πMa)9« êN≥ùU<æÂ-ıTpºÉ@1NÖÌ£¥öÒrö=Ê–°5Î§nñ›yJB'o€&˘Ó≥⁄”ﬁìâóxâ[47©ÿÁ-üRÚU#Å]‘hCüGÒ˜Ë®¸*Ç◊˚ÒßÿwªaÇ‹Â>/6∂òÆs_`˘—›/
+ıæÌØ32LÀ∏üÕ]ﬁx≥ƒ√aÍÓ≈P®vD—ß'{—h¡*:v¬nö^≤^›GÍ2$c	:∆∫ÙÚ9Û,∫¯lé0õÍÚ 
+ºAQ’Ô‰^ıÏT-ò©ÍpMR‹›•π_'≠ïÙ∞ç^›,(W°!+Œ∂5¬5eîê7¨`≥®diÉı†Íî<gÒ<¶S∂6%ÎÒ£6R"Ö¡ Ø*⁄‡’õdCÿ¸–¸ÍRãî§æq.ª¥ÿeBö¯@Â]l
+À¬7⁄ÇnT›&ùüFÌ&÷~°d{ºﬁ˝fÁ‡pp∞Î¬ˆ"®ÌºwÇ®è1æiàìÊ,Ä=î" §∑SC^˛ a^—ÀZ
+Ê|d0;| »‡åUˇ¯Íå0JùõL\∂9_Ç02PèÃB]±HÒ∏≥øˇù¿ÖYÕU∂+eÄ<Õ0wTïXY”¨ã°´πÈD˜ÃÆîI›∫¶¡˛:÷{±9ãr'Q÷ê]ê/ä∏O§)é—•õtﬂöÄ¢¬©TzÜ›≥§ı(›}Ú<¥ÈàÕHUÿ%9ëv]€Z4ãõ#Ï*T√QÿZ
+˜Xò4‹Ez<¥C;à„Ë¸ =‹Ø0ë∫Ö\ÏEg,Àä∆RÌ∂/V§XŒÎ˝~U G‘Í-É§9 YïONTóFzN<.ö–†–ªY»T®∏m¡?˙oºÀnGX
+[†(N±¶hgiôÄ¡®πØF¯t	ÌE§(Éys‚ß≠]´|Å&˚R≤oí¨CXª}Íá+∏«[uçîµÒΩ◊ˆ…"†fO€Ï<Àõg™L®ìö,;≤LYCåäòbÇÄ∆-™ÔÑºÚìTQ4≥˙∏+‹pﬂGÿ@U;¨#™'93èd90öÏoP{Œt$N.—§˘!DZ@€ŒÙJÏáﬂØÿ(ˆagOO€ÉÿMòÉPÑl∫9©o{Ω~ì_ÌıR‘ﬂ<´ﬂ…k˘µA´n´µ	ºÙîá¶0Æ¢h=N¢`¬åL#X∫.öÆÙW◊	á[∞^æd_˝Ru®ô"K∆∫óxÿk_‚Q*C˘bÜ}Y/JM‚! ffS˛ÓG^<1˘ TÂ3wÎ∑p-°âGù⁄e¨<¬ê˚}ú‹˝ûîiÌÚR^«‘ï.∂ˇ∂ÜZ–wñ~
+ô‹O/Ü˙Ò≠ÄX^._2F=}èUá¿–µ≈¡)ﬂæ:@⁄õ8¡Eå)ï√⁄~¨jö£¥$bqQ1ù#¨ø€yˇÄıˇ/.ˆ¸LÉŸ‰Å¨0œ˜™∆zΩﬂΩnùù˝]p∂Ûµp8ÿŒ€„~àÄ˚I27ÑÌ≤ó^Ã´ÑS€ôoò7√x÷∑zˇ†®ùEÕ@'<‰Ò˙X4}/Á˛mAÍ‡)F'¶m¿Muì¯¨◊-†Êj)ä_r˝¿Ã73ﬂ¶o–]ç¢·^L.˛ ã⁄wˆ{CqªBs∑%+<4‡ûb≠AÈ˜pä%¯ü{ÒMºÓRœá¡l‰%]≈EÂSóT k…b∏ êa3ƒU∑¿ïFB¨ÅBéqI÷——	jÜı∑‡Ö*Kîv¿ç¢∆£¿…SÊ;~Ã-|¢1∑)Ç¸–ˇ¬u åU«”Î¸yòbë∫ß‹¬˚aF√#ßOƒ∞O˛ì¯ŒÑôs‡¨≤¿I˘¡î/{∞≠>aÌı†Í¶ÿP%©ÕU¥’Ê\aÕNÂ‘]Ân∏˙Ó|•èá˛zqK¨iŸ(±;d8ÔL"4‹JÁêâË	œQ¬õı'Â&π•&=`˝ò%·iPŸ”öÀ¬ïΩ“¨=QπnÙ,óê´Ca`]PNqûpŸARÒ‡≥÷XŒ_≈\ŒŒkP≥P‚-dΩ•€◊*v¬Ì≈∞|âQ≠¿§Ê¯\Ÿ]rrÀ÷uπkﬁ¨q9Âb;ÉhHÌêßÊÌtîhŸö«f–S_˝Æ∞¶–4	¯ƒVbÿÿZæ2√Ù|ì$åΩdô¿Á›—≈&	g»◊ê¬ â[Å¡wÉ–ªà@{Ûí?ê~S¬ﬁ¥‹@È¸ÙSFÊ#û"Nl6?˝‘êŒ∆…B(Õ$¯¡ﬁÓÃ'x¥·ü‡G% ÑD&lπ #â¢{T|Ò(•ñÁ1œÂ †>Bπ
+ÃÙ%&˙Ju\Ÿ¡íÿ´t›dTÊ]ÄË~∫ÅûD†+7ï±äWè9? çò˘gé‹ ¸pù≤¸Äe±nXﬁ´¥êﬂáÖ¸æ3Q@v∑öVcOü]±e≥âzhƒ«Çá3’Ñ.˝∂ﬁGæ(˚∆Ì$g≥AUìŸv7ncê€iEp¥„Àñ<'#?-†2´∆yÕ"Øòm.∏Î¸∏*mﬂãœ≥–7∫Ω‰·,# énR≤∏xÏ˘·¶hhaª¿ˆ:ûÊé™‹›¬r3Eö¨ü-©îtê+ÊÑp’5
+ VÕ‹Cü∂;{_;àV˘p§–)y!÷›I ÀF)ú—íEL¨ü8∞P‚˚∫\Á∏ó¿ª∂gŒiƒõ”Zd%£=€	!Ã≠+m	!¬ô’4\/q·6qeérófØ»ïW`Zú$c≈m_äÚ‚dy>ﬁî&“Ï∏>X#'À)ùß'Z—ÖÍÁõH*ﬂ2P|ï¨”®ËÒÎV»^Ç·¶LÿΩMhÃVÿûÎøRBí°4y%ì6≠|Â·§¢ú‹D¯ÕRËGÜ·(ô^˜øG≤å}Ä(€;éWﬁÇÚ≈≠~&πó˙äGÜNM`ı∫kÀdcMÑ ”ß.,2Yàõ…X≤•`
+Ô_LI/zx£π*∑¯…ãéR¬Óá~
+Ù¯◊ Ú{¸p©¥b€ºqîkº™y¥ ¥\∂»ê3ÖΩ‹R˘ú6≤≈M¨¡_%1X≤I∂≈ïÉ)w∏≈òR∂ÀÂ•6‹¬L;¥‚Sù(Ïèb^˛Î™ü®áj˛ÎdL∏Üó≤«!ì”\t¡T}VYˆgÁŸïò^éû*7OçÆ2cESsœcÍ5\~\e%$†¡#¯◊XÎa1LÏ&öí¿k¢Nª}ƒπ9“Xqv
+°&ÆWïå7⁄¿ñ⁄∏VE∆~x…tì†<∆,˛q‡wƒr™fÁÇµ aÄ.∏VN©}”Õ´q™ƒVÌ&“äGµXZÈ’I3€U»‚á´7{€ü6Kì‘'wl˘È¸°„R\Ü]CZq…>wÚ….bC…_	»ñøiéu	ƒ≤0, Ù[ (öæ–Ël1.ªM¶qtC‰µàŒﬁt\∂QD∂Y,∂Ev¸ˇàº∂äπÆâò´9Úπ:ÉNÁûòr€∏zΩë∏´Kƒu¡,ÏöËÍ:3b◊{‹µ[[C≠kmC≠M‹◊°{`’A˜Ôa£ÃhŒ∏ºG†Ò+çFÖÉÜ)N(2…tÊ·æ®µÛÚV<ŸÇ›I8¢q[ﬁ
+Ó†d}ÉãNB¿¶ÿ˘aÊO5Yx*æäñlEæ\¢/Ö*$Iãjèû*E¢Ù›’Òà^Œ8ÒIr™2#`i≥mT`©,UyÂA—\V√Úƒıl√…Unm(ïàî—[>Ë7eÂ$fyÕ"S5Çïóu»Ó-ŒU_ò…ÉuôΩ5“©Qû∏€'ôÉ]ˆ‚z≠≥’lı·öt≤ø]{˜≈Ù‚›}–¬Ô‚”„Ó⁄2˚_oÌ¡“∑5ŒÛÒ âüônÈ‡ıœí*1õrçßVÆ…îÆ1oı)Xÿ>åﬁJ≠ƒ‰$é&%Ç·àcgôF„’ùÀjÙH≈ß_Çrh’l˜:	ö™%ÖPÚ¥úÖ?â%2∂†?ÙY¿52&º˙w˝R≥%X±c2–+~M|ÄQèG··Ïx‚ßOØ∆4ﬁ`4z·«È¶ {ïûﬂ0ÙòˆµzÏö~…AY±ÎLÃh`≈v"Ø#∞›GhMxvÑπ=±Æq´¨uMsîMI…∫…„áâó≤Ùh1Å¶ñ∏ØóÊÜÊ
++Åô¨ÑQhz<êy/!◊FπÕbæ≈§>#<¿èΩë·ëzÁ/@_[ Ô™ÙÊ◊˘•Hk.∆j€âäí)fÖ<X©Õui±Í$Zi%™ÌÅÄﬁ§î`æ{Ï=4X» ÉQãMö6˝d^,◊ç,∂,ã†RŸˆ©a˙’àÛ‚ﬁê9ß–ƒüv˙¶õ¿ÆÌiÁæÒîÚ<‹¶Fhüa¬ïÛÕ¬;:KqÔbääÎƒqZ8É¡›õ4{◊’g¨⁄gçÖí°≈ä¬®µ[ 2ªˆ”îf'	6Z!ezÜ~ÁŸiË˘qdœŒØ];¯ó`˝ƒ-/øﬂy+ﬁı?∂πV§¡qÏ-.›¿«˙m
+˚ú?Œ¬qõK?«KÉVó~Øz%iõkuûz`¥∑†>lﬂÃ“YÀ´A∂^√û∂Ì√A∫∂Ω/7ÛC¥6éåÓ~n
+$lc¶õåuÕ¬b7ŒÒ\ Œ®§0…≥*¨ò˘
+1E '∆KWPRÂBÉˇ7âõäœ∏U∑•L™i‚êûy™MÛ$àTXÈ˜◊î’∏ª§CúŸ7‹fóˆìU|à¬˘·Ò49ê÷o√Å‰‡1íËÕz≥œ—õB¨#≥G*†ùJ˜O&ƒ*…”/≈1N2gÀH…≠Æı∞∏'WÎº*n¨‹us‰%ÈÎHî[ëﬁôP?p‡A’òµ|ä<’QòÕùd´_®R!Î,ñeï!ÏE∆$\Ω∫°·§‘´/¨î#Œ¿\®˙”E∞◊pN#£kHÎ(⁄Y¡˛l<ﬂ¨∫)®ú†íÄ´L:°≤’QßÁÃ≤∫û9äRlí+	Wë˛>	(–E©ÙöjoÆ˙kÌc÷Ï?¨0EöñìJûE°„WÔkë„ÍàQÈ˚•‘ç˚¢“ìﬁç;≠)*ùÅ‡'*∆w,u„8∏HÃTˇ'|Ëç&Ë'¨nli…Ú√a∂4ÁCzíéΩr©Ò‚Ä¬dÇ±~)Ç«∞cEJ7T%±i^‡çïtŸs’	
+|q¡ „Vz√∞ï∂†jÏ~l÷¿’t‹˛äsÂ^aõ¶îq€¨ßEºÀæ±W¨å÷≠7ïl∆+A∫ı≤è’ôï9Íâ§Õå¡£ÆåÔ‘K¢8ÌvÈ29∂&“ﬁ]%LßÛøçÁc…4⁄Éê8˛µúΩô=aEﬁﬂÑπ4•qt∆Ü0h<%Ç={?!O-TêÑt˛HCk>cÁ•wf?iè∆ˆì«'ÌQﬂ~“gˇ„,ph”©Ωê|Á–KÌ'Ωô9úÙ:rËÃmÔGÀIîü#æÀœá"Ë@ÀV≤›ki.hz7,Ê+; ÎI:RÎ\¶Ä¯f&åNÍL‹`‹π≤LUÓ3^y6⁄£2âT!Ñoı>T˜?’ıc¬√˛˙ùä+¨éè9c2éi<HªkòKÒ5.Kú®p¡,!ÕÛ$ZºÀÇ€ÏLëjWÕ¬Y:.±Í€Üá≤îU\XåÃkQ∞ÌrMåç{F7Ä6kâzìoí+õ&t£9#FØDì	\Z{S::ƒÇﬂ›ıe“YÎ,Ω[∞A¢Fæ‰æe˜îãˇ€Ö2é,NÑ∏⁄RHnö•Å;å8?É4˝∫b˝π!∫qG¬≠ÒúÎÄS¬Z’›ÀˆÍÍ<V¯¶C¬«Jé`e”6ÑFºµi7∆]ä.*¬ºM\ÓÖX¥_®ÎÓí¡··Ó·—‡ıÈíƒOR‘ædœC¨mtÍ#^K∞~ÌŒü{;’ΩTZs·®?¡Ç¨TÚ /≤ä Îi≤w˝O#7-g¬ÇkÜ—û3fd˚¨î qBG$*
+©ü,√˜ÖOä€Ä¡Á_ˇ¬æLºtxõ’±¡á≥„Ld˝Ç˝ü=c!ı∫≥éõπÜ††õ¬m,SNµ∑Ê/˚¶Õj]ÙM£,#ÜÛ‚l>|»¬W¨/Ù‰-à»Æk+çdsKÂ∞‹/èÖ·"õ CôJıÚØÏb$ÓÆo™JKyÂfv%k‰î∆ "Uüd¡2™e∏ªæ úQÂÀV&$NºÏÖªÖó≠{]2‰…πæ≠âäZ™Ó¬∏iJaQ◊õ~Z√öΩ´√®n—Ù˙g<Gı»ü÷Ç‹ÍAU&5[K¥ÏRJ)]NgtÇ+´102|TÜ f⁄zf∑XÀÃàE∂˘UıÀ¶QLÜyê P L†1ô†X+ò©∞ò;•+]—òçãñY´ïµ-P¶6g—-AZµL÷Ç∞¢ÚË•x«ÄN]“…KÄ*ÆÃËúÅIAvë¥	¬UÉH ]ı¥T‹u⁄ÈnÙ»∏ƒ]-±æ€j**ÓlYæÎçÂ¡‡Ë„hÏ7XÌñmÔÓ@Kãjc´SöŒL–˚€m±ùœ€U7µXÔ 2∆”Î—tπ¥®“ÖˆÍê(“ˆ]b9≥◊êÚ&S∆ÿåß(c'ö%x›ÑSˆyéEF∑oV¬‡CPˆOç˘Ó3ƒàé:Ô¡XáÜ@/!◊ŸwÂ¬\E∞≤GÁ¥-∆&î-çÚ„Zˆ¬{[ë0|Êá`xÏ"∆ÿ≠‹ò5∞Õ¬⁄¨Mç™çπTsàh[›ﬂï8é°Rq·¢™è£∂Sm8-Oé -¥b’ÇxˇˇÓÍfÈØ®X%QÕÖöä7_jü;◊*$PtÜÁ$„`t8è“»HÁhmmì˝ﬂël›HÚËp'÷µ€Ì.€πÒN/>ÂìÏxg∞sN;¥∏Ë4$™%î ÄO°ïïÆ¡˙¡Ü*a63˜\¶˙"’’„ππ^„Æëg¨ZCvC⁄†)≤1,ÜûWñƒOöAD	JŒƒò›Ütºœ¬*Tzƒeµq„Œm/ÓÆïâå‰Æòúí›Ÿ°H|}˜J‘∞@≥|÷ëq	ÏUè6Âc˙uTS≥2Ìjn8ÇC>Ü*0ŒR°®√†ùe"6À‰;Ê˝ë{“˝¨lΩ_˙Ó B‚UÍØL“mH¬´°bWñ6$QãÚ(áJ9IÃHwkÕ‚1qE‡Æ<8Ñ‰È’√åEË∑1w´»cÄk˙óx;„Xô∆IÀN©≈rië\Æ,ïU~ΩZÙ0ãb˛⁄Çáw•Å¯NëÙ¨µÍ_s‡@ó‡Ï õ2˘∂Ω?§ƒ1#^T∫A§T2å}^∆√h°?¢#¬@RÊ–‹íMïE§Gﬁ ∆	Œ8'<y~¨SVc¨`€¨özé∂©ºòÆñ≠Å¡y.†ìy≈”‡ûî£ÖBoÉÑRÛ/|dÒWÆ_[Ö jQ£’úâï˛™ûÚI‹∏–¿†™Êr<ªEùDV…vÆîn≤Qú*ﬂHΩÿ›Û/—˚ÅÊlUq«;ê≈»n!◊"˛&ù∫…∑DΩ-ò˙LIFCOÛTpKc±ã´¥6a˛f∂¨-€@—¢JÓî‘ŒÖ(Ú4ˆVRbxπU¿yú0åhˆh∂mo›~ˇºLUÌ‘Vf≥¯)gãK»s¢˙÷Íïm˚.Ó©Ìöru@¥p>(l.¶\<	ÌØ‚·‡Ç¯–Æ(o@{î´À·G^Árzáà∆Œ2:|ô|WÇJmíœ
+J–≈Â¥Ë±^∏´…a§Áq1πçµ’µ4á´BÔ3™∑Ô7zpW¸Fb´¸+Ú≠˛ûÕiÇöõÏE#‘ _%ÖÄÉã[ÈƒøÄ9»π€ÓùG,”ø∆.D~tbP3_7h¡_íˆë‡Å{µ CôK6=Z;ÎVYÎÊÍØ9∏∂Hôì…≠<s…£UJ=l¬LpÂÂ FCqU£1◊ˆ¨˙[û%ÉKÃ‡¯rcÊÀr3JaÆ$NHu˝™ë[÷”*E@e˜Q1—L+àvW˜ÁfE+LÏójá
+·Â(Ï˛¨çÂò∆A'ÀZ–‰2‹“Î¡f´-l{'t§z"«Ïa[Ñ˘)ÉÑºıkãLR 4!_ÌΩ¬+vA≈:à•	#˛xΩaîC¥6≥ˆˆ†	`eøtñ∞A¢"ü˛NbM≠›G|Ô~Î©ÓÇﬂª›Ö√ ™˜‡ﬂ≤;÷6È ?eê
+¸s∂;®∞`ú"Äg”pˇnπQ≈Àä/∑ÑXúØ'~Ë0öa;ÂÕ⁄]Ò€Ê∑{Øì¶4æ4÷H,h”%£!Nœ)lfS,	ºó«Ó∂£aÒÃGÈ5â“·at4™<…vgΩd)ï¥˛NMòﬂÉıï«–óqlÍCú⁄Q‡ı‡¥(f'ÎüOë±¥€ŸÅS	çH¬πây §£oâ{$A£›5ƒ∞íáµí≥[œ‹•B÷¸Çv5ú;‚Õ7".§Á≈
+ 0o∏çCıE	ÇJæÈÇÛ€0n§ tÏH$ﬂx6-Â$Bz˜JgÊıùY\æ≈v0o§/3_Ÿvƒp.ø¥˚w≈ÀÃËLów”Ôtâ+3˝ùùïÆ	kãöó“Zi9+≈Âø∂9È:	’—∏∞ÈLÑø1“"g!~tõÉŸôw|÷ÕQÀ6mog‚∫¶o:L^bØã%3“—™4;>Ûyæm=◊2”Vﬂ:”ùÊ˙öÌÜRVﬂÏ›≤<ÌñtﬂLQ—¿¥¢~a+ÌÒ⁄
+\)AƒAË>2y∫Îvà5QzAàpR¥3?DBJÛb|‚{«g¯ﬂûÑwÁˇ∑≈2ü–3˘◊¬ÍD›ŸYÊv-g‘öÉoõÿ{˙JôôÍdé¨v≥Å]Î`âGÁ…”´˚Ù›Ü.-QË‡u$‘åé¸!g	4PËÃU´’…´3Ië‘6ÕC@©%TçËÛ®m—æ¯ÚìÙ/?Wt•O»˛TTœO•àßò`≤∫vÎÁÃá^@ı™Õ·v∑N5WìõÉ!q£!C¢ë—‹Q¢˛öi◊a)≈§{∑® V¸™$nÍYñdÆMò:QKíç<ˆñB‘,<}Î°ÈÖá•ãÀé™R:ÛPu…5¶%Ã†Ì˘©u≠ßaÎuÜ^πfê8ΩÇ˝0°kÂÑvYk+’µïaÍ¶!Í·i∑–¥9,mà>Ó∆Ye*ëV¸≤}‘_^DÏVÔR¯ÕÌflı~Âü5¨œ…î∆â∑¶]Û’Ö84ÈØ©o∂ôá\´L™¿ìë–÷cÆÍ UVó©ƒ[Ò|]º0øª¯K‡›e –± yÇ èÄØµkÓsˆﬁLa‡äå˘åÇ8òOÑáu+¢p^'
+ããﬁ•*I6(Á&πzodâ“ﬂ`ìh:F9Áå!o1!Ωs√†·•˙·è`m@£Ô]á¸Å—ï¿~È\œueÎ»hp(«¶Å“˘Òƒ+V¡ÚO+√¶~®ú”Y2Óä;©˚Z5cı@5HËô''L“œ“ƒŸı´¶ˆ|ÁDA,Å+é@ç!(·F5XÇ∫ÿ◊0v|£;`»ÉΩaà=	ÕËôì^W∏G¥ñü¡3ÇíS‚⁄”‹¿‚!¸ NëíCdÁbì≤Ú	As›;%MY™ûõ=L÷≥Ö3ÊÆpÜ4=fÒ™ÿ<Ì≠¢•ç"7Ò√ßeB0wA‚˙Îπ†5MZ5Àô≈ëÀ≈®h»∑ì°jbü^g1gÆ6π‚é´46ﬁ%ItÉ*HRπæÍ‹º-h¬≠Ó∏uMﬁGª;w.o√qÂ™gã¡ÖkÑ√[;œ‰∂Ω.[uáW-zßıâ∆·Z˜Œ∂*¯µıÊı—¡`eÎ´ù?}Õãwëﬂëù$ç~òyÊ2^X¢®ÊèKL5XàäæéY"ûPhZwH√¡pË%…^4ö^∑˙<A‡›t
+˙a–Ì ÍN‹£!=ıˆÈe¯”dÈ∑¬a•ßøÙÔÓ1o·∞˝(NiÄªúmoÇªÎtD	+Ëvk•√@"`◊ÂùŒb‰∫°3XØ>ÛXª`ÂbLñGªƒß ∑#á—Ñ®ñÂW_Óo∑ØvUì=u∫§±æòf‘Êß“Aá¬pceÑ˘b”Ó˘	˛…Ú}m†˙îåiÇ¡|X“≈Îëßd*^¥ó¿ÜØ;5◊œúÅŸ8ÁÕAøZi∆Wè{”ﬁôüÃ¿^˛—≥ú∫G”qÔ$à`„ﬁÕù7d%'üùˆ¿î@Ô√ ]BÊë≠_ZãØ+⁄˘=yò˝g˝¸Ï)È˜µè4‰`Ø◊:Œí¬]
+B∂_®ZAknío¢·ı_…4JíôO§⁄£úÁiä'√t§ß3èh{oŸ]‚åÒıœdB}FT’ÔìëOìÅILNËY/gß{…¨ƒ›·œ© p$Ë¸•$agÎRÑk@2%‡<ËÕ≥ItﬂÉ}s0ŒK4±Ñ‹H◊ßRvπ!S±m≤¬˘6‚¶ Ÿ·LH¢xe1$~“ßAV˝+§>j ¸ÙÏõ(ÄÌIRßF˙HX§[l¬â	¿"∂ú‚c®6ÿ~xZqr=Ñ∞±â…∂úÑd˚Â‰[Â/+=Æ¨A÷Ã±î„ñ:&_¨≤5Ç`^FROwZ˜Q€–$x7Yî23f≈˚e6Îƒ”√€W√ªçzx:rÈ˙‰TﬁºÀﬂZ1qU¬πÁÊÇ\á≈Ñ˜NçÙ©#òöjùÇüÓpÁØÓ8Ê_ +.LWƒûvä4–£ÿß§ã∂v›{k¡øRqWÏÌ|}X›£÷‘U˜^]a˝ÙSÂÅÜ	_€Q≤:Ó*YÍf≥—8~Œ≠„ö|cñÆÚUoY‡⁄B‰Æ±¨,=¢ç‰ä≥59_u∞A“‹CVîË,4è∑¸xX¶Ç ïY?∫ÆíqÏáﬂØ¿ríbô˝∫kBﬂèhY2≤>¿3a∏xàÄH¡nﬂ.õÍ9"z¸@˚L˝éò=Á>ºí	êÏ≤[Ë¬F8"√“,]&^2ıÇ1ß¥ù¬oØßΩD‡gÙª¬F¢Ÿ6C€∆'hΩáßœﬁÄÊô¡îcw˝ºò›„˙g^‹çàÕt∫Ω0ÅOî»Ñïö?ñ;§ÿH¸~OécCÆ≈~yì?zô·d˚°¬v(çF–∫M=¶˛E=	zîıGÅ¸ßÿùod◊lπŒíÆ;4Ù∫FÃ•ÚÖöæ∫úNG†éh√÷ÿ~
+‰π”ÁCÙJM87+…Pã:Fh9◊Ò"dh È"WìIC™ræ“H∆¯üó[ïÏ≠Ü≥"4'∂Y÷Ñ√±Ô#÷aeeÛîÕ#Åã>Ñ•Y'Ùl™*(•Ù6!ı!´∑1\ÇëÊë˝ÿ?£CAá™^òÂãÈË|ºx∏d`V[◊ãiz
+ˇÅÜ∆Ñr/Øˇë.≥boòÙ…Ç¬&ø’â?b∂à‰¿Üπõ†I
+ü∏Ç;âÇ1eöéû2ÖÈ±JëTQÆ-kMr˝ODTjÜ;WéÜN‡Õ^y>M‹õ∫G©«u)˙VY;ªxF¯œˇG{ü˛˝ﬁÁkèV◊◊˙_¥÷/N‚Z§d-Äñ3ÓÃs=0¶®öÜãt  õ
+ΩÄ"ª*#ƒaéh^ç˝v¸l ¨õ(A>∫∫ÿ“4ÑR\÷6¡Ó‘'Ñho˛dV
+F0¸Ë∂be‰Y≥M´Ùì¿7ÊëÓ	ãa&\1¨Ø∏b·Éú0)Ÿ›ÁÑ0À∞!ÄIcJ(ÈôwäA\®&◊ #)ŸÜ•z’‘RÀk|/F†yaç‰¢¡ü0+Ÿ,ÚpŸdÒ\ò0Ngóu√¨!‹—œˆ`Cèx·ôè‹ˆn¥¶Cp’!fnÿ„gHù=?é˛ûKC?LzGÔ8Fa∏°ûx#UÏGΩîr}cèÃˆ…ª≥‘17n–Áj∏º”by∞ËF!‘¿h†‚9öwæÒé1≈Ç†xü\·∂Îå'´34¢Å∆±.‚˘ﬁÅ+é…(SS£Œ0ß2ÛËÒó˛„ËBüˆ„èûbÏ◊”˚ŸCn{=Ω™€czq≠÷p7Ï‡_’ÓúWxè◊'Å;%}	/fΩ0ÇRDÉ√MÀÕ©œÀcPmÛ∆È$x≈ç∆¬Xœ≥¬[]Òû´∫F°÷≠£ßW>Ò‰˙1# í
+>*1AEgªÌ›X\FjuSt°ÆdöìM∏Õ\huπ7G√VW—"zh∫◊ã©N ∞[„Êÿ˙	≈>gâD
+òÕ®∑YÁÚÓ∆uÀa‹3÷†l¡£¶ÂF√…^Aw(6sv*LÊ+}»}•’HV¨†∞SÀ]ßTñÿHåµ Îç2tå,±XvïÚme=∆cèø»É]T‰7[ﬂ*:˜¥c∫⁄ã∫IΩÉª0™(π˛±«÷aÉ€ñœÍ◊K~én9∑:òÓ’¨B´ÆñJ¯–ñJÿ4S|é¡Ã*oä[lÜ	9,«&»∂üL£˙ogûo ﬂ◊ÔÄï{‡fU¢D{õ‰™‰Ê¸h?ë≠˝óõ6Û∂|eV··°ØW∑óö6;Fäí∫Í\4%∞n¶y¶h¿ÅrÍ€\8yaE5%Syì;Á~Ω«˜bv=èŒf∂ˆ ;]8LÃUSD*‡R%â]gØî‘ e%Ôâ’gtæ ï·ƒ∆U´å”¿¬$Ojewƒ“ˆ†ÛlÔ˙ØÃ:N`cıWt˛ò+¯òo«_µø~Ôà¨íó3æ˘öÁ^É¯áôƒÃu#Œ>Êë˝Ÿq ∑‰Û‹è µøC”"IÏ^∆äô∆bIº)ÛL¬#ãÂ_ºw‚†ºlUœªSÀˆNú¶àZ¿uKıßÌæŸ™Q∫˚÷Ù§v{y¶€CJ(Dö`.Ê“ÛﬁÓ´|êÍt<ª≈’ﬂG˛9´Ó≈[4Ò∫KΩ4ˆ'∏ì©º$^¨<”ÃQj˛ïgOâ•»?ˇ„‘RgãÕ™m-†`J•⁄R6˜Â“\koÒ^xÇ˘S.•ÕÌEÀ€¥î≈}°2B»∏I`Ä,»Bá4Í‡¶g >3ïã•TqHßªÊ®Q}Åàÿæc—ZvÕˇÜ)y˛%ÏåJpåŒ˚˘zÉΩ∞úGQ‡Õ}?á°Æ’¨Ù√¿ΩÉô(KôΩ;¸Ô(4§JQ√Ëã~10a—⁄w+8-çKßSô»OG'Ø•M_ ù¿_,¸áŸ3çFkõ3Áúa•ΩAΩüm˜$è´Ï≈©#ûk3®Ôá4óCFha”“˘—ô¶+/åÓ°‚a^(‰±i€¿…„&„U	é§F(Ÿ|
+´&F£≤ÇÖ«≥›ü
+?îÌ˘cº	FdõÕ·Z-Å#C—\≈≈ŒÁÍAöÕ”›l_˝∞ºßÀ7˜ 1Î=ñ∑ˇ∑ÓÓ#¬^˙5¶^˘7÷a7n‰[ø“˙·Qqµèi8
+ºo|Ô\ ¡ît”¸U/U)IWé3∑qHcîbõôàá„–Ó\zäµµ·rö#∞ö,unÖ›$∆ºM≈√ƒï^ƒä∫l!ù6ê7≥}ºÖÕ„-n?Ù∆q©AŸE<¨3b-øàGVÇÒÛf:Ö‘cƒÿãü¬L ≈e˛•®—(≥<…jíE¶‹πÖ‡Qåÿq†Á‘ãa∞/¶RéxÿÁ∏mÜK!hK;äü’Â˘èzø1B·∑wˆªád˚Õ÷◊{;Øèﬁí¡Îù?∂ﬂ‡wdÎÕ´¡ã7Ò†êœû†èÙ§ıêíSµ¬&I<99ûØûCæ≠ãeÒ¶	’Ö'ÌSd¡ÃX;X¬∫êÒ¨û⁄g†mü•Q†8![¢ ©üÿW7⁄ú˝>o‰äê≠Î_¶>ÂŒ˜/ó…÷ÎØñ…‡¸UÇu!2ﬁqœ¸≤H¡˜Û»ñsåÿ(2Ä∆çA*KòJaKc6(*M°‹Œ≠®§:3˙à'ó;b›ÄÒLÑjO(˜Áw˝J‡V“¸zÂ'Ø"≠‹ªƒÁ∑h™…nPÊR@∏R7á4)¨Ößœ°∑πHSLtƒ¡ÓôfÜÒƒ}ê≤s≈∫π¿7./_ï‡#Ã√±72∆ŸeLﬁÿWbMÀ∫(œÎÊ=≈8Ê≤e¨á¯P/çb6´æ"”hÑF˙0ò˘1Ôk!a	.x2[öú‚∆véwÔ“Jqû>í\kıLFÖè˜YÈÛû©:ìò˚zÀ•D∂ç˘«·|V©	`b uöfπ`d4Ã’’´î°«Õ˝2'/uÿ*€÷8uÔ◊≤¨™m√˛^«ı’∂≤â˚+Tg‹≠ä £Í¨8¯…o˚k”ão‹\–+√Ô$xÓèÃÛ$?ÿh¶≤¨Xûf„≤n∞'¨æzÒ*ä¢©+ôΩ¡»±rM≥Ü[+»ã”∆VÈãÇ“g^ ∏`"ƒßﬂ!©üüZß‚‰?ÃŒvxëÒÜ}ßÌ≤5•üÇﬁ—SyMRx√ˆ¶¬s5‘ü[Äò-H∂˝S\†:“MrÿÿÃ‚¿—≠˚ƒ)œèqÏù<ï∑vsTq‡Ú”Œª„ÄÜﬂª¯óêt$¿Í(—‘=Ãsà
+õÅÉ˘—é{¢§Ô*H&dFìuäı¶π!ûJ˜ò√£FÌßπ∫¥’3IoôÓÜ£◊∏∂ŸÍEuP6÷SÃEMFòfø>oû®cí˝ó;;Ø∑v*6∏U"Ë§úXB*∞q/∏ÒiôKÒpCx0k_˘IJŒ}ÿ/0Tyùj‹!wbõŸü`a≥ø„Ëˇ6zVÃ•2oÄ˚Ù˛ı/±?åÚÙ«$-fÙ´ø√—`ﬁÑ√,…úùz„Ë‹&®—pLE‚ÏÑ'£√Ç√_…	≈çÀÈ2‹Nú`íÅå§F3”Œl1‡‹˙í√v&'õZÈNtÅz%E$Ê¶M„⁄kˇï˝Ã|iÖ≈K5Ôä$¥ìQÊ“´ò±<)ö•Ãé≈ûbÇR_Õ]kZãE°›©$∑
+”ÒK¨1≠"’§.‹…Ô◊Óêßn±áV£sØ\ùèm9è$≠c‘v™P<àczŸ;â£	Äiôv≥ËT»&‡XK2bı"äèÜKKKΩ$ä”Ó?y“¥ÆÒ$+i<…åºﬂﬂRIb√ONz¸7¯v°5:ºtû 1"uœáÑ}K®6cnkõê§˝m,∆ÏQÏÑ?”Ó>†#P‹#_¡ÄòÒIøNÏ7V%í[„€K](UdM—K∏h–A7êP°ÏÀ˙πL1S≤]∫LéπÜ••®5˜2-ılCKò∆^˜XuŒ¢∞Àv‰≤3nyë®eáÄy[p\Õ‚Z ∆π8@.≥V>„VÅøZò¸Àøˇr‡ùZì’T7`…–0+Ïkç^ÿ	±cDxò∑ãcÍ–CÆ0ıπ⁄hÜ®ª¥Ò„¬∞ﬂ`_∂ôÊ∑C_4Ω}! ÙÖÜ1nx®€ÄùÁ∆ﬁJÚÁ_ìCíUA5ë0[R ÂM≤ºæüi/òîÆ	v‹tCOÚ°?Y|˛Ak/r;˙É"©øfóFXı}›t£ãê&Ü≠fï∆›ª&U¨ÀvÿtCSD∆=ÕÄ¶*Oú&ÈiúZ‡x2a¥gå7Üqõï{zê∫ﬂöÑ»ùMNv™ >∆uØÑhaÑ≤õ?€›WºıÓ‘5+ Ò=O\Td´÷I<vÏïïèKy4œ£pœ¢XPEõ
+{@◊e4Û¨ÉÂ‰úÀ0_ˇm{OÀzSZu",óÂ\£Z.§w.Hna˝∑ î∏c»áMxÿ*-†øf V., M
+§#ÂlÃÇA”ÙÁHè¿ù¬à{ny‚Ä"Ue¸±'
+8ˇ`Øb*W©˙F˝Z–˛W^ÌE§/Ω∆ÄEz´ê[Ä{^GAtzI∂¢©¿ÌªÆ∑ˆ@cmÌ{ÒÈQ¸◊ÅIí$îÏD=ŒìÎ_‚…Ó∫åÄ´	M»ÑµÛ˙óSHUÏ(ª!;cı‡≈„'çÜ∞;¿på•√ws'S˚ölF‡¶yö§S+œu][ïzLìäÅ
+œ[_”“Y…uM—Ω_¬¶=Ù	nßyé⁄˚’«X}¥Ç∞É”Í˙ã˝#±˙€çç5ïA… 3c
+ÊÿÏÙ:«èBF_;õÑ
+¨LıÈ08wõéî]5S,	qhA4Y}s ⁄Ñ®—ÈM5VG§ÔFŸ Ø»O.Y.^‚#LúÇÿŒN=%a†° îs1.ÕÚëÇπ˛”Œ‹è£…‘@ïŸŸπò>Ê◊Ò⁄4¬¨G~ˆ›pË≈©˜#Ex’±"3ÜQ… ¶7˚„_P'4º˛ülÓRÆ!òóÊ◊1e…4gF•âP(z¶Muú ZY¨T/∆íÖnßeÊLùÃj‹ºBÕz^ J+gÌ^_Ïˇ˝∑ˇÚs°ﬂ≥ﬁ~°îüEîs[Ñ˝iÜYl	c¢NXµë°dˇ_úy:≈úŒÎ@–~Ùbï…ıœ>HeeÌö≥*Nå£uÿÉn®ày˝‚ÄÙÙ◊6ûˇ&H’É	“QﬁÎ¨'≥ª”“¥ÁëI÷>å6IëﬁXr†C∑0{3û`-˜-/H|LâK	µü˝#o¬K›¿ œ†¸ÑÎ∑µ˛[ÀdÉˇ'¬ø0ø˙ÏãﬂRÌ`rÑ˘ùI <E˜vŸ \Ë5UﬂXKZıbOïsµl£^⁄+5)4¶Ø6tÄõMè˚¢»à0l7≥rD‰uƒ™Ü$l+
+ˆ≥‚f¢P˛©Ë<VñdKµX4âπ Ú(äzC/˜â¿°CÎe´Lie¡pUøg¶‡»ß∞Å6Ñ†ÖõÅ˜s#–¡ ,õ}MÄ‘¨ú{∞Y0ó˙ò¢Bw´vö+ßà†F35{Ëeπ…É<Üfåx\Q_∂C óâo@Õ`k4zÖ¡d|Æo÷oü]Mz	+¬7„Hµ¡"Î“|ÜﬂXP]~fiÇù¶‘◊Üó≈Î3º˝b„_[.ÉÛµZFåÌdd‚'DÒÜF''œHç™<ô•nºIëe|£∫TíèartÈ:‹‰¸™U«¬w‡¢9çΩÊ+}„èmxﬂ4'û+∆G∆-[äﬁzK=:LﬁÌa…)≤â!3/ër˝µkıjäL‰«Î©J'Ty∫∏¢ÓJÃ∆Z≠¬R;jä'ﬁIÏ%„≠sLÑÜ`¡„í©:9°ƒM´"£é‡i<,±—íoàtv¡¬I…`WîªŒpôô.IäµCc†∞ †ôÿéVπË`ç≈3¢pv<Ò”ßW<≤Ç7¡5W%√•!]´ gJŒ Bµ(ç}’^1á_≠ÍxÁ›.ﬁD≠Ty[Ú∑tài Ø4·Ú‚ßùóÛÜfä§	ËΩ§%œ§$ ç3)u˚ïÇmVﬂW‡è
+’‰+ı8úìSL•t‘˛c√∆å^¬DO˝˙y˝ë¢Ê¸È'r/QAle›ËLπò≠¬ÂÃ⁄]fm1ü∂ñGõ€≤°õà∂üÇ•∂—†d;õ¥Œƒs¶ùNp'uÌ+Sx¥ —‡≈&Ÿ›€sp4∏˛O◊ˇÒŸﬁ!€åÿ©ªu¯ÕÍü_˛πú~Y ¯VN5~«JëÕ†©ΩﬂWtâjO0S·]lEÇﬂt+ÆÏÚÆ©‘_‹ÀF§·ZREZZ∆YvA≤Q'Õ(OîåÛ&$àDM8íÃ(aÔõ«›z≥7xΩ˚˙∞v√3ÿfL0#^Åﬂ.a≤Ûì 8¯@ìsA∞ªÎà&µÇíµÿãjDI˝∑4AG¨ÚÚ¢ób'Qm-¥Ü+J$1Îö§UÖ±ï£%Wk∫πàÑ¨Ñ"j¨):VözñÓz§ôå
+≤WPbjß¬V‡Oè#´ î∞◊jÈ’ƒru°_ßö÷ô˝†1“
+yπŸTŸäb¨Œú2Y”fÎÍÿ»¨∫D·k'!;Â:¨©∑Z¨µ∫Ã™C ]ˇ|‚ùb1›”òûÂ
+ƒgOœ|€Í*nb3w%òÍº∏66ÎQcöFp◊·B_º˚Wm˝
+"µ`1MÂ„C‰&ÙaƒYπÓa6\X<Sy3πZdRH’∆´l&2Èô2}cÁ≥™ÿ™V)ìó¯ûtÜ¡¸æØ≈~±±…≠WK™Â[!IgÆ›ÌÏm◊„5d>o°«{W˜\]ˆ¸!xtíí¡—§§€õåé…*È—·ptºÙ¸NÓ7ı÷	Gk)_Xû>%!óoMEY±“Ò˘êÃ`ó@`2OAa‹#Ø#≤w(næå‚-üDy◊X ±Á√åãâ-17pôÖ>ç	ﬁ2ÏiáXÑZü&%ÕµﬁÀvÍ∫=ÓŒÖÀﬂù¶èâÃIÖ∆1†MŸA7±:^ë˘Øïø.ìÑg"ú€  √‰_≤ó^§K¨≥Xde≈[9ª˛Ï¿5WP˜Ò≈ddÅ–…ë¥Xã°	·\\Wﬁ[ÑÜQ|’Ã4)!)8]ùtÑéÑ'>.ñ,õˆı‰Îi ;(Úá∆(
+¡âñßAçfñUUzù∆ASæÇà®£&bçÔSåùÙ7yt'íXÜ‘öÁæ2ﬂ2íÎÇ
+o !*yÑÕD“Q∏·¥|≥ÕO—πÖù´™&^ u6Ê“u;|N:Ü“£Ÿ—y“}˚≠À©_ÅJˆb◊≥gLenA˜•›p.Ìƒqw;˙ñkK£ÉXÛYSc∞HR~B~÷∑|Û,˚◊‡∂‰1iÙW¬|ZYjòVEÓ©¨·∫NjΩ…÷•ÓŒd
+∆'’∞—ö°–Nﬁ˝l-˝MÊoJÊã}¸©»}—k,z÷∂⁄≥)€c‰îÅ\˜M†´+&Öé¨3§âò:ﬂ=P%◊qL<û¶Ü Ø´Æ≤Ãµπ‰˜3`à>x#‘
+¿Í=Ù—Ä˚ΩÆ¶™‰ƒJ%¢
+¸,oƒß∫>»X2§¶Í°‚ﬁ’HÑˆ˙F‘ë?.¡ÑÇI"A∆Î∫CÉ`B±‹ë¶≈Üh`ô_ Ru:”«¶D“_ÄV¬f˝–œ≥±<]â≈ô„,Ï¨–%z)N
+-ÉT¯¡úŒq%»kI˛Ü”˜ﬁƒóboº>»JO’ ≥Ã√ˆrÉùr⁄mõ2í0ø†-ô«Q ∏ìª4·%“8∏ò"J±™¯ô~"ÇmÚÜæ>S«œ]T»VlÀ–æE„ë\ËŸb≠o ∑áÅæÇyˆX‚Ω◊M˘˜Û‡_Ÿ1øQÆ(RFBTx˙Àf˙å0⁄•€òÈ„◊“N=Òm¶&oö>Ì†ìcôπ8‡øAr¡ˇ1∑bΩ·A}ê/‰Ó‡_⁄-º=N¢`ñ¢;÷£ï5"å1ˇG:◊∞P≈+”ÅÑ(î÷ÒDå~)‚<Èã™ôp˛:ŒØΩùR)ù°U^F≥I±√ΩdËY¢qLì¥Ë#¬ò'˛˝™seÈUGÌ…ºì\Ö⁄©ZgL%úc∞Ω"ÀÿNµµoHÒ0⁄õ‹î≤•lï|9ÛÒâ!∫C¶…¯Ø≥ÿsÁ∂-Äi∏@iÕI5ãóÜΩﬁ1BMµ∆„ı?R$
+Çw›4v¨Ú«ö¡-w¯>
+ùµmƒa£Q)<ÕÂ»°Ùƒ∫≤nBç!¶ÄÕã=˙=”Ünût~Ñ—ƒ{åÜÃcÉ;èSXò·ûﬁc∞ÙÜ—ª!ÁMé'^8÷Sæ?Y≈W5ÙD=`Fa≥ sô4üM`@¥XÃ<≈X™`L{d@Xã9ö√^ºPÁøÁáû˘ò%êÄ≈ÚsˆÓØﬂ∞Ò0sç/ö¨◊ƒÒI
+]JOÉÌ?å˝!çO(0è'lrÉê≈æ˜¯ñ˜ë˜#}|B˝˙n‚áÚ/zÒx≤∏Ócñ0DÎ~ßÑR
+Õó‚
+)30”:ËoK@/wD*
+~¥%˙H&ÁOÛÎé≤oYÓ-ÂQπ^4H◊'¬€”ÿÑ^äo~Ê{ÁX⁄l»Lõ≈D÷ç1ˆ¥˙'YN:BA^R’S≤ıÄyÊt˛≈äGI.œ™Ïó˚≤¬X¬˝[ïËtiM4rE˝ÀﬂˇÂˇ˛Ôˇ\jjÉÅ™í˙ﬁ∫Ëƒ$˜`5DGfÉ^®†_‘®õb_°1¶Ó`&B3‚r=eôG√Æ3¡ÜK 1ÿÉŸıﬂ`ï¿8g2cÑK˜≤¬|∞G6ë_*˙¸}∂|%>Ê/ Sœm´—X˝Z9˙ï˘¯%∆«ˆ5Ÿ=Ü∞√ÓWõ√S…ıEø2^yr°c9™c4(<hUÓÍ,´®EEw¶0ÉøUçT,ê6⁄êä‚>
+Ô@›û.@hŸ"≠‰ñ±ånH`ö`ù(A“å1ï¨™!3π‘.u<xÑüµÀëÆàÉ±Êi≠)‰ôô"«Fy‰µ*ƒ≠ƒŒ#˝ÒÑ´	ΩÔ7S˚	?πÏ]\≈5^ñ@‘EJAÍRÿ◊ÂËÈä;E≠r1™PÉYo∏πLé‰boXË üòΩ≥∫¨N¬WÃzq¨ƒ∫è%I"íN\
+Æ\ΩF8€ª±ÖÌáç[sq:±	
+a¶1©‚¢ﬂÖÊ˘@.nÊ∂Õ◊πz7∫)Çm≤tülY„û1z¡/∆®B≤lçñ’®.É˚¡^ B¨y∞ítöxE @'ñ·'}<#V:ç*≈ ÆVb[EÂJÕ ÈöH⁄◊ı˛Za%¸W!¥U4√&P<Ê4fñâ?∫p ∆goh9Cf˝é.öqØÂéwkf™ *‡ë!Àm=}ƒ;ƒÅ1““Ÿf~ºªR¢0ëô8¿ú_&ÒÆì08VI¿ª›Â*	ŒsTïYÃI´Û∆∫Pcáê?ê˛"XIØ`¿DÿÇM∞.ó…∞	·…±;Mj‚D™(∆sË0ûx¥ô€Ë†„I˜¨Ù‰,¬∑ã!!Ω¬¬Ï?f[ùˇ?_!r*áä‚≈„å˛ËõfÖ&8S;Pó∫ìYeŸîñ≠bU{B»&>ÊÚû\πeÆ≥zn0_N]Ü'ù’Ím1‹‰ˇSjiøOgA‚ô’Kn]7∆yb—bêq„ir+HXŒJ‰VXK;Îéhªyeì
+‡¥_¥·ØˇBº‰áôè∞¿∆:‡T√e'#xw¨ß:b‡û=}å Ω!º∏#S5`ôbxW=’∆ØÍ©π•Ô≈ß´dùÔÜgàñâ/wa“0òˇÔ~íÓå¸4˚≠Ïû®M>âPd»?[≠±åFΩK|¸QƒoKÇ‚‚∫Œ ¯Kl+¯Çà≥ïároÛhÌl¸mïßö!¨ÚQzÀ‰Xë⁄yÂAèÅIZÍPVæ«≠)|d,6Øë∂ó}™dò÷¸I*ÓÖúwÅ&ó·êˆÅ:H÷Î°úCS∂Ω:“ÆªÎüêÓΩÍ`/)AÕ,—Ìz3DHù¯ÅLbJ¢	üb^ÃÔ¯∆ª¨lÅ5π˛e4"¬*„DÛÔ$iÑïX‘∏bÑ4™$¥{BAù*/âΩtáı_ÍìnÖå@5û∞‚qO	ñä|)>vΩﬁp
+$LèxRÒ,~= µ∏^’iº€Ã“É;u;¯]g)Ø©"g„ëFƒ´^^¯…v¥¢N°ﬂ™∑êﬂ€ÆˇaÜ§])\ˇöï›Úm‰œù•%’’?¸ì˘Ö34˜òÖ~Zm=~gk9çSuû¸ﬁv=MS:3,Û&„A˛E˝¸˜èÎûúY*Ö†ô\Á‘G6÷åLÈÙÌh®6ÅT˜Ó˘#5”üîR’Ø
+—~O<ò_ÜÜ“—®÷J˘’˝jﬂ4úŸµ‰∫‡AyøP[5’lT^†ã“°~>/y"`-P”IΩΩà¿|7≈ Æìkqf÷öê5û©•:a+¿73¨ùÁ#¨‘®`P≈ûjü® ÜP‡ r≈‚€,≠/c\≥ù’∆—≠Û6”«lïk0 ¯{*îeQÕ∑—¬-,§L7?z G—yÚÙjΩﬁ˜ÅµfF™
+§iS—oP&Ÿ‚K¨ÁcH$1%ëpπ»÷nÂ9.b!Ô¿
+‚ÌÏÔjÇ!ÜyÎ≤£	GËú£8ö¬∆ |√d?Èy‹ Ã∆ﬂ¸≠v[«˙D«ò?˙hTx¶sˆ‡Q†Ä€∏0”Î_b?2]Ú2„0ùıfÜQ)ÌÍ‚æ¢ê9º—-XŒ2°iûdõíY‘§oÏñ∆lµ„HüE“îl‚Fg¯◊“Vﬁ≈&ÿ©ÀËbPS»Ëg{{é:Æò)‹Z‡’wÓªí}
+´ﬂ1±§∞}^∞8Ò–ÄI†≤-ùÚÿØ=Ìh“Ó\Nﬁù<N÷ZH‚æ0EıÈ’Ω{™'ÿ¯¸Ææ[¥¿íœ¥^]úùŒ~F)bW¢sè”kçï^cısıi∑Æ®a#;Ó‰RÅ-Õı?äﬁ—µúπ¢òÏEgº‰r,=;ÀËlMº¯Ò($"cd\á•p®Ò?k|™˙Ï∏⁄◊f‚¶#≤w˝7ÙˆìÓ =et—kÅ}Ú›)≠Áh·&8M7~ƒÌÓ_E√≤_TÃî[rd∞ñõJyΩJ.J|∂;`‚…ıœ`˜í˛2Ÿè)&Í`ÚÀ@ıﬂú	ÑóˆÂ9ê$ò´‰eî≤_G)M»K?RøéJk++∫“	àÅ?TDd2≥T›©∑˙˚e¨¢æ‹ECˆüãeûeäˇ]∆¥S’›k‘…íöIZûr⁄ÖÑª›<
+~ÜŸÄnNb§&«ø*ïˇu!ø+ ~B$ÆÕ∆?î˘&¯ŸÂ^·¸Ç`rtKÈ‘æä¿@°ÀÆ*Óg–p’ÍÖ5=O<—-aj÷;-∑Ü)∞´iÚ{úÌ&KÑ¢§èO]*§&∏™è¸ü«tjL¥P¥åmåiöÊH8=€L‡•Lâíß‰;…Q˜ﬁ™Á;=ã∆‡=≥0F^“Ì¸Ù”à¶t≥≥¥$Ôàø'”¿OÒ«Œ“€µoı˜„A.32{)‰πÂT8≈¥)w¢t|øúxg≠£˛dü¢˛¸i:Q+7æ·Pnºé”®!~€_Á˘WÃØÌÇ©q´,Ï∂ÁGÖ*
+…î ‚◊≈-˛Ñˇˆ@=¿ptªÔd›üe6°`Zë>™≈ef"¸ä≠∆®"ô>ç7∂AáÆˇ´πK [j~Ë	ß4}“¥ålÌ6NéÑR}dbœjÄ#ãë“£†/õH’≈»;≥’_»”2Ïµ=ñçÆ:F” F™!ÿ¢·–ı¿ÙÙñn”W–Â¢ñÂB÷âÍ5Ÿ:˝˘Z„◊<§¡ô |8ø©’SeÊØúT˙òßÀïa=G£•,[ı7tè3∫ßQõ'É8éŒâ˛
+sÍ9ú§b*÷7ûË"Oh¡ó¬6äÍ¢∫ø·ÖJGU3VDˇé¡ÜvGpuû¬ø.ÇSt7HHÂr¸í_‹Å&ƒtD;‰'“I®ÈÓî9eüZQ>
+òK
+⁄C5˙¸ﬁ±óÄ °uÀ`#òßŸ‡“h‚i\v’&7Ôu§ﬂT˝ãlÆ˙◊ÿ£IƒøµaÇ`ÜL¶AtÈyª£ÍÚ_Ïw)aã“\Dç#¥w4"_2í.≥)µ\ÅÃ–dõüÅë¥îÇ>«1¶!≠œ…Èız¯iπÄ„É‹Éyê9ﬂéöRwÄÈ•{ª#eÈ®N€jÄ˜àïéA9∆1À¶PÎ4îj–D=è≥°"ü2ƒMr∑∑5ovñ±∞≤ç\1¬Øœ{^oëE‚_£⁄;â|¶&yŸ`û∂Ôc—ÍIi5PÍø™Æ˙(AS,ä1j„’"'∏ﬂS®V•Óø 'Âû•JXYƒÀ≥)ä)æ˙˚ï_RbÊõäz1 ~ëi“71M¬ØÇcR‹&~%uƒ{¸¿¢Õ: f˝®∂æ:Ñ¿ßñÏÒeÛOπùùEƒ,Õ
+yw";`yNpÎÊŸ!eÙ&›ï%3Ê§rµ¥ìûÌ?H˜∆|$‡îH–PrnB–ø˚¢˜ë˜",dEV…õclo
+Gù'¢(¨g≈Ôµx N2ÔîïôŸŸﬂ]∆B>”ò}ú¿ú¶®Â]Y£Ôl‹ˆ«‹R‹ä‡9B3ê–} ´©◊◊›÷ÜTa´Û°G√…b…ë^2ıÜ◊;Òáë≈`AÑ˚:…∏fÆˆ“¨h/Õåˆ“,„‰ûı–πq√ñ—" @_ß~‡ˇ(R)„ÃOÂïÊ4+%≤	?w¶*|2Q4<†RDˇÓ L„z¶π¢3äé¨U,‡áå◊>ÄÅ~º8Â˚1ÑË”XS„¯◊°W;q>Ü@Ω±Âw!^Øi`€∞}q⁄˛∫ˇ-tØ=Í1Wç#Ú∑˛ß¡óì'-œ"5≥“ç≈ˆ’˛ÎﬂB¸∆óæçßu~œE¯A4|¨Z.É˙ø›Ë9døò9ébœYÓ]îtø¸‡<Ê0´.≠‘Æï5F+ø:⁄{ÖÌæØsxé?};ä Í ˆ±…aìß W‚ È;‹˜&≈xÈÑ)"’ÚQÃÚ¬úÜnCn‘UÂ‹OR«'K‰µ[·ØŒ∑:£Å2vπ¢:N‘ñ3¡]r[´¥ˆ,yyÌykÍ«ùGÒ˜XÁ´h7öº⁄ıiXkÀOgö~¬_ù˚©,Cõuô“ºÀsÁ3ÒêV˙r«TM0"nfÌÜY˜‡ÔIw…xù¥˛*óÍÆŸ$oø’ÙF4ÇÅO/u#XÎkyAΩø±TÉáı&eœøWÕµuâTñÍpxô∑Dûãd ïÀëòÑM^•1–çGä∑◊ﬂJÒù∞©äÎ•¿ €0zÜ+J*aè˛g–ÅÑC± Z∂‹Ù˛?   ˇˇÏ}[o‹HñÊ_	kÂT∑îíR≤≠ ∂-§%πJ=∂§ëdcv‹Fôô§î,g&≥I¶,ïZ@/ÊaÄ˚∞Û¥ò÷›ãn`Ä≈ˆ∞ò«÷?©?∞aœâ$„BÊEñT"∫] L2ó'Œı;7◊ª/ ∫©Oÿ…kCëNUE°ÕÍ62ÉcÄ{:øØä"®Ñ·°0ñ•"*≥cd⁄3£˛5∫"∆^„!°#∑˙
+JÁ∏~!ßøT§:÷$Îu}—
+c/5!oQ4°¯Ø·Ñ¡*¡JÖ}O≥—,h"ç4"úë2≤bq‘¶ª”€îl@ì>ç|ÔeÊæ¡Úcƒ;˙*mWc¯ùf0ƒD∫	*éCæBt39§÷Ωv2MdÍq»4#Œﬂ=*Ω©0‹Sâ4á‡∏î&àâ™T„í§©ÈOB;ËÃÕ¢îÎ_›◊TÕ¢ß^U6bà»+≈GoúÂÁ5B^ ,WπTtû‘◊ÁÈﬂï¸ˆXbvÓ9˚ÔC˚‘%W
+µæbëKî∏Æ¡†–u-≤/u»Æêå]	_Û$¡#o•ú˜†°r†ﬂ$ßÅj‘VﬂÅf»¬ìP%E∞ÙxßÌ<ÿÊA\˜NÑÒú˘˘+,dÍ\•§ät—$si∫ﬂÅófø›˚L˛ª@Œ” ŸJΩ¯{Òki„¥0Î©õøñn.¢^K⁄v·Ï~ïi78	ù>lùiW;ÖXªê=Ø‚u≥s Ÿ:1ﬁ=Oó£û>∏ÖÅœË uRı~¶eñ}?‹Õ_ü>«__ﬁu∫^1˘ßı<K
+&{=Ωôw yêøü~6Ù d’˚Y*]ôóáhr°ØNr,·Â%s~ûmï1ÎÁü—"í'ò‰˘'¥∞‰Ñé@ì$8æß@’„q<™CrFû¡ì&r!$Â]ÔÆª‰ ˜*n≠fı#»á‚&•ñ'†çzz2]ßEz“\C{í·u∆Ã´€úu
+·uQˆ∏≤â(;ëa∆ßÏTH˙≤î≠]WGN—ı®~Ï‹Z-f’Û‚P‰ø{ıò ÆuJ¶öxF<fc‘°‚º{·9Y÷¥9Å,yJıå@∆ﬁ≠•L≈1}4óûπ–éÇ
+}Ñ¸íÃ-/7Èˇ‘∏ÏrÎp.“!’\îXÿüÛ|~ƒÜF
+#LE76BËû©$a=v˜©lT3FcXè#c@∂öô®æ-ê”f¢)RjÇjœ0–Xf†±ëÅ∆?zH’%Rkç‚†ı9ˆ;AïÏ7ù^TW¸ƒ◊z”ÈuF=ÑDFÎCh∫C˘∏R^;~@Å&=£x1ºØ]ﬂuΩ¡\zhpΩTøu‚\TFÔößõZ:dÛåÍ›¯u≤z∑Ú∆Ï\M˚⁄»)ÁZûπëû:E.€íâ˝V‡‘y^≠Ω“KÛk±≈\m%ŸÎëFJÀ#≤q-/
+†=¿úÎN1. $ÄRuI§3ÀÑ h^{Æe¸>'AUìR≤_Øºr£≈îí≈nà˜îÚ—∑Ë¬£⁄ÕÙπ®d=úÕ⁄'·¢ŸñÓπË}ÙøËIÃ˙UKáïÿ!©}{$cüdd∫ﬂ∑:dÊÄz'P)™aÉÈEIhö˚LJ¥ñrπÂ∆GF©*l–tv7X ﬂ‘MÅsZXÁó	g18bÓ√ZJé˙ÓÜµ?/ñ~A^Ômµ^¡¶ÿ‹><‹#/˜Zdkõ|∑wpıüvˆ»/ñπ– ò÷qÏÖ4∂ñˆUâ°·,ô òu¯Ït>bÈIú≥ê2M[TLÂÄò∆ôÄÈª" „`RPi≤Ø§´ùÅã8≤‡a5–^>L&◊ÖOã+èIˇ°D±ù#˙C;`&ú
+–Ï√ÆÔı\Z,+ã*±#[àŸC0…Û1ÂTô{ﬁÍxQ‡ÚCêEådq0KâGåä»õb\=,¥neè8ÏUË≠ı#ò)á8√´øD®◊Ø<iÆ.cEµPÙÉF›wRß°@†hÔ;nxı«`Èïå ~ÆìCØOMé°0P-ê”†sıg]˝Ö ûjÚˆ^Ç‡DÒP—ùd≠ﬂéº®ûõ›aıag9HaˆqTpZEëwÇHetîO€œ/úd≤°#ß}	„˘'#˙G1˜ ër‡tt)Ó‘®OZné•Ç	S&˚ç"|™xÇßõÖé≥á»Ó–ìÁÑ”XOg‰◊lX…-#Œ˙~ícÁ4i≈=–≤ª8E?§œü:,.¿i;ΩÆ:(†
+zÆ£t˛—ˇãrôHñ-Ÿ_◊?AêQ4bÂ¬–ÜûY–)˜v÷˙Hc{òê‹§›+|eé∑£÷™Ef‡≠t¬7CœzÚA™i÷bÅ(Ü≠ã*z@ﬂ§ç
+bÛ¬^äÅÿ“,P˙ÚßWü1@^3!˙)Q≠ôQòPπ@Ì¿©MË NbÜcÊF21Ω±usƒB`§"á&0oe‘ûé8íÄßVyck˙Õ´‡Dßè:j3UæÁ≥™≥:kΩkøâ]M”b3_é¯(Ë¨ø·ªX˛»–l@ÕŒHi{âî¶eàø5…á_À<≠Iæ∫–∞ÀKÚ;“j#◊É/AˆŒÙ®˘†ÈÊ(Ó"}xÓãÛf∫ít¸*Ú’¡—ßBÊãÛ!Ïø≈ 3`◊Á§RC—
+x‡¿˘‘Ç˘<ı`$5≈Ë¥;=/ax;m≥À>hÓ·æ˚x3ãQõ”ñÏh©wD©'GSﬂ\5&Ød¿]ä}È‡ñ£Â·he 8—vSpóõ SÕØ≥‚ ¶„3qÄlü¡Ä∆J“6ƒÒ†›˛TÎˇY_ôÅ¢r>•kJÓŒe	H∂ç,úmƒÛk˝f(¨SH;Eù˝û3à©ﬂw£ÿ∞jCejÅxqGë<s`b3aΩë$∑å(>m»iµ·Åæ…‘–Ä8íTçË2√x™”eño›
+∫,Eä}tUEFÒ&∂C!ÑOÖ“Ü¸ôà⁄∏4¥hj¨@u‚™Np…±w7hç-®»a-%¸xqEz–T
+Ù®¬ûù∂˝Z-“Md∫.ö§Û{%µ{IkI·t}<>—PÑëﬁ›pÛ⁄Ã4òN˝Êâò	f8≠6¬,Zv>ZúdC¬lâ◊k¯fIvÔÌø€|ıÊÍˆ»¡ˆ·—¡ŒQãlÓΩ&á€ªﬂQCxkÎıŒÓ¸“⁄⁄;(X√ëôny»œ&5á?Z^zÚ≈Ã·:Ã”‘‚M-Ê¬∫˜î´O,˙rÏ∏Ùø?A˛#±X«•!E¿â„dDm/˛‰y—çvEñ€
+ﬂYÊ•âW»xÎıGJª˝Y/g_Wz_ôÖ~≥Î¡˘ú±–?Ü…~¨zÆÍvŒ⁄ÏÈnu˝Nás}f.˝ÿv"O„sn°‘å—∑LrŒ
+™nÏ¸¸{%‘zÔZ”	ï]Iÿ¯‚1›QÂQRG˝•ÜÂöØ‹—•“ñ≈qñ„fªëYjÿ°*˝XaAÀªË|Øe±Sﬂ√p±PTH1Öß(Õ™åWVqmïá\¡°∏‘ì„CÙ€Fvv∫†)zR∏æ@ñ"”-Rd‘¥Rœ30⁄ıπÖ>ò=/;%k0%kYﬁ¿¸äQd∫èãjxwVª∂%îUKNDr;∑‚!˜ó˙†é˝∞ÔÑ‘(Ô™2 *`´ïÿJ» äa_∏%n‘Y’gœ»\ËÉP)Çlêπ∑‘ì€ˆÍ3:V†ÛÅÌ{∆
+3∫ﬁ1∑6´iãøìÃ.5S∏ËÆÍ˘m/§˘ôà¬éXj/å‚êA lnfû¨é∑áüEUóöÑ£EÕ®;Q+Ït˝Suºï∂˚¨ÆÉ.ê÷{àR‡¬jı`ip—Ü–_Z6»G?!>Ö%•∏«.1y©ªG®‘/Ω>›πDcÛÛV'œsk$
+ ∞Ûebä^J’5B%∞™&õå%æV&6©ù0m[ûJÜGÕŒrÕ6Wﬂ„ùÁ 5‘ë„·øˆr‘lUpOn	ÁóZÔnÍ
+4|Ö¸%*ü’˚-tÁÏDi’ªd’[°‰Ê]á¯	ò>ê(û1gtΩQiÀû§hpü≈à…æF1b(-∞¸(%Õ~0P‡öËÙÙ‹∑ŸÂ`È :9z±∆X,wÇﬂ&˙∞(ô!kJKSï¥(I∞c”~Pä=•ª∂–âR∆õ/8ëK◊∑hÃ‹Ï°v@VóKÀèö\]yà
+6ÿB9Sn∞Œ(åÇpq–Ã˜õm;Åë?*Må&y–âQÖÎœ}’VI ¡ægnûÖN‘m(ˆîqm
+Òël£<Å–§ﬂD◊Å∏Ω{t∞˝mã,ëÌ∑;[Wˇywsßuà&ò≠Ì∑{Øﬁ\˝#irò-Ô4ËQå∆ƒ˛¬Rl=8qbÁ£˜2”{∆FÎzú∑Ã +,aôaFû∆Vb<ñì!0ø∏…sEKŸr2∞^k@z≤qßÑ1'È{)Èüã‡A)‘œ¶¥ÂŒD÷≥!lú®ﬂL‚+ïd6Ù¨+4ëŸxº>àÌ=w˜R##d'Q‹Á˙“*Ø¯nMg	¢6†M?Ï‰ı≈YYÇX»›IﬁDFcqπ0Ïñ:Ë†%a›¬&ÚznKùV¿ê€xIK~3÷á÷‹ 0!¶ÚßÊ./ÊT*^?˝˛üà(4˝å˝å˙¸FUKc€´t≥◊È˘¥¥Mˇ‘∑÷°Á{G‰ÑöF¿⁄€—@?ÕK ˚õÙNO9g7‹ñ„ŸfKÿ°~∂ÙÇìÄ(ÌÓ$ˆÉ˝n—VË«µwÔmœa∫Ñı	≥	nòxˇTf8∆.sr“zŒ‹\πòÖ/aΩìæ–Ú! +≤$Ò2èº˝ŒÏï§‹Î≈S,eÌÙ¿∂n‹£™Œj÷Ω+Ó¡3±Á9.’A~πBWóTÎ.†+ïmˆI)ª¢ß˙≠5tÓπ‡‡ úØ˛≈Eã{Çè÷Óøy;Ø≠Z™„•∏|º“Éx˝iùHxIiì≈@O†-ßÁÒXOL‚zq`,Å«Ê1ËÄÚ0Ç˙ñ’F˙‚‹8“dÑ‰´™m^~0èhÓ≤XgZ\ºH∏K3ÈéÅUbkˆ®«„öºΩ6¸Ï¶∆Î>⁄G1∏◊¡≤OHM:J“ñ∆µ∫,±Î+T”5I-S5w.2„Èﬁ–∞⁄GŸﬂDû⁄®:E]íi”„Ef!656±ı(≠;ÖTvi9Ω>ÇÀÎ©xΩÃêëêˇ4a™∂jŸ‚œoΩLPLœM›i˙.KÕ‹r’rµ$ëvm|≤–»®˛Iê•˛›Ã»¬TK˜)$<_â2
+¥¡ÊD2D_d§]A›ŸÌ|&W2·wö;ü¶ùfñ7©‘zΩ{~”AvSu«√ú¿a2ˆ^/œˇsX+§w“ÃC[®Mÿ≈∂ÑÃ´2;'∫k⁄⁄ÛÌûrﬂhàÖ¬ùàföu>¢‘¯…wEjbi5âPlÚ‡ˇ©æñ»kx6ƒ¨#&‹çt†ØÈöø(%=Â-·Ai™˜º¡I‹•òF*1Ω‰±E—OÚ‰˝§ ÇC¸JT¢\ )ŒıŒöÑ	2`&ÉòzIuäV¯Å˜∂*∫√ø∫†ª¸`+è^å¨|	*s‘¡\G:z6‡*e÷%ûë7"ÍÏéôL'¬-Fø9°gµ{Á&Œè{ö◊ˆ|'§"Ádu‹ü˙˝Öùgt.Q*ÖÈŒÏ!èoúài'ø$+0ı
+7có˝'hˇÄCÏ‡¸2⁄Öµ‚UPíÈÛUoDx√ñ+®•rùf¢q÷Êû3=¿a*ÄÎ…!Qí˜„:&Ω—\‘˛V1bùlBZQzó´R&Â¿©…Í¶Úﬁbo◊E•ˆûÎ2Æãpñü£¡hMØ1ôØºÉæen)Î5m	:f…3i‹üV/K‹v“¨–g#Oëx3ŒŒ®/à˘8sPöñMãúRbÖ—3zù€L∑Èy'H¨¿˜›îÔœï†Vxõ?0“´çVØÛ§œÿ¯í-öÙF±˘†/˝√”¬T©'†¨ÄÍ…6 Ω…d˛ß7LŸˆüh34¸ãj[@ê°‚ƒW¡ïÂà:‹QÎpAÿ(∆çe˛oº3èΩ^@@f— ï%·É,L.ıÖ6yåNDsO~»$Ñ%‰Jﬂ«‹≠⁄≠©´CöãX8“¯fhî*tP‡)∆(≤ØqI,-˚/ª´∏ëºèßÁIå0ÊÁ√Tt‡t˜˙‰ßﬂˇsﬁ=ˇ”Ôˇ«â\è‹í‰l¸ëá0K¿™C‰¶LAbz¿¸çÃùüßíS
+ß‘Áπ¨(l÷8|ÑÄÚQ¿üQΩ∏EÁrÍG£rú“ètxWÎ§≈B–#˙[⁄‰ø˛ $#h4…5qÅe@I™∫∆7√Ò0+ÛM≤1kπ—XˆÂ8œ˝>–~E3ÛÕ3Mrˆ—|ƒu",·få|Fg~RπJ;±ÜC¶†f+3“÷”@ÍπÁ+u…~©Ê˜Ç”õî‰íb;ç¯ëá Z»¿h“IÄú‡á—ÄY1¯ªÅÈÄ°,≈≈ååÿG∂±TÊ<4i≈tüñ€]‘ö…+Úp Íˆ˛¨ÿúdeÊvõ>ÓÆO≥bB∂ƒ˙Êı†µÏb¯±QÎt:oRπﬂwNº•_,‘ªûﬂ°ˇõÉ}˚√ûÄ9-eÚÏ¬èﬁ±¿<…Kı∑ﬂ˝é¯w¨”_ò≈√§"r&ãnπÆxöŸJjﬁôK˜E4WVÒ‚•⁄õµÎf@∆ÎBgKß°R≤’…‡JµÚæU„˘X™'©uâ[ï Xì∞W‹ Ñç‰MÓÕ‰{íí3%Ú*n÷ÙíQl'6êˆHg(â≥Èq31íî5ØU3∞i§ìöÌ&®üÆ!≥Jd»_¨•Õ~ñŸN;¬≠ÍÅ;ÑcÙúnåË4¸^‰/VµØÅ~œåûY…ÿ@]`˛À÷§¢¥≠€*C˘V1-≠Ã˙ï0sYé*º∆∑ÑMn€ø-íL£^F˜úö”¢p∏æXëÿz]è‚4“W≈£–aëY'∞ïêÙ1c˛7º˙|‚Sïâu…âæò{ ƒd‘˙ÕldåERò[*ã19#√ΩT#]ï§¥$ﬁq&Û˝Eô|¶"¬‰¸W7KÑë≠…wYÑ°¥~/ª‹!ŸE˚C%S à˙M˙w| §Û#3NEü∏‡,ª.¢æ¸\ÂºûÙ±q≤{íß« Ò)<]*”á] Ñiº‰s¥¸q©2¢≤=f]jH≠f0’f[„eﬁäS§6∆GEéÇm”ô◊ÆµN¥1<P\C”˝•Ã!ò˙∑\¶çBü◊—e){$ò5I@Ãk6á?˘6ßèDuNU ∞üKö√ŒØ‹sÊÄäÔ8Ù¢ÓÊ'"ÖHœéÜFßº≈ÂÆÕ˛µi⁄≥J7Œ9ë@5pƒ U%ÿÇr¯Ç˘⁄BMFR	ˇEÒÎÇ>€v·π Ëå/˜éˆ…VãÇ¥∂("„Î÷—ˆ¡NÎU@
+´W‚ »≥;â∞:% a2…ú2Eß2]!:—ﬂyæ(]
+mØÔ \ÄH∞0bXí(Ä~°G	P¯Un@@>-CïÇœ6÷mMøÁΩ#ıﬁÑYVòîOHSëá∆ﬂã9£∆iª—π¸r*Sµ<~n‹r¬Ãz%öÒóœ¨G¶ $UÚ5˘÷Èıx∏ÁVÓjIæO€e à–ËYÒ/pä%	ÿ¯w«Èì(`Q8=œG#r°∏˜ú¡∂Î«"¡à≠+Æ¥îÆ»Û/s?OÚWò‡¥ßLCU—gXY˘oUSñ¡â®ƒY“?cÁˇß≈ïñldÀäCfEÑöÑãÙt—°Àf].˛Ë‰bùLLœ¢22±^~ ©Ø‰ßÅ+|]7 éo:!
+œ¬Í_€Ùz£¬íé∆˝éh∞†∫<Ø⁄≈S⁄πì"tsÇ—!&§√;πÄûùcq\wÆ˛@Â
+ËÍ	ñ‚ÒB„ﬁ∞-XI‹Âtác8ø”âÈﬁ˜H˚}Œ∞b/¶ËÀâãÂEXÆîyú√´œCﬂ»¿!-M#ü1ÓO%ß?»äﬂó˜*I}ƒ«dãg¿öT@aë ïkæﬂEUQ⁄‘ÚNa7kd–	˜ÿJ“0YVañkáöG@g§GtŒÀµÂG√ h†Üt›5¯æl^Ø ˛.£ßKÈ„b”ßﬁR3E±áLOîrR)•y•c™$xÂEÌÅ˙VÅÁŒ‡∑≥#xæ‘hTGè¢cäf˜≠ÁK§jCCï4®ç∞7Ì¿ı¥*W~∑ÕHÑ
+≥êd/üíx‰P‚Õr¿¥f;6ú™[©l÷‡ñ`eFÑR	§pÈl¯s]]í≤@b§êà°ﬂ¢K≥(VI¬¥Î‰9}_Ω§¶$N§è29úèî“UríË<*;»è¥–Ô©∂™MŒ–≥v°h∑¬æÛ£GC2¥∆E≠*I}´—Ü∞√æ^æT#ÿ∂Rr—ù”ñÆ ø(<b~¬û≤jMVç˙MŸ˜ﬁw•èkîYË‚Å,£°æxùïaÇVëˆGûå \˜ÜªT.˝‡∞C2›‹Q.ÎË\KxŸRÌ?9H¿xü@ ß≤Ò∆ ≈öX“Ø±YË¥ÄEY6±j8êüÇÅ Wû≤∑øŒ √Úc4÷“ï^dbÆ¯v%´°ÚØÌZ•$P[ÇV VT	´òAÚÙê•¶PiÈ…ﬂ≈‰ˇúF(âπ^ûG˙'∆rv"DâÉ…∂É8Á&Ö]ºME–∏bßÔ∫†”Å¨;)∂≈ˆyE«ÆT»≈ç0ˇ∫~}a>`ù‰=√*ÂÿÆã"ö‹ÊÖZÏ +•b™‚îg.Eç∆…∑Dô„4ﬁ µ*¨lHg+⁄p◊3∆GŸñ©ı5Ié=.ykÖWïüiVa=oI'≠´¥a±“ûÎè2•.uÜIº2∏1‘™ƒ≥>Âå“4´ßŒ ’Á‰öãŸúKÑ¿∂ˇ-f≠ˆÌ¶gküu_”òìDßö`>›Î¥û≠Ze∞:“+®k*‡~µ#Çyw_A\≈ªã)Ùgãè—
+∑¶èX#˘2EˇÌ›t[…U%“ŸP‘ PÖxMb¢¥ª≥^zùn!ÚÀËª“~Q.™ÉlÌëù›√£É7Ø∑w·cm≥µ’Çè{dâl∂^Ìº¿ÇõÛråG∫Wªûß—VT6»Ø9V©è•˝Eûmø =’ı#,◊ÁhÊ©∫¿∏¿â>8√àaÉzpqWx ÙßBtÁœ…ÔÆ—±?‹¸KËcœ‰wÅ¬^ì:Mé¡ßÅ¶ı˘|ìãπß°Âåwº∆>5ÒAÊßüÖW;ì∏¿Á±'Uûñ¶(i#ﬂ7¡≈ø£„=á˛±r≤^Ü∞¿µ˚)}˚\Oﬂ≥Sx±OEDqcƒ4ó<Äª‡*ö∂¬–9áﬂË˘;Í¢_—õà[8U?Hv	Ÿ¢Rá=◊jÌÈiß=Ê∏—m§jë}¯pæﬁ£ê“Ë:U∫∆oq‰[ÊÛF	Ä“ÎﬂxÁLbZzq-›<ﬂ~∑Ω}Ù˝ÀùÌW[á,c‡Õ‰ív˛*6Î∏.ÂNÔ%öH±·=™¯÷Ò‰ıΩ®Ü$1ØZúw–‡{⁄ÚÉlÁÍ]'™·€®\ˇÓ°†Öá‰!’⁄§˝£¸rﬂâª¯Éj£=|ÎÇ©Î±ó(÷·ùÛ~Åºk≥Œ9πÈn„≈˚°u6^QÔ”3ÇÔ61ïÚ[ÅR∞ZYm	ﬁº¯„Ú‚7ÔÁkÔZãˇ~~	∂Ë√ØV»WçáÛ 'ﬁ}ø¯˛óÙ.¢π„7Ìﬂ|¬j@»17"±?Îq≠úõN‰’äÉ	·Dı¬∑Xa-7ÜV‘-•R˘àÙèIÌî={&a[HòÈ◊xÓeø¢≈ú¯Q8 ˙˝?=¸UÆIx=Sˇ$˙õÆ"[ˇáî›òn£~ Xµ‰=‘€áÉÇ’dî¡á
+ÔœnzVw.iâ~{{É§-$täP‰é©≈ÑçóŸá¬Ìø>‹€≠≥ôAÜ?“[ü~úØˇ 'piRŒÉ4•¸I7s/¢w.–µX ç˘*3éõ⁄>·»ê§˘¶Pˆ1‚Ëø8\ãO§},Ì ËyŒ‡avŒaˆ˙˝á8'ªWÃ.ø1Û¶Ù˜ÀÙO~£¨^Ÿjnø[_~o∑Åe,mOñE∂aôr¶môâ÷|ƒKpwﬂ}”8Ìæ/kòµ∆9b8•:J≤ëuy®oS„∏¨yj‹8UC·Ô–QU•÷:ÛûÇ3lNXÎ1Ûπêó¨"l É OR•ößŸnW≈ÇØÿr=3ïz©PQ=*√!hV'á2ä}Íªh8Ö\ßVùo´raR∏¬6∫£ìhôÇrô∑9I¶$sb	≠—≠q´PNM£˘hhæ`Ü:5‹ãÎç·Ÿ¸˚¥‡º›üxÒÒÿäñ±¥_]Hí6pïó:„ûŒ˚°)Ø*¢tI\ﬁ˘·RÈ^N˚°q)H Ÿ$¬%Ö)¿`dˆ’EÜ/[’îé3nâf◊çzt‰’ñ» Ú¸¸eù¥h5†ÃÛ"2"$‡ ^àÿ7	…”¬&˝¿ıYå 5”–"Ãuuò.i#rtƒ&k¶ÎúbDÔú<Nm'}yùÏE,∂à8m«?£i£–â–£2OàÂj74¡ƒ~òŸ™N<B!Z[K≥∏XËûïöÊe±”´?¨sfƒl x YßUòÆ=ú±»”•MõÕ∑¡Ì^Àh˜J]„ x8∫Áyp3»V˚a0E ¶ôπl*îç”Z∏äÊæIËÖ§ó¶q‘T∫‰Îå∞v-gÅ∞`1¶Ï§πœœeÜ?TüNÿc®FqôånøN‡Eπ¸ƒ~ tÅòÇ-è{!Q4|4 ÎΩànvF…ßU H(wòt±.Ë»/K,N÷xî] “=Á„"’çb€éCqÍ‡=íJQ£Sér$’…∆ï8˘\à*Ó±∑K]ﬂ8Ã∂Ùw¢V €ëó^ÒYå9»´Æ%ÚÙ5Ä"
+”$hàZ|5ELÈíç° éB¶Ÿb<è[è}jy5πÙ@"U§ß?D˘‰j”ÃÔA˙ô1£-úÚÓcÁGêfê—b∏'p>«ıh˛R«£ç·º˙SüÖõB≥mF∞ √ƒYt)Ã®–6	è˜hAo~ËëH
+°‘1r”i1_5iQ6Ûéí<’CﬁóàÂP≤ü±òyÖ`Å ¨CeÚ†vïKk:˝Ã8ó◊÷Së≈>/ ?ësoJ`ƒ≈¯9åÕ§\Ø`‡¬ìC˝öæ4ñ7ãiÅ U∫ˆ“(Œµ&=Ô∫–Ãú>°7E·&uÛ≤[J%^7W‡-åü4 ¯_≥XﬁZÁH5%+x]É®˘¯‹ÛÒôAy4ÚaD«^xıg‡«à≥{Ç	<0ŒCP:0~—£a™Œ¿Î`ÄÍ†3Í· 8J¶_7l†JNp≈ôMOâ¢˜ùŒGSdgÜ§ìäJârèT-Îˆ'Ã=ˇN“˚Ç0k9 o˙Ÿ˜¡˜Ÿô⁄OO“*KoÖ9hø.r~ö,|Å6yHu4À`Íp¢ï9 3pÍÖs‡˘ñÅ”–æd˛%àjñNŒøy,‡:SîFO‘Ü&’ •òã¬¥Q¡!Ô∆J•·ßrs&ö’ÃåÈ√3yÍäD˛ñ}GE#˛Zà€Ó7Å⁄◊HÇ/_∏CóACœò!¯¿–Ç<oRL∏®RK¯Û®H0Ç™äõπgu∆€+ıGi√YØ^bÍœxyhú6èªÖﬂ≤KD#œÜIï∑˜HŒ˘~≤úßÙ§ÑÄ<?{èŒŒkHz≤-i∫–áhøHÏÓóÛ5…ïOœV>ëÛ¬ßA wXaJ∏
+◊á¶p£p=0
+mÖ~%qÂíJñ§i£ùôGmN6ÔÍ√3•Ô˝´øDãõâ€"„—?›‰O3àQPAvduA¥1˙q–!j^ï1‡sﬁ∫d¬È¢»(˝Ú+=‚ì)Px¸≈kÉ®X_Q◊06“44¬O∫ÿsµMòäê√™gtèe<´ÖCIæ{mŸ4˛&ëÀî§m≥oä-ßwÍ€’Âih∑Ñ~q'Y⁄),ÏDÀ™_TX“ü˛˘ø—29XOﬁ¥e˙ÔˇÛˇ˝ﬂˇJˆ—XBJ*n’I0ZPsYÆÎlõ¬0ÏM=l
+ºÚRg? ÌUzYCΩ”€ÚîãQ0PõŸ‘-}%PK2ØfTò£÷∑”òÄä√éù
+]≥ª‘É(æ<Hç˚äqq/w·ÈüTì+„√w®R?ÀÓÔ«π˙p†®¶g¥…,fØÑfqtâ†:7´jU4Pßb.£†|,ZàLŸdZZL
+—'Ω‡‘* °f$y ·3∫S˙NΩ¬^œÜd•Ì~ﬂ¶^xÏ›’ü‰˙m<óN8‹>c1Ë“⁄Œ G°À>®ƒ#¥ô/_b·‰BlÕ“‹z>':í9˜KØúﬂ ¶øáEŒB,Nî°öÉQZ  ªõ”YFMIÓ€ãBæ∏XT*0ÕP £ígäóè'ΩM$∑ïìÿäi<∑ b(õ®¶ò$µãè"6:˛
+7òSK!ñîCökùåú–•¿/€}?b≈Ó<Y Ômdn+ûË1=‡•∞∆mP˜y≈‰j4@zs˙e:‡dg'≤_KKD¶§&∞“¡ à±:aåAØú≥R'¬)±ƒX`)ÉEÀ™⁄‰Juû7A‹È∞4Ô]¿¿WΩs“ˆHáb—∏K.Ohhüuìb¥[¢l5Oú}Va!ts»F¸cø0s£¯ö∫íL¥b172€Û|4¡Ü-ÂXpk>xêaπGÊÖ»Ú3Û 0E–pzÈ MÃ%dåT6¡R¿Ã˝∏^é[˝¡ çMı¡úªoÅa†æTy&M˘µâ¡hÔòÃ‰íö≤Ä•	CñÌÉ˝ dIÄçƒ/Ã¬ÚæﬂTw£VIUàµY√@X¬PJ§‹óO∑∑É?d∂wiÄè·∫#œ%ÍÉUûÿv˘ˆÍªyM17∑˙D|µIÀwîO—∑¿6®·äls+T2|ÎQ0ä#F±â`&˚.÷ö™o.$e®∆&“»àÌ^ÙïXÎ*Á‰˜\pUäª8LÖ≠À¯Oòc6ÁF∞ïrNögf≠à⁄µgç=¶>*KÒ§]€R”)ñ(O"€9Ω+¥1éSo«® ŒûD´É¯w 
+6◊9Z¶^ÛºFÖKÜZÇ¨-—p≈â0“'mS[kM\-Qn=W`£XYû´5ï»$æC_áå]¨‹’Ác+ù”Ôè‚´œ(ÕÀ!AÆ$Â≥¬⁄ñf–s–`à«¥Á¥˝ûÔ:Æß´®ŒÁC_|/4$HR¸‰≥ªâAˇ9ì»WüiÜ¿gi~’“î§ï”≈°Í∫,$¶/õ@aõÃ à∞•qó∏“™Â¥?_˝©3Ä%åLp‚‚Q∑h öˆäLiË,1 õ_Ëz‡ÑR≠zº@@∞∂4]˝•Ãé˙ñvôÖ0ó&íE-”IDK[Z@‹Ù≤Mˆ∏≈´ÃJ™¬1“2TÊ„Æ:j/ä@(ù’Û¿Uk)@1TJ÷™
+∂;/ÑYNGöu≤º¥e?g‘ZTﬂu
+vˆB\“Q÷/˘f‡ﬂÙjJœ0úõâOb/ÅâWπ2òxçY
+/%p2£6¯.5(pÆ‚SP:[1Kºå‰ì`_øv&C†UöÅIñ ßŒIÉb¶= É®≠në@™U`ÙôÜíW\É*ßLìTûø47‹–3◊‚™¶T®0îäm0ŸMZ*∫A—ß≥–kâ—Øl›Ÿ7∫§ÃöWuU*±Ü• ÷≤ëÜiD©"0Æz}	πU;†⁄ïcR{Éz2≠Bjä»>⁄~ıj“5UüN1	º&àÁ£g∫ÄÃÀõCÌ—AÙxœ<^4ç&≠Ë8±©ry’“QﬂR⁄ÇŒólˆ1OM+´Œ)TπÅå7(Îe®f8lËF1©Ik?a$œAgı0Rl@ﬁˆÄá$%BÍ$I—ÕÑˆã˘i1Ò&WêÉ∂…kzd™l®‹≈≤Ë<ÍõEπOMjx’qãq<öq1ß◊ìL≥•e¯äı8¯C∂s≥∫ò>FëvKuË*”‰wõ$eK◊è/(N,ßWê—«+8Ø Ö√Î¢Ù~ºw…D™ï*Úä≥ŒÓM˙mõe]o˙Æcx˛;û˘õÌÙñÎ≥sDÿ©ÎÜ±d"M<π√+kÂ]@£UÏ∞t’” JÏΩ&”ìlÏç
+VHj%£áë∞ØôlT˚‘¥ÚCÛj K7R<ô˘n*@µ®J~i®⁄	‚[E—´*ò≤Î6m¯V·…í%≤˜v˚‡UÎ?6	b“√1(ßxÁ™„ÈœIµ`Ê·g˚ÖñÔºì)m”™lÃiª•)kHZ∞πTàU'ïe≥ƒËCoñ Q•¶clππ¸ÆÇöUB¡Öíxy–øí7´($G®8x1QEï5ÚEä—*∂∂›{[5„a{€rÜR∆0l(E ¡MÃ3xä—,πßÉ¡·®›˜„gNt>ËêößYØ>ΩSúUÔÿı‚öbR„\π¢<Ï0∏Ø@‘!œrÿÕUà:œ•*È†Œæ⁄(€§ÚÈÊDO„€ﬂïl‡Ω¶Ö&y˜^&ô ê{1≈∂GK‘≠ÊÛÃæLﬂà?÷‘·}†®*;®ÆôÅõ¸pËut”"~W=}©äˆÂÚì}l@j-Ë‘‘Ø›%±AÁúmøxÍ‘úzXûŸ‘,FIñk|W–w¥TU•!◊ã:°?d—ÃÍˆ§[L-Å 2pum–MO˜AÈÈû¶?öûé(êüuM#Ú=∆©ÂPÂ⁄ÈÂø€Äπ?°·‹ö6¯Ô¥ÑÛåF°ßi+›-≈]™~"D´«kîçV 5´˚"ÓûO∆ÁÊ»\}nû¢C/õ^‚úUyâsVÒ%£ÅÎÊ£Û◊vBÕ‘·-ªﬁ	¬Æ∂Â'ıy°5ﬂD;~ﬂı‹ÈåÇæG·§Ù-î‹rÛ:ÄÓ‰UsÛ≥~À"{ç÷6∞„Ógàtn‚+Ã$€®∂L…c¥∏C
+TØ(6Yæôππ…ûß¿¯⁄¯ îÌ÷™ÏÃÜj◊ò÷a‚∆KòL≤ô-åµêÿ4R43ÓBäÁßºê–ÏÏR”¯¯â∞a‚Ω”Ët@cq:Áõ®ÑËZ…‹D[k≠ËƒÉ°ó4aËôNñ„Tç(y^ÌXöJ'PÈzÀë•¥Úå /3JxËÜ™˛lÌ|á?Zπéˇnjc ∑á¡ñ√’ãjÛó{ÿÿW∏¨wHÍœ?˝£[ˆáî’Ωöâí™~@Çç÷-âtãQXÊÙ≥ÂxqÇjsVxúBËÈôŒTÚ.”tfZT∂v©≠Ø6{≥ Âù.àCa®NDm8Ëyu∏!ks€!b∆sÿxZòU oè≈ÜTaKπœ˘/4xèEÒÉ'ÎôJ Ãˆõï´ÚÜ4ÅzÃg¥“$;	≤=˚Ík"–‹’ï€U&Ãb§K∆ÑôqH•÷≥aπ Î˝6¶_µˇWi«U3I!¬j»Ø#Á$kÔZ•Æø’z9s≠pıÂg-_?DÌˆ”‘Iüº4¿öò^mâ M¨G!J£›:Õ•ç~÷›ø˛;ç1í2~°~µ…›m$`ñ_Ï¢NÅ†8œœ4nç—CÁﬁ=«›ÙtÅD"Ë@Ûs±`x&X]m.ÄÃ“ƒ‹fI!~“∆-øÉ ∆(PŒ\›¸ÑàHj:≠¶z-ºı5“Ó]§-∆ünU%?•1&Ãˆ≠ï∑µgï)_∫öYïèò⁄/°Á·â◊Y≥Lë8˝√ó:uA7z√>– ˚Z∑Ög: ™£ lR˙ qÒ[F„[‘“í*€t–8|î’Iá†&ü€CÿYKuÜ¿Ô.I[∏∫6'`KÃhanÓπàÙ`Êü.±_ı∞ä¨‡ü{ÙæàSMá©õÔﬁœ3∞dheÅ¯∂*º'B˘RP'|´¨àïÙo–7jÅÆúÉ÷?.o≠¡áêˆôIL¶Ü¡Y˚†ßgmYqeWﬁ>\„*îô/S •mù—˘å≈›XÜÆ©çı§bã$ÀÈ@ã»%.Óe«*ŒøóJgÇÓ<Ä&í˙ûs
+°Ï#^T]]©⁄@Zµ+>-ÍNcœ±T5´)∆ø1Ï#}«xﬂ≥=3Ùd#w´®jf‹W0Ä‹–ùà÷®áŒèNptòy–“HÓÕæ	x°â3¢v1»2Ω®Mπ[¬üÕÌ# KßÎ#ZC>]¡Î9Ñ€¬t‘:Õ©∏uÀÍL7W`‹db_2+ÈPÌñæ="¢‰vøsÚaJrq0YŸÁ˚¯≠Sc>®sƒ^‘I'¶m%s37˛P?§˛ûÌ8-	éÌ{™Hπ7oªrü‹ù›¨©Ö‹¶Êï‹w:J–Ø•Ê	›Î™±ÅÌ~Æπ/*6ób†>O˛¨ÿD	ƒ”Rs•yx:”¶O’˜M˚Ãt∫îÖO}û˘Xï(ÄËsÒ◊‘O‚|Ó[Ÿ-÷híÌhËuÑÉ+Ç1%æÔ§_Ï∞á≠G”çÈßÓgÏ{Ì¿‚^´à.“ﬁûÉ^Ñﬂπs~¢”|R´Ï1‚¬wTΩÔ®Yñ{%ÉlqR∆∑»“◊œ⁄K_2ûñ=˙≥¥øæ∆å µ<ˆ≈ú≈Rñ¬ÌaÕ"Ô‚gÈ0ŒŸ6∑œö≠onõ±p˜Íﬂ1–ïï√´?Ö˛¢(&ﬁ‹ûÌëK,∫ﬂ%lóÓ.Æ4V◊=ÆæUø†ívÄÎNVj}6ß4Ä2∞àJõùÇ
+—w3*Øt¨&|≥:≤j,ÿiËò±‰¬‘9 ^/ˇ1¢…kO ñ‘^˚≤D0Ô  ¥ÿÇjà®'3Nã˛”Œhÿï°G£˘n#si0dc√¿òÿUö=±k,&≈ÆqXª“‹ø≤⁄ª¥Läˇl¸uf+SÒêS€¯l/;‡è!ï?gﬂ¡∫øÑ‡%£tnE‡ú’ñqŒ&ﬁ2ŒŸ›⁄2ò…zøeTó	ØDÕèfà¨ôúêo©}Ç£–h∑√À∏qíåe„¶©¥e∆ﬁ0„nûë]a£∑II¯ΩŸlëI∂ÖëmObÁ√´hÎ1“≠nËì˚S—ÿG{b4¯—∆KåGo¯3õöÿÔzM⁄ÑiZªÖ©ı≥|‚Ã‚÷0Ω≈«¢Ñ60A´¬SÆR< Uπ‰2’6‘«–7DˇÉO¯∑(∑’`ö˙⁄v6YN'é\˘Hñ·dZÓ6%¸G¡¥yRπÛTûJ‚¡ÛSﬁ:Ω $Ú5GæÃWˇJ◊yû¸¢`ºÂ¸$*hËw++√≥˜9XRÀL»	˝lOÎâìó¢3¡9·gÍäö∫ƒ√öl∞!;§vzı»z^óKÀFh¿Ó¥¡~Ê6?”Äåa˝÷SLR≥Çb@Jà Æ	GÏ∏˝2|ÈÂãÀÒÁM≈·÷§z}õêByá$ó4‰Çë.'l%emÜ[ÿÇVrIwRIé`‘v}≥|B`~"á^\{g]hF∞vÇòÛÂÓ”£enF~ô€>Ó;enÎó|Î«ì„•NˇØˇßƒΩ∞,©—÷ÜÌé™bÁDÇg—≥úi?ÌË¯ZÆﬁ;±w74ˆÓªgónê⁄ﬁê‚‘˜Óm—[t„nY÷’Îã…∑Œ¥voçNÆR÷Ë;∂iAÌ~”(Øªfè&ç/jën‹ìt≈Õroìæ∑Iœ‘&≠˝AıÀµ¨3Ë7Mﬂg≥ûÖ;º=¡_å„}‰˙4#◊eÇ∏ãqÎ…¯*ÖÆÁge¸¿u—“¨c◊≈{∆_Oû6j%≥ã`ˇ¬¨x\uπò3Àóaco'N¡pÔÒ4±Dwëã·Ub√π9üÛÜfÕÑ˘k∆„¡‚·ü'ﬁÚØ˛@ù∆◊ É≥∏€∑á	Kx‚˜\x™zA‹E6úåØ¥^nV&@÷„-ÕVèøgLL=ÒÙ‚≈•æ∂£,¨6…/Jã17^ˇkîwi^
+b‹I∞\Et¬Lm¡<Öú1˘ÕY†‡„	≤‹µ’ 
+eOl+⁄"º—3á©0—ƒŒGãúSœ›°üJ†%FV≥}-¬—f:_èCø_À≈îb®±%áÚ¡±–ØM∫…W:¡a•!©b	_„¨lõ U,óµËâÒyS©ém}	Lq•ï™åOÆègF´Ô‚aì‘©Eπ¸YÀùéAeL∂bïdL∂∆æõ»ö¸õîwò%œ‚Ì§v°‹dÓpâ‡í]ì¶`¢)ã±˘√¿$ÕfÊ:
+˙ﬁÑ‹9√úm∏T˜g-Á^7ûLúo‰gj¶Ä©òLö
+∫Évb'®Ã5am.¨ŒU—ƒPAJÎyj-©≥∑Ùõ≠•ìîîÃ†ÿ(ıº¡I‹%œ…˙<oøçFÌà˜[^Ä_*4≥f
+a†/∞
+iôó7Ê…/çOÃ-ÕYÓ»∂ŸXÄ>NπÕ5√y=PΩ
+”‘∞Nìz*X◊ÚC∫	ÇjF,!§ñi«õ2a|[[KØ_/µ‡¸˚¶ïã—p|=IËıhÚâfdÓCÛë⁄∆8⁄£8∆≥Å›¢[U`®=øÛ¯©ÕLΩ·Ÿu{ü70I|ÌcÊ∂ûŸ=Ô8VòúÚ)ç}ÄÂW◊1aéÉ‹Ô≠®H(Cãœ"<hÄ(ÍÜ∏Eû÷„GÙøcπ≈≤u3-íh…VRñølË“FÈÊ~Äy≠a]”“%%ÕêB9æìlÀZ:ÁÅ√kıs»ı”ÕÆwÉ- vΩQ(Y¬ãôT–åÒs˘(/“?‘ó|u°ﬂUX»;bj	]_û£eª/?Ë°â∆}∫ƒ∏Ü.=€zSB±95ƒhÀH≠»˛ÏY iqô¸∏∏≤lä6Œ≤7cµJıjä)t9wº8Ì(Ëçbè oÄ~Ü˛IˇC∆†˙1∞’…ÜlıR≤·Y/…Ï¡òòh›‡ıF=Œ◊MJíöòïŸ}$˚¥ÃˆG…·eãÊ≈jFa˚"1Æ4[b◊ƒÃâ]Êò{ºJ≥kKMòIΩ  .n%éye,©#ÕSÍEÉÈ6H≥Ï‚•pÏì…ƒÎmD8*K‹)s6CöW˝%d	1@eŸÛëó Y ßñX"HqA?,—%"Õk©€qÒÙ zî#Xû~»‰¯ö≥_“q7jSñM≤dô¶Ùº<ΩÏÈô•ÚÅƒ≈‰»N◊Î|lñlq—ª=»%ôÙ2tSI√œ^®<&ö>Ω∫N¥˙ö ](Ω∆OJ/Eir{fuÆ2◊®Únòˇ°¶ ∫˙z_˛fΩäZ∏ìôÓƒ⁄Uö¸≥?ˆ{¿˙ÏÏ;{’ê”6	≥y–Ñ_êœûU]Z8g≤∏•Ó”Z-≤ó$r	uÆ†ÁÂ<˜MéÀﬂe∏õùÖ],Ä∆Íÿì3˘#vº,3}iZ4c⁄å1˚Nõ$_∫•1CR÷0$%¬A@æ&{Ì»Oùªà
+À∞8°ªâgÿt¬QÿÙ!∫lí€êù üSDJ20|j∆∞ºMûPµÂâÖAw)VÌπE·§ÖA‹«ï*™2±bLk0˙˝πÁœƒïóæ>céœIˆÿaÌ©o%≥ßvÔsîØ{ü„ÕÒ9J|˙ﬁè(_”Ù#^õ˚0#ªç¡XÒÕNËÈåñFŒ∞ww/∫m90R◊g(ÆÍm¯Q'à»¿!¨8wıøúrÍGAHêI`iJÙ3›¥ÌqÚ"ˇGè^'/¨SATbÖ	è™7p=
+ÜÉr¡g .¯P{HÔ5∑yÃsÓ$5}9vÉOH“)iæ\ß«=Lj´›XtÂ3Jé,Õ,˛[|ô$Ü˜îÂL’+˛§6‘'MEõŒ†„ıúPA ¬ÔX¯≈≤fp‰ˆ}•(®ûê,•ã¡RÎ˛ca3bæ9ŒX9‹3ıÕ⁄˛X3ıÙ–9Õ•§03ïIﬂ?tzßNHZh>¥Í˜Í	WÏ‘ßKË{ñøÀ›î˘ò¢'¢-ÁıﬁVÎUìº›9|”zµÛ˜≠≠Ω≤µM6˜vèZãõﬂmˇÌõmR˚nÔ’ˆ¡Œ—ˆºdÿπà`+Ì;ÁQœ“=ÑÊà{¯˜YüsÅsd∆	E\züùŒGtÉ‚“áÍ5\áDS∆è»{Û^◊XuÜÒ(∞¥≥‘ïzx'zvaï·/¡Û5‚§]ﬂuΩApªæ∏û„t5Ë<~Á9ÿdﬁÜñÔ)∑x‚‰m]aÎ ΩdfrGL‹d]-Â…–!üæÙ{ﬁÏ»ÏfAsY9cY!®&gd„\º!Í+Ö≥-Øè.‹ê·pÉÚªÔúp§Î⁄EélÎpk‹UàÍÕ™><UìfößãZæC˜¯4Áƒ€w@ëNq«'ÚÉr∂°t'õ¬–ÏAh•U·¿01™ÿEú Ï˝∏‡˚N◊˚Ì»˚˛+ı¥'9hm†è?7âç|–i?®&ögŒ‰k<|ó`§E/p‹Õ ¬S±á$kitÅÿ†D2'øVg3Œeœ|ÑπtA˙C≠w@#àΩÌûáüjséﬁHÅO÷ª°wè#uÙÇˆõ∞g§¶+ç‚®ç˜vêdjöjT’,ˇÖQÜNœ•«}" à/üde !F„1nïäÒ	fπ ëT€C£¿mâ©*-·‡˙ÜdÎ•ﬁ-•√ÊIsˆ‡ì?Ä	©””¢¶ÒX©ŒRùîkªò·Úéµ∏˚!z©º∂;}ò≥æí•±◊∑8€◊£-…"ûMM:ÃÚΩÇƒÿv †Ù,˙Õ¡+8NÉèﬁ^˚h>ÀœÈXtf?π´¶µÍ™Hÿ¶ºÂ|èåÜÌJ⁄0Oƒr-©x¸ùBêRNUTà¢™ü
+§/˜ºÑ8˙òdúó¬YP‰ªıGß›˜\‡Ç‹œ˛b?*Mu3åÚ}aôÍj¶Z°Dph^HURòä'À0:”§¬€t‰vû]T:ﬂÀª∫≤b≥®}ã˝∏Á=+»píº7∑IÂΩE&Ô!„”Ù¢Z	h§À-ˇƒèÅ2[#◊è…´‡ÑºÇx¿¢‡‘”S¥dÕ€*´ô8Àﬂ≠,cÆ@45jõÛzÍ≤9÷ê1ö5Z’d&iÿÉ—Ùº∞˜∂Ö {ÎÕ÷Œ—ﬁ¡|ÿ˘vÁ®ıä‘6É˛∞Á£qáº˙vKSåG[ÜÁ©∂<œvEV¥?0–⁄N–'yÂ˘‰[î◊®¢¬≤$5[0%©¡ö˝w≤≤Z≤¸ÕRcye}~$i
+⁄·Ù·A$$/äΩD6Fh_]S=øùp^ö®„E¸çˇBœ†ù≥No°:Ë–ÒûKwç_Ï¬2Gˇ∏ºÿG{1
+Tÿ|ÉÆC@:ÚO}w‰ÙÍdøè5à∞Då)¡l¯¥á¿fä√´@„8Yß~ç˘?Ú7y˝ã9¢O{h?/ÏF—ÄÁ∂0⁄©˝úDAõdg¸ñvÜ¨•QÏc◊@"Ñ€a)ÚBK´Ze…∫7–lÎ&|#Áa]6ÑL’Îu]/ñ4›–ÉπZvEÂFvåæÚNúŒ9yÈÙzh·"µÔÇû"ˇyÂú£Ml÷Ûäõ~dæïÿí%{àT)9·“jiTÜ$ÔÄ`2kL…lê#CqÁ‰k≤t»p ùŸJ=ÇB›µı
+G1lÛ≤,ekçßEYJ‰[®"–`>B'ÂƒÔVVìJjÈ4%\Ÿê ±π˜∫µª≥{H6[Øv^¥Æ˛ÒÍˆ»6ÅoﬂmÔ≤è;ª[oèÄ]ø“í¨*‘ãˇ¶*¸∂úÎ.*“‚® ´vt˛PºFi≠.ê›ø˛o≤¸ÕŸŸtØà»¶”GYËìEÚ¢ü∑˜…Zc}yeÒ—˙ä∂¡ßÌ–òππªˇÎ&Yn‘◊ñWÍ+À+KÀÀ–‡Ú:˘È˜ G¿`I<ÿWOVÊ…Í„¸¥∫¢{ô˛ 3 ãÁ®áô$1+(•Æéπ
+Y∫6Pzû´$ãu¶›6®v'GœxãÃ˚,È√¶u⁄ﬁ‹y±áÁ˝~Î€÷ÎÌ›£=Ì¨ò‚Gµ§P≤Sô≥§ù{}ıÁàx«Õ"gg∂’©-†>  Ÿ‘6à=¡πbá;~/"/Ëè≈£÷ (]}$Su÷Ëªorª%JF ©@òÊ∫÷¬ë‚_:£û.®¿í/©4øßµG≈ıLYÆyr¯
+1d6ÿ%®8ºn}øª‘+√≥¬V/QΩk∆k≥Ùiô–M´ÙYqë¥uÀ[⁄E¬∂g∞&_hÚ7ùD¸8ïÈ¨s¨› B·T'⁄Ã&w–DJæE~w‰¥{^Y’YsÆ	πSØ¯∆Ù-E€Cöµ/◊∞Â/ÄÌ⁄sÜ }wA 1‰«aNÛ∑8OSßbÚQ±ìHJñÊÍxq7Û–∂m˛V≈\~Z\yl)?∂yıSﬁ‰”•∏;ÌnYz¥EÎgS•ıö;Û’–È	‚πƒØ˛<Ë¯¶‹‡Yınù§¶•£o=Ë#5r®C	'ÓhµÓ‡™u~ıâL∆›˚4n£˙,Ñ⁄Z@<'¸èƒ≠TÖ·RÁ–áÌ√Dy˜ÃZe	ŸK∏vœ.íì£m≈«cWπ:"2è“èÎù¿’ ¸≈K±ÅUé◊µR“E⁄Ió≤	öJq˝}-’√YÏ¬/1óí"ö/Jı]ÄàhHÊN.bO°‹ æBëÅH≥ßÁ2ª€‹0^|q0∑@.4«Ôè˙/CßÉH-ÚQì4»Â¸ÂÎãö÷öíÃi~ÊBèTú7ó≥ª;5k&l.ﬁÜr‚ãû3¯H–‘´-∞Loï*îõ"≈YfG5‘.∞‡3sFı≤9Áyù,Å8{Á)$†Z.3ß?^Ú˙ﬂó©√óú⁄8cã@ó2GEw—&’Â®{|>ˆı†Õô…ï˜⁄}onroû≥Üf≈‡9î≈t(’Ì™Î†á£vƒN/B@~ßáˆ*ä}D=ª„˙DÜ30`ìeN`pò2 Dx≠Z°\e∂¬ï|_´®òƒè_}˝Ä†gøiC/–Œ)Ò‡+ìØÇçÂ†oNxn$ÕçBêB˙`˛Ã¥ûÖ‚Pµﬁh:t'É°Ç„xyˆµ±‚©…åd´úl•ÏQõƒ–„3å3tñãU0—ö±fsÆydÛÍsØS';ªááVr¥zÇ Üz€E`;	´T¡A·†,$Q$bÒ`eÆ@ƒìë±OÕN 6b∂êÛXdupÚˆìU8<è¨¯É˜d5e≤z˘Ì—ÌÁV«'Òx‹J<xOVS +$%Ùﬂ°ø˚Nê‘[¥_åESoUñè{¢*˜£^5R¨≥Ãi<¬‚™*˙´ëKCÃ)-•5û40&ë/-Ú§U_ ·m⁄∑ﬁ*ã≤ã§Ã˛≥√ΩçµsN¬ äJ(@™Ω#={ø{¨,πï1¯ Tîx∂æ Q„G^E2 >~OI„Ò·íDñI)À\∏N‘Õ£]Æ1}ºQé_ñJ∫€ﬁ∂^ÌêWWˇÂoﬂÏlÌÈqO«≥'Çe◊[Ñî»9mãSœˇÌ»w«≤9…èﬁ[ù ˝d6›≤,úØ…°BÛ<rË—1Wä# Cƒ¨≥=≥F
+±‚j%≥|ôÛp™áç”Á˘¶◊E⁄§ÙüWJ«—f%BbÕ=/1G€&Ï¸   ˇˇ êïπ.xúÏ=€r€FñÔ˘äkväJô§.ñ£h,ªhâ∂π•€PrvjS©MìhâÉ  uçûˆ!0_êÕ√÷L’<e˜eó?∂Át„“ ∫†§»N&x∞E\˙r˙ú”Áﬁƒ˚øêµçÓÁ´_Ù÷W◊∂VûêêùÛ(ÈÃè»Áå∞(fƒÒ'ÛÛbüú˘¸b∏\>f!u|–ê:aQ„ø‘%–“’ƒùG¸¬'‘'ﬂ•cﬂçÌÕò√©›”yùÛ	]¸˜‚h“Iƒº)%‹s¯wÊ‘Ìí#ºS◊ÿ\23N`pQƒ=œaúÃeq∏¯ö'#<ÇÊ¯üíæÿÏ¶EZ∑∆Füè_‹D–ƒ$fŒ1Ωé\t”&ò”èoü˜∆/H‰èâOÜ«˜ik»∂Ê1«·y gﬂÿ‘8Ù/#÷ˆg|Fàe(Ô†È˛9,…Àn4Lπwﬁ∂4E»ÍÎ„MÎÛÛÈvªÊ	ˆå3|ﬁÙèû˜ •è‡	ô∏Ä;át∆vZ1ªä; C|tœ:Ãs µ√¬Nú˛π4fù≠’Uƒùg-”x˙9Bˆ»æ $âÄÉ=MSá§gúÁ¯≈Ë-Ÿ=:ËOå 1Œ⁄@{ª¥NïwJ7
+?·€‰Øõﬁg‰‡hØøøMˆ˚áãÔ˙#˛·È®ﬂŸ};¯˝ªÅ©ºÎÔO§›?=ÌÔæ%«{ØW»gΩt 7—‘ø‹Ä>¡ﬁﬂ&Ù€ﬂíOÀÀy∆Øò,%bqgïåœì•˚buµ˜~”…{'ÙÉŒÿù√™Œ»ôÀÆèŸ,Jq‡€yÛ≥ÎÙg–yJ˛‘Ÿ\%˛œ\ˇ≤s›NÏœ„3l˘å:¨√ΩNî√∏úB/¯ñÁ0ßsÂíh
+lÛ≤≥ŒËUÁ≤„ûìÀŒŸ‹u§+‚ﬁ˙™2Ñ)wÊ…¡„?`ƒdv›Ÿ*afy8ô$0ß§áqµ+—t
+ä1ã/Ùß¬©Bœ£ÄzÖïΩ∏3ˆ]áÀHHC=}è]—ê˙∞≠ÏeªTÒ°‹Kª©Ù=û«±ÔU⁄çØÑæxÿ™<ıΩ]óOﬁÔ‹¥W»Œr£!¿¢-∂œ®±ïﬂÈø9dó…ÀÉY‡˙◊åùv´Uˇ˙¿l™æYxöÇÊ¶’nM}óÖ∞$ö=vŒ^—à={⁄h6Æ†˛›€*/3”ΩV…1v[π˘yv3C√5d™ùµå4Ä@pÒ"sﬂCƒˆ√®ºvVˆu”Œ&–“f´ QÅw
+lx°cr≈{g~89ôèg<ﬁπô¬fÌ≤z¡®[h¨€"}=#ÄüLb≥ÇÁ»S| r_Ü)*/ÎZœ≠A÷bnÅ≠∏˛‰=)ÅWê]ƒf\êﬁl†o\E⁄mk◊"¬=Ôâ.5Cë£◊4≤?Œy»Õ£ÍŒŸŒçß°ùh ‘	 ?á/⁄L–ßâÆX7¶·9ãª¢≠ò°¿,e±.X‰Å …#Ip’Ÿ ¡ug]ı‘ìy¥çr Y˘˙◊‘≈-Ü%_Ã™ÃGªM˚Å¿	©VÎ≈	ÇÓ0RêµAZzﬁìÔÍöπ·»†=Í¢Ñug4h∑ÁÑzÒ.Ìˆ=ªﬁπôwπsõÆï¯aJ‡© Ω%m¯+ft[f÷IÛñ°ÆhñXº¿Æ*ÈVâT’àù±êyFˇ¸¿u∞¯[Ñ:à’‚oﬁÑWe>3eq/òÎKneÿoó¨d∏¿è`Ø ‹ﬁiÆ∂…øŒ›©ä‚˙3]K* ]û@ÂNˆÛ§MÕÆ°¡ƒºtG&∏%`º;ÂÅèxó	PèÕœUÒdyÑ)7EºEƒÌÎü˙4`ÌôÏˆb9§ù…î°ù¶˝6y∞b„ö•∆@ùG¿—	ı[/F∞aåÙì€B]¢9!}°Ü©≠}I]FN≥GK¥«¢Ä«˘è f
+»üÿÊ1ﬁ1∑¥¸F 
+yÕa†{†„˝	˜Õüö$◊≠$ŸÅz@ßqÍ‘Ö6+On>ıT—\ÃÔ•v+«©i∑`ﬂ€È˘»›©•∑Ùv˘…>y∑Ùç∏g˛»
+Ô˚Å˛’“7ﬂ$‰πû“©C£)ß¢,£`≠jÅ…ˇFßª·≈#e¢F”K“JzV»ÿ˛\§∑π™€)Âµù}õsóD√Qo?]]UìæΩ€ot∞2ÿzﬁÅ LcgW“21ÌlÅˆ≥•‚.v/∞5µZå∂¶Qêí÷ÉäVw©>KâÕªÛôÿùÃf±0§hÄ≠«wcfëP)–ÒÁô—dÿ´–)˜\Ó¡Ñπé:”4≈B"˝äHSL ˙◊∫õŸvêN¥HÊìy˘a'y˜§vöör¢0I&””0ezõFˆïI"îóîœÄ)òqîN&,àa£óO(Ω8gÊÚù:£dânÚ∂Ÿí´Í‡¬FeÍ√Ñw&	E<¨"ÂWk´¡’◊Lèm»0Â		˚àxË	Å($VFhÆâô«~§∑Ip”`c]a‚’%!õ±ê∫NUnI¨ÁíãdäO-ˆÀƒhgÄC≈lZiG⁄1êHf‹Î\vtvª⁄©H„Œzë¿“á»C¢)àUÔ-çCÛ∏„ÌNêw#OÕÇË«\7Gƒ>„£™	,Â!Û'`Ω√L~@’<v≤ubì3Sû’	¥D;FŒ+⁄)P]ÿµÄï™õ–0dÁËuú¯3ÕÖ◊Ò.c¥9~,èˆcyŸ≠»Új`Kñ◊rvY˝7Hmtù%æ1[tÂ•±Î ´)jóÏΩ†3
+<ê∑ê˙C‹ßq€]◊—¥§#6ÛM“õﬁúõ>”3‰äB`T'˙¬@ãÛıë#Íuâ
+M0˙s&ƒË{—∫◊µ>3N÷·c#\ºãgciﬂ∆OÊ›Xûéñ°--®f˛+XKa5®±/gF≠˜£(m¶DVî:õYv)ı.’YÚMtRáfëpË–Ã·ªÃŸπ	$T•ß$Êﬁπ~7ﬂ  7≥K—7
+0”C$≥Õ“
+JÛø©H®xÁäàò@◊ÛcT ˝KÊ¥Ñ*W£?îEß∞iY∫çä“ÀSê^û§©(ËgqB›Èvªbƒ‚w™’Ò|å¬= §Oòê@√(ü˜P&æõ€¯ÊÌÈ´£?lì◊GßGdp@N˚˝√∑Gd˜Ì`x§:¯—^MBSèß>‡œæ2 õèÏ“…˚ﬁeˇ˛ÃY¬ø_ˆÁ+]ó*t˚∫8pπÁ∏Pé(¿VôHƒs@4âòvæ˙bıb˙u…¡_pøöÃ(´¨≈~pÄ†ÁB›kvΩ“Zk9ÄmìYïâ”q‰ªs ˙å≥≥
+?ü‚b*¸†‚<ﬁHîâƒZ‚ûP÷‡3N ‚xo´¿≠—*PúnÖZözöæfì)uiDÛŸy©°(úÏî)•ZÍÇzˇI»°Ñ°EˇüëòŒ®7©z ∏_^FU˝¯'ÃÁ	nm"˙„oŸ$ÏÛb =C¯änƒ8èBwΩª1ì$Üh4x3<9ıGd ex:ë—·.ièêÄ?Ü\ÿìQwﬂı=‰]‹:ÆDçº…˝bà>/Ûá*Üà†«€âÂ§Q@ë≤hó∏,È
+ô÷e]Ë‹Ÿ“ï#ä0Ü®‰
+©	);f$ù&™uË¢÷6Qâ?-ÈBÑñ0WËDÈì)gÆ”â2.Ô3 `bY}o®&	›Ê¨˜¿˝ÈF%ˆ	§¿•◊íOA!Õ≈ô1à´
+º
+Ú 6~í,28‹’˘ﬁü˜¶⁄¡ö≠ª
+zÖØëåæeÑP¶Ù	Ëmeƒüìô'Œ>ò√•ª√az˚?u˘8èƒO<hWzHtf7≠ Ø’Ù7"@,QôRí(JıÒPf);ZJ%k*OÕ‰Õî4∂fªZ·£ﬁ0èÖ¿2˙ûÉ¬. …ı¥’6©™∞ÛD±@≤£‡H‘=„û”nsÒÔráÏÏÏê4ÿy/çn'õõ∏}ˆ;…ic—ÿ$m{{ŸïØhY<Ω¶÷]±¶”nJoeªn¶Û$0CΩ¶6åR◊s…VS‰’÷ Xª9”R$ò“	ó~ﬂ?ˇô¥Ü99õ•ù êgæÁgP@£Íã´ ÖîÎÈ$≤)•FÊ¶¶«”˛õmíå?¶Áb‹áΩæ1÷ﬁ6ç%ŒœC@0¸I:Çâù”L™˝jm≠‰œ»m©¿	¨&xãŸV·¢~ùY(¨∂⁄]Al€böïXaMY∏ëDıRƒèI∞„.¿≈ñ≤âejL˙èê"zã_($ö„gËñcáÛŸ í<Úg¥V~09†·Ñˆ`[dÆˇ0`Ÿ¿sn”_3l˘£Ü¿k ØË√L=DÎ˜nA *‹¢W@ÊèÔ èe3D*ªﬁÌJ;W–≤èó©1y>óÅ
+z˜ÌÈ‚ØèO|C£ vÚ≈˜–¡gπa£+ìH∑–õúÇ:#‡‘k‡6R?˙…„!SÜb\-∆mÿc€¢tø¡{˛<ëûÔi}ïÖ¿“CÜ	Ü˘a4†j b@9(H¯KÖ∞ö¢1?dZŒP—rzµ_…Áºû‚`h»t…bò∏sÛTá:9ûéç¸epT~8¯	Ë˘àò9∏bËß⁄—Üåá>*UËjˆPâÆçJ5ùÜO`úëÃ MÅ]	›îzb{v@Ÿe!|Õ™x‹ymÛ_0xÑ¢’-Fá’‚ø0‹õÃX˙Ó‚«sLG=8<Am9ÌÜ»∫"¯zèË‚Ôé∏˚ƒŸY:à'hÿ_Ü<^<Ô•ÿ¢A§&!3õ∂êôœHü˚‰@ùQöàòf±ÜãÔ1√òF©Z˝ˇ≤HdköƒWÊ.Å'ÏqzÓ-~ÖcíÛé'§Ë«s€ ù È,	#RÛú¥O|ïÓ˙!hh¸ÇVÌ	kÇô©ÿÌNFoÔ∆áÒˆ65R®˛;%⁄;–*Óv™ˇ’˚iÖ
+Ïüf,∏á|÷Æc§ô?T—oü©‡wJåe©ŒW™ıÄ•h∫nâlƒ®⁄tä€>|¿„km‹™>©}∏2Äﬂ(µèÿp ÈÓ•∆köôÕ£Ä{™’&§Ô7,˜Ë:¿8£a_dRŸ¥zm“í!§œ6üW~¨õI—Ê⁄d¸°2z¬H‚˛MÏ≤÷PR√dt	Xè‚'N\;_Oﬁı˜áˇﬁ_|∑¯œ#2 √É„—‡‰Ïë—`ø∫¯Àhø d¡››£√◊G£É·^Ó€∑∆ÕÛ%gó©´'MjÑÁØ˝_QüjåêâΩp;âÖ≤0•¡\‘Px©±Ÿ2V7ˇ¶dzî#ö“hüé•”|á|˙©2¬ó› oÔJ˚:¥™~≠5Y.·˛⁄z¥z›¿Ù^Øß‚ˆzVëEã…ıâ[~Ω¢“M'o°ö‹H:PÓ$cPÓÃ ¢Ú/9ç(Ä¥ÒñQúÉD‡W@‡Ì∑r§~‚$\—D£iñO®‡wh9l®∞•∏»ÃK#n-Â∏-ùw¬ï°∞–Õ:ÁùhnIG x≠õé4Û–ëéÕ¸s£· FHõ†˛#£œhÂiºÎ¶’xºHY~F⁄ü*ån≈Ú.F@ ~ÿÀ◊¥˙Ëò±"JÙ
+‹IAoÌeÏ˙úÕ—.™ÏN—@;!˚"Û:Y`Ø` êeí¶tö(a]ﬁG∑e-àcﬁMµ˘≥Òvˇ≤+(≥}üp_¶∑—›,%…XÂÕ⁄ÿºíàY@çy\D›Ò,`{IZMÂg[¯˝∂-∏ë9À2eŸ¥√TÉ
+I*:?3¶êÈìæJí Ó–üA·Bt¨ô∂éD¢≈èdÒ◊¥0êÜ†	*k∂4•≠QCÃ_{ﬂ(áUSäØÑT¨Ç¡.(õÉ ;W‡§$ÕZ£≥”o*IÉdÅù$€‡;åëø`ßt‹n)rnM6√I¡Oˇ i	yhØ. Ba_júÖöî≥\†Öºå¯÷0Ë"y{˘$Ωµ*IÇF
+A≈=ØN wÆ	åAg´"•ß!U	9uKgª@&†Kπ0»$ƒ¨ÕqöV∫¿¡ˇ=åtñVzTMáGD†øv*ò(≠æ\à≥Õπ>6#1E8`7
+2ÈsF´ª†Ú„nZ'2ã16zü5zk›†AÉê´˚sòÔØRY ‹]Û35«∏!ë-…,∆–Î òÄª¥”HXÔíæ•5eìLv«ÄÖ¨WŸÌ_‹ö‚–ÑWÊú%KY'DLØ≠≥ûÏ≠∆MpÔ(å¿E)ª∏!%V∂˝†IyU/3^Öö+âí¨g*OîŸº @F>¡¯qiçÀy;ì≥Ÿ˜œ}£πTÙWW/,^lŒ∂Œ"n<sÁ‡€6˘∞¿à÷÷K—·Ê/ç\…lI≈Î˘Æ?£∞D(ÂŒ/≈Óday∆Ç£5ºp∫V.D¥Æ÷:êmÜÛ 8¿DDıÜtÚΩñó‹±ìp¯9åæ.æ;:A+Á¡‡tt¥Ùfÿ'≤PÊÈ‡PXG-ƒ7]ªs⁄nhflA∂Æ∞´=géd—‹J^DπY⁄Rºâñ˜>ÕWW˙Udû4Œm/Tõ»JHdNõµJPbÃh∞.•QãŸc√∫$w05àïjË/Œße-∂@»ï~Ô¡åã˝rª&J3):µ*∏ÀÉW7
+\∑[ùñænùÚf»@~çXªˆ≈oA[h∑z÷∑â«..–^7ˆ˜˝	u˛<ë%ò[A‹y5jôŸ◊›√ªÍv‘S¥8êW‘ÛöÔ´eÈπ„ÊâŒ˘Ñí Ã∆πi3ùÆWªôñr230^õﬂÛbwŸ]◊TÏ∂>ìZÁñ‹y3‹Ì≥<D?Vs∆t›D∑/≈kµﬁèÇ'1çÁëï»ı1ó˘ÚÊµ≤•µh“êèéæÏÔôˆ Åò©,`¿M@•ë◊UabC#‘èd4NÑ5bL˘-≈óªTí1´‚g:XPˇ,)ÈZ˛ïI36ÊWàÅ*9Üπ4ÚsÊW≈„i\æ%]°&{∫¡~Ù†ÈxYR>“+Ê ç+21§
+ ∫)‘RŒ¬såhÙéΩÃ–}›Iö]Î*ô«n)ÆñÊXD>ªlÆ©g^JßX#3g;ˇπ!Ï.™Ö*b∞¨õm>v5AºQÊde?AjöHQ˘í4·mÚJ`ºm ¨ñ(s	B˚û£∏U∑©a9ü£Êu]FBxáê	#√⁄Ñëd∫µ ©¡ªèN˚oÍìpöÕŸöyuOÑPì™ÓÇ9œ?m÷Ü5E&ôÌ/ˇò±P®·'ãøÜôÉ=#© ÍQ¢Ÿy≈+¡Üà°} Àq∫ìê	QøbC·⁄πó∫˜ß¬á{`A1QÙ~ºa/oÎüf±_”qÚïÍÓöÕ›>Ù≠b•◊¶Î,Ú˜Ú‰EP™‘Tæ⁄¨∆¶cˇ≠[íir `î¥⁄a"Œ O ¥uŸ®*#^b≈jIÙ%˘Ê7‚ÕB‚b·&.&7D‚‚7µçn?
+zÿ≠°Êá˙™q∫‘HºD∞≥ÃK‚¥1˚h∑’Éjêüˆ∏ﬁ-Óa®≈ù‚jG?LŒ–»aGI \/K∫Ø 9K.îÊ*nJª!®^ùÀêƒe‘IiÃ•WiπÅÊ®µ’sÙÓl»Ì{ãÔ]pO`C”DÅª õÆ4Ö◊HnÓm4≠M°zMåà'Ωö√ ä·f¥ªoâãfﬁ›5k¸A}˛«ÁÕ µ&eB6∫<(‰Ô±J÷\{hãvH˝îfØFMÖèá)úë’EYé>ã:∂*:*•ºÔQ˜:‚—√RjvRd‘ê8É∏≥eH)Dﬁ´≠*≤U<4ÅôO™∞J¶`ä‚0û Xä5˝÷a∑Ë@gyÛıf°VñxØ∫™ÔX7C+Í]°9€ëíbçCT_ƒ†áj[¿b„A∫˜†°∑™o(»1˘—ø«cgE|UØKêróèlùﬁ§áwxÁCÆŒ2ß≤jsÔJ∑©¥ ã*…vÉΩ·)ÌN‘î9.r5}6ÉsæÍ˝k!™I`©`‚s≈fNYÑirbÍ›OI-ú˘RYSM*í.¥»K™-t»D°‡®X•aìLÛò—¥∫±V»@<†!Ÿ•·π°æû{RB®†c5Û»_MP≠q=màw^%Î°kÂ%p[∂V^·Võ™gG€Oû*Wπ≠V)—·¡Qê uÛ'≠ª‹õ“Ía∫⁄˙#ÊÍ#IÅ¶¨ﬁI¨â5“?™/5ÚpÖF“æ≤A$ âo©•F÷ßΩ’W©¢I˘åë8ç3UãFi˘+B4$8Cô]5:Ååöj∂S|?ñ¢ óˆ+ ÷º"FıÑ@π7Â@S §§ß•ﬂtƒΩZÿ˜ÑF0≠î£GUtjÃ†í5/@QeÈ*Bpyw2©rK¬áò€°Û´ÿÚÛ[ê;›SdyÕﬂW≥Ó'®T”µˇEà)FQ˙8ØÔõl·’ÿ1÷00˝pgtÓj≥çe÷<¿x‹hOq%;⁄04Ÿ&
+Ec‡∞(—≈|Õ#<‡Z˜E˙$)º#l/Y∏K1|W◊û\]mÔÍﬁi>Q´∑Sw´ñ^éÆcÍÑã|M6¯mbæ˜N@k®‚›.p∫')<5÷#m•ä£ÂhÜb•Ê¬{:GÉûıG©n&ˆ¥¬≠ﬁä.
+Ó˙≥¿eKùl¸‡Áie‡¶6©∑ß5W€kõ≤Çª›n©kSLdB1[ˇÆˆ‡ˆ∆µˇ‰.vßìñ+ßD‡’ÏÙÌG«=áe{iÔ˚Á‹≥‚[yXhò≤øèv˝ë£cÆ˛Sög~¿Ú£¬d≥BO|7 nàR%˜GéPw:æïùÃDÖ:ÛYÎ7m‘[@géƒ;Qw"mw w|ııJwFÉv[‹zB∏s%$9CZ|2Ñ˜ÏzÁ^ΩM1A|}kÙô…«˙&-_—⁄¥hß÷hSØOkÊŒΩâ;wXdä÷o*Ûaû™±ö@yÌÙÑcq|5%4—ï†ÜR~íŒ?:Œu∏¯˚ÖÃ.?ñ3p±üê{Ÿ§Úèã´Uå_"ÉÎ;3Ó%ëPaÎE·'iü˙1uWl»^j.] …§-¥' €2mÌs–z1ß‡E˙3Ü…Õ±≠ù•)≠‰€_ˇ0ñ·Féª∞πÿÔØ∂ﬁG(	´ﬁ¥è|ˇ‘•åJÜ›¥∞)rH|Kº#jc)]VUŸ16_=ÄE%ÄIﬁ¶h€ö)æihKY†HU∏°æã$ÍGL-ÁmË±L≠=¶8Ø¸Óì€O˛  ˇˇ Á;%b

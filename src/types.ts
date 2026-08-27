@@ -336,6 +336,198 @@ export interface InventoryTransaction {
   createdAt?: string;
 }
 
+
+export type RentalAssetStatus = 'disponivel' | 'locado' | 'manutencao' | 'inativo';
+export type RentalContractStatus = 'rascunho' | 'ativo' | 'encerrado' | 'cancelado';
+export type RentalInvoiceStatus = 'emitida' | 'paga' | 'cancelada';
+export type RentalMovementType = 'saida' | 'devolucao';
+export type RentalReturnCondition = 'conforme' | 'avaria' | 'faltante';
+
+export interface RentalService {
+  id: string;
+  name: string;
+  description: string;
+  monthlyPrice: number;
+  cnaeCode?: string;
+  cnaeDescription?: string;
+  active: boolean;
+  createdAt?: string;
+  createdBy?: string;
+  createdByUid?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByUid?: string;
+}
+
+export interface RentalAsset {
+  id: string;
+  assetCode: string;
+  description: string;
+  brand?: string;
+  model?: string;
+  serialNumber?: string;
+  rangeMin?: number;
+  rangeMax?: number;
+  unit?: string;
+  baseIdentification?: string;
+  calibrationCertificateNumber?: string;
+  calibrationDueDate?: string;
+  defaultServiceId?: string;
+  currentRentalId?: string;
+  status: RentalAssetStatus;
+  notes?: string;
+  createdAt?: string;
+  createdBy?: string;
+  createdByUid?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByUid?: string;
+}
+
+export interface RentalContractItem {
+  assetId: string;
+  assetCode: string;
+  description: string;
+  brand?: string;
+  model?: string;
+  serialNumber?: string;
+  rangeText?: string;
+  baseIdentification?: string;
+  serviceId: string;
+  serviceName: string;
+  monthlyPrice: number;
+  dispatchedAt?: string;
+  returnedAt?: string;
+  returnCondition?: RentalReturnCondition;
+  returnNotes?: string;
+}
+
+export interface RentalContract {
+  id: string;
+  rentalNumber: string;
+  clientId: string;
+  clientName: string;
+  clientCnpj: string;
+  clientAddress?: string;
+  clientEmail?: string;
+  clientPhone?: string;
+  startDate: string;
+  firstDueDate: string;
+  billingCycleDays: 30;
+  status: RentalContractStatus;
+  items: RentalContractItem[];
+  quotationRefs?: string;
+  purchaseOrder?: string;
+  processNumber?: string;
+  project?: string;
+  responsibles?: string;
+  paymentMethod?: string;
+  billingNotes?: string;
+  dispatchAt?: string;
+  dispatchResponsible?: string;
+  dispatchResponsibleUid?: string;
+  closedAt?: string;
+  createdAt: string;
+  createdBy: string;
+  createdByUid?: string;
+  updatedAt: string;
+  updatedBy?: string;
+  updatedByUid?: string;
+}
+
+export interface RentalInvoiceLine {
+  assetId: string;
+  assetCode: string;
+  description: string;
+  baseIdentification?: string;
+  serviceId: string;
+  serviceName: string;
+  monthlyPrice: number;
+}
+
+export interface RentalInvoice {
+  id: string;
+  invoiceNumber: string;
+  invoiceSequenceNumber: number;
+  rentalId: string;
+  rentalNumber: string;
+  cycleIndex: number;
+  clientId: string;
+  clientName: string;
+  clientCnpj: string;
+  clientAddress?: string;
+  issueDate: string;
+  periodStart: string;
+  periodEnd: string;
+  dueDate: string;
+  lines: RentalInvoiceLine[];
+  total: number;
+  status: RentalInvoiceStatus;
+  quotationRefs?: string;
+  purchaseOrder?: string;
+  processNumber?: string;
+  project?: string;
+  responsibles?: string;
+  paymentMethod: string;
+  cnaeCode: string;
+  cnaeDescription: string;
+  bankInstructions: string;
+  taxNotes: string;
+  billingNotes?: string;
+  financeTransactionId?: string;
+  reminder3DaysSentAt?: string;
+  createdAt: string;
+  createdBy: string;
+  createdByUid?: string;
+}
+
+export interface RentalMovementItem {
+  assetId: string;
+  assetCode: string;
+  description: string;
+  baseIdentification?: string;
+  serialNumber?: string;
+  condition?: RentalReturnCondition;
+  notes?: string;
+}
+
+export interface RentalMovement {
+  id: string;
+  movementNumber: string;
+  rentalId: string;
+  rentalNumber: string;
+  type: RentalMovementType;
+  clientId: string;
+  clientName: string;
+  clientCnpj: string;
+  clientAddress?: string;
+  date: string;
+  responsibleComanins: string;
+  responsibleComaninsUid?: string;
+  responsibleClient: string;
+  responsibleClientDocument?: string;
+  items: RentalMovementItem[];
+  notes?: string;
+  createdAt: string;
+}
+
+export interface RentalSettings {
+  rentalPrefix: string;
+  nextRentalNumber: number;
+  invoicePrefix: string;
+  nextInvoiceNumber?: number;
+  cnaeCode: string;
+  cnaeDescription: string;
+  paymentMethod: string;
+  bankInstructions: string;
+  taxNotes: string;
+  notificationRecipients: string[];
+  notificationDaysBefore: 3;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByUid?: string;
+}
+
 export interface ExamTypeItem {
   id: string;
   name: string;

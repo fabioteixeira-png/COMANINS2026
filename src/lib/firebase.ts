@@ -23,7 +23,7 @@ import {
   QueryDocumentSnapshot
 , runTransaction, writeBatch } from "firebase/firestore";
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument } from '../types';
+import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument, RentalService, RentalAsset, RentalContract, RentalInvoice, RentalMovement, RentalSettings } from '../types';
 import { generateAuthKey } from '../utils/authKey';
 import { trackFirebaseOp } from './firebaseTelemetry';
 
@@ -2574,6 +2574,215 @@ export async function deleteRncDoc(id: string): Promise<void> {
 }
 
 
+
+
+
+// --- RENTAL MODULE ---
+
+const rentalApiRequest = async <T = any>(url: string, options: RequestInit = {}): Promise<T> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+  if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const response = await fetch(url, { ...options, headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = String(payload?.error || payload?.message || 'RENTAL_REQUEST_FAILED');
+    const messages: Record<string, string> = {
+      MODULE_EDIT_DENIED: 'Seu perfil permite apenas visualizar o módulo de Locação.',
+      RENTAL_NOT_FOUND: 'Locação não encontrada.',
+      RENTAL_ASSET_NOT_AVAILABLE: 'Um ou mais equipamentos selecionados não estão disponíveis.',
+      RENTAL_ASSET_CALIBRATION_EXPIRED: 'Um ou mais manômetros estão com a calibração vencida. Atualize a calibração antes de registrar a saída da locação.',
+      RENTAL_NOT_ACTIVE: 'Esta locação não está ativa.',
+      RENTAL_ALREADY_DISPATCHED: 'A saída desta locação já foi registrada.',
+      RENTAL_NO_ACTIVE_ITEMS: 'Não existem itens ativos para faturar.',
+      RENTAL_INVOICE_SEQUENCE_NOT_CONFIGURED: 'Configure o próximo número da fatura antes de emitir.',
+      RENTAL_INVOICE_ALREADY_EXISTS: 'A fatura deste ciclo já foi gerada.',
+      RENTAL_BILLING_CYCLE_NOT_STARTED: 'O próximo ciclo mensal ainda não começou. A renovação só pode ser faturada a partir do primeiro dia do respectivo ciclo.',
+      RENTAL_INVALID_INVOICE_SEQUENCE: 'O próximo número da fatura é inválido ou já foi utilizado.',
+      INVALID_RENTAL_DATA: 'Revise os dados obrigatórios da locação.',
+    };
+    throw new Error(messages[code] || code);
+  }
+  return payload as T;
+};
+
+export const syncRentalServices = (callback: (items: RentalService[]) => void) => {
+  const q = query(collection(db, 'rentalServices'), orderBy('name', 'asc'), limit(500));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalService)));
+  }, (error) => {
+    handleQuotaOrError(error);
+    callback([]);
+  });
+};
+
+export const saveRentalService = async (service: Partial<RentalService>): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const now = new Date().toISOString();
+  const id = String(service.id || '').trim() || `rsvc_${Date.now()}`;
+  const refDoc = doc(db, 'rentalServices', id);
+  const existing = await getDoc(refDoc);
+  const payload = {
+    name: String(service.name || '').trim(),
+    description: String(service.description || '').trim(),
+    monthlyPrice: Number(service.monthlyPrice || 0),
+    cnaeCode: String(service.cnaeCode || '7739-0/99').trim(),
+    cnaeDescription: String(service.cnaeDescription || 'Atividade de aluguel de outras máquinas e equipamentos comerciais e industriais não especificados anteriormente, sem operador.').trim(),
+    active: service.active !== false,
+    updatedAt: now,
+    updatedBy: user.displayName || user.email || 'Usuário interno',
+    updatedByUid: user.uid,
+    ...(existing.exists() ? {} : {
+      createdAt: now,
+      createdBy: user.displayName || user.email || 'Usuário interno',
+      createdByUid: user.uid,
+    }),
+  };
+  await setDoc(refDoc, payload, { merge: true });
+  return id;
+};
+
+export const syncRentalAssets = (callback: (items: RentalAsset[]) => void) => {
+  const q = query(collection(db, 'rentalAssets'), orderBy('assetCode', 'asc'), limit(1000));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalAsset)));
+  }, (error) => {
+    handleQuotaOrError(error);
+    callback([]);
+  });
+};
+
+export const saveRentalAsset = async (asset: Partial<RentalAsset>): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const now = new Date().toISOString();
+  const id = String(asset.id || '').trim() || `rasset_${Date.now()}`;
+  const refDoc = doc(db, 'rentalAssets', id);
+  const existing = await getDoc(refDoc);
+  const payload = {
+    assetCode: String(asset.assetCode || '').trim(),
+    description: String(asset.description || 'Manômetro com base').trim(),
+    brand: String(asset.brand || '').trim(),
+    model: String(asset.model || '').trim(),
+    serialNumber: String(asset.serialNumber || '').trim(),
+    rangeMin: asset.rangeMin === undefined || asset.rangeMin === null ? null : Number(asset.rangeMin),
+    rangeMax: asset.rangeMax === undefined || asset.rangeMax === null ? null : Number(asset.rangeMax),
+    unit: String(asset.unit || '').trim(),
+    baseIdentification: String(asset.baseIdentification || '').trim(),
+    calibrationCertificateNumber: String(asset.calibrationCertificateNumber || '').trim(),
+    calibrationDueDate: String(asset.calibrationDueDate || '').trim(),
+    defaultServiceId: String(asset.defaultServiceId || '').trim(),
+    status: asset.status || 'disponivel',
+    notes: String(asset.notes || '').trim(),
+    updatedAt: now,
+    updatedBy: user.displayName || user.email || 'Usuário interno',
+    updatedByUid: user.uid,
+    ...(existing.exists() ? {} : {
+      createdAt: now,
+      createdBy: user.displayName || user.email || 'Usuário interno',
+      createdByUid: user.uid,
+    }),
+  };
+  await setDoc(refDoc, payload, { merge: true });
+  return id;
+};
+
+export const syncRentalContracts = (callback: (items: RentalContract[]) => void) => {
+  const q = query(collection(db, 'rentalContracts'), orderBy('createdAt', 'desc'), limit(1000));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalContract)));
+  }, (error) => {
+    handleQuotaOrError(error);
+    callback([]);
+  });
+};
+
+export const syncRentalInvoices = (callback: (items: RentalInvoice[]) => void) => {
+  const q = query(collection(db, 'rentalInvoices'), orderBy('createdAt', 'desc'), limit(1000));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalInvoice)));
+  }, (error) => {
+    handleQuotaOrError(error);
+    callback([]);
+  });
+};
+
+export const syncRentalMovements = (callback: (items: RentalMovement[]) => void) => {
+  const q = query(collection(db, 'rentalMovements'), orderBy('createdAt', 'desc'), limit(1000));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalMovement)));
+  }, (error) => {
+    handleQuotaOrError(error);
+    callback([]);
+  });
+};
+
+export const syncRentalSettings = (callback: (settings: RentalSettings | null) => void) => {
+  return onSnapshot(doc(db, 'systemSettings', 'rentalBilling'), (snapshot) => {
+    callback(snapshot.exists() ? snapshot.data() as RentalSettings : null);
+  }, (error) => {
+    handleQuotaOrError(error);
+    callback(null);
+  });
+};
+
+export const saveRentalSettings = async (settings: Partial<RentalSettings>): Promise<RentalSettings> => {
+  const result = await rentalApiRequest<{ success: true; settings: RentalSettings }>('/api/rentals/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+  return result.settings;
+};
+
+export const createRentalContract = async (payload: Record<string, unknown>): Promise<RentalContract> => {
+  const result = await rentalApiRequest<{ success: true; rental: RentalContract }>('/api/rentals/contracts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return result.rental;
+};
+
+export const updateRentalContract = async (id: string, payload: Record<string, unknown>): Promise<RentalContract> => {
+  const result = await rentalApiRequest<{ success: true; rental: RentalContract }>(`/api/rentals/contracts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  return result.rental;
+};
+
+export const dispatchRentalContract = async (
+  id: string,
+  payload: { responsibleClient: string; responsibleClientDocument?: string; notes?: string; date?: string },
+): Promise<{ rental: RentalContract; movement: RentalMovement }> => {
+  const result = await rentalApiRequest<{ success: true; rental: RentalContract; movement: RentalMovement }>(`/api/rentals/contracts/${encodeURIComponent(id)}/dispatch`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return { rental: result.rental, movement: result.movement };
+};
+
+export const returnRentalItems = async (
+  id: string,
+  payload: { responsibleClient: string; responsibleClientDocument?: string; notes?: string; date?: string; items: Array<{ assetId: string; condition: string; notes?: string }> },
+): Promise<{ rental: RentalContract; movement: RentalMovement }> => {
+  const result = await rentalApiRequest<{ success: true; rental: RentalContract; movement: RentalMovement }>(`/api/rentals/contracts/${encodeURIComponent(id)}/return`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return { rental: result.rental, movement: result.movement };
+};
+
+export const generateRentalInvoice = async (id: string): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
+  const result = await rentalApiRequest<{ success: true; invoice: RentalInvoice; financeTransactionId: string }>(`/api/rentals/contracts/${encodeURIComponent(id)}/invoices`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return { invoice: result.invoice, financeTransactionId: result.financeTransactionId };
+};
 
 
 // --- FINANCE MODULE ---

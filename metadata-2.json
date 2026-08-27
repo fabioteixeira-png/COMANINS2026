@@ -1,0 +1,8 @@
+{
+  "name": "COMANINS - Excelência que move resultados",
+  "description": "Site institucional e portal interno de metrologia para calibração de instrumentos de pressão e temperatura.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
