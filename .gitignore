@@ -13,3 +13,6 @@ db.json
 
 # Removido bun do projeto (Hostinger requer npm)
 bun.lock
+
+# Generated from sharded InternalPortal source; never commit/export
+src/components/internal-portal/InternalPortal.generated.tsx

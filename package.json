@@ -7,10 +7,18 @@
     "node": ">=22 <25"
   },
   "scripts": {
+    "internal-portal:generate": "node scripts/internal-portal-source.mjs generate",
+    "internal-portal:verify": "node scripts/internal-portal-source.mjs verify",
+    "internal-portal:clean": "node scripts/internal-portal-source.mjs clean",
+    "predev": "npm run internal-portal:generate",
     "dev": "tsx server.ts",
+    "prebuild": "npm run internal-portal:generate",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node --check dist/server.cjs",
+    "postbuild": "npm run internal-portal:clean",
     "start": "node dist/server.cjs",
-    "lint": "tsc --noEmit"
+    "prelint": "npm run internal-portal:generate",
+    "lint": "tsc --noEmit",
+    "postlint": "npm run internal-portal:clean"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

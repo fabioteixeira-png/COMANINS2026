@@ -21,6 +21,11 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "rootDirs": [
+      "src",
+      "src/components",
+      "src/components/internal-portal"
+    ]
   }
 }
