@@ -484,6 +484,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Central Financeira simplificada. Registros operacionais e itens de
+    // conciliação são escritos exclusivamente pelo backend para manter
+    // validação, integrações automáticas e trilha de auditoria atômicas.
+    match /financeOperations/{document=**} {
+      allow read: if canManageFinance();
+      allow create, update, delete: if false;
+    }
+    match /financeBankStatementItems/{document=**} {
+      allow read: if canManageFinance();
+      allow create, update, delete: if false;
+    }
+
     // Locação mensal de instrumentos. Cadastros simples de serviços/equipamentos
     // podem ser mantidos pelo perfil de Locação; contratos, movimentações, faturas
     // e lembretes são autoritativos no backend para preservar disponibilidade,

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle,
-  X, FileText, Upload, DollarSign, Eye, RefreshCw
+  X, DollarSign, Eye, RefreshCw
 } from 'lucide-react';
-import { FinanceTransaction } from '../../types';
-import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction } from '../../lib/firebase';
+import { FinanceDocumentAttachment, FinanceTransaction } from '../../types';
+import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction, uploadCorporateFile } from '../../lib/firebase';
 import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
+import FinanceAttachmentField from './FinanceAttachmentField';
+import { financeFormatDatePt, financeTodayLocal } from './finance-date';
+import FinanceTransactionDetailsModal from './FinanceTransactionDetailsModal';
 
 interface ContasReceberProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
@@ -23,11 +26,12 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
   const [showFormModal, setShowFormModal] = useState(false);
   const [showBajaModal, setShowBajaModal] = useState(false);
   const [selectedTx, setSelectedTx] = useState<FinanceTransaction | null>(null);
+  const [viewTx, setViewTx] = useState<FinanceTransaction | null>(null);
 
   // Form states
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState(0); // bruto
-  const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [transactionDate, setTransactionDate] = useState(financeTodayLocal());
   const [dueDate, setDueDate] = useState('');
   const [category, setCategory] = useState('Serviço'); // Tipo de receita
   const [costCenter, setCostCenter] = useState('');
@@ -39,9 +43,11 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
   const [bankAccount, setBankAccount] = useState('');
   const [notes, setNotes] = useState('');
   const [retentions, setRetentions] = useState(0); // Deductible taxes
+  const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Baja states
-  const [receivedDate, setReceivedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [receivedDate, setReceivedDate] = useState(financeTodayLocal());
   const [amountReceived, setAmountReceived] = useState(0);
   const [bajaBankAccount, setBajaBankAccount] = useState('');
 
@@ -69,7 +75,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
       setSelectedTx(tx);
       setDescription(tx.description);
       setAmount(Number(tx.grossAmount ?? (Number(tx.amount || 0) + Number(tx.retentions || 0))));
-      setTransactionDate(tx.date || new Date().toISOString().split('T')[0]);
+      setTransactionDate(tx.date || financeTodayLocal());
       setDueDate(tx.dueDate);
       setCategory(tx.category);
       setCostCenter(tx.costCenter);
@@ -85,8 +91,8 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
       setSelectedTx(null);
       setDescription('');
       setAmount(0);
-      setTransactionDate(new Date().toISOString().split('T')[0]);
-      setDueDate(new Date().toISOString().split('T')[0]);
+      setTransactionDate(financeTodayLocal());
+      setDueDate(financeTodayLocal());
       setCategory('Serviço');
       setCostCenter('');
       setContractNumber('');
@@ -98,48 +104,69 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
       setNotes('');
       setRetentions(0);
     }
+    setPendingAttachments([]);
     setShowFormModal(true);
   };
 
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit) return;
-    const finalAmount = amount - retentions;
-    const data: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt'> = {
-      type: 'receita',
-      description,
-      amount: finalAmount,
-      grossAmount: amount,
-      retentions,
-      date: transactionDate,
-      dueDate,
-      status: selectedTx ? selectedTx.status : 'pendente',
-      category,
-      costCenter,
-      contactName,
-      contactDocument,
-      documentNumber,
-      paymentMethod,
-      bankAccount,
-      contractNumber,
-      createdBy: selectedTx?.createdBy || currentUserName || 'Usuário autenticado',
-      notes
-    };
+    if (!canEdit || isSaving) return;
+    if (!Number.isFinite(amount) || amount <= 0) { alert('Informe um valor bruto maior que zero.'); return; }
+    if (!Number.isFinite(retentions) || retentions < 0 || retentions >= amount) { alert('As retenções devem ser zero ou um valor menor que o valor bruto.'); return; }
+    const finalAmount = Number((amount - retentions).toFixed(2));
+    setIsSaving(true);
+    let transactionSaved = false;
+    try {
+      const data: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt'> = {
+        type: 'receita',
+        description,
+        amount: finalAmount,
+        grossAmount: amount,
+        retentions,
+        date: transactionDate,
+        dueDate,
+        status: selectedTx ? selectedTx.status : 'pendente',
+        category,
+        costCenter,
+        contactName,
+        contactDocument,
+        documentNumber,
+        paymentMethod,
+        bankAccount,
+        contractNumber,
+        createdBy: selectedTx?.createdBy || currentUserName || 'Usuário autenticado',
+        notes
+      };
 
-    if (selectedTx) {
-      if (Number(selectedTx.paidAmount || 0) > 0) {
-        data.amount = selectedTx.amount;
-        data.grossAmount = selectedTx.grossAmount;
-        data.retentions = selectedTx.retentions;
+      let transactionId = selectedTx?.id || '';
+      if (selectedTx) {
+        if (Number(selectedTx.paidAmount || 0) > 0) {
+          data.amount = selectedTx.amount;
+          data.grossAmount = selectedTx.grossAmount;
+          data.retentions = selectedTx.retentions;
+        }
+        await updateFinanceTransaction(selectedTx.id, { ...data, updatedBy: currentUserName || 'Usuário autenticado' });
+      } else {
+        transactionId = await addFinanceTransaction(data);
       }
-      await updateFinanceTransaction(selectedTx.id, {
-        ...data,
-        updatedBy: currentUserName || 'Usuário autenticado',
-      });
-    } else {
-      await addFinanceTransaction(data);
+
+      transactionSaved = true;
+      if (pendingAttachments.length > 0 && transactionId) {
+        let currentAttachments = Array.isArray(selectedTx?.attachments) ? [...selectedTx!.attachments!] : [];
+        for (const file of pendingAttachments) {
+          const result = await uploadCorporateFile(file, 'finance-document', transactionId, 'documento-receita', file.name);
+          const attachment: FinanceDocumentAttachment = { ...result, uploadedAt: new Date().toISOString() };
+          currentAttachments = [...currentAttachments, attachment];
+          await updateFinanceTransaction(transactionId, { attachments: currentAttachments, updatedBy: currentUserName || 'Usuário autenticado' });
+        }
+      }
+      setPendingAttachments([]);
+      setShowFormModal(false);
+    } catch (error: any) {
+      alert(transactionSaved ? `O lançamento foi salvo, mas um anexo não pôde ser enviado. ${error?.message || ''}`.trim() : (error?.message || 'Não foi possível salvar a receita.'));
+    } finally {
+      setIsSaving(false);
     }
-    setShowFormModal(false);
   };
 
   const handleOpenBaja = (tx: FinanceTransaction) => {
@@ -259,7 +286,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
                   <div className="text-[10px] text-slate-400 font-bold uppercase">{item.costCenter}</div>
                 </td>
                 <td className="px-6 py-4 text-slate-600">
-                  {new Date(item.dueDate).toLocaleDateString('pt-BR')}
+                  {financeFormatDatePt(item.dueDate)}
                 </td>
                 <td className="px-6 py-4 text-right font-mono font-bold text-slate-800">
                   <div>R$ {item.amount.toFixed(2).replace('.', ',')}</div>
@@ -274,6 +301,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex items-center justify-center space-x-2">
+                    <button onClick={() => setViewTx(item)} className="p-1 text-slate-400 hover:text-blue-700" title="Ver detalhes, anexos e baixas"><Eye className="h-4 w-4" /></button>
                     {canEdit && item.status !== 'pago' && (
                       <button
                         onClick={() => handleOpenBaja(item)}
@@ -301,6 +329,8 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
           </tbody>
         </table>
       </div>
+
+      {viewTx && <FinanceTransactionDetailsModal transaction={viewTx} title="Detalhes da receita" onClose={() => setViewTx(null)} />}
 
       {/* Receivable Form Modal */}
       {showFormModal && canEdit && (
@@ -390,20 +420,17 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
                 <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue"></textarea>
               </div>
 
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <FileText className="h-4 w-4 text-slate-500" />
-                  <span className="text-xs font-semibold text-slate-600">Documento de Medição Aprovada / NF-e</span>
-                </div>
-                <button type="button" disabled title="Upload documental financeiro será liberado após validação específica" className="text-xs font-bold text-slate-400 flex items-center space-x-1 cursor-not-allowed">
-                  <Upload className="h-3.5 w-3.5" />
-                  <span>Anexos financeiros: em implantação</span>
-                </button>
-              </div>
+              <FinanceAttachmentField
+                label="Medições, notas fiscais, pedidos e comprovantes"
+                attachments={selectedTx?.attachments}
+                pendingFiles={pendingAttachments}
+                onPendingFilesChange={setPendingAttachments}
+                canEdit={canEdit}
+              />
 
               <div className="pt-4 border-t border-slate-200 flex justify-end space-x-2">
                 <button type="button" onClick={() => setShowFormModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-semibold hover:bg-slate-50">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-sm">Registrar Título</button>
+                <button type="submit" disabled={isSaving} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-sm disabled:opacity-50">{isSaving ? 'Salvando...' : 'Registrar Título'}</button>
               </div>
             </form>
           </div>

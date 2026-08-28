@@ -11,7 +11,7 @@ import type { AuthRequest } from './src/middleware/auth.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 import { adminAuth, adminDb, adminStorage, adminStorageBucketName } from './src/lib/firebase-admin.ts';
-import { FieldPath, FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import {
   ACCESS_MODULE_CATALOG,
   ALL_ACCESS_MODULES,
@@ -1431,6 +1431,14 @@ app.post('/api/inventory/move', requireAuth, requireInternalAccount, requireEdit
   }
 });
 
+const financeBusinessDate = (): string => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bahia', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+};
+
 const normalizeFinanceDate = (value: unknown): string => {
   const text = asLimitedString(value, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
@@ -1446,6 +1454,310 @@ const normalizeFinanceAmount = (value: unknown): number | null => {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+
+const FINANCE_OPERATION_KINDS = new Set([
+  'orcamento', 'emprestimo', 'cartao', 'despesa_cartao', 'reembolso',
+  'custo_pessoal', 'rateio', 'ativo', 'tributo',
+]);
+
+const financeActor = (req: AuthRequest) => ({
+  actorName: asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário interno',
+  actorUid: asLimitedString(req.user?.uid, 160),
+  actorRole: asLimitedString(req.user?.permissionLevel || req.user?.role, 100),
+});
+
+const financeAddMonths = (value: string, months: number, preferredDay?: number): string => {
+  const normalized = normalizeFinanceDate(value);
+  if (!normalized) return '';
+  const source = new Date(`${normalized}T12:00:00.000Z`);
+  const targetYear = source.getUTCFullYear();
+  const targetMonth = source.getUTCMonth() + months;
+  const first = new Date(Date.UTC(targetYear, targetMonth, 1, 12));
+  const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0, 12)).getUTCDate();
+  const day = Math.max(1, Math.min(lastDay, Math.floor(preferredDay || source.getUTCDate())));
+  return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), day, 12)).toISOString().slice(0, 10);
+};
+
+const normalizeFinanceOperationKind = (value: unknown): string => {
+  const kind = asLimitedString(value, 40).toLowerCase();
+  return FINANCE_OPERATION_KINDS.has(kind) ? kind : '';
+};
+
+const cleanFinanceTargets = (value: unknown): Array<{ costCenter: string; percent: number }> => {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 10).map((target: any) => ({
+    costCenter: asLimitedString(target?.costCenter, 180),
+    percent: Number(Number(target?.percent || 0).toFixed(4)),
+  })).filter(target => target.costCenter && Number.isFinite(target.percent) && target.percent > 0);
+};
+
+const normalizeFinanceOperationInput = (raw: any, existing?: any): { data?: Record<string, any>; error?: string } => {
+  const kind = normalizeFinanceOperationKind(raw?.kind || existing?.kind);
+  if (!kind) return { error: 'Tipo de operação inválido.' };
+
+  const mergedDetails = { ...(existing?.details || {}), ...(raw?.details || {}) };
+  const titleInput = asLimitedString(raw?.title ?? existing?.title, 240);
+  const description = asLimitedString(raw?.description ?? existing?.description, 1500);
+  const categoryInput = asLimitedString(raw?.category ?? existing?.category, 180);
+  const costCenterInput = asLimitedString(raw?.costCenter ?? existing?.costCenter, 180);
+  const bankAccount = asLimitedString(raw?.bankAccount ?? existing?.bankAccount, 180);
+  let contactName = asLimitedString(raw?.contactName ?? existing?.contactName, 240);
+  const contactDocument = asLimitedString(raw?.contactDocument ?? existing?.contactDocument, 80);
+  const documentNumber = asLimitedString(raw?.documentNumber ?? existing?.documentNumber, 120);
+  let amount = normalizeFinanceAmount(raw?.amount ?? existing?.amount);
+  let date = normalizeFinanceDate(raw?.date ?? existing?.date);
+  let dueDate = normalizeFinanceDate(raw?.dueDate ?? existing?.dueDate);
+  let status = asLimitedString(raw?.status ?? existing?.status, 60).toLowerCase();
+  let title = titleInput;
+  let category = categoryInput;
+  let costCenter = costCenterInput || 'Administrativo';
+  let approvalStatus: string = asLimitedString(raw?.approvalStatus ?? existing?.approvalStatus, 40).toLowerCase() || 'nao_aplicavel';
+  let details: Record<string, any> = {};
+
+  if (kind === 'orcamento') {
+    const startDate = normalizeFinanceDate(mergedDetails.startDate || date);
+    const endDate = normalizeFinanceDate(mergedDetails.endDate || dueDate);
+    if (amount === null || amount <= 0 || !startDate || !endDate || endDate < startDate) return { error: 'Informe valor orçado positivo e período válido.' };
+    category = category || asLimitedString(mergedDetails.category, 180) || 'Geral';
+    title = title || `Orçamento - ${costCenter} - ${category}`;
+    date = startDate; dueDate = endDate;
+    status = ['ativo', 'encerrado'].includes(status) ? status : 'ativo';
+    approvalStatus = 'nao_aplicavel';
+    details = { startDate, endDate };
+  } else if (kind === 'emprestimo') {
+    const creditor = asLimitedString(mergedDetails.creditor || contactName, 240);
+    const loanType = asLimitedString(mergedDetails.loanType, 120) || 'Capital de Giro';
+    const interestRate = Number(mergedDetails.interestRate || 0);
+    const installments = Math.floor(Number(mergedDetails.installments || 0));
+    const dueDay = Math.max(1, Math.min(31, Math.floor(Number(mergedDetails.dueDay || 0) || (date ? Number(date.slice(-2)) : 1))));
+    if (!creditor || amount === null || amount <= 0 || !date || !Number.isFinite(interestRate) || interestRate < 0 || interestRate > 100 || installments < 1 || installments > 120) {
+      return { error: 'Credor, valor principal, data inicial, juros e número de parcelas válidos são obrigatórios.' };
+    }
+    title = title || `${loanType} - ${creditor}`;
+    category = category || 'Empréstimos e Financiamentos';
+    contactName = creditor;
+    dueDate = financeAddMonths(date, 1, dueDay);
+    status = ['ativo', 'encerrado'].includes(status) ? status : 'ativo';
+    approvalStatus = 'nao_aplicavel';
+    details = { creditor, loanType, interestRate: Number(interestRate.toFixed(6)), installments, dueDay, method: 'price' };
+  } else if (kind === 'cartao') {
+    const holder = asLimitedString(mergedDetails.holder, 180);
+    const role = asLimitedString(mergedDetails.role, 160);
+    const last4 = asLimitedString(mergedDetails.last4, 4).replace(/\D/g, '').slice(-4);
+    const closingDay = Math.max(1, Math.min(31, Math.floor(Number(mergedDetails.closingDay || 1))));
+    const dueDay = Math.max(1, Math.min(31, Math.floor(Number(mergedDetails.dueDay || 10))));
+    if (!holder || last4.length !== 4 || amount === null || amount <= 0) return { error: 'Portador, últimos 4 dígitos e limite positivo são obrigatórios.' };
+    title = title || `Cartão •••• ${last4} - ${holder}`;
+    category = 'Cartão Corporativo';
+    date = date || financeBusinessDate();
+    dueDate = '';
+    status = ['ativo', 'inativo'].includes(status) ? status : 'ativo';
+    approvalStatus = 'nao_aplicavel';
+    details = { holder, role, last4, closingDay, dueDay };
+  } else if (kind === 'despesa_cartao') {
+    const cardId = asLimitedString(mergedDetails.cardId, 180);
+    const cardLast4 = asLimitedString(mergedDetails.cardLast4, 4).replace(/\D/g, '').slice(-4);
+    const establishment = asLimitedString(mergedDetails.establishment || contactName, 240);
+    const receiptAttached = mergedDetails.receiptAttached === true || String(mergedDetails.receiptAttached).toLowerCase() === 'sim';
+    if (!establishment || amount === null || amount <= 0 || !date || !dueDate || (!cardId && cardLast4.length !== 4)) return { error: 'Cartão, estabelecimento, valor, data e vencimento da fatura são obrigatórios.' };
+    title = title || establishment;
+    category = category || 'Despesas de Cartão';
+    contactName = establishment;
+    status = 'registrado';
+    approvalStatus = 'nao_aplicavel';
+    details = { cardId, cardLast4, establishment, receiptAttached };
+  } else if (kind === 'reembolso') {
+    const employee = asLimitedString(mergedDetails.employee || contactName, 180);
+    const purpose = asLimitedString(mergedDetails.purpose || description, 600);
+    const reimbursementType = ['reembolso', 'adiantamento'].includes(String(mergedDetails.reimbursementType || '').toLowerCase()) ? String(mergedDetails.reimbursementType).toLowerCase() : 'reembolso';
+    if (!employee || !purpose || amount === null || amount <= 0 || !date || !dueDate) return { error: 'Colaborador, finalidade, valor, data e vencimento são obrigatórios.' };
+    title = title || `${reimbursementType === 'adiantamento' ? 'Adiantamento' : 'Reembolso'} - ${employee}`;
+    category = category || (reimbursementType === 'adiantamento' ? 'Adiantamentos' : 'Reembolsos');
+    contactName = employee;
+    status = existing?.status && existing.status !== 'pendente_aprovacao' ? existing.status : 'pendente_aprovacao';
+    approvalStatus = existing?.approvalStatus && existing.approvalStatus !== 'pendente' ? existing.approvalStatus : 'pendente';
+    details = { employee, purpose, reimbursementType };
+  } else if (kind === 'custo_pessoal') {
+    const employee = asLimitedString(mergedDetails.employee || contactName, 180) || 'Equipe';
+    const competence = asLimitedString(mergedDetails.competence, 7);
+    const baseSalary = Math.max(0, Number(mergedDetails.baseSalary || 0));
+    const charges = Math.max(0, Number(mergedDetails.charges || 0));
+    const benefits = Math.max(0, Number(mergedDetails.benefits || 0));
+    if ((amount === null || amount <= 0) && baseSalary + charges + benefits > 0) amount = Number((baseSalary + charges + benefits).toFixed(2));
+    if (!competence || !/^\d{4}-\d{2}$/.test(competence) || amount === null || amount <= 0 || !dueDate) return { error: 'Competência, valor total e vencimento são obrigatórios.' };
+    date = date || `${competence}-01`;
+    title = title || `Custo de pessoal - ${employee} - ${competence}`;
+    category = category || 'Custos de Pessoal';
+    contactName = employee;
+    status = 'registrado';
+    approvalStatus = 'nao_aplicavel';
+    details = { employee, competence, baseSalary: Number(baseSalary.toFixed(2)), charges: Number(charges.toFixed(2)), benefits: Number(benefits.toFixed(2)) };
+  } else if (kind === 'rateio') {
+    const sourceCostCenter = asLimitedString(mergedDetails.sourceCostCenter || costCenter, 180);
+    const targets = cleanFinanceTargets(mergedDetails.targets);
+    const totalPercent = Number(targets.reduce((sum, target) => sum + target.percent, 0).toFixed(4));
+    if (!sourceCostCenter || targets.length < 1 || Math.abs(totalPercent - 100) > 0.01) return { error: 'Informe o centro de custo de origem e destinos cujo percentual total seja 100%.' };
+    amount = 0; date = date || financeBusinessDate(); dueDate = '';
+    title = title || `Rateio - ${sourceCostCenter}`;
+    category = 'Rateio de Custos'; costCenter = sourceCostCenter;
+    status = ['ativo', 'inativo'].includes(status) ? status : 'ativo';
+    approvalStatus = 'nao_aplicavel';
+    details = { sourceCostCenter, targets, totalPercent };
+  } else if (kind === 'ativo') {
+    const assetName = asLimitedString(mergedDetails.assetName || titleInput, 240);
+    const salvageValue = Math.max(0, Number(mergedDetails.salvageValue || 0));
+    const lifeMonths = Math.floor(Number(mergedDetails.lifeMonths || 0));
+    const supplier = asLimitedString(mergedDetails.supplier || contactName, 240);
+    const createExpense = mergedDetails.createExpense === true || String(mergedDetails.createExpense).toLowerCase() === 'sim';
+    if (!assetName || amount === null || amount <= 0 || !date || salvageValue >= amount || lifeMonths < 1 || lifeMonths > 600 || (createExpense && !dueDate)) return { error: 'Ativo, valor, data de aquisição, valor residual inferior ao custo e vida útil válida são obrigatórios.' };
+    title = assetName; category = category || 'Ativos e Investimentos'; contactName = supplier;
+    status = ['ativo', 'baixado'].includes(status) ? status : 'ativo';
+    approvalStatus = 'nao_aplicavel';
+    details = { assetName, salvageValue: Number(salvageValue.toFixed(2)), lifeMonths, supplier, createExpense };
+  } else if (kind === 'tributo') {
+    const taxType = asLimitedString(mergedDetails.taxType || titleInput, 120);
+    const competence = asLimitedString(mergedDetails.competence, 7);
+    if (!taxType || amount === null || amount <= 0 || !date || !dueDate) return { error: 'Tributo, valor, competência/data e vencimento são obrigatórios.' };
+    title = title || `${taxType}${competence ? ` - ${competence}` : ''}`;
+    category = category || 'Tributos e Retenções';
+    status = 'pendente'; approvalStatus = 'nao_aplicavel';
+    details = { taxType, competence };
+  }
+
+  return {
+    data: {
+      kind, title, description, amount: Number((amount || 0).toFixed(2)), date, dueDate, status,
+      category, costCenter, bankAccount, contactName, contactDocument, documentNumber,
+      approvalStatus, details,
+    },
+  };
+};
+
+const buildLoanSchedule = (operation: any): Array<{ installment: number; dueDate: string; amount: number; interest: number; amortization: number }> => {
+  const principal = Math.max(0, Number(operation.amount || 0));
+  const installments = Math.max(1, Math.floor(Number(operation.details?.installments || 1)));
+  const monthlyRate = Math.max(0, Number(operation.details?.interestRate || 0)) / 100;
+  const dueDay = Math.max(1, Math.min(31, Math.floor(Number(operation.details?.dueDay || 1))));
+  const pmtRaw = monthlyRate > 0
+    ? principal * (monthlyRate * Math.pow(1 + monthlyRate, installments)) / (Math.pow(1 + monthlyRate, installments) - 1)
+    : principal / installments;
+  let balance = principal;
+  const schedule: Array<{ installment: number; dueDate: string; amount: number; interest: number; amortization: number }> = [];
+  for (let index = 1; index <= installments; index += 1) {
+    const interest = balance * monthlyRate;
+    let amortization = Math.max(0, pmtRaw - interest);
+    if (index === installments || amortization > balance) amortization = balance;
+    const payment = Number((interest + amortization).toFixed(2));
+    balance = Math.max(0, Number((balance - amortization).toFixed(8)));
+    schedule.push({
+      installment: index,
+      dueDate: financeAddMonths(operation.date, index, dueDay),
+      amount: payment,
+      interest: Number(interest.toFixed(2)),
+      amortization: Number(amortization.toFixed(2)),
+    });
+  }
+  return schedule;
+};
+
+const financeOperationLinkedTransactions = (operation: any): Array<{ suffix: string; data: Record<string, any> }> => {
+  const today = financeBusinessDate();
+  const base = {
+    type: 'despesa',
+    grossAmount: Number(operation.amount || 0), retentions: 0, paidAmount: 0,
+    settlements: [], bankAccount: operation.bankAccount || '', paymentMethod: '',
+    contactName: operation.contactName || '', contactDocument: operation.contactDocument || '',
+    costCenter: operation.costCenter || 'Administrativo', documentNumber: operation.documentNumber || '',
+    recurrence: 'none', installments: 1, currentInstallment: 1,
+  };
+
+  if (operation.kind === 'emprestimo') {
+    const schedule = buildLoanSchedule(operation);
+    operation.details = { ...(operation.details || {}), schedule };
+    return schedule.map(item => ({
+      suffix: `parcela_${item.installment}`,
+      data: {
+        ...base,
+        description: `${operation.title} - Parcela ${item.installment}/${schedule.length}`,
+        amount: item.amount, grossAmount: item.amount, openBalance: item.amount,
+        date: operation.date, dueDate: item.dueDate, status: item.dueDate < today ? 'atrasado' : 'pendente',
+        category: operation.category || 'Empréstimos e Financiamentos',
+        installments: schedule.length, currentInstallment: item.installment,
+        notes: `Gerado automaticamente pelo controle de empréstimo. Juros: R$ ${item.interest.toFixed(2)}; amortização: R$ ${item.amortization.toFixed(2)}.`,
+      },
+    }));
+  }
+
+  const shouldCreate = operation.kind === 'despesa_cartao' || operation.kind === 'custo_pessoal' || operation.kind === 'tributo' || (operation.kind === 'ativo' && operation.details?.createExpense === true);
+  if (!shouldCreate) return [];
+  return [{
+    suffix: 'principal',
+    data: {
+      ...base,
+      description: operation.title,
+      amount: Number(operation.amount || 0), grossAmount: Number(operation.amount || 0), openBalance: Number(operation.amount || 0),
+      date: operation.date, dueDate: operation.dueDate, status: operation.dueDate && operation.dueDate < today ? 'atrasado' : 'pendente',
+      category: operation.category || 'Outras Despesas',
+      notes: operation.description || `Gerado automaticamente pela Central Financeira (${operation.kind}).`,
+    },
+  }];
+};
+
+const createFinanceOperationRecord = async (
+  raw: any,
+  actor: { actorName: string; actorUid: string; actorRole: string },
+  options: { refId?: string; importFingerprint?: string; imported?: boolean } = {},
+): Promise<{ id: string; financeTransactionIds: string[] }> => {
+  if (!firestoreDb) throw new Error('AUTH_SERVICE_UNAVAILABLE');
+  const normalized = normalizeFinanceOperationInput(raw);
+  if (!normalized.data) throw new Error(`INVALID_FINANCE_OPERATION:${normalized.error || ''}`);
+  const nowIso = new Date().toISOString();
+  const operationRef = options.refId
+    ? firestoreDb.collection('financeOperations').doc(options.refId)
+    : firestoreDb.collection('financeOperations').doc();
+  const operation: any = {
+    ...normalized.data,
+    createdAt: nowIso, updatedAt: nowIso,
+    createdBy: actor.actorName, createdByUid: actor.actorUid,
+    updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+    isDeleted: false,
+    ...(options.importFingerprint ? { importFingerprint: options.importFingerprint } : {}),
+    ...(options.imported ? { importedAt: nowIso, importedBy: actor.actorName } : {}),
+  };
+  const linked = financeOperationLinkedTransactions(operation);
+  const transactionRefs = linked.map(entry => firestoreDb!.collection('financeTransactions').doc(`finop_${operationRef.id}_${entry.suffix}`.slice(0, 180)));
+  operation.financeTransactionIds = transactionRefs.map(ref => ref.id);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+
+  await firestoreDb.runTransaction(async (transaction) => {
+    const existingOperation = await transaction.get(operationRef);
+    if (existingOperation.exists) {
+      const error: any = new Error('FINANCE_OPERATION_DUPLICATE'); error.code = 'FINANCE_OPERATION_DUPLICATE'; throw error;
+    }
+    transaction.create(operationRef, operation);
+    linked.forEach((entry, index) => {
+      const txRef = transactionRefs[index];
+      transaction.create(txRef, {
+        ...entry.data,
+        contractId: '', contractNumber: '', contractClientName: '',
+        createdAt: nowIso, updatedAt: nowIso,
+        createdBy: actor.actorName, createdByUid: actor.actorUid,
+        updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+        sourceFinanceOperationId: operationRef.id,
+        isDeleted: false,
+      });
+    });
+    transaction.set(auditRef, {
+      action: 'FINANCE_OPERATION_CREATED', entityType: 'financeOperation', entityId: operationRef.id,
+      actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+      createdAt: nowIso, immutable: true,
+      summary: `${operation.kind}: ${operation.title}`,
+      metadata: { kind: operation.kind, amount: operation.amount, financeTransactionIds: operation.financeTransactionIds, imported: options.imported === true },
+    });
+  });
+  return { id: operationRef.id, financeTransactionIds: operation.financeTransactionIds };
 };
 
 
@@ -2262,7 +2574,7 @@ app.post('/api/finance/transactions/:id/settle', requireAuth, requireInternalAcc
       const nextPaid = Math.min(originalAmount, Number((currentPaid + settlementAmount).toFixed(2)));
       const nextOpen = Math.max(0, Number((originalAmount - nextPaid).toFixed(2)));
       const dueDate = normalizeFinanceDate(before.dueDate);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = financeBusinessDate();
       const nextStatus = nextOpen <= 0 ? 'pago' : (dueDate && dueDate < today ? 'atrasado' : 'pendente');
       const settlement = {
         id: `sett_${Date.now()}_${randomBytes(3).toString('hex')}`,
@@ -2609,6 +2921,370 @@ app.post('/api/finance/module-import', requireAuth, requireInternalAccount, requ
   }
 });
 
+
+app.post('/api/finance/operations', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  try {
+    const result = await createFinanceOperationRecord(req.body || {}, financeActor(req));
+    return res.status(201).json({ success: true, ...result });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('INVALID_FINANCE_OPERATION')) return res.status(400).json({ error: 'INVALID_FINANCE_OPERATION', message: code.split(':').slice(1).join(':') || undefined });
+    if (code.includes('FINANCE_OPERATION_DUPLICATE')) return res.status(409).json({ error: 'FINANCE_OPERATION_DUPLICATE' });
+    console.error('Finance operation create failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.put('/api/finance/operations/:id', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const id = asLimitedString(req.params.id, 180);
+  if (!id) return res.status(400).json({ error: 'INVALID_FINANCE_OPERATION' });
+  const ref = firestoreDb.collection('financeOperations').doc(id);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const nowIso = new Date().toISOString();
+  const actor = financeActor(req);
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists || snap.data()?.isDeleted === true) {
+        const err: any = new Error('FINANCE_OPERATION_NOT_FOUND'); err.code = 'FINANCE_OPERATION_NOT_FOUND'; throw err;
+      }
+      const before: any = snap.data() || {};
+      const linkedIds = Array.isArray(before.financeTransactionIds) ? before.financeTransactionIds.filter(Boolean) : [];
+      let updates: Record<string, any>;
+      if (linkedIds.length > 0) {
+        const forbiddenKeys = ['kind', 'amount', 'date', 'dueDate', 'category', 'costCenter', 'bankAccount', 'contactName', 'contactDocument', 'documentNumber', 'details', 'approvalStatus'];
+        if (forbiddenKeys.some(key => Object.prototype.hasOwnProperty.call(req.body || {}, key))) {
+          const err: any = new Error('FINANCE_OPERATION_LOCKED'); err.code = 'FINANCE_OPERATION_LOCKED'; throw err;
+        }
+        updates = {
+          description: asLimitedString(req.body?.description ?? before.description, 1500),
+          updatedAt: nowIso, updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+        };
+      } else {
+        const normalized = normalizeFinanceOperationInput({ ...before, ...(req.body || {}), details: { ...(before.details || {}), ...(req.body?.details || {}) } }, before);
+        if (!normalized.data) {
+          const err: any = new Error(`INVALID_FINANCE_OPERATION:${normalized.error || ''}`); err.code = 'INVALID_FINANCE_OPERATION'; throw err;
+        }
+        updates = {
+          ...normalized.data,
+          financeTransactionIds: linkedIds,
+          updatedAt: nowIso, updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+        };
+      }
+      transaction.update(ref, updates);
+      transaction.set(auditRef, {
+        action: 'FINANCE_OPERATION_UPDATED', entityType: 'financeOperation', entityId: id,
+        actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+        createdAt: nowIso, immutable: true, summary: `Operação financeira atualizada: ${before.title || id}`,
+        metadata: { kind: before.kind, locked: linkedIds.length > 0 },
+      });
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('FINANCE_OPERATION_NOT_FOUND')) return res.status(404).json({ error: 'FINANCE_OPERATION_NOT_FOUND' });
+    if (code.includes('FINANCE_OPERATION_LOCKED')) return res.status(409).json({ error: 'FINANCE_OPERATION_LOCKED' });
+    if (code.includes('INVALID_FINANCE_OPERATION')) return res.status(400).json({ error: 'INVALID_FINANCE_OPERATION', message: code.split(':').slice(1).join(':') || undefined });
+    console.error('Finance operation update failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/finance/operations/:id/decision', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const id = asLimitedString(req.params.id, 180);
+  const decision = asLimitedString(req.body?.decision, 20).toLowerCase();
+  if (!id || !['aprovar', 'rejeitar'].includes(decision)) return res.status(400).json({ error: 'INVALID_FINANCE_OPERATION' });
+  const ref = firestoreDb.collection('financeOperations').doc(id);
+  const txRef = firestoreDb.collection('financeTransactions').doc(`finop_${id}_reembolso`.slice(0, 180));
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const actor = financeActor(req);
+  const nowIso = new Date().toISOString();
+  let financeTransactionIds: string[] = [];
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists || snap.data()?.isDeleted === true) {
+        const err: any = new Error('FINANCE_OPERATION_NOT_FOUND'); err.code = 'FINANCE_OPERATION_NOT_FOUND'; throw err;
+      }
+      const before: any = snap.data() || {};
+      if (before.kind !== 'reembolso' || before.approvalStatus !== 'pendente') {
+        const err: any = new Error('FINANCE_OPERATION_ALREADY_DECIDED'); err.code = 'FINANCE_OPERATION_ALREADY_DECIDED'; throw err;
+      }
+      if (decision === 'aprovar') {
+        const amount = Math.max(0, Number(before.amount || 0));
+        const today = financeBusinessDate();
+        const settlementIds = Array.isArray(before.financeTransactionIds) ? before.financeTransactionIds.filter(Boolean) : [];
+        if (settlementIds.length === 0) {
+          const existingTx = await transaction.get(txRef);
+          if (!existingTx.exists) {
+            transaction.create(txRef, {
+              type: 'despesa', description: before.title, amount, grossAmount: amount, retentions: 0,
+              paidAmount: 0, openBalance: amount, settlements: [], date: before.date, dueDate: before.dueDate,
+              status: before.dueDate && before.dueDate < today ? 'atrasado' : 'pendente',
+              category: before.category || 'Reembolsos', costCenter: before.costCenter || 'Administrativo',
+              contractId: '', contractNumber: '', contractClientName: '', bankAccount: before.bankAccount || '', paymentMethod: '',
+              contactName: before.contactName || before.details?.employee || '', contactDocument: before.contactDocument || '',
+              documentNumber: before.documentNumber || '', recurrence: 'none', installments: 1, currentInstallment: 1,
+              notes: before.description || before.details?.purpose || '',
+              createdAt: nowIso, updatedAt: nowIso, createdBy: actor.actorName, createdByUid: actor.actorUid,
+              updatedBy: actor.actorName, updatedByUid: actor.actorUid, sourceFinanceOperationId: id, isDeleted: false,
+            });
+          }
+          financeTransactionIds = [txRef.id];
+        } else {
+          financeTransactionIds = settlementIds;
+        }
+        transaction.update(ref, {
+          approvalStatus: 'aprovado', status: 'aprovado', financeTransactionIds,
+          updatedAt: nowIso, updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+          decidedAt: nowIso, decidedBy: actor.actorName, decidedByUid: actor.actorUid,
+        });
+      } else {
+        transaction.update(ref, {
+          approvalStatus: 'rejeitado', status: 'rejeitado',
+          updatedAt: nowIso, updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+          decidedAt: nowIso, decidedBy: actor.actorName, decidedByUid: actor.actorUid,
+        });
+      }
+      transaction.set(auditRef, {
+        action: decision === 'aprovar' ? 'FINANCE_OPERATION_APPROVED' : 'FINANCE_OPERATION_REJECTED',
+        entityType: 'financeOperation', entityId: id,
+        actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+        createdAt: nowIso, immutable: true, summary: `${decision === 'aprovar' ? 'Aprovado' : 'Rejeitado'}: ${before.title}`,
+        metadata: { kind: before.kind, amount: before.amount, financeTransactionIds },
+      });
+    });
+    return res.json({ success: true, financeTransactionIds });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('FINANCE_OPERATION_NOT_FOUND')) return res.status(404).json({ error: 'FINANCE_OPERATION_NOT_FOUND' });
+    if (code.includes('FINANCE_OPERATION_ALREADY_DECIDED')) return res.status(409).json({ error: 'FINANCE_OPERATION_ALREADY_DECIDED' });
+    console.error('Finance operation decision failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.post('/api/finance/operations/import', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (rawItems.length === 0 || rawItems.length > 200) return res.status(400).json({ error: 'INVALID_FINANCE_OPERATION_IMPORT' });
+  const actor = financeActor(req);
+  const errors: Array<{ row: number; message: string }> = [];
+  let imported = 0;
+  let skipped = 0;
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const row = index + 2;
+    const item = rawItems[index] || {};
+    if (asLimitedString(item?.sourceRecordId, 180)) { skipped += 1; continue; }
+    const normalized = normalizeFinanceOperationInput(item);
+    if (!normalized.data) { errors.push({ row, message: normalized.error || 'Dados inválidos.' }); continue; }
+    const fingerprint = createHash('sha256').update(JSON.stringify(normalized.data)).digest('hex');
+    const refId = `finop_${fingerprint.slice(0, 40)}`;
+    try {
+      const exists = await firestoreDb.collection('financeOperations').doc(refId).get();
+      if (exists.exists) { skipped += 1; continue; }
+      await createFinanceOperationRecord(item, actor, { refId, importFingerprint: fingerprint, imported: true });
+      imported += 1;
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('FINANCE_OPERATION_DUPLICATE')) skipped += 1;
+      else errors.push({ row, message: code.includes('INVALID_FINANCE_OPERATION') ? (code.split(':').slice(1).join(':') || 'Dados inválidos.') : 'Falha ao importar o registro.' });
+    }
+  }
+  const nowIso = new Date().toISOString();
+  await firestoreDb.collection('systemAuditLogs').add({
+    action: 'FINANCE_OPERATION_XLS_IMPORT', entityType: 'financeOperationImport', entityId: `import_${Date.now()}`,
+    actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+    createdAt: nowIso, immutable: true,
+    summary: `Importação de rotinas financeiras: ${imported} incluído(s), ${skipped} ignorado(s), ${errors.length} erro(s)`,
+    metadata: { receivedRows: rawItems.length, imported, skipped, errors: errors.slice(0, 50) },
+  });
+  return res.json({ success: true, imported, skipped, errors });
+});
+
+app.post('/api/finance/reconciliation/import', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const bankAccountId = asLimitedString(req.body?.bankAccountId, 180);
+  const bankAccountLabel = asLimitedString(req.body?.bankAccountLabel, 240);
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+  const endingBalanceRaw = normalizeFinanceAmount(req.body?.endingBalance);
+  if (!bankAccountId || !bankAccountLabel || rawItems.length === 0 || rawItems.length > 1000) return res.status(400).json({ error: 'INVALID_BANK_STATEMENT' });
+  const bankRef = firestoreDb.collection('financeBankAccounts').doc(bankAccountId);
+  const bankSnap = await bankRef.get();
+  if (!bankSnap.exists || bankSnap.data()?.isDeleted === true) return res.status(404).json({ error: 'BANK_ACCOUNT_NOT_FOUND' });
+  const actor = financeActor(req);
+  const nowIso = new Date().toISOString();
+  const normalized: Array<{ ref: any; data: Record<string, any> }> = [];
+  for (const raw of rawItems) {
+    const date = normalizeFinanceDate(raw?.date);
+    const description = asLimitedString(raw?.description, 500);
+    const amount = normalizeFinanceAmount(raw?.amount);
+    const externalId = asLimitedString(raw?.externalId, 180);
+    const documentNumber = asLimitedString(raw?.documentNumber, 120);
+    if (!date || !description || amount === null || Math.abs(amount) < 0.00001) continue;
+    const fingerprint = createHash('sha256').update([bankAccountId, date, Number(amount).toFixed(2), externalId, description].join('|')).digest('hex');
+    const ref = firestoreDb.collection('financeBankStatementItems').doc(`fstmt_${fingerprint.slice(0, 40)}`);
+    normalized.push({ ref, data: {
+      bankAccountId, bankAccountLabel, date, description, amount: Number(amount.toFixed(2)), externalId, documentNumber,
+      status: 'pendente', importFingerprint: fingerprint, importedAt: nowIso, importedBy: actor.actorName,
+      createdAt: nowIso, updatedAt: nowIso, isDeleted: false,
+    } });
+  }
+  if (normalized.length === 0) return res.status(400).json({ error: 'INVALID_BANK_STATEMENT' });
+  let imported = 0; let skipped = 0;
+  for (let offset = 0; offset < normalized.length; offset += 200) {
+    const chunk = normalized.slice(offset, offset + 200);
+    const snaps = await firestoreDb.getAll(...chunk.map(entry => entry.ref));
+    const batch = firestoreDb.batch();
+    let chunkWrites = 0;
+    chunk.forEach((entry, index) => {
+      if (snaps[index]?.exists) skipped += 1;
+      else { batch.create(entry.ref, entry.data); imported += 1; chunkWrites += 1; }
+    });
+    if (chunkWrites > 0) await batch.commit();
+  }
+  if (endingBalanceRaw !== null) {
+    await bankRef.set({ balance: Number(endingBalanceRaw.toFixed(2)), balanceUpdatedAt: nowIso, updatedAt: nowIso }, { merge: true });
+  }
+  await firestoreDb.collection('systemAuditLogs').add({
+    action: 'FINANCE_BANK_STATEMENT_IMPORTED', entityType: 'financeBankStatement', entityId: bankAccountId,
+    actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+    createdAt: nowIso, immutable: true, summary: `Extrato importado: ${bankAccountLabel}`,
+    metadata: { receivedRows: rawItems.length, imported, skipped, endingBalance: endingBalanceRaw },
+  });
+  return res.json({ success: true, imported, skipped });
+});
+
+app.post('/api/finance/reconciliation/:id', requireAuth, requireInternalAccount, requireEditModule('finance'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const statementId = asLimitedString(req.params.id, 180);
+  const action = asLimitedString(req.body?.action, 40).toLowerCase();
+  const transactionId = asLimitedString(req.body?.transactionId, 180);
+  if (!statementId || !['match', 'create_and_match', 'ignore'].includes(action)) return res.status(400).json({ error: 'INVALID_BANK_STATEMENT' });
+  const statementRef = firestoreDb.collection('financeBankStatementItems').doc(statementId);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const actor = financeActor(req);
+  const nowIso = new Date().toISOString();
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const statementSnap = await transaction.get(statementRef);
+      if (!statementSnap.exists || statementSnap.data()?.isDeleted === true) {
+        const err: any = new Error('BANK_STATEMENT_ITEM_NOT_FOUND'); err.code = 'BANK_STATEMENT_ITEM_NOT_FOUND'; throw err;
+      }
+      const item: any = statementSnap.data() || {};
+      if (item.status === 'conciliado') return;
+      if (action === 'ignore') {
+        transaction.update(statementRef, { status: 'ignorado', updatedAt: nowIso, reconciledAt: nowIso, reconciledBy: actor.actorName, reconciledByUid: actor.actorUid });
+        transaction.set(auditRef, {
+          action: 'FINANCE_BANK_ITEM_IGNORED', entityType: 'financeBankStatementItem', entityId: statementId,
+          actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+          createdAt: nowIso, immutable: true, summary: `Movimento bancário ignorado: ${item.description}`,
+          metadata: { amount: item.amount, date: item.date, bankAccountId: item.bankAccountId },
+        });
+        return;
+      }
+
+      const amount = Math.abs(Number(item.amount || 0));
+      const expectedType = Number(item.amount || 0) < 0 ? 'despesa' : 'receita';
+      let txRef: DocumentReference;
+      let txDescription = '';
+      if (action === 'create_and_match') {
+        txRef = firestoreDb!.collection('financeTransactions').doc(`fstmt_tx_${statementId}`.slice(0, 180));
+        const existingTx = await transaction.get(txRef);
+        if (!existingTx.exists) {
+          const settlement = {
+            id: `sett_${Date.now()}_${randomBytes(3).toString('hex')}`, amount, date: item.date,
+            bankAccount: item.bankAccountLabel, paymentMethod: 'Conciliação Bancária', notes: `Criado a partir do extrato: ${item.description}`,
+            createdAt: nowIso, createdBy: actor.actorName, createdByUid: actor.actorUid,
+          };
+          txDescription = item.description;
+          transaction.create(txRef, {
+            type: expectedType, description: item.description, amount, grossAmount: amount, retentions: 0,
+            paidAmount: amount, openBalance: 0, settlements: [settlement], date: item.date, dueDate: item.date, status: 'pago',
+            category: 'Conciliação Bancária', costCenter: 'Administrativo', contractId: '', contractNumber: '', contractClientName: '',
+            bankAccount: item.bankAccountLabel, paymentMethod: 'Conciliação Bancária', contactName: item.description,
+            contactDocument: '', documentNumber: item.documentNumber || item.externalId || '', recurrence: 'none', installments: 1, currentInstallment: 1,
+            notes: 'Lançamento criado automaticamente durante a conciliação bancária.',
+            createdAt: nowIso, updatedAt: nowIso, createdBy: actor.actorName, createdByUid: actor.actorUid,
+            updatedBy: actor.actorName, updatedByUid: actor.actorUid, sourceBankStatementItemId: statementId, isDeleted: false,
+          });
+        } else {
+          txDescription = existingTx.data()?.description || item.description;
+        }
+      } else {
+        if (!transactionId) { const err: any = new Error('TRANSACTION_NOT_FOUND'); err.code = 'TRANSACTION_NOT_FOUND'; throw err; }
+        txRef = firestoreDb!.collection('financeTransactions').doc(transactionId);
+        const txSnap = await transaction.get(txRef);
+        if (!txSnap.exists || txSnap.data()?.isDeleted === true) { const err: any = new Error('TRANSACTION_NOT_FOUND'); err.code = 'TRANSACTION_NOT_FOUND'; throw err; }
+        const before: any = txSnap.data() || {};
+        if (before.type !== expectedType) { const err: any = new Error('FINANCE_RECONCILIATION_TYPE_MISMATCH'); err.code = 'FINANCE_RECONCILIATION_TYPE_MISMATCH'; throw err; }
+        const originalAmount = Math.max(0, Number(before.amount || 0));
+        const currentPaid = Math.max(0, Number(before.paidAmount || 0));
+        const currentOpen = Math.max(0, Number.isFinite(Number(before.openBalance)) ? Number(before.openBalance) : originalAmount - currentPaid);
+        if (amount > currentOpen + 0.00001) { const err: any = new Error('FINANCE_RECONCILIATION_AMOUNT_MISMATCH'); err.code = 'FINANCE_RECONCILIATION_AMOUNT_MISMATCH'; throw err; }
+        const nextPaid = Math.min(originalAmount, Number((currentPaid + amount).toFixed(2)));
+        const nextOpen = Math.max(0, Number((originalAmount - nextPaid).toFixed(2)));
+        const nextStatus = nextOpen <= 0 ? 'pago' : (before.dueDate && before.dueDate < financeBusinessDate() ? 'atrasado' : 'pendente');
+        const settlement = {
+          id: `sett_${Date.now()}_${randomBytes(3).toString('hex')}`, amount, date: item.date,
+          bankAccount: item.bankAccountLabel, paymentMethod: 'Conciliação Bancária', notes: `Conciliado com extrato: ${item.description}`,
+          createdAt: nowIso, createdBy: actor.actorName, createdByUid: actor.actorUid,
+        };
+        const existingSettlements = Array.isArray(before.settlements) ? before.settlements.slice(-199) : [];
+        transaction.update(txRef, {
+          paidAmount: nextPaid, openBalance: nextOpen, status: nextStatus,
+          settlements: [...existingSettlements, settlement], bankAccount: item.bankAccountLabel,
+          updatedAt: nowIso, updatedBy: actor.actorName, updatedByUid: actor.actorUid,
+        });
+        txDescription = before.description || transactionId;
+      }
+      transaction.update(statementRef, {
+        status: 'conciliado', matchedTransactionId: txRef.id, matchedTransactionDescription: txDescription,
+        updatedAt: nowIso, reconciledAt: nowIso, reconciledBy: actor.actorName, reconciledByUid: actor.actorUid,
+      });
+      transaction.set(auditRef, {
+        action: 'FINANCE_BANK_ITEM_RECONCILED', entityType: 'financeBankStatementItem', entityId: statementId,
+        actorUid: actor.actorUid, actorName: actor.actorName, actorRole: actor.actorRole,
+        createdAt: nowIso, immutable: true, summary: `Conciliação bancária: ${item.description}`,
+        metadata: { amount: item.amount, date: item.date, bankAccountId: item.bankAccountId, transactionId: txRef.id, createdTransaction: action === 'create_and_match' },
+      });
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('BANK_STATEMENT_ITEM_NOT_FOUND')) return res.status(404).json({ error: 'BANK_STATEMENT_ITEM_NOT_FOUND' });
+    if (code.includes('TRANSACTION_NOT_FOUND')) return res.status(404).json({ error: 'TRANSACTION_NOT_FOUND' });
+    if (code.includes('FINANCE_RECONCILIATION_TYPE_MISMATCH')) return res.status(409).json({ error: 'FINANCE_RECONCILIATION_TYPE_MISMATCH' });
+    if (code.includes('FINANCE_RECONCILIATION_AMOUNT_MISMATCH')) return res.status(409).json({ error: 'FINANCE_RECONCILIATION_AMOUNT_MISMATCH' });
+    console.error('Finance reconciliation failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.get('/api/finance/audit', requireAuth, requireInternalAccount, requireAccessModule('finance'), async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const requested = Math.max(10, Math.min(300, Math.floor(Number(req.query?.limit || 150))));
+  try {
+    const snapshot = await firestoreDb.collection('systemAuditLogs').orderBy('createdAt', 'desc').limit(Math.min(600, requested * 3)).get();
+    const items = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as any)).filter((item: any) => {
+      const action = String(item.action || '');
+      const entityType = String(item.entityType || '');
+      return action.startsWith('FINANCE_')
+        || action.startsWith('RENTAL_INVOICE_')
+        || (action === 'CORPORATE_FILE_UPLOADED' && entityType === 'finance-document')
+        || entityType.startsWith('finance')
+        || entityType === 'rentalInvoice';
+    }).slice(0, requested);
+    return res.json({ success: true, items });
+  } catch (error) {
+    console.error('Finance audit read failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.post('/api/inventory/items/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const itemId = asLimitedString(req.params.id, 160);
@@ -2771,6 +3447,7 @@ const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'health' | 'payslip'
   financeMeasurements: { area: 'finance', label: 'Medição financeira' },
   financeBankAccounts: { area: 'finance', label: 'Conta bancária' },
   financeCategories: { area: 'finance', label: 'Categoria financeira' },
+  financeOperations: { area: 'finance', label: 'Operação financeira complementar' },
   savedIntakes: { area: 'operations', label: 'Entrada de material' },
   rncReports: { area: 'operations', label: 'Relatório de não conformidade' },
   referenceStandards: { area: 'operations', label: 'Padrão de referência' },
@@ -3157,6 +3834,15 @@ app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, wr
       }
       const before: any = snapshot.data() || {};
       if (before.isDeleted === true) return;
+      if (
+        collectionName === 'financeOperations' &&
+        Array.isArray(before.financeTransactionIds) &&
+        before.financeTransactionIds.length > 0
+      ) {
+        const error: any = new Error('FINANCE_OPERATION_LINKED');
+        error.code = 'FINANCE_OPERATION_LINKED';
+        throw error;
+      }
 
       transaction.update(recordRef, {
         isDeleted: true,
@@ -3199,6 +3885,7 @@ app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, wr
   } catch (error: any) {
     const code = String(error?.code || error?.message || '');
     if (code.includes('RECORD_NOT_FOUND')) return res.status(404).json({ error: 'RECORD_NOT_FOUND' });
+    if (code.includes('FINANCE_OPERATION_LINKED')) return res.status(409).json({ error: 'FINANCE_OPERATION_LINKED' });
     console.error('Critical record archive failed:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }

@@ -9,6 +9,7 @@ import {
   syncFinanceContracts
 } from '../../lib/firebase';
 import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
+import { financeFormatDatePt, financeTodayLocal } from './finance-date';
 
 export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }: { requestAdminDelete?: (type: string, id: string, name: string) => void; canEdit?: boolean }) {
   const [showModal, setShowModal] = useState(false);
@@ -64,7 +65,7 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
     setPeriod('');
     setType('Calibração');
     setValue('');
-    setSendDate(new Date().toISOString().split('T')[0]);
+    setSendDate(financeTodayLocal());
     setInvoiceNumber('');
     setStatus('em_analise');
     setShowModal(true);
@@ -142,7 +143,7 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
       type,
       value: numericValue,
       status,
-      sendDate: sendDate || new Date().toISOString().split('T')[0],
+      sendDate: sendDate || financeTodayLocal(),
       invoiceNumber: invoiceNumber.trim() || undefined
     };
 
@@ -270,7 +271,7 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
                   <div className="text-xs text-slate-500">{item.type}</div>
                 </td>
                 <td className="px-6 py-4 text-slate-600">
-                  {new Date(item.sendDate).toLocaleDateString('pt-BR')}
+                  {financeFormatDatePt(item.sendDate)}
                 </td>
                 <td className="px-6 py-4 text-right font-mono font-bold text-slate-800">
                   R$ {item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

@@ -3,6 +3,7 @@ import { Plus, Search, Filter, Edit, Trash2, CheckCircle, Briefcase, BarChart, X
 import { FinanceContract } from '../../types';
 import { syncFinanceContracts, deleteFinanceContract, addFinanceContract, updateFinanceContract } from '../../lib/firebase';
 import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
+import { financeAddYearsLocal, financeFormatDatePt, financeTodayLocal } from './finance-date';
 
 export default function FinanceContratos({ requestAdminDelete, canEdit = false }: { requestAdminDelete?: (type: string, id: string, name: string) => void; canEdit?: boolean }) {
   const [showModal, setShowModal] = useState(false);
@@ -45,8 +46,9 @@ export default function FinanceContratos({ requestAdminDelete, canEdit = false }
     setContractNumber('');
     setDescription('');
     setValue('');
-    setStartDate(new Date().toISOString().split('T')[0]);
-    setEndDate(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+    const today = financeTodayLocal();
+    setStartDate(today);
+    setEndDate(financeAddYearsLocal(today, 1));
     setStatus('ativo');
     setCostCenter('');
     setShowModal(true);
@@ -78,6 +80,10 @@ export default function FinanceContratos({ requestAdminDelete, canEdit = false }
     const numericValue = parseFloat(value);
     if (isNaN(numericValue) || numericValue <= 0) {
       alert('Por favor, informe um valor financeiro válido.');
+      return;
+    }
+    if (endDate < startDate) {
+      alert('A data final do contrato não pode ser anterior à data inicial.');
       return;
     }
 
@@ -172,7 +178,7 @@ export default function FinanceContratos({ requestAdminDelete, canEdit = false }
                   </span>
                 </td>
                 <td className="px-6 py-4 text-slate-600 text-xs font-semibold">
-                  {new Date(item.startDate).toLocaleDateString('pt-BR')} a {new Date(item.endDate).toLocaleDateString('pt-BR')}
+                  {financeFormatDatePt(item.startDate)} a {financeFormatDatePt(item.endDate)}
                 </td>
                 <td className="px-6 py-4 text-right font-mono font-bold text-slate-800">
                   R$ {item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

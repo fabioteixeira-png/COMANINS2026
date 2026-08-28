@@ -2787,7 +2787,7 @@ export const generateRentalInvoice = async (id: string): Promise<{ invoice: Rent
 
 // --- FINANCE MODULE ---
 
-import { FinanceTransaction, FinanceContract, FinanceMeasurement } from '../types';
+import { FinanceTransaction, FinanceContract, FinanceMeasurement, FinanceOperation, FinanceOperationKind, FinanceBankStatementItem, FinanceAuditEntry } from '../types';
 
 export const syncFinanceTransactions = (callback: (transactions: FinanceTransaction[]) => void) => {
   const shared = createSharedSync<FinanceTransaction[]>(
@@ -3016,6 +3016,144 @@ export const updateFinanceDoc = async (collectionName: string, id: string, updat
 export const deleteFinanceDoc = async (collectionName: string, id: string) => {
   await archiveCriticalRecord(collectionName, id);
 };
+
+
+export const syncFinanceOperations = (callback: (items: FinanceOperation[]) => void) => {
+  const shared = createSharedSync<FinanceOperation[]>(
+    'financeOperations',
+    'financeOperations',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'financeOperations'), orderBy('updatedAt', 'desc'), limit(1000));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs
+          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as FinanceOperation))
+          .filter((item: any) => item?.isDeleted !== true);
+        onData(items);
+      }, onError);
+    },
+    { persistCache: false }
+  );
+  return shared(callback);
+};
+
+async function financeAuthorizedRequest<T = any>(url: string, init: RequestInit = {}): Promise<T> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...(init.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = String(payload?.error || '');
+    const known: Record<string, string> = {
+      INVALID_FINANCE_OPERATION: 'Preencha os campos obrigatórios da operação financeira.',
+      FINANCE_OPERATION_NOT_FOUND: 'Registro financeiro não encontrado.',
+      FINANCE_OPERATION_LOCKED: 'Este registro já gerou lançamento financeiro. Os campos financeiros estão bloqueados para preservar o histórico.',
+      FINANCE_OPERATION_ALREADY_DECIDED: 'Esta solicitação já foi aprovada ou rejeitada.',
+      INVALID_FINANCE_OPERATION_IMPORT: 'A planilha contém dados inválidos.',
+      INVALID_BANK_STATEMENT: 'O extrato não contém movimentações válidas.',
+      BANK_STATEMENT_ITEM_NOT_FOUND: 'Movimento bancário não encontrado.',
+      FINANCE_RECONCILIATION_AMOUNT_MISMATCH: 'O valor do movimento bancário não é compatível com o saldo do lançamento selecionado.',
+      FINANCE_RECONCILIATION_TYPE_MISMATCH: 'O movimento bancário e o lançamento selecionado são de naturezas diferentes.',
+      TRANSACTION_NOT_FOUND: 'Lançamento financeiro não encontrado.',
+    };
+    throw new Error(payload?.message || known[code] || code || 'Não foi possível concluir a operação financeira.');
+  }
+  return payload as T;
+}
+
+export async function createFinanceOperation(input: Partial<FinanceOperation> & { kind: FinanceOperationKind }): Promise<{ id: string; financeTransactionIds: string[] }> {
+  const result = await financeAuthorizedRequest<{ success: true; id: string; financeTransactionIds?: string[] }>('/api/finance/operations', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return { id: result.id, financeTransactionIds: result.financeTransactionIds || [] };
+}
+
+export async function updateFinanceOperationRecord(id: string, input: Partial<FinanceOperation>): Promise<void> {
+  await financeAuthorizedRequest(`/api/finance/operations/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function decideFinanceOperation(id: string, decision: 'aprovar' | 'rejeitar'): Promise<{ financeTransactionIds: string[] }> {
+  const result = await financeAuthorizedRequest<{ success: true; financeTransactionIds?: string[] }>(`/api/finance/operations/${encodeURIComponent(id)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+  return { financeTransactionIds: result.financeTransactionIds || [] };
+}
+
+export async function importFinanceOperations(items: Array<Record<string, any>>): Promise<{ imported: number; skipped: number; errors: Array<{ row: number; message: string }> }> {
+  if (!Array.isArray(items) || items.length === 0) return { imported: 0, skipped: 0, errors: [] };
+  if (items.length > 200) throw new Error('O limite por importação é de 200 registros operacionais.');
+  const result = await financeAuthorizedRequest<{ success: true; imported: number; skipped: number; errors?: Array<{ row: number; message: string }> }>('/api/finance/operations/import', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  });
+  return { imported: Number(result.imported || 0), skipped: Number(result.skipped || 0), errors: Array.isArray(result.errors) ? result.errors : [] };
+}
+
+export const archiveFinanceOperation = async (id: string) => {
+  await archiveCriticalRecord('financeOperations', id);
+};
+
+export const syncFinanceBankStatementItems = (callback: (items: FinanceBankStatementItem[]) => void) => {
+  const shared = createSharedSync<FinanceBankStatementItem[]>(
+    'financeBankStatementItems',
+    'financeBankStatementItems',
+    [],
+    (onData, onError) => {
+      const q = query(collection(db, 'financeBankStatementItems'), orderBy('date', 'desc'), limit(1000));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs
+          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as FinanceBankStatementItem))
+          .filter((item: any) => item?.isDeleted !== true);
+        onData(items);
+      }, onError);
+    },
+    { persistCache: false }
+  );
+  return shared(callback);
+};
+
+export async function importFinanceBankStatement(input: {
+  bankAccountId: string;
+  bankAccountLabel: string;
+  endingBalance?: number | null;
+  items: Array<{ date: string; description: string; amount: number; externalId?: string; documentNumber?: string }>;
+}): Promise<{ imported: number; skipped: number }> {
+  const result = await financeAuthorizedRequest<{ success: true; imported: number; skipped: number }>('/api/finance/reconciliation/import', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return { imported: Number(result.imported || 0), skipped: Number(result.skipped || 0) };
+}
+
+export async function reconcileFinanceBankStatementItem(
+  id: string,
+  input: { action: 'match' | 'create_and_match' | 'ignore'; transactionId?: string }
+): Promise<void> {
+  await financeAuthorizedRequest(`/api/finance/reconciliation/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchFinanceAudit(limitItems = 150): Promise<FinanceAuditEntry[]> {
+  const result = await financeAuthorizedRequest<{ success: true; items?: FinanceAuditEntry[] }>(`/api/finance/audit?limit=${Math.max(10, Math.min(300, Math.floor(limitItems || 150)))}`, {
+    method: 'GET',
+  });
+  return Array.isArray(result.items) ? result.items : [];
+}
 
 
 export async function syncInternalTickets(callback: (tickets: InternalTicket[]) => void) {

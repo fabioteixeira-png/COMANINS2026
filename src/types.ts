@@ -568,6 +568,16 @@ export interface FinanceSettlement {
   createdByUid?: string;
 }
 
+export interface FinanceDocumentAttachment {
+  storagePath: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+  sha256: string;
+  version: number;
+  uploadedAt?: string;
+}
+
 export interface FinanceTransaction {
   id: string;
   type: 'receita' | 'despesa';
@@ -597,7 +607,7 @@ export interface FinanceTransaction {
   installments?: number;
   currentInstallment?: number;
   recurrence?: 'none' | 'monthly' | 'yearly';
-  attachments?: string[];
+  attachments?: Array<string | FinanceDocumentAttachment>;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -608,6 +618,86 @@ export interface FinanceTransaction {
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
+}
+
+export type FinanceOperationKind =
+  | 'orcamento'
+  | 'emprestimo'
+  | 'cartao'
+  | 'despesa_cartao'
+  | 'reembolso'
+  | 'custo_pessoal'
+  | 'rateio'
+  | 'ativo'
+  | 'tributo';
+
+export interface FinanceOperation {
+  id: string;
+  kind: FinanceOperationKind;
+  title: string;
+  description?: string;
+  amount?: number;
+  date?: string;
+  dueDate?: string;
+  status: string;
+  category?: string;
+  costCenter?: string;
+  bankAccount?: string;
+  contactName?: string;
+  contactDocument?: string;
+  documentNumber?: string;
+  approvalStatus?: 'nao_aplicavel' | 'pendente' | 'aprovado' | 'rejeitado';
+  details?: Record<string, any>;
+  financeTransactionIds?: string[];
+  importFingerprint?: string;
+  importedAt?: string;
+  importedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  createdByUid?: string;
+  updatedBy?: string;
+  updatedByUid?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByUid?: string;
+}
+
+export interface FinanceBankStatementItem {
+  id: string;
+  bankAccountId: string;
+  bankAccountLabel: string;
+  date: string;
+  description: string;
+  amount: number;
+  externalId?: string;
+  documentNumber?: string;
+  status: 'pendente' | 'conciliado' | 'ignorado';
+  matchedTransactionId?: string;
+  matchedTransactionDescription?: string;
+  importFingerprint: string;
+  importedAt: string;
+  importedBy?: string;
+  reconciledAt?: string;
+  reconciledBy?: string;
+  reconciledByUid?: string;
+  createdAt: string;
+  updatedAt: string;
+  isDeleted?: boolean;
+}
+
+export interface FinanceAuditEntry {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  actorUid?: string;
+  actorName?: string;
+  actorRole?: string;
+  createdAt: string;
+  summary?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface FinanceContract {
