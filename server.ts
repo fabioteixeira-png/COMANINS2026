@@ -6475,29 +6475,51 @@ async function startServer() {
 
       // Prepare image for Gemini Vision
       const prompt = `
-You are an expert data entry assistant. Analyze this image of a handwritten or printed field service form/certificate.
-Extract the following information and return ONLY a JSON object with these keys (no markdown formatting, just pure JSON). If a field is not found or unreadable, set its value to an empty string.
+Você é um assistente especialista em transcrição de planilhas industriais manuscritas.
+Analise a FOTO INTEIRA. Ela pode conter UMA OU MUITAS LINHAS de uma planilha de Serviço de Campo preenchida à mão.
 
-Required JSON format:
+OBJETIVO:
+- Transcrever todas as linhas legíveis, sem inventar conteúdo.
+- Preservar TAGs, números de certificado, OS, unidades, sinais, hífens, barras, pontos e vírgulas exatamente quando legíveis.
+- Não juntar duas linhas diferentes.
+- Se um campo estiver vazio ou ilegível, use string vazia.
+- Datas devem ser devolvidas preferencialmente em DD/MM/AAAA.
+- "Certificado", "COMA", "Nº Cert.", "Cert." podem representar o campo certificate.
+- "UM" significa unidade de medida.
+- Responda SOMENTE JSON válido, sem markdown e sem explicações.
+
+Formato obrigatório:
 {
-  "tag": "String - Equipment Tag/ID",
-  "equipamento": "String - Nome do equipamento",
-  "localizacao": "String - Localização",
-  "certificate": "String - Certificate number (very important)",
-  "interventionDate": "String - Date of intervention (DD/MM/YYYY se possível)",
-  "technician": "String - Name of technician / Técnico",
-  "area": "String - Área",
-  "range": "String - Range ou Faixa",
-  "operacao": "String - Operação",
-  "unidadeMedida": "String - Unidade de medida",
-  "categoria": "String - Categoria",
-  "emissaoPdf": "String - Emissão PDF (ex: Sim/Não)",
-  "ordemServico": "String - Ordem de serviço / OS",
-  "tipoServico": "String - Tipo de serviço",
-  "observacao": "String - Observação",
-  "cliente": "String - Cliente",
-  "unidade": "String - Unidade (local)"
+  "records": [
+    {
+      "certificate": "",
+      "dataCalibracao": "",
+      "interventionDate": "",
+      "tag": "",
+      "equipamento": "",
+      "localizacao": "",
+      "technician": "",
+      "area": "",
+      "range": "",
+      "operacao": "",
+      "unidadeMedida": "",
+      "categoria": "",
+      "emissaoPdf": "",
+      "ordemServico": "",
+      "tipoServico": "",
+      "observacao": "",
+      "unidade": "",
+      "cliente": ""
+    }
+  ]
 }
+
+REGRAS DE QUALIDADE:
+1. Percorra a tabela de cima para baixo e da esquerda para a direita.
+2. Retorne uma entrada em records para cada linha real identificada.
+3. Não repita cabeçalhos como se fossem dados.
+4. Não adivinhe números manuscritos. Se houver dúvida real, deixe vazio.
+5. Não corrija TAG/certificado com base em suposição.
 `;
 
       const response = await aiClient.models.generateContent({
@@ -6529,7 +6551,15 @@ Required JSON format:
           }
       }
 
-      res.json(parsedData);
+      const normalizedResponse = parsedData && typeof parsedData === 'object'
+        ? parsedData as Record<string, any>
+        : {};
+      const records = Array.isArray(normalizedResponse.records)
+        ? normalizedResponse.records.slice(0, 500)
+        : [normalizedResponse];
+      res.json({
+        records: records.filter((row: any) => row && typeof row === 'object'),
+      });
     } catch (err: any) {
       console.error("Error processing field service image:", err);
       res.status(500).json({ error: err.message });

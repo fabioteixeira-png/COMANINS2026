@@ -1552,18 +1552,49 @@ export default function InternalPortal({
     );
   };
 
+  const normalizeShelfClientName = (value: unknown): string =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+
+  const certificateShelfClientKeys = new Set([
+    'COMANINS',
+    'BRASKEMUNIB',
+    'BRASKEMPE1',
+    'BRASKEMPE2',
+    'BRASKEMPE3',
+    'BRASKEMPVC',
+    'BRASKEMACELEN',
+    'ACELEN',
+    'BRASKEMTEGAL',
+    'CETRELDAC',
+    'BRASKEMCETRELDAC',
+  ]);
+
+  const certificateIssuedStatusForInstrument = (instrument: any): "Disponível para Retirada" | "Disponível na Prateleira" => {
+    const client = clients.find((item: any) => item.id === instrument?.clientId);
+    const normalizedClient = normalizeShelfClientName(client?.name);
+    return certificateShelfClientKeys.has(normalizedClient)
+      ? "Disponível na Prateleira"
+      : "Disponível para Retirada";
+  };
+
   const markCertificateIssued = async (instId: string) => {
     if (!instId) return;
 
     const inst = instruments.find((i: any) => i.id === instId);
     if (!inst) throw new Error("Instrumento não encontrado para emissão do certificado.");
 
-    // The status transition is the critical operation tied to issuing/opening
-    // the certificate. Persist it first and only then mark the local issue flag.
+    // Equipamentos pertencentes à frota/estoque operacional configurado ficam
+    // disponíveis na prateleira após a emissão. Demais clientes seguem o fluxo
+    // tradicional de devolução/retirada.
+    const issuedStatus = certificateIssuedStatusForInstrument(inst);
     if (inst.status !== "Entregue" && inst.status !== "Não Conforme") {
-      await updateInstrumentDoc(instId, { status: "Disponível para Retirada" });
+      await updateInstrumentDoc(instId, { status: issuedStatus });
       if (onUpdateInstrumentStatus) {
-        await onUpdateInstrumentStatus(instId, "Disponível para Retirada");
+        await onUpdateInstrumentStatus(instId, issuedStatus);
       }
     }
 
@@ -1577,10 +1608,12 @@ export default function InternalPortal({
 
     // Generating/updating the intake devolution draft is important, but it must
     // never make an already valid calibration certificate impossible to view.
-    try {
-      await ensureIntakeDevolutionDraft(instId);
-    } catch (error) {
-      console.error("Certificado emitido, mas não foi possível atualizar o rascunho de devolução:", error);
+    if (issuedStatus === "Disponível para Retirada") {
+      try {
+        await ensureIntakeDevolutionDraft(instId);
+      } catch (error) {
+        console.error("Certificado emitido, mas não foi possível atualizar o rascunho de devolução:", error);
+      }
     }
   };
 
@@ -1599,6 +1632,7 @@ export default function InternalPortal({
       i.status === "Calibrado" ||
       i.status === "Aguardando Emissão de Certificado" ||
       i.status === "Disponível para Retirada" ||
+      i.status === "Disponível na Prateleira" ||
       i.status === "Entregue",
   ).length;
   const countPending = savedIntakes.reduce((acc, intake) => {
@@ -4668,6 +4702,7 @@ Status atual: ${e.status}.`,
       currentStatus === "Calibrado" ||
       currentStatus === "Aguardando Emissão de Certificado" ||
       currentStatus === "Disponível para Retirada" ||
+      currentStatus === "Disponível na Prateleira" ||
       currentStatus === "Entregue" ||
       currentStatus === "Não Conforme";
     const isRegPhoto = photoModalType === "registration";
@@ -4720,6 +4755,8 @@ Status atual: ${e.status}.`,
       if (photoModalType === "calibrated") {
         if (
           currentStatus !== "Entregue" &&
+          currentStatus !== "Disponível para Retirada" &&
+          currentStatus !== "Disponível na Prateleira" &&
           currentStatus !== "Não Conforme"
         ) {
           updatePayload.status = "Aguardando Emissão de Certificado";
@@ -4763,6 +4800,7 @@ Status atual: ${e.status}.`,
       currentStatus === "Calibrado" ||
       currentStatus === "Aguardando Emissão de Certificado" ||
       currentStatus === "Disponível para Retirada" ||
+      currentStatus === "Disponível na Prateleira" ||
       currentStatus === "Entregue" ||
       currentStatus === "Não Conforme";
     const isRegPhoto = photoModalType === "registration";

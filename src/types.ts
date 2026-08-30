@@ -2,7 +2,7 @@ export type InstrumentCategory = 'pressure' | 'temperature';
 
 export type InstrumentType = 'manometro' | 'termometro' | 'transmissor' | 'pressostato' | 'termostato' | 'manovacuometro';
 
-export type CalibrationStatus = 'Aguardando Triagem' | 'Aguardando Calibração' | 'Em Calibração' | 'Calibrado' | 'Aguardando Emissão de Certificado' | 'Entregue' | 'Não Conforme' | 'Disponível para Retirada' | 'RNC';
+export type CalibrationStatus = 'Aguardando Triagem' | 'Aguardando Calibração' | 'Em Calibração' | 'Calibrado' | 'Aguardando Emissão de Certificado' | 'Entregue' | 'Não Conforme' | 'Disponível para Retirada' | 'Disponível na Prateleira' | 'RNC';
 
 export interface Client {
   passwordChangeRequired?: boolean;

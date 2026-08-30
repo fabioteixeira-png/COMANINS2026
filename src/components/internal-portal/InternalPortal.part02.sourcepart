@@ -1948,6 +1948,7 @@
                     <option value="Aguardando Emissão de Certificado">
                       Aguardando Emissão de Certificado
                     </option>
+                    <option value="Disponível na Prateleira">Disponível na Prateleira</option>
                     <option value="Entregue">Entregue</option>
                   </select>
                 </div>
@@ -2010,51 +2011,32 @@
                       });
 
                       const sorted = [...filtered].sort((a: any, b: any) => {
-                        // 1. Status 'Entregue' goes to the bottom of the inventory
-                        const isAEntregue = a.status === "Entregue";
-                        const isBEntregue = b.status === "Entregue";
-
-                        if (isAEntregue && !isBEntregue) return 1;
-                        if (!isAEntregue && isBEntregue) return -1;
-
-                        // 2. Both are Entregue or both NOT Entregue: Order by Entry Order (Ordem da Entrada)
-                        const numEntradaA = (a.numeroDaEntrada || "").trim();
-                        const numEntradaB = (b.numeroDaEntrada || "").trim();
-                        if (numEntradaA && numEntradaB) {
-                          const cmp = numEntradaA.localeCompare(numEntradaB, undefined, { numeric: true, sensitivity: "base" });
-                          if (cmp !== 0) return cmp;
-                        } else if (numEntradaA && !numEntradaB) {
-                          return -1;
-                        } else if (!numEntradaA && numEntradaB) {
-                          return 1;
-                        }
-
-                        // Secondary: dataEntrada
-                        const dateA = a.dataEntrada || a.dataDaEntrada || "";
-                        const dateB = b.dataEntrada || b.dataDaEntrada || "";
-                        if (dateA && dateB) {
-                          const normDateA = dateA.includes("/") ? dateA.split("/").reverse().join("-") : dateA;
-                          const normDateB = dateB.includes("/") ? dateB.split("/").reverse().join("-") : dateB;
-                          const cmp = normDateA.localeCompare(normDateB);
-                          if (cmp !== 0) return cmp;
-                        } else if (dateA && !dateB) {
-                          return -1;
-                        } else if (!dateA && dateB) {
-                          return 1;
-                        }
-
-                        // Tertiary: certificateNumber / coma
-                        const certA = (a.certificateNumber || a.coma || "").trim();
-                        const certB = (b.certificateNumber || b.coma || "").trim();
+                        // Regra do inventário: o certificado numericamente/alfanumericamente
+                        // mais novo deve aparecer primeiro. Registros sem certificado ficam no fim.
+                        const certA = String(a.certificateNumber || a.coma || '').trim();
+                        const certB = String(b.certificateNumber || b.coma || '').trim();
                         if (certA && certB) {
-                          const cmp = certA.localeCompare(certB, undefined, { numeric: true, sensitivity: "base" });
+                          const cmp = certB.localeCompare(certA, 'pt-BR', {
+                            numeric: true,
+                            sensitivity: 'base',
+                          });
                           if (cmp !== 0) return cmp;
+                        } else if (certA && !certB) {
+                          return -1;
+                        } else if (!certA && certB) {
+                          return 1;
                         }
 
-                        // Fallback: id
-                        const idA = (a.id || "").trim();
-                        const idB = (b.id || "").trim();
-                        return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: "base" });
+                        const createdA = Date.parse(String(a.createdAt || a.updatedAt || ''));
+                        const createdB = Date.parse(String(b.createdAt || b.updatedAt || ''));
+                        if (Number.isFinite(createdA) && Number.isFinite(createdB) && createdA !== createdB) {
+                          return createdB - createdA;
+                        }
+
+                        return String(b.id || '').localeCompare(String(a.id || ''), 'pt-BR', {
+                          numeric: true,
+                          sensitivity: 'base',
+                        });
                       });
 
                       if (sorted.length === 0) {
@@ -2087,6 +2069,7 @@
                         (inst.status === "Calibrado" ||
                           inst.status === "Aguardando Emissão de Certificado" ||
                           inst.status === "Disponível para Retirada" ||
+                          inst.status === "Disponível na Prateleira" ||
                           inst.status === "Entregue") &&
                         !isRncIssued &&
                         hasApprovedReport;
@@ -2101,6 +2084,7 @@
                         inst.status === "Calibrado" ||
                         inst.status === "Aguardando Emissão de Certificado" ||
                         inst.status === "Disponível para Retirada" ||
+                        inst.status === "Disponível na Prateleira" ||
                         inst.status === "Entregue" ||
                         inst.status === "Não Conforme";
                       const displayStatus =
@@ -2145,9 +2129,11 @@
                               className={`px-2 py-1 rounded font-semibold text-[10px] ${
                                 inst.status === "Entregue"
                                   ? "bg-slate-800 text-white"
-                                  : inst.status === "Disponível para Retirada"
-                                    ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
-                                    : inst.status === "Não Conforme" ||
+                                  : inst.status === "Disponível na Prateleira"
+                                    ? "bg-cyan-100 text-cyan-800 border border-cyan-200"
+                                    : inst.status === "Disponível para Retirada"
+                                      ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
+                                      : inst.status === "Não Conforme" ||
                                         isRncIssued
                                       ? "bg-rose-100 text-rose-800 border border-rose-200"
                                       : inst.status === "Calibrado"
@@ -2162,9 +2148,11 @@
                             >
                               {inst.status === "Entregue"
                                 ? "Entregue"
-                                : inst.status === "Disponível para Retirada"
-                                  ? "Disponível para Retirada"
-                                  : isRncIssued
+                                : inst.status === "Disponível na Prateleira"
+                                  ? "Disponível na Prateleira"
+                                  : inst.status === "Disponível para Retirada"
+                                    ? "Disponível para Retirada"
+                                    : isRncIssued
                                     ? "Não Conforme (RNC)"
                                     : displayStatus}
                             </span>

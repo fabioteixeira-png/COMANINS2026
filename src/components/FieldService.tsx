@@ -10,7 +10,7 @@ import {
   updateFieldServiceRecord, 
   bulkAddFieldServiceRecords,
   bulkUpsertFieldServiceRecords,
-  deleteFieldServiceRecord, syncInstruments
+  deleteFieldServiceRecord, syncInstruments, refreshFieldServiceRecords
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 
@@ -75,7 +75,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   
   // Filter states
   const [filters, setFilters] = useState<Record<string, string>>({
-    certificate: '', cliente: '', tag: '', equipamento: '', localizacao: '',
+    certificate: '', dataCalibracao: '', cliente: '', tag: '', equipamento: '', localizacao: '',
     interventionDate: '', technician: '', area: '', range: '',
     operacao: '', unidadeMedida: '', categoria: '', emissaoPdf: '',
     ordemServico: '', tipoServico: '', observacao: '', unidade: ''
@@ -83,7 +83,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   
   // Column Visibility State
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-    certificate: true, cliente: true, tag: true, equipamento: true,
+    certificate: true, dataCalibracao: true, cliente: true, tag: true, equipamento: true,
     localizacao: false, interventionDate: true, technician: true, area: false,
     range: false, operacao: false, unidadeMedida: false, categoria: false,
     emissaoPdf: false, ordemServico: true, tipoServico: true, observacao: false, unidade: false
@@ -140,19 +140,38 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
       }
     }
 
-    // Atualização otimista: evita a célula voltar visualmente ao valor antigo
-    // enquanto o Firestore confirma a gravação, especialmente no campo Certificado.
+    const previousCalibrationDate = record.dataCalibracao || '';
+    const previousClientId = record.clientId || '';
+    const updatePayload: Partial<FieldServiceRecord> = { [colId]: newVal } as Partial<FieldServiceRecord>;
+
+    if (colId === 'certificate') {
+      const linkedInstrument = findInstrumentByCertificate(newVal);
+      updatePayload.certificate = newVal.trim().toUpperCase();
+      updatePayload.dataCalibracao = linkedInstrument?.lastCalibrationDate || '';
+      if (linkedInstrument?.clientId) updatePayload.clientId = linkedInstrument.clientId;
+    }
+
+    // Atualização otimista: a célula não volta para o certificado antigo enquanto
+    // o Firestore confirma a gravação. O snapshot local usa o mesmo payload persistido.
     setRecords((current) => current.map((item) => (
-      item.id === record.id ? { ...item, [colId]: newVal } as FieldServiceRecord : item
+      item.id === record.id ? { ...item, ...updatePayload } as FieldServiceRecord : item
     )));
     setEditingCell(null);
 
     try {
-      await updateFieldServiceRecord(record.id, { [colId]: newVal });
+      await updateFieldServiceRecord(record.id, updatePayload);
     } catch (e) {
       console.error(e);
       setRecords((current) => current.map((item) => (
-        item.id === record.id ? { ...item, [colId]: previousValue } as FieldServiceRecord : item
+        item.id === record.id
+          ? {
+              ...item,
+              [colId]: previousValue,
+              ...(colId === 'certificate'
+                ? { dataCalibracao: previousCalibrationDate, clientId: previousClientId }
+                : {}),
+            } as FieldServiceRecord
+          : item
       )));
       alert("Erro ao salvar célula. O valor anterior foi restaurado.");
     }
@@ -188,9 +207,13 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isRefreshingRecords, setIsRefreshingRecords] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
 
   useEffect(() => {
     if (!canEdit) {
@@ -214,16 +237,64 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
 
   const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+  const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
+  const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
+
+  const findInstrumentByCertificate = (certificate: unknown): Instrument | undefined => {
+    const normalized = normalizeCertificate(certificate);
+    if (!normalized) return undefined;
+    const numeric = certificateDigits(normalized);
+    return instruments.find((instrument) => {
+      const certificateNumber = normalizeCertificate(instrument.certificateNumber);
+      const coma = normalizeCertificate(instrument.coma);
+      if (certificateNumber === normalized || coma === normalized) return true;
+      if (!numeric) return false;
+      return certificateDigits(certificateNumber) === numeric || certificateDigits(coma) === numeric;
+    });
+  };
+
+  const formatCalibrationDate = (value: unknown): string => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+    return raw;
+  };
+
+  const resolveCalibrationDate = (record: Partial<FieldServiceRecord>): string => {
+    const instrument = findInstrumentByCertificate(record.certificate);
+    return formatCalibrationDate(instrument?.lastCalibrationDate || record.dataCalibracao || '');
+  };
+
+  const escapeHtml = (value: unknown): string => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+  const loadComaninsLogoDataUrl = async (): Promise<string> => {
+    try {
+      const response = await fetch('/COMANINS%202026_logo_horizontal_transparente.png');
+      if (!response.ok) return '';
+      const blob = await response.blob();
+      return await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return '';
+    }
+  };
+
   const resolveClientId = (record: Partial<FieldServiceRecord>): string => {
-    const cert = String(record.certificate || '').trim().toUpperCase();
+    const cert = normalizeCertificate(record.certificate);
     const tag = String(record.tag || '').trim().toUpperCase();
 
     if (cert) {
-      const certificateMatch = instruments.find((instrument) => {
-        const certificateNumber = String(instrument.certificateNumber || '').trim().toUpperCase();
-        const coma = String(instrument.coma || '').trim().toUpperCase();
-        return certificateNumber === cert || coma === cert;
-      });
+      const certificateMatch = findInstrumentByCertificate(cert);
       if (certificateMatch?.clientId) return String(certificateMatch.clientId).trim();
     }
 
@@ -236,6 +307,18 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
 
     return String(record.clientId || '').trim();
+  };
+
+  const handleRefreshRecords = async () => {
+    setIsRefreshingRecords(true);
+    try {
+      await refreshFieldServiceRecords();
+    } catch (error) {
+      console.error(error);
+      alert('Não foi possível atualizar os registros de Serviço de Campo.');
+    } finally {
+      setIsRefreshingRecords(false);
+    }
   };
 
   const handleDownloadTemplate = () => {
@@ -330,6 +413,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             equipamento: String(normalizedRow['equipamento'] || normalizedRow['descrio'] || ''),
             localizacao: String(normalizedRow['localizacao'] || normalizedRow['localizao'] || normalizedRow['local'] || normalizedRow['serie'] || normalizedRow['srie'] || ''),
             certificate: strCert,
+            dataCalibracao: String(normalizedRow['datacalibracao'] || normalizedRow['datadecalibracao'] || ''),
             interventionDate: formattedInterventionDate,
             technician: String(normalizedRow['tecnico'] || normalizedRow['tcnico'] || normalizedRow['technician'] || ''),
             area: String(normalizedRow['area'] || normalizedRow['rea'] || ''),
@@ -343,6 +427,10 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             observacao: String(normalizedRow['observacao'] || normalizedRow['observao'] || normalizedRow['notas'] || ''),
             unidade: String(normalizedRow['unidade'] || normalizedRow['und'] || '')
           };
+          const linkedInstrument = findInstrumentByCertificate(parsedRecord.certificate);
+          if (linkedInstrument?.lastCalibrationDate) {
+            parsedRecord.dataCalibracao = linkedInstrument.lastCalibrationDate;
+          }
           parsedRecord.clientId = resolveClientId(parsedRecord);
 
           // Find existing match
@@ -391,45 +479,156 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     reader.readAsBinaryString(file);
   };
 
-  const handleExportExcel = () => {
-    if (records.length === 0) {
-      alert("Nenhum registro para exportar.");
+  const handleExportExcel = async () => {
+    if (sortedRecords.length === 0) {
+      alert("Nenhum registro encontrado para o filtro atual.");
       return;
     }
-    const ws = XLSX.utils.json_to_sheet(sortedRecords.map(r => ({
-      'Certificado': r.certificate,
-      'Data Calibração': (() => {
-        if (!r.certificate) return '-';
-        const correlatedInst = instruments.find(i => i.certificateNumber === r.certificate || (i.coma && i.coma === r.certificate));
-        if (correlatedInst && correlatedInst.lastCalibrationDate) {
-          const dateParts = correlatedInst.lastCalibrationDate.split('-');
-          if (dateParts.length === 3) {
-            return `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
-          }
-          return correlatedInst.lastCalibrationDate;
-        }
-        return '-';
-      })(),
-      'Data de Intervenção': r.interventionDate,
-      'Tag': r.tag,
-      'Equipamento': r.equipamento,
-      'Localização': r.localizacao,
-      'Técnico': r.technician,
-      'Área': r.area,
-      'Range': r.range,
-      'Operação': r.operacao,
-      'Unidade de Medida': r.unidadeMedida,
-      'Categoria': r.categoria,
-      'Emissão PDF': r.emissaoPdf,
-      'Ordem de Serviço': r.ordemServico,
-      'Tipo de Serviço': r.tipoServico,
-      'Observação': r.observacao,
-      'Unidade': r.unidade,
-      'Cliente': r.cliente || ''
-    })));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "ServicoCampo");
-    XLSX.writeFile(wb, "Servico_de_Campo_Export.xlsx");
+
+    const logoDataUrl = await loadComaninsLogoDataUrl();
+    const exportRows = sortedRecords.map((record) => ({
+      certificate: record.certificate || '',
+      dataCalibracao: resolveCalibrationDate(record) || '',
+      interventionDate: record.interventionDate || '',
+      tag: record.tag || '',
+      equipamento: record.equipamento || '',
+      localizacao: record.localizacao || '',
+      technician: record.technician || '',
+      area: record.area || '',
+      range: record.range || '',
+      operacao: record.operacao || '',
+      unidadeMedida: record.unidadeMedida || '',
+      categoria: record.categoria || '',
+      emissaoPdf: record.emissaoPdf || '',
+      ordemServico: record.ordemServico || '',
+      tipoServico: record.tipoServico || '',
+      observacao: record.observacao || '',
+      unidade: record.unidade || '',
+      cliente: record.cliente || '',
+    }));
+
+    const columns: Array<{ label: string; key: keyof typeof exportRows[number] }> = [
+      { label: 'CERTIFICADO', key: 'certificate' },
+      { label: 'DATA CALIBRAÇÃO', key: 'dataCalibracao' },
+      { label: 'DATA INTERVENÇÃO', key: 'interventionDate' },
+      { label: 'TAG', key: 'tag' },
+      { label: 'EQUIPAMENTO', key: 'equipamento' },
+      { label: 'LOCALIZAÇÃO', key: 'localizacao' },
+      { label: 'TÉCNICO', key: 'technician' },
+      { label: 'ÁREA', key: 'area' },
+      { label: 'RANGE', key: 'range' },
+      { label: 'OPERAÇÃO', key: 'operacao' },
+      { label: 'UM', key: 'unidadeMedida' },
+      { label: 'CATEGORIA', key: 'categoria' },
+      { label: 'EMISSÃO PDF', key: 'emissaoPdf' },
+      { label: 'OS', key: 'ordemServico' },
+      { label: 'TIPO DE SERVIÇO', key: 'tipoServico' },
+      { label: 'OBSERVAÇÃO', key: 'observacao' },
+      { label: 'UNIDADE', key: 'unidade' },
+      { label: 'CLIENTE', key: 'cliente' },
+    ];
+
+    const uniqueUnits = Array.from(new Set(exportRows.map((row) => row.unidade.trim()).filter(Boolean)));
+    const uniqueClients = Array.from(new Set(exportRows.map((row) => row.cliente.trim()).filter(Boolean)));
+    const titleSuffix = uniqueUnits.length === 1 ? ` - ${uniqueUnits[0]}` : '';
+    const subtitleParts = [
+      uniqueClients.length === 1 ? `Cliente: ${uniqueClients[0]}` : '',
+      uniqueUnits.length === 1 ? `Unidade: ${uniqueUnits[0]}` : '',
+      `Registros: ${exportRows.length}`,
+      `Gerado em: ${new Date().toLocaleString('pt-BR')}`,
+    ].filter(Boolean);
+
+    const htmlRows = exportRows.map((row) => (
+      `<tr>${columns.map((column) => `<td>${escapeHtml(row[column.key])}</td>`).join('')}</tr>`
+    )).join('');
+
+    const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8" />
+<style>
+  @page { size: A4 landscape; margin: 0.30in; }
+  body { font-family: Arial, sans-serif; color: #111827; margin: 0; }
+  table { border-collapse: collapse; width: 100%; table-layout: auto; }
+  .brand td { border: 0; vertical-align: middle; padding: 3px 5px; }
+  .brand-logo { width: 185px; max-height: 62px; object-fit: contain; }
+  .title { font-size: 17px; font-weight: 700; text-align: center; }
+  .subtitle { font-size: 9px; text-align: center; color: #475569; }
+  .data th { background: #17365d; color: #ffffff; border: 1px solid #9ca3af; font-size: 7px; padding: 4px 3px; text-align: center; vertical-align: middle; white-space: nowrap; }
+  .data td { border: 1px solid #b7c0cc; font-size: 7px; padding: 3px 3px; vertical-align: middle; }
+  .data tr:nth-child(even) td { background: #f8fafc; }
+  .footer { margin-top: 5px; font-size: 8px; color: #64748b; }
+</style>
+<!--[if gte mso 9]>
+<xml>
+<x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+<x:Name>Serviço de Campo</x:Name>
+<x:WorksheetOptions>
+<x:PageSetup>
+  <x:Layout x:Orientation="Landscape"/>
+  <x:Header x:Margin="0.15"/>
+  <x:Footer x:Margin="0.15"/>
+  <x:PageMargins x:Bottom="0.30" x:Left="0.20" x:Right="0.20" x:Top="0.30"/>
+</x:PageSetup>
+<x:FitToPage/>
+<x:Print><x:FitWidth>1</x:FitWidth><x:FitHeight>0</x:FitHeight><x:PaperSizeIndex>9</x:PaperSizeIndex></x:Print>
+<x:Selected/>
+<x:FreezePanes/><x:FrozenNoSplit/><x:SplitHorizontal>3</x:SplitHorizontal><x:TopRowBottomPane>3</x:TopRowBottomPane>
+</x:WorksheetOptions>
+</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook>
+</xml>
+<![endif]-->
+</head>
+<body>
+<table class="brand">
+  <tr>
+    <td style="width:22%">${logoDataUrl ? `<img class="brand-logo" src="${logoDataUrl}" />` : '<b>COMANINS</b>'}</td>
+    <td style="width:78%"><div class="title">LISTA DE SERVIÇOS${escapeHtml(titleSuffix)}</div><div class="subtitle">${escapeHtml(subtitleParts.join(' | '))}</div></td>
+  </tr>
+</table>
+<table class="data">
+<thead><tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
+<tbody>${htmlRows}</tbody>
+</table>
+<div class="footer">Documento gerado pelo módulo Serviço de Campo — COMANINS.</div>
+</body></html>`;
+
+    const logoBase64 = logoDataUrl.includes(',') ? logoDataUrl.split(',')[1] : '';
+    const exportContent = logoBase64
+      ? [
+          'MIME-Version: 1.0',
+          'Content-Type: multipart/related; boundary="COMANINS_XLS_BOUNDARY"',
+          '',
+          '--COMANINS_XLS_BOUNDARY',
+          'Content-Type: text/html; charset="utf-8"',
+          'Content-Location: file:///comanins-lista-servicos.htm',
+          '',
+          html.replace(logoDataUrl, 'cid:comanins-logo'),
+          '--COMANINS_XLS_BOUNDARY',
+          'Content-Type: image/png',
+          'Content-Transfer-Encoding: base64',
+          'Content-Location: comanins-logo.png',
+          'Content-ID: <comanins-logo>',
+          '',
+          logoBase64,
+          '--COMANINS_XLS_BOUNDARY--',
+          '',
+        ].join('\r\n')
+      : `\ufeff${html}`;
+    const blob = new Blob([exportContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const suffix = (uniqueUnits.length === 1 ? uniqueUnits[0] : 'FILTRO')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    anchor.href = url;
+    anchor.download = `LISTA_DE_SERVICOS_${suffix || 'CAMPO'}.xls`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -440,12 +639,13 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     setIsProcessingImage(true);
     try {
       let base64 = "";
       try {
-        base64 = await compressImageToWebResolution(file, 1200, 1200, 0.7);
+        // Manuscritos exigem mais definição que uma foto de cadastro comum.
+        base64 = await compressImageToWebResolution(file, 2200, 2200, 0.86);
       } catch {
         base64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -458,46 +658,64 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
       const response = await authJsonFetch('/api/parse-field-service-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64 })
+        body: JSON.stringify({ imageBase64: base64, mode: 'table' })
       });
 
+      const responseData = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Erro ao processar imagem.");
+        throw new Error(responseData.error || "Erro ao processar imagem.");
       }
 
-      const data = await response.json();
-      
-      setFormData({
-        cliente: data.cliente || '',
-        tag: data.tag || '',
-        equipamento: data.equipamento || '',
-        localizacao: data.localizacao || '',
-        certificate: data.certificate || '',
-        interventionDate: data.interventionDate || '',
-        technician: data.technician || '',
-        area: data.area || '',
-        range: data.range || '',
-        operacao: data.operacao || '',
-        unidadeMedida: data.unidadeMedida || '',
-        categoria: data.categoria || '',
-        emissaoPdf: data.emissaoPdf || '',
-        ordemServico: data.ordemServico || '',
-        tipoServico: data.tipoServico || '',
-        observacao: data.observacao || '',
-        unidade: data.unidade || ''
-      });
-      setShowAddModal(true);
-      
-      if (data.certificate && records.some(r => r.certificate === data.certificate)) {
-        alert("Atenção: A IA identificou um certificado que já existe na planilha.");
-      } else {
-        alert("Imagem processada! Verifique os dados extraídos antes de salvar.");
+      const extractedRows = Array.isArray(responseData.records)
+        ? responseData.records
+        : (responseData && typeof responseData === 'object' ? [responseData] : []);
+
+      const rows = extractedRows
+        .map((data: any) => {
+          const certificate = String(data.certificate || '').trim();
+          const linkedInstrument = findInstrumentByCertificate(certificate);
+          return {
+            'Certificado': certificate,
+            'Data Calibração': formatCalibrationDate(linkedInstrument?.lastCalibrationDate || data.dataCalibracao || ''),
+            'Data de Intervenção': dateMask(String(data.interventionDate || '')),
+            'Tag': String(data.tag || ''),
+            'Equipamento': String(data.equipamento || ''),
+            'Localização': String(data.localizacao || ''),
+            'Técnico': String(data.technician || ''),
+            'Área': String(data.area || ''),
+            'Range': String(data.range || ''),
+            'Operação': String(data.operacao || ''),
+            'Unidade de Medida': String(data.unidadeMedida || ''),
+            'Categoria': String(data.categoria || ''),
+            'Emissão PDF': String(data.emissaoPdf || ''),
+            'Ordem de Serviço': String(data.ordemServico || ''),
+            'Tipo de Serviço': String(data.tipoServico || ''),
+            'Observação': String(data.observacao || ''),
+            'Unidade': String(data.unidade || ''),
+            'Cliente': String(data.cliente || ''),
+          };
+        })
+        .filter((row: any) => Object.values(row).some((value) => String(value || '').trim() !== ''));
+
+      if (rows.length === 0) {
+        throw new Error('Nenhuma linha legível foi identificada na foto. Tente uma imagem mais nítida e bem enquadrada.');
       }
 
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 26 }, { wch: 22 },
+        { wch: 22 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 15 }, { wch: 16 },
+        { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 34 }, { wch: 18 }, { wch: 24 },
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Importacao');
+      const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+      XLSX.writeFile(workbook, `IMPORTACAO_SERVICO_CAMPO_IA_${stamp}.xlsx`);
+
+      alert(`Leitura concluída: ${rows.length} linha(s) reconhecida(s).\n\nA planilha de importação foi gerada. Revise os dados e use o botão “Importar Planilha” no próprio Serviço de Campo.`);
     } catch (error: any) {
       console.error(error);
-      alert("Falha na extração de dados: " + error.message);
+      alert("Falha na extração dos dados manuscritos: " + error.message);
     } finally {
       setIsProcessingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -532,8 +750,11 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
 
     try {
+      const linkedInstrument = findInstrumentByCertificate(formData.certificate);
       const recordToSave: Partial<FieldServiceRecord> = {
         ...formData,
+        certificate: normalizeCertificate(formData.certificate),
+        dataCalibracao: linkedInstrument?.lastCalibrationDate || formData.dataCalibracao || '',
         clientId: resolveClientId(formData),
       };
       if (formData.id) {
@@ -562,16 +783,17 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     let filtered = records.filter(r => {
       return Object.entries(filters).every(([k, v]) => {
         if (!v) return true;
-        const recordVal = String((r as any)[k] || '').toLowerCase();
+        const rawValue = k === 'dataCalibracao' ? resolveCalibrationDate(r) : (r as any)[k];
+        const recordVal = String(rawValue || '').toLowerCase();
         return recordVal.includes(String(v).toLowerCase());
       });
     });
 
     if (sortConfig !== null) {
       filtered.sort((a, b) => {
-        if (sortConfig.key === 'interventionDate') {
-          const dateA = parseDateForSort(a.interventionDate);
-          const dateB = parseDateForSort(b.interventionDate);
+        if (sortConfig.key === 'interventionDate' || sortConfig.key === 'dataCalibracao') {
+          const dateA = parseDateForSort(sortConfig.key === 'dataCalibracao' ? resolveCalibrationDate(a) : a.interventionDate);
+          const dateB = parseDateForSort(sortConfig.key === 'dataCalibracao' ? resolveCalibrationDate(b) : b.interventionDate);
           if (dateA < dateB) return sortConfig.direction === 'asc' ? -1 : 1;
           if (dateA > dateB) return sortConfig.direction === 'asc' ? 1 : -1;
           return 0;
@@ -589,13 +811,39 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
 
     return filtered;
-  }, [records, filters, sortConfig]);
+  }, [records, filters, sortConfig, instruments]);
 
   const totalPages = Math.ceil(sortedRecords.length / itemsPerPage);
   const paginatedRecords = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return sortedRecords.slice(start, start + itemsPerPage);
   }, [sortedRecords, currentPage, itemsPerPage]);
+
+  useEffect(() => {
+    const tableScroller = tableScrollRef.current;
+    if (!tableScroller) return;
+    const updateWidth = () => setTableScrollWidth(tableScroller.scrollWidth);
+    updateWidth();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateWidth) : null;
+    observer?.observe(tableScroller);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [paginatedRecords.length, visibleColumns]);
+
+  const syncTopScroll = () => {
+    if (topScrollRef.current && tableScrollRef.current) {
+      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  };
+
+  const syncTableScroll = () => {
+    if (topScrollRef.current && tableScrollRef.current) {
+      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -632,11 +880,21 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           <button 
             onClick={handleExportExcel}
             className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
+            title="Gera a lista filtrada com logo COMANINS e impressão A4 paisagem"
           >
             <Download className="h-4 w-4" />
-            <span>Exportar Excel</span>
+            <span>Gerar XLS A4</span>
           </button>
 
+          <button
+            onClick={handleRefreshRecords}
+            disabled={isRefreshingRecords}
+            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
+            title="Atualizar a base manualmente. A navegação entre abas usa o cache em memória."
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshingRecords ? 'animate-spin' : ''}`} />
+            <span>Atualizar Dados</span>
+          </button>
 
           {canEdit && (
             <>
@@ -646,7 +904,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                 className="flex items-center space-x-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
               >
                 {isProcessingImage ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-                <span>{isProcessingImage ? 'Analisando...' : 'Anexar Foto (IA)'}</span>
+                <span>{isProcessingImage ? 'Lendo manuscritos...' : 'Foto → Planilha (IA)'}</span>
               </button>
 
               <button
@@ -734,7 +992,15 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           </div>
         </div>
         
-        <div className="overflow-x-auto min-h-[400px]">
+        <div
+          ref={topScrollRef}
+          onScroll={syncTopScroll}
+          className="overflow-x-auto overflow-y-hidden h-4 border-b border-slate-200 bg-slate-50"
+          title="Rolagem horizontal superior"
+        >
+          <div style={{ width: `${tableScrollWidth}px`, height: '1px' }} />
+        </div>
+        <div ref={tableScrollRef} onScroll={syncTableScroll} className="overflow-x-auto min-h-[400px]">
           <table className="w-full text-left text-sm text-slate-600">
             <thead className="bg-slate-50 text-slate-700 text-xs uppercase font-bold border-b border-slate-200">
               <tr>
@@ -777,22 +1043,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                       let value = (record as any)[col.id];
                       
                       if (col.id === 'dataCalibracao') {
-                        if (record.certificate) {
-                          const correlatedInst = instruments.find(i => i.certificateNumber === record.certificate || (i.coma && i.coma === record.certificate));
-                          if (correlatedInst && correlatedInst.lastCalibrationDate) {
-                            // format date to DD/MM/YYYY
-                            const dateParts = correlatedInst.lastCalibrationDate.split('-');
-                            if (dateParts.length === 3) {
-                              value = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
-                            } else {
-                              value = correlatedInst.lastCalibrationDate;
-                            }
-                          } else {
-                            value = '-';
-                          }
-                        } else {
-                          value = '-';
-                        }
+                        value = resolveCalibrationDate(record) || '-';
                       }
                       
                       const isEditing = canEdit && editingCell?.rowId === record.id && editingCell?.colId === col.id;
@@ -823,27 +1074,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                     })}
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       {(() => {
-                        const normalizeCertificate = (value: unknown) =>
-                          String(value || '').trim().toUpperCase();
-                        const extractNum = (value: unknown) =>
-                          normalizeCertificate(value).replace(/\D/g, '');
-                        const recordCertificate = normalizeCertificate(record.certificate);
-                        const recordNumericCertificate = extractNum(record.certificate);
-                        const matchingInst = instruments.find((instrument) => {
-                          const certificateNumber = normalizeCertificate(instrument.certificateNumber);
-                          const coma = normalizeCertificate(instrument.coma);
-
-                          if (recordCertificate && (certificateNumber === recordCertificate || coma === recordCertificate)) {
-                            return true;
-                          }
-
-                          const certificateNumeric = extractNum(instrument.certificateNumber);
-                          const comaNumeric = extractNum(instrument.coma);
-                          return Boolean(
-                            recordNumericCertificate &&
-                            (certificateNumeric === recordNumericCertificate || comaNumeric === recordNumericCertificate)
-                          );
-                        });
+                        const matchingInst = findInstrumentByCertificate(record.certificate);
                         if (matchingInst && onPrintCertificate) {
                           return (
                             <button 

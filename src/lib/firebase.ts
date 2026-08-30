@@ -785,6 +785,7 @@ export async function updateClientDoc(client: Client): Promise<Client> {
 const INSTRUMENT_PAGE_SIZE = 1000;
 const instrumentCache = new Map<string, Instrument>();
 let instrumentLoadPromise: Promise<void> | null = null;
+let instrumentInitialLoadComplete = false;
 let instrumentLiveUnsubscribe: (() => void) | null = null;
 const instrumentSubscribers = new Set<(instruments: Instrument[]) => void>();
 
@@ -798,6 +799,7 @@ const instrumentStatusPriority = (status?: Instrument['status']): number => {
     case 'Entregue':
       return 8;
     case 'Disponível para Retirada':
+    case 'Disponível na Prateleira':
     case 'Não Conforme':
     case 'RNC':
       return 7;
@@ -913,8 +915,9 @@ const ensureInstrumentLiveListener = (fromIso: string) => {
   });
 };
 
-const loadInstrumentsInPages = async (): Promise<void> => {
-  if (instrumentLoadPromise) return instrumentLoadPromise;
+const loadInstrumentsInPages = async (force = false): Promise<void> => {
+  if (instrumentInitialLoadComplete && !force) return;
+  if (instrumentLoadPromise && !force) return instrumentLoadPromise;
   const liveStartIso = new Date(Date.now() - 5000).toISOString();
   ensureInstrumentLiveListener(liveStartIso);
 
@@ -946,6 +949,7 @@ const loadInstrumentsInPages = async (): Promise<void> => {
       cursor = page.docs[page.docs.length - 1] || null;
       if (!cursor) break;
     }
+    instrumentInitialLoadComplete = true;
   })().finally(() => {
     if (instrumentLoadPromise === task) instrumentLoadPromise = null;
   });
@@ -3287,6 +3291,7 @@ export interface FieldServiceRecord {
   equipamento: string;
   localizacao: string;
   certificate: string;
+  dataCalibracao?: string;
   interventionDate: string;
   technician: string;
   area: string;
@@ -3308,6 +3313,7 @@ export interface FieldServiceRecord {
 const FIELD_SERVICE_PAGE_SIZE = 1000;
 let fieldServiceCache: FieldServiceRecord[] = [];
 let fieldServiceLoadPromise: Promise<void> | null = null;
+let fieldServiceInitialLoadComplete = false;
 const fieldServiceSubscribers = new Set<(records: FieldServiceRecord[]) => void>();
 
 const notifyFieldServiceSubscribers = () => {
@@ -3316,6 +3322,7 @@ const notifyFieldServiceSubscribers = () => {
 };
 
 const loadFieldServiceRecordsInPages = async (force = false): Promise<void> => {
+  if (fieldServiceInitialLoadComplete && !force) return;
   if (fieldServiceLoadPromise && !force) return fieldServiceLoadPromise;
 
   const task = (async () => {
@@ -3349,6 +3356,7 @@ const loadFieldServiceRecordsInPages = async (force = false): Promise<void> => {
       cursor = page.docs[page.docs.length - 1] || null;
       if (!cursor) break;
     }
+    fieldServiceInitialLoadComplete = true;
   })().finally(() => {
     if (fieldServiceLoadPromise === task) fieldServiceLoadPromise = null;
   });
@@ -3366,6 +3374,11 @@ export async function syncFieldServiceRecords(callback: (records: FieldServiceRe
   return () => {
     fieldServiceSubscribers.delete(callback);
   };
+}
+
+export async function refreshFieldServiceRecords(): Promise<void> {
+  fieldServiceInitialLoadComplete = false;
+  await loadFieldServiceRecordsInPages(true);
 }
 
 export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {

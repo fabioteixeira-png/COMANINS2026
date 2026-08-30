@@ -3284,7 +3284,7 @@
         {activeTab === "field_service" && canAccessModule("field_service") && (
           <FieldService
             canEdit={canEditFieldService}
-            onPrintCertificate={(instId, tagData, equipmentData, context) => {
+            onPrintCertificate={async (instId, tagData, equipmentData, context) => {
               const mappingError = getFieldServiceClientMappingError(context);
               if (mappingError) {
                 alert(mappingError);
@@ -3311,7 +3311,15 @@
               setFieldServiceEquip(equipmentData);
               setFieldServiceCertificateContext(context);
               setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
-              setActiveTab("certificados");
+              try {
+                await markCertificateIssued(instId);
+                setActiveTab("certificados");
+              } catch (error: any) {
+                console.error("Erro ao abrir/emitir certificado pelo Serviço de Campo:", error);
+                alert(
+                  `Não foi possível concluir a emissão do certificado.\n\n${error?.message || "Falha ao atualizar o status do instrumento."}`,
+                );
+              }
             }}
           />
         )}
