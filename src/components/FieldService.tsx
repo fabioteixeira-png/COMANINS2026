@@ -50,7 +50,7 @@ const COLUMNS = [
 
 interface FieldServiceProps {
   canEdit?: boolean;
-  onPrintCertificate?: (instId: string, tagData: string, equipmentData: string) => void;
+  onPrintCertificate?: (instId: string, tagData: string, equipmentData: string, clientData: string, unitData: string) => void;
 }
 export default function FieldService({ canEdit = false, onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
@@ -799,7 +799,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                         if (matchingInst && onPrintCertificate) {
                           return (
                             <button 
-                              onClick={() => onPrintCertificate(matchingInst.id, record.tag || '', record.equipamento || '')} 
+                              onClick={() => onPrintCertificate(matchingInst.id, record.tag || '', record.equipamento || '', record.cliente || '', record.unidade || '')} 
                               className="text-emerald-500 hover:text-emerald-600 mr-3" 
                               title="Imprimir Certificado (Calibração)"
                             >
