@@ -2367,49 +2367,161 @@ app.post('/api/rentals/contracts/:id/return', requireAuth, requireInternalAccoun
 });
 
 
+app.delete('/api/rentals/contracts/:id', requireAuth, requireInternalAccount, requireAdministratorAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const rentalId = asLimitedString(req.params.id, 180);
+  const reason = asLimitedString(req.body?.reason, 1000);
+  if (!rentalId) return res.status(400).json({ error: 'INVALID_RENTAL_DATA' });
+  if (!reason) return res.status(400).json({ error: 'DELETE_REASON_REQUIRED' });
+
+  const rentalRef = firestoreDb.collection('rentalContracts').doc(rentalId);
+  const invoiceQuery = firestoreDb.collection('rentalInvoices').where('rentalId', '==', rentalId);
+  const movementQuery = firestoreDb.collection('rentalMovements').where('rentalId', '==', rentalId);
+  const financeQuery = firestoreDb.collection('financeTransactions').where('contractId', '==', rentalId);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const { actorName, actorUid, actorRole } = rentalActor(req);
+  const nowIso = new Date().toISOString();
+  let result = { deletedInvoices: 0, deletedFinanceTransactions: 0, deletedMovements: 0, releasedAssets: 0 };
+
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const rentalSnap = await transaction.get(rentalRef);
+      if (!rentalSnap.exists) {
+        const error: any = new Error('RENTAL_NOT_FOUND'); error.code = 'RENTAL_NOT_FOUND'; throw error;
+      }
+      const rental: any = rentalSnap.data() || {};
+      const invoiceSnap = await transaction.get(invoiceQuery);
+      const movementSnap = await transaction.get(movementQuery);
+      const financeSnap = await transaction.get(financeQuery);
+
+      const assetIds = Array.from(new Set(
+        (Array.isArray(rental.items) ? rental.items : [])
+          .map((item: any) => asLimitedString(item?.assetId, 180))
+          .filter(Boolean),
+      ));
+      const assetRefs = assetIds.map((assetId) => firestoreDb!.collection("rentalAssets").doc(String(assetId)));
+      const assetSnaps: any[] = [];
+      for (const assetRef of assetRefs) assetSnaps.push(await transaction.get(assetRef));
+
+      const invoiceFinanceIds = new Set(
+        invoiceSnap.docs.map((doc) => asLimitedString(doc.data()?.financeTransactionId, 180)).filter(Boolean),
+      );
+      const financeDocs = financeSnap.docs.filter((doc) =>
+        invoiceFinanceIds.has(doc.id) || String(doc.data()?.category || '') === 'Locação de Instrumentos',
+      );
+      const assetsToRelease = assetSnaps.filter((snap) => snap.exists && String(snap.data()?.currentRentalId || '') === rentalId);
+      const writeCount = 2 + invoiceSnap.size + movementSnap.size + financeDocs.length + assetsToRelease.length;
+      if (writeCount > 450) {
+        const error: any = new Error('RENTAL_DELETE_TOO_MANY_LINKED_RECORDS'); error.code = 'RENTAL_DELETE_TOO_MANY_LINKED_RECORDS'; throw error;
+      }
+
+      assetsToRelease.forEach((snap) => {
+        const assetData = snap.data() || {};
+        transaction.update(snap.ref, {
+          status: String(assetData.status || '') === 'locado' ? 'disponivel' : assetData.status,
+          currentRentalId: FieldValue.delete(),
+          updatedAt: nowIso,
+          updatedBy: actorName,
+          updatedByUid: actorUid,
+        });
+      });
+      invoiceSnap.docs.forEach((doc) => transaction.delete(doc.ref));
+      movementSnap.docs.forEach((doc) => transaction.delete(doc.ref));
+      financeDocs.forEach((doc) => transaction.delete(doc.ref));
+      transaction.delete(rentalRef);
+      transaction.set(auditRef, {
+        action: 'RENTAL_CONTRACT_DELETED',
+        entityType: 'rentalContract',
+        entityId: rentalId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Locação ${asLimitedString(rental.rentalNumber, 120) || rentalId} excluída por administrador`,
+        metadata: {
+          reason,
+          rentalNumber: asLimitedString(rental.rentalNumber, 120),
+          clientId: asLimitedString(rental.clientId, 180),
+          clientName: asLimitedString(rental.clientName, 240),
+          deletedInvoices: invoiceSnap.size,
+          deletedFinanceTransactions: financeDocs.length,
+          deletedMovements: movementSnap.size,
+          releasedAssets: assetsToRelease.length,
+        },
+      });
+
+      result = {
+        deletedInvoices: invoiceSnap.size,
+        deletedFinanceTransactions: financeDocs.length,
+        deletedMovements: movementSnap.size,
+        releasedAssets: assetsToRelease.length,
+      };
+    });
+
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('RENTAL_NOT_FOUND')) return res.status(404).json({ error: 'RENTAL_NOT_FOUND' });
+    if (code.includes('RENTAL_DELETE_TOO_MANY_LINKED_RECORDS')) return res.status(409).json({ error: 'RENTAL_DELETE_TOO_MANY_LINKED_RECORDS' });
+    console.error('Rental deletion failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.delete('/api/rentals/invoices/:id', requireAuth, requireInternalAccount, requireAdministratorAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const invoiceId = asLimitedString(req.params.id, 180);
+  const reason = asLimitedString(req.body?.reason, 1000);
   if (!invoiceId) return res.status(400).json({ error: 'INVALID_INVOICE_ID' });
+  if (!reason) return res.status(400).json({ error: 'DELETE_REASON_REQUIRED' });
 
   const invoiceRef = firestoreDb.collection('rentalInvoices').doc(invoiceId);
-  
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const { actorName, actorUid, actorRole } = rentalActor(req);
+  const nowIso = new Date().toISOString();
+  let deletedFinanceTransactionId = '';
+
   try {
     await firestoreDb.runTransaction(async (transaction) => {
       const invoiceSnap = await transaction.get(invoiceRef);
       if (!invoiceSnap.exists) {
         const error: any = new Error('INVOICE_NOT_FOUND'); error.code = 'INVOICE_NOT_FOUND'; throw error;
       }
-      
-      const invoiceData = invoiceSnap.data() || {};
-      const financeTransactionId = invoiceData.financeTransactionId;
-      
+
+      const invoiceData: any = invoiceSnap.data() || {};
+      const financeTransactionId = asLimitedString(invoiceData.financeTransactionId, 180);
+      let financeSnap: any = null;
+      let financeRef: any = null;
       if (financeTransactionId) {
-        const financeRef = firestoreDb.collection('financeTransactions').doc(financeTransactionId);
-        const financeSnap = await transaction.get(financeRef);
-        if (financeSnap.exists) {
-          transaction.delete(financeRef);
-        }
+        financeRef = firestoreDb!.collection('financeTransactions').doc(financeTransactionId);
+        financeSnap = await transaction.get(financeRef);
       }
-      
+
+      if (financeRef && financeSnap?.exists) {
+        transaction.delete(financeRef);
+        deletedFinanceTransactionId = financeTransactionId;
+      }
       transaction.delete(invoiceRef);
+      transaction.set(auditRef, {
+        action: 'RENTAL_INVOICE_DELETED',
+        entityType: 'rentalInvoice',
+        entityId: invoiceId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Fatura ${asLimitedString(invoiceData.invoiceNumber, 180) || invoiceId} excluída por administrador`,
+        metadata: {
+          reason,
+          invoiceNumber: asLimitedString(invoiceData.invoiceNumber, 180),
+          rentalId: asLimitedString(invoiceData.rentalId, 180),
+          rentalNumber: asLimitedString(invoiceData.rentalNumber, 180),
+          clientName: asLimitedString(invoiceData.clientName, 240),
+          total: Number(invoiceData.total || 0),
+          financeTransactionId: deletedFinanceTransactionId || financeTransactionId || '',
+        },
+      });
     });
 
-    const { actorName, actorUid } = rentalActor(req);
-    await firestoreDb.collection('systemAuditLogs').add({
-      timestamp: new Date().toISOString(),
-      action: 'RENTAL_INVOICE_DELETED',
-      entityId: invoiceId,
-      entityType: 'rentalInvoice',
-      actorUid,
-      actorName,
-      details: 'Fatura de locação e lançamentos financeiros excluídos.',
-    });
-
-    return res.json({ success: true });
+    return res.json({ success: true, deletedFinanceTransactionId: deletedFinanceTransactionId || undefined });
   } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
     console.error('Invoice deletion failed:', error);
-    if (error.code === 'INVOICE_NOT_FOUND') return res.status(404).json({ error: 'INVOICE_NOT_FOUND' });
+    if (code.includes('INVOICE_NOT_FOUND')) return res.status(404).json({ error: 'INVOICE_NOT_FOUND' });
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });

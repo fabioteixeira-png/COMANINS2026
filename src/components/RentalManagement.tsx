@@ -16,6 +16,7 @@ import {
   Search,
   Settings,
   Truck,
+  Trash2,
   Wrench,
   X,
 } from 'lucide-react';
@@ -31,8 +32,11 @@ import type {
   RentalSettings,
 } from '../types';
 import type { PortalUser } from '../lib/firebase';
+import { isAdministratorAccess } from '../access-control';
 import {
   createRentalContract,
+  deleteRentalContract,
+  deleteRentalInvoice,
   dispatchRentalContract,
   generateRentalInvoice,
   returnRentalItems,
@@ -146,7 +150,7 @@ const nextUninvoicedCycle = (rental: RentalContract, invoices: RentalInvoice[]) 
 const normalizeText = (value: unknown) => String(value || '').trim().toLowerCase();
 
 export default function RentalManagement({ clients, currentUser, canEdit, companyData = {} }: RentalManagementProps) {
-  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Admin' || currentUser?.role === 'admin' || currentUser?.role === 'master' || currentUser?.role === 'Diretor';
+  const isAdmin = isAdministratorAccess(currentUser as any);
   const [activeTab, setActiveTab] = useState<RentalTab>('locacoes');
   const [services, setServices] = useState<RentalService[]>([]);
   const [assets, setAssets] = useState<RentalAsset[]>([]);
@@ -415,6 +419,69 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     }
   };
 
+  const requireDeletionReason = (entityLabel: string) => {
+    const confirmed = window.confirm(
+      `Excluir ${entityLabel}? Esta ação é restrita ao Administrador e não poderá ser desfeita.`,
+    );
+    if (!confirmed) return null;
+    const reason = window.prompt('Informe o motivo da exclusão para o registro de auditoria:')?.trim() || '';
+    if (!reason) {
+      setError('A exclusão administrativa exige a informação do motivo.');
+      return null;
+    }
+    return reason;
+  };
+
+  const removeInvoice = async (invoice: RentalInvoice) => {
+    clearMessages();
+    if (!isAdmin) {
+      setError('Somente o perfil Administrador pode excluir faturas de locação.');
+      return;
+    }
+    const reason = requireDeletionReason(`a fatura ${invoice.invoiceNumber}`);
+    if (!reason) return;
+    setBusy(true);
+    try {
+      await deleteRentalInvoice(invoice.id, reason);
+      if (printDocument?.kind === 'invoice' && printDocument.invoice.id === invoice.id) setPrintDocument(null);
+      setNotice(`Fatura ${invoice.invoiceNumber} excluída. O lançamento financeiro vinculado também foi removido.`);
+    } catch (e: any) {
+      setError(e?.message || 'Não foi possível excluir a fatura.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeRental = async (rental: RentalContract) => {
+    clearMessages();
+    if (!isAdmin) {
+      setError('Somente o perfil Administrador pode excluir locações.');
+      return;
+    }
+    const reason = requireDeletionReason(`a locação ${rental.rentalNumber}`);
+    if (!reason) return;
+    const cascadeConfirmed = window.confirm(
+      'A exclusão da locação removerá também as faturas, lançamentos financeiros e comprovantes vinculados. Equipamentos ainda vinculados a esta locação serão liberados. Deseja continuar?',
+    );
+    if (!cascadeConfirmed) return;
+    setBusy(true);
+    try {
+      const result = await deleteRentalContract(rental.id, reason);
+      if (printDocument?.rental?.id === rental.id) setPrintDocument(null);
+      if (invoicePromptTarget?.id === rental.id) {
+        setInvoicePromptTarget(null);
+        setManualInvoiceNumber('');
+      }
+      setNotice(
+        `Locação ${rental.rentalNumber} excluída com correção dos vínculos: ${result.deletedInvoices} fatura(s), ${result.deletedFinanceTransactions} lançamento(s) financeiro(s) e ${result.deletedMovements} comprovante(s).`,
+      );
+    } catch (e: any) {
+      setError(e?.message || 'Não foi possível excluir a locação.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submitSettings = async (event: React.FormEvent) => {
     event.preventDefault();
     clearMessages();
@@ -550,6 +617,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                       {rental.status === 'ativo' && canEdit && <button onClick={() => openReturn(rental)} className="px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-bold flex items-center gap-1"><RotateCcw className="w-3.5 h-3.5" /> Receber Devolução</button>}
                       {dispatchMovement && <button onClick={() => setPrintDocument({ kind: 'movement', movement: dispatchMovement, rental })} className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Comprovante Saída</button>}
                       {lastReturn && <button onClick={() => setPrintDocument({ kind: 'movement', movement: lastReturn, rental })} className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1"><PackageCheck className="w-3.5 h-3.5" /> Última Devolução</button>}
+                      {isAdmin && <button onClick={() => removeRental(rental)} disabled={busy} className="px-3 py-2 rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 text-xs font-bold flex items-center gap-1 disabled:opacity-50" title="Exclusão restrita ao Administrador"><Trash2 className="w-3.5 h-3.5" /> Excluir Locação</button>}
                     </div>
                     {(rental.purchaseOrder || rental.quotationRefs || rental.project) && <div className="text-[11px] text-slate-500 border-t border-slate-100 pt-3">{rental.purchaseOrder && <span className="mr-3"><b>PC:</b> {rental.purchaseOrder}</span>}{rental.quotationRefs && <span className="mr-3"><b>Orçamento:</b> {rental.quotationRefs}</span>}{rental.project && <span><b>Obra:</b> {rental.project}</span>}</div>}
                   </div>
@@ -582,7 +650,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
       {activeTab === 'faturas' && (
         <div className="space-y-4">
           <div><h3 className="font-extrabold text-slate-900">Faturas de Locação</h3><p className="text-xs text-slate-500">Cada fatura corresponde a um ciclo integral de 30 dias e gera automaticamente um Contas a Receber.</p></div>
-          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3 text-left">Fatura</th><th className="p-3 text-left">Locação / Cliente</th><th className="p-3 text-left">Período</th><th className="p-3 text-left">Vencimento</th><th className="p-3 text-right">Valor</th><th className="p-3"></th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id} className="border-t border-slate-100"><td className="p-3 font-mono font-black">{invoice.invoiceNumber}</td><td className="p-3"><b>{invoice.rentalNumber}</b><div className="text-slate-500">{invoice.clientName}</div></td><td className="p-3">{formatDate(invoice.periodStart)} a {formatDate(invoice.periodEnd)}</td><td className="p-3">{formatDate(invoice.dueDate)}</td><td className="p-3 text-right font-black">{formatCurrency(invoice.total)}</td><td className="p-3 text-right"><button onClick={() => setPrintDocument({ kind: 'invoice', invoice, rental: findRental(invoice.rentalId) })} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold inline-flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Fatura</button></td></tr>)}</tbody></table>{invoices.length === 0 && <div className="p-8 text-center text-slate-500 text-sm">Nenhuma fatura de locação emitida.</div>}</div>
+          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3 text-left">Fatura</th><th className="p-3 text-left">Locação / Cliente</th><th className="p-3 text-left">Período</th><th className="p-3 text-left">Vencimento</th><th className="p-3 text-right">Valor</th><th className="p-3"></th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id} className="border-t border-slate-100"><td className="p-3 font-mono font-black">{invoice.invoiceNumber}</td><td className="p-3"><b>{invoice.rentalNumber}</b><div className="text-slate-500">{invoice.clientName}</div></td><td className="p-3">{formatDate(invoice.periodStart)} a {formatDate(invoice.periodEnd)}</td><td className="p-3">{formatDate(invoice.dueDate)}</td><td className="p-3 text-right font-black">{formatCurrency(invoice.total)}</td><td className="p-3 text-right"><div className="inline-flex flex-wrap justify-end gap-2"><button onClick={() => setPrintDocument({ kind: 'invoice', invoice, rental: findRental(invoice.rentalId) })} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold inline-flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Fatura</button>{isAdmin && <button onClick={() => removeInvoice(invoice)} disabled={busy} className="px-3 py-1.5 border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg font-bold inline-flex items-center gap-1 disabled:opacity-50" title="Exclusão restrita ao Administrador"><Trash2 className="w-3.5 h-3.5" /> Excluir</button>}</div></td></tr>)}</tbody></table>{invoices.length === 0 && <div className="p-8 text-center text-slate-500 text-sm">Nenhuma fatura de locação emitida.</div>}</div>
         </div>
       )}
 

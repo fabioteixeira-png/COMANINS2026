@@ -2603,6 +2603,9 @@ const rentalApiRequest = async <T = any>(url: string, options: RequestInit = {})
       RENTAL_BILLING_CYCLE_NOT_STARTED: 'O próximo ciclo mensal ainda não começou. A renovação só pode ser faturada a partir do primeiro dia do respectivo ciclo.',
       RENTAL_INVALID_INVOICE_SEQUENCE: 'O próximo número da fatura é inválido ou já foi utilizado.',
       INVALID_RENTAL_DATA: 'Revise os dados obrigatórios da locação.',
+      FORBIDDEN: 'Somente o perfil Administrador pode executar esta exclusão.',
+      DELETE_REASON_REQUIRED: 'Informe o motivo da exclusão administrativa.',
+      RENTAL_DELETE_TOO_MANY_LINKED_RECORDS: 'A locação possui vínculos demais para uma exclusão segura em uma única operação. Acione o suporte técnico.',
     };
     throw new Error(messages[code] || code);
   }
@@ -2782,6 +2785,27 @@ export const generateRentalInvoice = async (id: string): Promise<{ invoice: Rent
     body: JSON.stringify({}),
   });
   return { invoice: result.invoice, financeTransactionId: result.financeTransactionId };
+};
+
+export const deleteRentalInvoice = async (id: string, reason: string): Promise<{ deletedFinanceTransactionId?: string }> => {
+  const result = await rentalApiRequest<{ success: true; deletedFinanceTransactionId?: string }>(`/api/rentals/invoices/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason }),
+  });
+  return { deletedFinanceTransactionId: result.deletedFinanceTransactionId };
+};
+
+export const deleteRentalContract = async (id: string, reason: string): Promise<{ deletedInvoices: number; deletedFinanceTransactions: number; deletedMovements: number; releasedAssets: number }> => {
+  const result = await rentalApiRequest<{ success: true; deletedInvoices: number; deletedFinanceTransactions: number; deletedMovements: number; releasedAssets: number }>(`/api/rentals/contracts/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason }),
+  });
+  return {
+    deletedInvoices: Number(result.deletedInvoices || 0),
+    deletedFinanceTransactions: Number(result.deletedFinanceTransactions || 0),
+    deletedMovements: Number(result.deletedMovements || 0),
+    releasedAssets: Number(result.releasedAssets || 0),
+  };
 };
 
 
