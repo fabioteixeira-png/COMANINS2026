@@ -2048,8 +2048,6 @@ app.post('/api/rentals/contracts', requireAuth, requireInternalAccount, requireE
 app.patch('/api/rentals/contracts/:id', requireAuth, requireInternalAccount, requireEditModule('rental'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const rentalId = asLimitedString(req.params.id, 180);
-  const manualInvoiceNumber = asLimitedString(req.body.invoiceNumber, 180);
-  if (!manualInvoiceNumber) return res.status(400).json({ error: 'INVOICE_NUMBER_REQUIRED' });
   if (!rentalId) return res.status(400).json({ error: 'INVALID_RENTAL_DATA' });
   const ref = firestoreDb.collection('rentalContracts').doc(rentalId);
   const snap = await ref.get();
@@ -2419,6 +2417,8 @@ app.delete('/api/rentals/invoices/:id', requireAuth, requireInternalAccount, req
 app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAccount, requireEditModule('rental'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const rentalId = asLimitedString(req.params.id, 180);
+  const manualInvoiceNumber = asLimitedString(req.body.invoiceNumber, 180);
+  if (!manualInvoiceNumber) return res.status(400).json({ error: 'INVOICE_NUMBER_REQUIRED' });
   if (!rentalId) return res.status(400).json({ error: 'INVALID_RENTAL_DATA' });
 
   const rentalRef = firestoreDb.collection('rentalContracts').doc(rentalId);

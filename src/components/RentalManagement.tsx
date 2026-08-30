@@ -146,7 +146,7 @@ const nextUninvoicedCycle = (rental: RentalContract, invoices: RentalInvoice[]) 
 const normalizeText = (value: unknown) => String(value || '').trim().toLowerCase();
 
 export default function RentalManagement({ clients, currentUser, canEdit, companyData = {} }: RentalManagementProps) {
-  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Admin' || currentUser?.role === 'admin' || currentUser?.role === 'master' || currentUser?.role === 'Diretor' || currentUser?.profile === 'administrator' || currentUser?.profile === 'Administrador';
+  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Admin' || currentUser?.role === 'admin' || currentUser?.role === 'master' || currentUser?.role === 'Diretor';
   const [activeTab, setActiveTab] = useState<RentalTab>('locacoes');
   const [services, setServices] = useState<RentalService[]>([]);
   const [assets, setAssets] = useState<RentalAsset[]>([]);
@@ -159,6 +159,8 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [printDocument, setPrintDocument] = useState<PrintDocument>(null);
+  const [invoicePromptTarget, setInvoicePromptTarget] = useState<RentalContract | null>(null);
+  const [manualInvoiceNumber, setManualInvoiceNumber] = useState('');
 
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [serviceDraft, setServiceDraft] = useState<Partial<RentalService>>({ active: true, monthlyPrice: 0 });
@@ -441,6 +443,18 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
 
   return (
     <div className="space-y-5">
+      {invoicePromptTarget && (
+        <Modal title="Emitir Fatura / Renovação" onClose={() => setInvoicePromptTarget(null)}>
+          <form onSubmit={issueInvoice} className="space-y-4">
+            <p className="text-sm text-slate-600 mb-2">Informe manualmente o número da Fatura (vinculado à Ordem de Serviço) para esta locação/renovação.</p>
+            <Field label="Número da Fatura / OS *">
+              <input required value={manualInvoiceNumber} onChange={(e) => setManualInvoiceNumber(e.target.value)} className="input-rental" placeholder="Ex: OS-2026-001" />
+            </Field>
+            <button disabled={busy} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold disabled:opacity-50 mt-4">Emitir Fatura</button>
+          </form>
+        </Modal>
+      )}
+
       <style>{`
         @media print {
           body * { visibility: hidden !important; }
@@ -532,7 +546,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {rental.status === 'rascunho' && canEdit && <button onClick={() => { setDispatchTarget(rental); setDispatchForm({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso() }); }} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> Registrar Saída</button>}
-                      {canGenerateInvoice && <button onClick={() => void issueInvoice(rental)} disabled={busy} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center gap-1 disabled:opacity-50"><FileText className="w-3.5 h-3.5" /> {rental.status === 'encerrado' ? 'Gerar Fatura Pendente' : 'Gerar Próxima Fatura'}</button>}
+                      {canGenerateInvoice && <button onClick={() => { setInvoicePromptTarget(rental); setManualInvoiceNumber(rental.processNumber || ''); }} disabled={busy} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center gap-1 disabled:opacity-50"><FileText className="w-3.5 h-3.5" /> {rental.status === 'encerrado' ? 'Gerar Fatura Pendente' : 'Gerar Próxima Fatura'}</button>}
                       {rental.status === 'ativo' && canEdit && <button onClick={() => openReturn(rental)} className="px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-bold flex items-center gap-1"><RotateCcw className="w-3.5 h-3.5" /> Receber Devolução</button>}
                       {dispatchMovement && <button onClick={() => setPrintDocument({ kind: 'movement', movement: dispatchMovement, rental })} className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Comprovante Saída</button>}
                       {lastReturn && <button onClick={() => setPrintDocument({ kind: 'movement', movement: lastReturn, rental })} className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1"><PackageCheck className="w-3.5 h-3.5" /> Última Devolução</button>}
@@ -708,19 +722,7 @@ function Modal({ title, children, onClose, wide = false, extraWide = false }: { 
   return <div className="fixed inset-0 z-[90] bg-slate-950/60 p-3 sm:p-6 overflow-y-auto"><div className={`${extraWide ? 'max-w-6xl' : wide ? 'max-w-3xl' : 'max-w-lg'} mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200`}><div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center"><h3 className="font-extrabold text-slate-900">{title}</h3><button onClick={onClose} type="button" className="p-1.5 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button></div><div className="p-5">{children}</div></div></div>;
 }
 
-{invoicePromptTarget && (
-        <Modal title="Emitir Fatura / Renovação" onClose={() => setInvoicePromptTarget(null)}>
-          <form onSubmit={issueInvoice} className="space-y-4">
-            <p className="text-sm text-slate-600 mb-2">Informe manualmente o número da Fatura (vinculado à Ordem de Serviço) para esta locação/renovação.</p>
-            <Field label="Número da Fatura / OS *">
-              <input required value={manualInvoiceNumber} onChange={(e) => setManualInvoiceNumber(e.target.value)} className="input-rental" placeholder="Ex: OS-2026-001" />
-            </Field>
-            <button disabled={busy} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold disabled:opacity-50 mt-4">Emitir Fatura</button>
-          </form>
-        </Modal>
-      )}
-
-      function CompanyHeader({ companyData, logoUrl }: { companyData: Record<string, any>; logoUrl: string }) {
+function CompanyHeader({ companyData, logoUrl }: { companyData: Record<string, any>; logoUrl: string }) {
   return <div className="grid grid-cols-[135px_1fr_220px] border border-black text-[11px] min-h-24"><div className="border-r border-black p-3 flex items-center justify-center"><img src={logoUrl} className="max-w-full max-h-16 object-contain" /></div><div className="p-3 leading-5"><b>{companyData.razaoSocial || 'COMANINS COMERCIO E MANUTENÇÃO INSTRUMENTOS LTDA'}</b><br />{companyData.endereco || 'RUA A3, N. 09, POLOPLAST - CAMAÇARI - BA'}<br />CNPJ – {companyData.cnpj || '02.401.101/0001-08'}</div><div className="p-3 text-center leading-5"><b>FINANCEIRO COMANINS</b><br />TEL {companyData.telefone || '71-3621-0311'}<br />{companyData.emailFinanceiro || 'financeiro@comanins.com.br'}</div></div>;
 }
 
