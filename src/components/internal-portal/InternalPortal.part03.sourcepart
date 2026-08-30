@@ -34,7 +34,7 @@
                               Pré-visualização em escala ampliada
                             </p>
                             <p className="text-[10px] text-slate-500">
-                              Tamanho físico de impressão: 36 mm × 15,98 mm
+                              Tamanho físico de impressão: 36 mm × {loadedLabelData.isComaninsStandard ? "36 mm" : "15,98 mm"}
                             </p>
                           </div>
                           <span className="rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-900">
@@ -45,8 +45,12 @@
                         <CalibrationLabelArtwork
                           certificateNumber={loadedLabelData.certificateNumber}
                           calibrationDate={loadedLabelData.calibrationDate}
+                          isComaninsStandard={loadedLabelData.isComaninsStandard}
+                          clientTag={loadedLabelData.clientTag}
+                          validityDate={loadedLabelData.validityDate}
+                          periodicityMonths={loadedLabelData.periodicityMonths}
                           calibrationLogo={calibrationLogo}
-                          className="w-full shadow-lg"
+                          className={loadedLabelData.isComaninsStandard ? "mx-auto w-full max-w-[520px] shadow-lg" : "w-full shadow-lg"}
                         />
 
                         <button

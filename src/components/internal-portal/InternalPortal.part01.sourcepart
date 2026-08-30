@@ -174,6 +174,7 @@ import NotificationBellPopover from "./NotificationBellPopover";
 import CalibrationLabelPrintModal, {
   CalibrationLabelArtwork,
   DEFAULT_CALIBRATION_LABEL_LOGO,
+  calculateCalibrationValidityDate,
   formatCalibrationLabelDate,
 } from "./CalibrationLabelPrintModal";
 import type { CalibrationLabelData } from "./CalibrationLabelPrintModal";
@@ -757,9 +758,32 @@ const currentCalibrationDate = () => {
 const normalizeIntakeNumber = (value: unknown): string =>
   String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
 
+const resolveComaninsStandardPeriodicity = (tag: unknown): 3 | 6 | 12 | null => {
+  const normalizedTag = String(tag || "").trim().toUpperCase();
+  const match = normalizedTag.match(/(?:^|[^0-9])(03|3|06|6|12)\s*$/);
+  if (!match) return null;
+  const months = Number(match[1]);
+  return months === 3 || months === 6 || months === 12 ? months : null;
+};
+
+const isComaninsBpcStandardInstrument = (
+  instrument: any,
+  clients: Client[],
+): boolean => {
+  if (!instrument) return false;
+  const client = clients.find((item: any) => item.id === instrument.clientId);
+  const normalizedClient = normalizeFieldServiceLookup(
+    client?.name || (client as any)?.razaoSocial || "",
+  );
+  const normalizedTag = String(instrument.tag || "").trim().toUpperCase();
+
+  return normalizedClient.startsWith("COMANINS") && /^BPC(?:[-/\s]|$)/i.test(normalizedTag);
+};
+
 const resolveCalibrationLabelData = (
   instrument: any,
   calibrationReports: any[],
+  clients: Client[] = [],
 ): CalibrationLabelData | null => {
   if (!instrument) return null;
 
@@ -787,7 +811,29 @@ const resolveCalibrationLabelData = (
   ).trim();
 
   if (!certificateNumber || !calibrationDate) return null;
-  return { certificateNumber, calibrationDate };
+
+  const isComaninsStandard = isComaninsBpcStandardInstrument(instrument, clients);
+  if (!isComaninsStandard) {
+    return { certificateNumber, calibrationDate };
+  }
+
+  const periodicityMonths = resolveComaninsStandardPeriodicity(instrument.tag);
+  if (!periodicityMonths) return null;
+
+  const validityDate = calculateCalibrationValidityDate(
+    calibrationDate,
+    periodicityMonths,
+  );
+  if (!validityDate) return null;
+
+  return {
+    certificateNumber,
+    calibrationDate,
+    isComaninsStandard: true,
+    clientTag: String(instrument.tag || "").trim().toUpperCase(),
+    periodicityMonths,
+    validityDate,
+  };
 };
 
 const CALIBRATION_CONSUMABLE_OPTIONS = [

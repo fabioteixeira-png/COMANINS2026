@@ -4,6 +4,10 @@ import { AlertCircle, Printer, X } from "lucide-react";
 export interface CalibrationLabelData {
   certificateNumber: string;
   calibrationDate: string;
+  isComaninsStandard?: boolean;
+  clientTag?: string;
+  validityDate?: string;
+  periodicityMonths?: 3 | 6 | 12;
 }
 
 export const DEFAULT_CALIBRATION_LABEL_LOGO =
@@ -32,6 +36,60 @@ export const formatCalibrationLabelDate = (value: string): string => {
   return Number.isNaN(parsed.getTime()) ? normalized : parsed.toLocaleDateString("pt-BR");
 };
 
+const parseCalibrationDateParts = (
+  value: string,
+): { year: number; month: number; day: number } | null => {
+  const normalized = String(value || "").trim();
+  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return {
+      year: Number(isoMatch[1]),
+      month: Number(isoMatch[2]),
+      day: Number(isoMatch[3]),
+    };
+  }
+
+  const brMatch = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    return {
+      year: Number(brMatch[3]),
+      month: Number(brMatch[2]),
+      day: Number(brMatch[1]),
+    };
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return {
+    year: parsed.getFullYear(),
+    month: parsed.getMonth() + 1,
+    day: parsed.getDate(),
+  };
+};
+
+/**
+ * Soma a periodicidade em meses sem deixar datas como 31/01 "estourarem"
+ * para o mês seguinte. Ex.: 31/01 + 3 meses => 30/04.
+ */
+export const calculateCalibrationValidityDate = (
+  calibrationDate: string,
+  months: 3 | 6 | 12,
+): string => {
+  const parts = parseCalibrationDateParts(calibrationDate);
+  if (!parts) return "";
+
+  const monthIndex = parts.month - 1 + months;
+  const targetYear = parts.year + Math.floor(monthIndex / 12);
+  const targetMonthIndex = ((monthIndex % 12) + 12) % 12;
+  const lastDayOfTargetMonth = new Date(
+    Date.UTC(targetYear, targetMonthIndex + 1, 0),
+  ).getUTCDate();
+  const targetDay = Math.min(parts.day, lastDayOfTargetMonth);
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return `${targetYear}-${pad(targetMonthIndex + 1)}-${pad(targetDay)}`;
+};
+
 const certificateFontSize = (value: string): number => {
   const length = value.length;
   if (length > 16) return 22;
@@ -42,15 +100,113 @@ const certificateFontSize = (value: string): number => {
   return 44;
 };
 
+const standardCertificateFontSize = (value: string): number => {
+  const length = value.length;
+  if (length > 18) return 28;
+  if (length > 14) return 32;
+  if (length > 10) return 38;
+  return 44;
+};
+
+const standardTagFontSize = (value: string): number => {
+  const length = value.length;
+  if (length > 20) return 20;
+  if (length > 16) return 23;
+  if (length > 12) return 26;
+  return 29;
+};
+
 export function CalibrationLabelArtwork({
   certificateNumber,
   calibrationDate,
+  isComaninsStandard = false,
+  clientTag = "",
+  validityDate = "",
+  periodicityMonths,
   calibrationLogo,
   className = "",
   printable = false,
 }: CalibrationLabelArtworkProps) {
   const formattedDate = formatCalibrationLabelDate(calibrationDate);
+  const formattedValidity = formatCalibrationLabelDate(validityDate);
   const cleanCert = certificateNumber.replace(/^COMA-/i, "").trim();
+  const cleanTag = String(clientTag || "").trim().toUpperCase();
+
+  if (isComaninsStandard) {
+    return (
+      <div
+        id={printable ? "calibration-label-print" : undefined}
+        className={`calibration-label-artwork overflow-hidden ${className}`}
+        style={{ aspectRatio: "1 / 1" }}
+        aria-label={`Etiqueta de calibração de padrão COMANINS. Certificado ${cleanCert}. TAG ${cleanTag}. Calibração ${formattedDate}. Validade ${formattedValidity}.`}
+      >
+        <svg
+          className="block h-full w-full"
+          viewBox="0 0 360 360"
+          role="img"
+          aria-hidden="true"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect className="tze661-tape-background" width="360" height="360" fill="#f4cf16" />
+
+          <image
+            href={calibrationLogo || DEFAULT_CALIBRATION_LABEL_LOGO}
+            x="35"
+            y="8"
+            width="290"
+            height="74"
+            preserveAspectRatio="xMidYMid meet"
+            onError={(event) => {
+              if (event.currentTarget.getAttribute("href") !== DEFAULT_CALIBRATION_LABEL_LOGO) {
+                event.currentTarget.setAttribute("href", DEFAULT_CALIBRATION_LABEL_LOGO);
+              }
+            }}
+          />
+
+          <text x="180" y="103" textAnchor="middle" fontFamily="Arial, Helvetica, sans-serif" fontSize="17" fontWeight="900" fill="#000">
+            PADRÃO COMANINS
+          </text>
+          <text x="180" y="128" textAnchor="middle" fontFamily="Arial, Helvetica, sans-serif" fontSize="19" fontWeight="900" fill="#000">
+            CALIBRADO
+          </text>
+          <line x1="18" y1="139" x2="342" y2="139" stroke="#000" strokeWidth="2" />
+
+          <text x="18" y="160" fontFamily="Arial, Helvetica, sans-serif" fontSize="12" fontWeight="800" fill="#000">
+            CERTIFICADO
+          </text>
+          <text x="18" y="204" fontFamily="Arial, Helvetica, sans-serif" fontSize={standardCertificateFontSize(cleanCert)} fontWeight="900" fill="#000">
+            {cleanCert}
+          </text>
+
+          <text x="18" y="228" fontFamily="Arial, Helvetica, sans-serif" fontSize="12" fontWeight="800" fill="#000">
+            TAG DO CLIENTE
+          </text>
+          <text x="18" y="260" fontFamily="Arial, Helvetica, sans-serif" fontSize={standardTagFontSize(cleanTag)} fontWeight="900" fill="#000">
+            {cleanTag}
+          </text>
+
+          <line x1="18" y1="273" x2="342" y2="273" stroke="#000" strokeWidth="1.5" />
+          <text x="18" y="298" fontFamily="Arial, Helvetica, sans-serif" fontSize="12" fontWeight="800" fill="#000">
+            CALIBRAÇÃO
+          </text>
+          <text x="132" y="298" fontFamily="Arial, Helvetica, sans-serif" fontSize="18" fontWeight="900" fill="#000">
+            {formattedDate}
+          </text>
+
+          <text x="18" y="326" fontFamily="Arial, Helvetica, sans-serif" fontSize="12" fontWeight="800" fill="#000">
+            VALIDADE
+          </text>
+          <text x="132" y="326" fontFamily="Arial, Helvetica, sans-serif" fontSize="18" fontWeight="900" fill="#000">
+            {formattedValidity}
+          </text>
+
+          <text x="18" y="348" fontFamily="Arial, Helvetica, sans-serif" fontSize="10" fontWeight="700" fill="#000">
+            PERIODICIDADE: {periodicityMonths ? `${periodicityMonths} MESES` : "—"}
+          </text>
+        </svg>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -122,9 +278,15 @@ export function CalibrationLabelArtwork({
 export default function CalibrationLabelPrintModal({
   certificateNumber,
   calibrationDate,
+  isComaninsStandard = false,
+  clientTag = "",
+  validityDate = "",
+  periodicityMonths,
   calibrationLogo,
   onClose,
 }: CalibrationLabelPrintModalProps) {
+  const labelHeightMm = isComaninsStandard ? 36 : 15.98;
+
   const handlePrint = () => {
     const printContent = document.getElementById("calibration-label-print");
     if (!printContent) return;
@@ -147,21 +309,21 @@ export default function CalibrationLabelPrintModal({
             <title>Imprimir Etiqueta</title>
             <style>
               @page {
-                size: 36mm 15.98mm;
+                size: 36mm ${labelHeightMm}mm;
                 margin: 0;
               }
               html, body {
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 36mm !important;
-                height: 15.98mm !important;
+                height: ${labelHeightMm}mm !important;
                 overflow: hidden !important;
                 background: transparent !important;
               }
               svg {
                 display: block !important;
                 width: 36mm !important;
-                height: 15.98mm !important;
+                height: ${labelHeightMm}mm !important;
               }
               .tze661-tape-background {
                 fill: transparent !important;
@@ -198,10 +360,12 @@ export default function CalibrationLabelPrintModal({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div>
             <h2 id="calibration-label-title" className="text-base font-extrabold text-slate-900">
-              Visualização da etiqueta de calibração
+              {isComaninsStandard
+                ? "Visualização da etiqueta do padrão COMANINS"
+                : "Visualização da etiqueta de calibração"}
             </h2>
             <p className="mt-1 text-xs text-slate-600">
-              Brother TZe-661 • 36 mm × 15,98 mm • impressão preta sobre fita amarela
+              Brother TZe-661 • 36 mm × {isComaninsStandard ? "36 mm" : "15,98 mm"} • impressão preta sobre fita amarela
             </p>
           </div>
           <button
@@ -220,7 +384,7 @@ export default function CalibrationLabelPrintModal({
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
                 Na janela de impressão, selecione a impressora Brother, mídia contínua de 36 mm,
-                comprimento de 15,98 mm, margens zero, escala 100% e desative cabeçalhos e rodapés.
+                comprimento de {isComaninsStandard ? "36 mm" : "15,98 mm"}, margens zero, escala 100% e desative cabeçalhos e rodapés.
               </p>
             </div>
           </div>
@@ -229,9 +393,13 @@ export default function CalibrationLabelPrintModal({
             <CalibrationLabelArtwork
               certificateNumber={certificateNumber}
               calibrationDate={calibrationDate}
+              isComaninsStandard={isComaninsStandard}
+              clientTag={clientTag}
+              validityDate={validityDate}
+              periodicityMonths={periodicityMonths}
               calibrationLogo={calibrationLogo}
               printable
-              className="w-full max-w-[720px] shadow-lg"
+              className={isComaninsStandard ? "w-full max-w-[520px] shadow-lg" : "w-full max-w-[720px] shadow-lg"}
             />
           </div>
 

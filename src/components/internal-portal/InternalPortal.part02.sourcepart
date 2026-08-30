@@ -2064,6 +2064,14 @@
                       const calibrationLabelData = resolveCalibrationLabelData(
                         inst,
                         reports,
+                        clients,
+                      );
+                      const isComaninsBpcStandard = isComaninsBpcStandardInstrument(
+                        inst,
+                        clients,
+                      );
+                      const comaninsStandardPeriodicity = resolveComaninsStandardPeriodicity(
+                        inst.tag,
                       );
                       const isCalibrated =
                         (inst.status === "Calibrado" ||
@@ -2464,8 +2472,12 @@
                               }`}
                               title={
                                 calibrationLabelData
-                                  ? "Carregar etiqueta de calibração Brother TZe-661"
-                                  : "Etiqueta disponível somente após existir certificado aprovado e data de calibração."
+                                  ? calibrationLabelData.isComaninsStandard
+                                    ? "Carregar etiqueta 36 × 36 mm do padrão COMANINS"
+                                    : "Carregar etiqueta de calibração Brother TZe-661"
+                                  : isComaninsBpcStandard && !comaninsStandardPeriodicity
+                                    ? "Padrão COMANINS identificado pelo cliente + TAG BPC. O TAG deve terminar em -3, -6 ou -12 para definir a validade."
+                                    : "Etiqueta disponível somente após existir certificado aprovado e data de calibração."
                               }
                             >
                               <Printer className="h-3 w-3" />
@@ -3971,14 +3983,15 @@
                 </h2>
                 <p className="text-sm text-slate-600">
                   Visualize e imprima a etiqueta COMANINS na fita contínua Brother
-                  TZe-661, com o número real do certificado e a data da calibração.
+                  TZe-661. Padrões COMANINS identificados por cliente COMANINS + TAG BPC
+                  utilizam automaticamente a etiqueta especial 36 × 36 mm.
                 </p>
               </div>
             </div>
 
             {(() => {
               const instrumentsReadyForLabel = instruments.filter((instrument: any) =>
-                Boolean(resolveCalibrationLabelData(instrument, reports)),
+                Boolean(resolveCalibrationLabelData(instrument, reports, clients)),
               );
               const selectedInstrument = instruments.find(
                 (instrument: any) => instrument.id === selectedEtiquetaInstId,
@@ -3986,6 +3999,7 @@
               const selectedLabelData = resolveCalibrationLabelData(
                 selectedInstrument,
                 reports,
+                clients,
               );
               const loadedInstrument = instruments.find(
                 (instrument: any) => instrument.id === loadedEtiquetaInstId,
@@ -3993,6 +4007,7 @@
               const loadedLabelData = resolveCalibrationLabelData(
                 loadedInstrument,
                 reports,
+                clients,
               );
 
               return (
@@ -4015,7 +4030,7 @@
                       >
                         <option value="">Selecione o instrumento...</option>
                         {instrumentsReadyForLabel.map((instrument: any) => {
-                          const data = resolveCalibrationLabelData(instrument, reports)!;
+                          const data = resolveCalibrationLabelData(instrument, reports, clients)!;
                           return (
                             <option key={instrument.id} value={instrument.id}>
                               [{data.certificateNumber}] {instrument.description} - {formatCalibrationLabelDate(data.calibrationDate)}
@@ -4026,16 +4041,20 @@
                     </div>
 
                     <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 leading-relaxed text-amber-950">
-                      <p className="font-bold">Padrão configurado</p>
+                      <p className="font-bold">Padrões de etiqueta configurados</p>
                       <p className="text-[11px]">
-                        Brother TZe-661 contínua, 36 mm × 8 m, impressão preta em
-                        fita amarela. Cada etiqueta será cortada em 36 mm de largura
-                        por 15,98 mm de altura.
+                        Etiqueta convencional: Brother TZe-661, 36 mm de largura por
+                        15,98 mm de comprimento, mantendo o layout atual.
                       </p>
                       <p className="text-[11px]">
-                        A arte utiliza a logo COMANINS anexada, o número do certificado
-                        aprovado e a data registrada da calibração. Nenhum dado é
-                        preenchido automaticamente quando estiver ausente.
+                        Padrão COMANINS: quando o instrumento pertence ao cliente COMANINS
+                        e o TAG do cliente começa por BPC, a etiqueta passa automaticamente
+                        para 36 × 36 mm e acrescenta TAG do cliente e validade.
+                      </p>
+                      <p className="text-[11px]">
+                        A periodicidade é definida pelo final do TAG: -3 = 3 meses,
+                        -6 = 6 meses e -12 = 12 meses. TAG BPC sem uma dessas terminações
+                        não é liberado para impressão, evitando validade incorreta.
                       </p>
                     </div>
 
