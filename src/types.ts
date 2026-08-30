@@ -348,6 +348,7 @@ export interface RentalService {
   name: string;
   description: string;
   monthlyPrice: number;
+  renewalPrice?: number;
   cnaeCode?: string;
   cnaeDescription?: string;
   active: boolean;
@@ -396,6 +397,7 @@ export interface RentalContractItem {
   serviceId: string;
   serviceName: string;
   monthlyPrice: number;
+  renewalPrice?: number;
   dispatchedAt?: string;
   returnedAt?: string;
   returnCondition?: RentalReturnCondition;
@@ -443,6 +445,7 @@ export interface RentalInvoiceLine {
   serviceId: string;
   serviceName: string;
   monthlyPrice: number;
+  renewalPrice?: number;
 }
 
 export interface RentalInvoice {

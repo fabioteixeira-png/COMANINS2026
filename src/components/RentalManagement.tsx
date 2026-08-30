@@ -146,6 +146,7 @@ const nextUninvoicedCycle = (rental: RentalContract, invoices: RentalInvoice[]) 
 const normalizeText = (value: unknown) => String(value || '').trim().toLowerCase();
 
 export default function RentalManagement({ clients, currentUser, canEdit, companyData = {} }: RentalManagementProps) {
+  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Admin' || currentUser?.role === 'admin' || currentUser?.role === 'master' || currentUser?.role === 'Diretor' || currentUser?.profile === 'administrator' || currentUser?.profile === 'Administrador';
   const [activeTab, setActiveTab] = useState<RentalTab>('locacoes');
   const [services, setServices] = useState<RentalService[]>([]);
   const [assets, setAssets] = useState<RentalAsset[]>([]);
@@ -246,6 +247,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
         name: String(serviceDraft.name || '').trim(),
         description: String(serviceDraft.description || '').trim(),
         monthlyPrice: Number(serviceDraft.monthlyPrice || 0),
+        renewalPrice: serviceDraft.renewalPrice ? Number(serviceDraft.renewalPrice) : undefined,
         cnaeCode: serviceDraft.cnaeCode || settings.cnaeCode,
         cnaeDescription: serviceDraft.cnaeDescription || settings.cnaeDescription,
       });
@@ -383,14 +385,27 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     }
   };
 
-  const issueInvoice = async (rental: RentalContract) => {
+  const issueInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!invoicePromptTarget || !manualInvoiceNumber.trim()) return;
     clearMessages();
     if (!ensureEditable()) return;
     setBusy(true);
     try {
-      const result = await generateRentalInvoice(rental.id);
+      const response = await fetch(`/api/rentals/contracts/${invoicePromptTarget.id}/invoices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${(window as any).currentUserToken}` },
+        body: JSON.stringify({ invoiceNumber: manualInvoiceNumber.trim() })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Não foi possível gerar a fatura.');
+      }
+      const result = await response.json();
       setNotice(`Fatura ${result.invoice.invoiceNumber} emitida e integrada ao Contas a Receber.`);
-      setPrintDocument({ kind: 'invoice', invoice: result.invoice, rental });
+      setPrintDocument({ kind: 'invoice', invoice: result.invoice, rental: invoicePromptTarget });
+      setInvoicePromptTarget(null);
+      setManualInvoiceNumber('');
     } catch (e: any) {
       setError(e?.message || 'Não foi possível gerar a fatura.');
     } finally {
@@ -564,7 +579,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             <label className="space-y-1"><span className="font-bold text-slate-600">Próximo nº da Fatura *</span><input type="number" min="1" disabled={!canEdit} value={settingsDraft.nextInvoiceNumber ?? ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, nextInvoiceNumber: e.target.value ? Number(e.target.value) : undefined })} className="w-full border border-slate-300 rounded-lg px-3 py-2" placeholder="Ex.: 21436 se 21435 foi a última" /></label>
             <label className="space-y-1"><span className="font-bold text-slate-600">Prefixo da locação</span><input disabled={!canEdit} value={settingsDraft.rentalPrefix} onChange={(e) => setSettingsDraft({ ...settingsDraft, rentalPrefix: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2" /></label>
             <label className="space-y-1"><span className="font-bold text-slate-600">CNAE</span><input disabled={!canEdit} value={settingsDraft.cnaeCode} onChange={(e) => setSettingsDraft({ ...settingsDraft, cnaeCode: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2" /></label>
-            <label className="space-y-1"><span className="font-bold text-slate-600">Condição de pagamento</span><input disabled={!canEdit} value={settingsDraft.paymentMethod} onChange={(e) => setSettingsDraft({ ...settingsDraft, paymentMethod: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2" /></label>
+            <label className="space-y-1"><span className="font-bold text-slate-600">Condição de pagamento</span><select disabled={!canEdit} value={settingsDraft.paymentMethod} onChange={(e) => setSettingsDraft({ ...settingsDraft, paymentMethod: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2"><option value="">Selecione...</option><option value="Depósito Bancário">Depósito Bancário</option><option value="Transferência Eletrônica">Transferência Eletrônica</option><option value="Cartão de Crédito">Cartão de Crédito</option><option value="Pix">Pix</option><option value="Boleto Bancário">Boleto Bancário</option><option value="Dinheiro">Dinheiro</option></select></label>
             <label className="space-y-1 sm:col-span-2"><span className="font-bold text-slate-600">Descrição CNAE</span><textarea disabled={!canEdit} value={settingsDraft.cnaeDescription} onChange={(e) => setSettingsDraft({ ...settingsDraft, cnaeDescription: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2 min-h-20" /></label>
             <label className="space-y-1 sm:col-span-2"><span className="font-bold text-slate-600">Dados bancários / Crédito em</span><textarea disabled={!canEdit} value={settingsDraft.bankInstructions} onChange={(e) => setSettingsDraft({ ...settingsDraft, bankInstructions: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2 min-h-20" /></label>
             <label className="space-y-1 sm:col-span-2"><span className="font-bold text-slate-600">Observação tributária da fatura</span><textarea disabled={!canEdit} value={settingsDraft.taxNotes} onChange={(e) => setSettingsDraft({ ...settingsDraft, taxNotes: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2 min-h-24" /></label>
@@ -580,6 +595,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             <Field label="Nome do serviço *"><input required value={serviceDraft.name || ''} onChange={(e) => setServiceDraft({ ...serviceDraft, name: e.target.value })} className="input-rental" placeholder="Ex.: Locação mensal manômetro com base 0–10 bar" /></Field>
             <Field label="Descrição"><textarea value={serviceDraft.description || ''} onChange={(e) => setServiceDraft({ ...serviceDraft, description: e.target.value })} className="input-rental min-h-20" /></Field>
             <Field label="Valor mensal por equipamento *"><input required type="number" min="0.01" step="0.01" value={serviceDraft.monthlyPrice || ''} onChange={(e) => setServiceDraft({ ...serviceDraft, monthlyPrice: Number(e.target.value) })} className="input-rental" /></Field>
+            <Field label="Valor para renovação (Opcional)"><input type="number" min="0" step="0.01" value={serviceDraft.renewalPrice || ''} onChange={(e) => setServiceDraft({ ...serviceDraft, renewalPrice: e.target.value ? Number(e.target.value) : undefined })} className="input-rental" placeholder="Ex: 50.00" /></Field>
             <label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={serviceDraft.active !== false} onChange={(e) => setServiceDraft({ ...serviceDraft, active: e.target.checked })} /> Serviço ativo</label>
             <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">Periodicidade fixa: <b>30 dias</b>. Não existe valor diário nem rateio proporcional.</div>
             <button disabled={busy} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold disabled:opacity-50">Salvar Serviço</button>
@@ -634,7 +650,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
               <Field label="Processo / Cotação"><input value={rentalDraft.processNumber} onChange={(e) => setRentalDraft({ ...rentalDraft, processNumber: e.target.value })} className="input-rental" /></Field>
               <Field label="Obra / Projeto"><input value={rentalDraft.project} onChange={(e) => setRentalDraft({ ...rentalDraft, project: e.target.value })} className="input-rental" /></Field>
               <Field label="Responsáveis no cliente"><input value={rentalDraft.responsibles} onChange={(e) => setRentalDraft({ ...rentalDraft, responsibles: e.target.value })} className="input-rental" /></Field>
-              <Field label="Condição de pagamento"><input value={rentalDraft.paymentMethod} onChange={(e) => setRentalDraft({ ...rentalDraft, paymentMethod: e.target.value })} className="input-rental" placeholder={settings.paymentMethod} /></Field>
+              <Field label="Condição de pagamento"><select value={rentalDraft.paymentMethod} onChange={(e) => setRentalDraft({ ...rentalDraft, paymentMethod: e.target.value })} className="input-rental"><option value="">Padrão: {settings.paymentMethod}</option><option value="Depósito Bancário">Depósito Bancário</option><option value="Transferência Eletrônica">Transferência Eletrônica</option><option value="Cartão de Crédito">Cartão de Crédito</option><option value="Pix">Pix</option><option value="Boleto Bancário">Boleto Bancário</option><option value="Dinheiro">Dinheiro</option></select></Field>
               <Field label="Observações para faturamento" className="md:col-span-3"><textarea value={rentalDraft.billingNotes} onChange={(e) => setRentalDraft({ ...rentalDraft, billingNotes: e.target.value })} className="input-rental min-h-20" placeholder="Texto complementar que deverá aparecer na fatura." /></Field>
             </div>
             <button disabled={busy} className="w-full py-3 bg-blue-600 text-white rounded-xl font-black disabled:opacity-50">Cadastrar Locação</button>
@@ -692,7 +708,19 @@ function Modal({ title, children, onClose, wide = false, extraWide = false }: { 
   return <div className="fixed inset-0 z-[90] bg-slate-950/60 p-3 sm:p-6 overflow-y-auto"><div className={`${extraWide ? 'max-w-6xl' : wide ? 'max-w-3xl' : 'max-w-lg'} mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200`}><div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center"><h3 className="font-extrabold text-slate-900">{title}</h3><button onClick={onClose} type="button" className="p-1.5 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button></div><div className="p-5">{children}</div></div></div>;
 }
 
-function CompanyHeader({ companyData, logoUrl }: { companyData: Record<string, any>; logoUrl: string }) {
+{invoicePromptTarget && (
+        <Modal title="Emitir Fatura / Renovação" onClose={() => setInvoicePromptTarget(null)}>
+          <form onSubmit={issueInvoice} className="space-y-4">
+            <p className="text-sm text-slate-600 mb-2">Informe manualmente o número da Fatura (vinculado à Ordem de Serviço) para esta locação/renovação.</p>
+            <Field label="Número da Fatura / OS *">
+              <input required value={manualInvoiceNumber} onChange={(e) => setManualInvoiceNumber(e.target.value)} className="input-rental" placeholder="Ex: OS-2026-001" />
+            </Field>
+            <button disabled={busy} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold disabled:opacity-50 mt-4">Emitir Fatura</button>
+          </form>
+        </Modal>
+      )}
+
+      function CompanyHeader({ companyData, logoUrl }: { companyData: Record<string, any>; logoUrl: string }) {
   return <div className="grid grid-cols-[135px_1fr_220px] border border-black text-[11px] min-h-24"><div className="border-r border-black p-3 flex items-center justify-center"><img src={logoUrl} className="max-w-full max-h-16 object-contain" /></div><div className="p-3 leading-5"><b>{companyData.razaoSocial || 'COMANINS COMERCIO E MANUTENÇÃO INSTRUMENTOS LTDA'}</b><br />{companyData.endereco || 'RUA A3, N. 09, POLOPLAST - CAMAÇARI - BA'}<br />CNPJ – {companyData.cnpj || '02.401.101/0001-08'}</div><div className="p-3 text-center leading-5"><b>FINANCEIRO COMANINS</b><br />TEL {companyData.telefone || '71-3621-0311'}<br />{companyData.emailFinanceiro || 'financeiro@comanins.com.br'}</div></div>;
 }
 
@@ -711,7 +739,7 @@ function InvoicePrint({ invoice, rental, companyData, logoUrl }: { invoice: Rent
     invoice.project ? `Obra/Projeto: ${invoice.project}.` : '',
     baseIds ? `Bases: ${baseIds}.` : '',
     invoice.billingNotes || '',
-    invoice.bankInstructions ? `CREDITAR EM: ${invoice.bankInstructions}` : '',
+    (invoice.paymentMethod === 'Transferência Eletrônica' || invoice.paymentMethod === 'Depósito Bancário') && invoice.bankInstructions ? `CREDITAR EM: ${invoice.bankInstructions}` : '',
     `VENCIMENTO EM ${formatDate(invoice.dueDate)}.`,
   ].filter(Boolean);
   return <div className="font-sans text-black">
@@ -734,7 +762,7 @@ function MovementPrint({ movement, rental, companyData, logoUrl }: { movement: R
     <div className="border-x border-b border-black p-4 text-sm leading-6"><b>CLIENTE:</b> {movement.clientName}<br /><b>CNPJ:</b> {movement.clientCnpj}<br /><b>ENDEREÇO:</b> {movement.clientAddress || '-'}<br /><b>DATA:</b> {formatDate(movement.date)}</div>
     <table className="w-full border-collapse text-xs"><thead><tr><th className="border border-black p-2 text-left">Identificação / COMA</th><th className="border border-black p-2 text-left">Material</th><th className="border border-black p-2 text-left">Base</th><th className="border border-black p-2 text-left">Condição</th></tr></thead><tbody>{movement.items.map((item) => <tr key={item.assetId}><td className="border border-black p-2 font-mono font-bold">{item.assetCode}</td><td className="border border-black p-2">{item.description}{item.serialNumber ? ` • Série ${item.serialNumber}` : ''}</td><td className="border border-black p-2">{item.baseIdentification || '-'}</td><td className="border border-black p-2">{item.condition ? item.condition.toUpperCase() : (isDispatch ? 'ENTREGUE' : '-')}{item.notes ? ` — ${item.notes}` : ''}</td></tr>)}</tbody></table>
     <div className="border-x border-b border-black p-4 text-xs min-h-24"><b>OBSERVAÇÕES:</b><br />{movement.notes || (isDispatch ? 'Material entregue para locação mensal em condições de uso, conforme relação acima.' : 'Material recebido e conferido conforme relação acima.')}</div>
-    {rental && <div className="border-x border-b border-black p-4 text-xs"><b>Regra comercial:</b> locação em ciclos fixos de 30 dias, sem cobrança diária ou pró-rata. Primeiro vencimento: {formatDate(rental.firstDueDate)}.</div>}
+    {rental && isDispatch && <div className="border-x border-b border-black p-4 text-xs"><b>Regra comercial:</b> locação em ciclos fixos de 30 dias, sem cobrança diária ou pró-rata. Primeiro vencimento: {formatDate(rental.firstDueDate)}.</div>}
     <div className="grid grid-cols-2 gap-16 mt-24 text-xs text-center"><div className="border-t border-black pt-2"><b>{movement.responsibleComanins}</b><br />Responsável COMANINS</div><div className="border-t border-black pt-2"><b>{movement.responsibleClient}</b><br />Responsável Cliente{movement.responsibleClientDocument ? ` • ${movement.responsibleClientDocument}` : ''}</div></div>
     <div className="mt-16 text-[9px] text-slate-500">Documento emitido pelo Portal Interno COMANINS em {new Date(movement.createdAt).toLocaleString('pt-BR')}.</div>
   </div>;
