@@ -2463,33 +2463,7 @@
                     const inst = instruments.find(
                       (i) => i.id === selectedCertificateId,
                     );
-                    let client = clients.find((c) => c.id === inst?.clientId);
-                    if (fieldServiceClient) {
-                      let mappedClientName = "";
-                      const cName = fieldServiceClient.trim().toLowerCase();
-                      const uName = (fieldServiceUnit || "").trim().toUpperCase();
-
-                      if (cName === "braskem") {
-                        const unibUnits = ["IESE", "SAIN1", "SAIN2", "SOIN1F", "SOIN1Q", "SOIN2F", "SOIN2Q", "TMP"];
-                        if (unibUnits.includes(uName)) mappedClientName = "Braskem unib";
-                        else if (uName === "PE-1") mappedClientName = "Braskem PE-1";
-                        else if (uName === "PE-2") mappedClientName = "Braskem PE-2";
-                        else if (uName === "PE-3") mappedClientName = "Braskem PE-3";
-                        else if (uName === "TEGAL") mappedClientName = "Braskem Tegal";
-                        else if (uName === "PVC") mappedClientName = "Braskem PVC";
-                      } else if (cName === "acelen") {
-                        mappedClientName = "Acelen";
-                      }
-
-                      if (mappedClientName) {
-                        const foundMapped = clients.find((c) => c.name.toLowerCase() === mappedClientName.toLowerCase());
-                        if (foundMapped) {
-                          client = foundMapped;
-                        } else {
-                          client = { ...client, name: mappedClientName, city: client?.city || "Endereço não informado" } as any;
-                        }
-                      }
-                    }
+                    const client = clients.find((c) => c.id === inst?.clientId);
                     if (!inst) return null;
 
                     const report = [...reports]
@@ -3312,7 +3286,7 @@
         )}
 
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
-        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService canEdit={canEditFieldService} onPrintCertificate={(instId, tagData, equipmentData, clientData, unitData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setFieldServiceClient(clientData); setFieldServiceUnit(unitData); setActiveTab("certificados"); }} />}
+        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService canEdit={canEditFieldService} onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
         {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}
         {activeTab === "locacao_instrumentos" && canAccessModule("rental") && <RentalManagement clients={clients} currentUser={currentUser} canEdit={canEditModule("rental")} companyData={companyData} />}
         {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}

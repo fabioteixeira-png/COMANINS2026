@@ -1185,8 +1185,6 @@ export default function InternalPortal({
   const [selectedCertificateId, setSelectedCertificateId] = useState<any>("");
   const [fieldServiceEquip, setFieldServiceEquip] = useState<string>("");
   const [fieldServiceTag, setFieldServiceTag] = useState<string>("");
-  const [fieldServiceClient, setFieldServiceClient] = useState<string>("");
-  const [fieldServiceUnit, setFieldServiceUnit] = useState<string>("");
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");
