@@ -144,7 +144,7 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
       value: numericValue,
       status,
       sendDate: sendDate || financeTodayLocal(),
-      invoiceNumber: invoiceNumber.trim() || undefined
+      ...(invoiceNumber.trim() ? { invoiceNumber: invoiceNumber.trim() } : {})
     };
 
     try {
@@ -156,9 +156,10 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
         alert('✓ Nova medição cadastrada com sucesso!');
       }
       setShowModal(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar medição:', error);
-      alert('Erro ao salvar medição. Por favor, verifique as permissões e tente novamente.');
+      const detail = String(error?.message || '').trim();
+      alert(detail ? `Erro ao salvar medição: ${detail}` : 'Erro ao salvar medição. Tente novamente.');
     }
   };
 

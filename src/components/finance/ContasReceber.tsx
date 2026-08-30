@@ -1,14 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle,
   X, DollarSign, Eye, RefreshCw
 } from 'lucide-react';
-import { FinanceDocumentAttachment, FinanceTransaction } from '../../types';
-import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction, uploadCorporateFile } from '../../lib/firebase';
+import { FinanceContract, FinanceDocumentAttachment, FinanceTransaction } from '../../types';
+import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction, uploadCorporateFile, syncFinanceContracts, syncFinanceCollection } from '../../lib/firebase';
 import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 import FinanceAttachmentField from './FinanceAttachmentField';
 import { financeFormatDatePt, financeTodayLocal } from './finance-date';
 import FinanceTransactionDetailsModal from './FinanceTransactionDetailsModal';
+
+
+interface FinanceBankAccountOption {
+  id: string;
+  bank: string;
+  agency?: string;
+  account: string;
+  type?: string;
+}
+
+const bankAccountLabel = (account: FinanceBankAccountOption) =>
+  [account.bank, account.agency ? `Ag. ${account.agency}` : '', account.account ? `C/C ${account.account}` : '']
+    .filter(Boolean)
+    .join(' • ');
 
 interface ContasReceberProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
@@ -18,6 +32,8 @@ interface ContasReceberProps {
 
 export default function ContasReceber({ requestAdminDelete, canEdit = false, currentUserName = '' }: ContasReceberProps) {
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
+  const [contracts, setContracts] = useState<FinanceContract[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<FinanceBankAccountOption[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
   const [contractFilter, setContractFilter] = useState('todos');
@@ -35,6 +51,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
   const [dueDate, setDueDate] = useState('');
   const [category, setCategory] = useState('Serviço'); // Tipo de receita
   const [costCenter, setCostCenter] = useState('');
+  const [contractId, setContractId] = useState('');
   const [contractNumber, setContractNumber] = useState('');
   const [contactName, setContactName] = useState(''); // Cliente
   const [contactDocument, setContactDocument] = useState(''); // CNPJ/CPF
@@ -55,8 +72,45 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
     const unsubscribe = syncFinanceTransactions((data) => {
       setTransactions(data.filter(t => t.type === 'receita'));
     });
-    return () => unsubscribe();
+    const unsubscribeContracts = syncFinanceContracts(setContracts);
+    const unsubscribeBanks = syncFinanceCollection<FinanceBankAccountOption>('financeBankAccounts', setBankAccounts, 1000);
+    return () => {
+      unsubscribe();
+      unsubscribeContracts();
+      unsubscribeBanks();
+    };
   }, []);
+
+  const availableContracts = useMemo(
+    () => contracts.filter(contract => contract.status === 'ativo'),
+    [contracts],
+  );
+
+  const costCenterOptions = useMemo(() => {
+    const values = new Set<string>();
+    contracts.forEach(contract => {
+      if (contract.costCenter?.trim()) values.add(contract.costCenter.trim());
+    });
+    if (costCenter.trim()) values.add(costCenter.trim());
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contracts, costCenter]);
+
+  const bankOptions = useMemo(
+    () => bankAccounts.map(account => ({ id: account.id, label: bankAccountLabel(account) })),
+    [bankAccounts],
+  );
+
+  const handleContractSelection = (nextContractId: string) => {
+    setContractId(nextContractId);
+    const contract = contracts.find(item => item.id === nextContractId);
+    if (!contract) {
+      setContractNumber('');
+      return;
+    }
+    setContractNumber(contract.contractNumber);
+    setContactName(contract.clientName);
+    setCostCenter(contract.costCenter || '');
+  };
 
   const handleDelete = async (tx: FinanceTransaction) => {
     if (!canEdit) return;
@@ -79,6 +133,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
       setDueDate(tx.dueDate);
       setCategory(tx.category);
       setCostCenter(tx.costCenter);
+      setContractId(tx.contractId || contracts.find(contract => contract.contractNumber === tx.contractNumber)?.id || '');
       setContractNumber(tx.contractNumber || '');
       setContactName(tx.contactName);
       setContactDocument(tx.contactDocument);
@@ -95,6 +150,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
       setDueDate(financeTodayLocal());
       setCategory('Serviço');
       setCostCenter('');
+      setContractId('');
       setContractNumber('');
       setContactName('');
       setContactDocument('');
@@ -133,7 +189,9 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
         documentNumber,
         paymentMethod,
         bankAccount,
+        contractId: contractId || '',
         contractNumber,
+        contractClientName: contracts.find(contract => contract.id === contractId)?.clientName || contactName,
         createdBy: selectedTx?.createdBy || currentUserName || 'Usuário autenticado',
         notes
       };
@@ -372,11 +430,18 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Contrato Vinculado *</label>
-                  <input type="text" required value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="CT-2025-01" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                  <select required value={contractId} onChange={(e) => handleContractSelection(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                    <option value="">Selecione um contrato cadastrado...</option>
+                    {contractId && !availableContracts.some(contract => contract.id === contractId) && <option value={contractId}>{contractNumber || 'Contrato legado/inativo'}</option>}
+                    {availableContracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contractNumber} — {contract.clientName}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Centro de Custo de Destino *</label>
-                  <input type="text" required value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="Centro de custo real do lançamento" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                  <select required value={costCenter} onChange={(e) => setCostCenter(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                    <option value="">Selecione um centro de custo cadastrado...</option>
+                    {costCenterOptions.map(center => <option key={center} value={center}>{center}</option>)}
+                  </select>
                 </div>
               </div>
 
@@ -413,6 +478,15 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
                     <option value="Depósito">Depósito Identificado</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Conta Bancária Prevista para Recebimento</label>
+                <select value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                  <option value="">Selecione uma conta cadastrada...</option>
+                  {bankAccount && !bankOptions.some(option => option.label === bankAccount) && <option value={bankAccount}>{bankAccount} (legado)</option>}
+                  {bankOptions.map(option => <option key={option.id} value={option.label}>{option.label}</option>)}
+                </select>
               </div>
 
               <div>
@@ -478,7 +552,11 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Conta Bancária de Entrada *</label>
-                <input type="text" required value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} placeholder="Conta bancária de entrada" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                <select required value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                  <option value="">Selecione uma conta cadastrada...</option>
+                  {bajaBankAccount && !bankOptions.some(option => option.label === bajaBankAccount) && <option value={bajaBankAccount}>{bajaBankAccount} (legado)</option>}
+                  {bankOptions.map(option => <option key={option.id} value={option.label}>{option.label}</option>)}
+                </select>
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end space-x-2">

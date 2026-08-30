@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, Check, Edit3, Plus, Search, ThumbsDown, ThumbsUp, X } from 'lucide-react';
-import { FinanceOperation, FinanceOperationKind, FinanceTransaction } from '../../types';
-import { archiveFinanceOperation, createFinanceOperation, decideFinanceOperation, syncFinanceOperations, syncFinanceTransactions, updateFinanceOperationRecord } from '../../lib/firebase';
+import { FinanceContract, FinanceOperation, FinanceOperationKind, FinanceTransaction } from '../../types';
+import { archiveFinanceOperation, createFinanceOperation, decideFinanceOperation, syncFinanceContracts, syncFinanceOperations, syncFinanceTransactions, updateFinanceOperationRecord } from '../../lib/firebase';
 import FinanceOperationSpreadsheetActions from './FinanceOperationSpreadsheetActions';
 import { financeFormatDatePt, financeMonthLocal, financeTodayLocal, financeYearLocal } from './finance-date';
 
@@ -30,12 +30,32 @@ const openOf = (item: FinanceTransaction) => Math.max(0, Number.isFinite(Number(
 const today = financeTodayLocal;
 const month = financeMonthLocal;
 
+const clampCardDay = (value: unknown, fallback: number) => {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(31, parsed)) : fallback;
+};
+
+const cardInvoiceDueDate = (purchaseDate: string, closingDayInput: unknown, dueDayInput: unknown): string => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate || '')) return '';
+  const [year, month, day] = purchaseDate.split('-').map(Number);
+  const closingDay = clampCardDay(closingDayInput, 1);
+  const dueDay = clampCardDay(dueDayInput, 10);
+  const closingMonthOffset = day > closingDay ? 1 : 0;
+  const closingMonth = new Date(Date.UTC(year, month - 1 + closingMonthOffset, 1, 12));
+  const dueMonthOffset = dueDay > closingDay ? 0 : 1;
+  const dueMonth = new Date(Date.UTC(closingMonth.getUTCFullYear(), closingMonth.getUTCMonth() + dueMonthOffset, 1, 12));
+  const lastDay = new Date(Date.UTC(dueMonth.getUTCFullYear(), dueMonth.getUTCMonth() + 1, 0, 12)).getUTCDate();
+  dueMonth.setUTCDate(Math.min(dueDay, lastDay));
+  return dueMonth.toISOString().slice(0, 10);
+};
+
+
 const defaultForm = (kind: FinanceOperationKind): Record<string, any> => {
   const base = { title: '', description: '', amount: '', date: today(), dueDate: today(), costCenter: 'Administrativo', category: '' };
   if (kind === 'orcamento') { const businessYear = financeYearLocal(); return { ...base, amount: '', startDate: `${businessYear}-01-01`, endDate: `${businessYear}-12-31`, category: 'Geral' }; }
   if (kind === 'emprestimo') return { ...base, creditor: '', loanType: 'Capital de Giro', interestRate: '1.20', installments: '12', dueDay: '10' };
   if (kind === 'cartao') return { ...base, holder: '', role: '', last4: '', limit: '', closingDay: '2', dueDay: '10' };
-  if (kind === 'despesa_cartao') return { ...base, cardId: '', cardLast4: '', establishment: '', receiptAttached: false, category: 'Despesas de Cartão' };
+  if (kind === 'despesa_cartao') return { ...base, costCenter: '', cardId: '', cardLast4: '', establishment: '', receiptAttached: false, category: 'Despesas de Cartão' };
   if (kind === 'reembolso') return { ...base, employee: '', reimbursementType: 'reembolso', purpose: '', category: 'Reembolsos' };
   if (kind === 'custo_pessoal') return { ...base, employee: 'Equipe', competence: month(), baseSalary: '', charges: '', benefits: '', category: 'Custos de Pessoal' };
   if (kind === 'rateio') return { ...base, ruleName: '', sourceCostCenter: 'Administrativo', target1: '', percent1: '', target2: '', percent2: '', target3: '', percent3: '', target4: '', percent4: '', target5: '', percent5: '' };
@@ -56,6 +76,7 @@ const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2
 export default function FinanceOperationRegistry({ kinds, defaultKind, canEdit = false }: Props) {
   const [operations, setOperations] = useState<FinanceOperation[]>([]);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
+  const [contracts, setContracts] = useState<FinanceContract[]>([]);
   const [kind, setKind] = useState<FinanceOperationKind>(defaultKind);
   const [query, setQuery] = useState('');
   const [form, setForm] = useState<Record<string, any>>(() => defaultForm(defaultKind));
@@ -66,7 +87,8 @@ export default function FinanceOperationRegistry({ kinds, defaultKind, canEdit =
   useEffect(() => {
     const unsubOps = syncFinanceOperations(setOperations);
     const unsubTx = syncFinanceTransactions(setTransactions);
-    return () => { unsubOps(); unsubTx(); };
+    const unsubContracts = syncFinanceContracts(setContracts);
+    return () => { unsubOps(); unsubTx(); unsubContracts(); };
   }, []);
 
   useEffect(() => {
@@ -75,6 +97,14 @@ export default function FinanceOperationRegistry({ kinds, defaultKind, canEdit =
 
   const cards = useMemo(() => operations.filter(item => item.kind === kind && `${item.title} ${item.description || ''} ${item.costCenter || ''} ${item.contactName || ''}`.toLowerCase().includes(query.toLowerCase())), [operations, kind, query]);
   const cardsOnly = operations.filter(item => item.kind === 'cartao' && item.status !== 'inativo');
+  const costCenterOptions = useMemo(() => {
+    const values = new Set<string>();
+    contracts.forEach(contract => {
+      if (contract.costCenter?.trim()) values.add(contract.costCenter.trim());
+    });
+    if (form.costCenter?.trim()) values.add(String(form.costCenter).trim());
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contracts, form.costCenter]);
 
   const linkedTransactions = (operation: FinanceOperation) => transactions.filter(tx => Array.isArray(operation.financeTransactionIds) && operation.financeTransactionIds.includes(tx.id));
   const displayStatus = (operation: FinanceOperation) => {
@@ -127,7 +157,7 @@ export default function FinanceOperationRegistry({ kinds, defaultKind, canEdit =
       startDate: operation.date, endDate: operation.dueDate,
       creditor: d.creditor, loanType: d.loanType, interestRate: d.interestRate, installments: d.installments, dueDay: d.dueDay,
       holder: d.holder, role: d.role, last4: d.last4, limit: operation.amount, closingDay: d.closingDay,
-      cardId: d.cardId, cardLast4: d.cardLast4, establishment: d.establishment, receiptAttached: d.receiptAttached,
+      cardId: d.cardId, cardLast4: d.cardLast4, establishment: d.establishment, receiptAttached: d.receiptAttached, cardClosingDay: d.cardClosingDay, cardDueDay: d.cardDueDay,
       employee: d.employee, reimbursementType: d.reimbursementType, purpose: d.purpose, competence: d.competence, baseSalary: d.baseSalary, charges: d.charges, benefits: d.benefits,
       ruleName: operation.title, sourceCostCenter: d.sourceCostCenter,
       assetName: d.assetName, salvageValue: d.salvageValue, lifeMonths: d.lifeMonths, supplier: d.supplier, createExpense: d.createExpense,
@@ -142,7 +172,7 @@ export default function FinanceOperationRegistry({ kinds, defaultKind, canEdit =
     if (kind === 'orcamento') return { ...common, amount: Number(form.amount || 0), date: form.startDate, dueDate: form.endDate, details: { startDate: form.startDate, endDate: form.endDate } };
     if (kind === 'emprestimo') return { ...common, contactName: form.creditor, details: { creditor: form.creditor, loanType: form.loanType, interestRate: Number(form.interestRate || 0), installments: Number(form.installments || 0), dueDay: Number(form.dueDay || 0) } };
     if (kind === 'cartao') return { ...common, amount: Number(form.limit || 0), details: { holder: form.holder, role: form.role, last4: String(form.last4 || '').replace(/\D/g, '').slice(-4), closingDay: Number(form.closingDay || 0), dueDay: Number(form.dueDay || 0) } };
-    if (kind === 'despesa_cartao') return { ...common, contactName: form.establishment, details: { cardId: form.cardId, cardLast4: form.cardLast4, establishment: form.establishment, receiptAttached: !!form.receiptAttached } };
+    if (kind === 'despesa_cartao') return { ...common, contactName: form.establishment, details: { cardId: form.cardId, cardLast4: form.cardLast4, establishment: form.establishment, receiptAttached: !!form.receiptAttached, cardClosingDay: Number(form.cardClosingDay || 0), cardDueDay: Number(form.cardDueDay || 0) } };
     if (kind === 'reembolso') return { ...common, contactName: form.employee, details: { employee: form.employee, reimbursementType: form.reimbursementType, purpose: form.purpose } };
     if (kind === 'custo_pessoal') {
       const total = Number(form.amount || 0) || Number(form.baseSalary || 0) + Number(form.charges || 0) + Number(form.benefits || 0);
@@ -219,7 +249,7 @@ export default function FinanceOperationRegistry({ kinds, defaultKind, canEdit =
               {kind === 'orcamento' && <><Field label="Centro de custo"><input className={inputClass} value={form.costCenter} onChange={e => setForm({ ...form, costCenter: e.target.value })} required /></Field><Field label="Categoria"><input className={inputClass} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} required /></Field><Field label="Valor orçado"><input className={inputClass} type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></Field><div /><Field label="Início"><input className={inputClass} type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} required /></Field><Field label="Fim"><input className={inputClass} type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} required /></Field></>}
               {kind === 'emprestimo' && <><Field label="Credor"><input className={inputClass} value={form.creditor} onChange={e => setForm({ ...form, creditor: e.target.value })} required /></Field><Field label="Tipo"><input className={inputClass} value={form.loanType} onChange={e => setForm({ ...form, loanType: e.target.value })} /></Field><Field label="Valor principal"><input className={inputClass} type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></Field><Field label="Juros ao mês (%)"><input className={inputClass} type="number" min="0" step="0.0001" value={form.interestRate} onChange={e => setForm({ ...form, interestRate: e.target.value })} required /></Field><Field label="Parcelas"><input className={inputClass} type="number" min="1" max="120" value={form.installments} onChange={e => setForm({ ...form, installments: e.target.value })} required /></Field><Field label="Data da contratação"><input className={inputClass} type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required /></Field><Field label="Dia do vencimento"><input className={inputClass} type="number" min="1" max="31" value={form.dueDay} onChange={e => setForm({ ...form, dueDay: e.target.value })} required /></Field><Field label="Centro de custo"><input className={inputClass} value={form.costCenter} onChange={e => setForm({ ...form, costCenter: e.target.value })} /></Field></>}
               {kind === 'cartao' && <><Field label="Portador"><input className={inputClass} value={form.holder} onChange={e => setForm({ ...form, holder: e.target.value })} required /></Field><Field label="Cargo"><input className={inputClass} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} /></Field><Field label="Últimos 4 dígitos" hint="Nunca cadastre o número completo"><input className={inputClass} maxLength={4} value={form.last4} onChange={e => setForm({ ...form, last4: e.target.value.replace(/\D/g, '').slice(0, 4) })} required /></Field><Field label="Limite"><input className={inputClass} type="number" min="0.01" step="0.01" value={form.limit} onChange={e => setForm({ ...form, limit: e.target.value })} required /></Field><Field label="Dia fechamento"><input className={inputClass} type="number" min="1" max="31" value={form.closingDay} onChange={e => setForm({ ...form, closingDay: e.target.value })} /></Field><Field label="Dia vencimento"><input className={inputClass} type="number" min="1" max="31" value={form.dueDay} onChange={e => setForm({ ...form, dueDay: e.target.value })} /></Field></>}
-              {kind === 'despesa_cartao' && <><Field label="Cartão"><select className={inputClass} value={form.cardId} onChange={e => { const card = cardsOnly.find(item => item.id === e.target.value); setForm({ ...form, cardId: e.target.value, cardLast4: card?.details?.last4 || '' }); }} required><option value="">Selecione...</option>{cardsOnly.map(card => <option key={card.id} value={card.id}>{card.title}</option>)}</select></Field><Field label="Estabelecimento"><input className={inputClass} value={form.establishment} onChange={e => setForm({ ...form, establishment: e.target.value })} required /></Field><Field label="Valor"><input className={inputClass} type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></Field><Field label="Data da compra"><input className={inputClass} type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required /></Field><Field label="Vencimento da fatura"><input className={inputClass} type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} required /></Field><Field label="Centro de custo"><input className={inputClass} value={form.costCenter} onChange={e => setForm({ ...form, costCenter: e.target.value })} /></Field><Field label="Categoria"><input className={inputClass} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></Field><label className="flex items-center gap-2 self-end rounded-lg border border-slate-200 p-3 text-sm"><input type="checkbox" checked={!!form.receiptAttached} onChange={e => setForm({ ...form, receiptAttached: e.target.checked })} /> Comprovante já recebido</label></>}
+              {kind === 'despesa_cartao' && <><Field label="Cartão"><select className={inputClass} value={form.cardId} onChange={e => { const card = cardsOnly.find(item => item.id === e.target.value); const closingDay = Number(card?.details?.closingDay || 0); const dueDay = Number(card?.details?.dueDay || 0); setForm({ ...form, cardId: e.target.value, cardLast4: card?.details?.last4 || '', cardClosingDay: closingDay, cardDueDay: dueDay, dueDate: cardInvoiceDueDate(form.date, closingDay, dueDay) }); }} required><option value="">Selecione...</option>{cardsOnly.map(card => <option key={card.id} value={card.id}>{card.title}</option>)}</select></Field><Field label="Estabelecimento"><input className={inputClass} value={form.establishment} onChange={e => setForm({ ...form, establishment: e.target.value })} required /></Field><Field label="Valor"><input className={inputClass} type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></Field><Field label="Data da compra"><input className={inputClass} type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value, dueDate: cardInvoiceDueDate(e.target.value, form.cardClosingDay, form.cardDueDay) })} required /></Field><Field label="Vencimento da fatura" hint="Calculado automaticamente pelo fechamento e vencimento cadastrados no cartão"><input className={`${inputClass} bg-slate-50`} type="date" value={form.dueDate || ''} readOnly required /></Field><Field label="Centro de custo"><select className={inputClass} value={form.costCenter} onChange={e => setForm({ ...form, costCenter: e.target.value })} required><option value="">Selecione um centro de custo cadastrado...</option>{costCenterOptions.map(center => <option key={center} value={center}>{center}</option>)}</select></Field><Field label="Categoria"><input className={inputClass} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></Field><label className="flex items-center gap-2 self-end rounded-lg border border-slate-200 p-3 text-sm"><input type="checkbox" checked={!!form.receiptAttached} onChange={e => setForm({ ...form, receiptAttached: e.target.checked })} /> Comprovante já recebido</label></>}
               {kind === 'reembolso' && <><Field label="Colaborador"><input className={inputClass} value={form.employee} onChange={e => setForm({ ...form, employee: e.target.value })} required /></Field><Field label="Tipo"><select className={inputClass} value={form.reimbursementType} onChange={e => setForm({ ...form, reimbursementType: e.target.value })}><option value="reembolso">Reembolso</option><option value="adiantamento">Adiantamento</option></select></Field><Field label="Finalidade"><input className={inputClass} value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} required /></Field><Field label="Valor"><input className={inputClass} type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></Field><Field label="Data solicitação"><input className={inputClass} type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required /></Field><Field label="Data prevista para pagamento"><input className={inputClass} type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} required /></Field><Field label="Centro de custo"><input className={inputClass} value={form.costCenter} onChange={e => setForm({ ...form, costCenter: e.target.value })} /></Field></>}
               {kind === 'custo_pessoal' && <><Field label="Colaborador ou grupo"><input className={inputClass} value={form.employee} onChange={e => setForm({ ...form, employee: e.target.value })} /></Field><Field label="Competência"><input className={inputClass} type="month" value={form.competence} onChange={e => setForm({ ...form, competence: e.target.value })} required /></Field><Field label="Salário / base"><input className={inputClass} type="number" step="0.01" value={form.baseSalary} onChange={e => setForm({ ...form, baseSalary: e.target.value })} /></Field><Field label="Encargos"><input className={inputClass} type="number" step="0.01" value={form.charges} onChange={e => setForm({ ...form, charges: e.target.value })} /></Field><Field label="Benefícios"><input className={inputClass} type="number" step="0.01" value={form.benefits} onChange={e => setForm({ ...form, benefits: e.target.value })} /></Field><Field label="Valor total (opcional)"><input className={inputClass} type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></Field><Field label="Vencimento"><input className={inputClass} type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} required /></Field><Field label="Centro de custo"><input className={inputClass} value={form.costCenter} onChange={e => setForm({ ...form, costCenter: e.target.value })} /></Field></>}
               {kind === 'rateio' && <><Field label="Nome da regra"><input className={inputClass} value={form.ruleName} onChange={e => setForm({ ...form, ruleName: e.target.value })} required /></Field><Field label="Centro de custo de origem"><input className={inputClass} value={form.sourceCostCenter} onChange={e => setForm({ ...form, sourceCostCenter: e.target.value })} required /></Field>{Array.from({ length: 5 }, (_, i) => <React.Fragment key={i}><Field label={`Destino ${i + 1}`}><input className={inputClass} value={form[`target${i + 1}`]} onChange={e => setForm({ ...form, [`target${i + 1}`]: e.target.value })} /></Field><Field label={`Percentual ${i + 1}`}><input className={inputClass} type="number" min="0" max="100" step="0.01" value={form[`percent${i + 1}`]} onChange={e => setForm({ ...form, [`percent${i + 1}`]: e.target.value })} /></Field></React.Fragment>)}</>}

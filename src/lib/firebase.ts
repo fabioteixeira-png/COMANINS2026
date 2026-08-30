@@ -226,8 +226,10 @@ async function archiveCriticalRecord(collectionName: string, recordId: string): 
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (payload?.error === 'ADMIN_REQUIRED') throw new Error('Somente o perfil Administrador pode excluir ou arquivar registros financeiros.');
     if (payload?.error === 'FORBIDDEN') throw new Error('Seu perfil não possui permissão para arquivar este registro.');
-    throw new Error(payload?.error === 'RECORD_NOT_FOUND' ? 'Registro não encontrado.' : 'Não foi possível arquivar o registro.');
+    if (payload?.error === 'RECORD_NOT_FOUND') throw new Error('Registro não encontrado.');
+    throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o registro.');
   }
 }
 
@@ -2992,20 +2994,20 @@ export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurem
 
 export const addFinanceMeasurement = async (measurement: Omit<FinanceMeasurement, 'id' | 'createdAt' | 'updatedAt'>) => {
   const now = new Date().toISOString();
-  const docRef = await addDoc(collection(db, 'financeMeasurements'), {
+  const docRef = await addDoc(collection(db, 'financeMeasurements'), stripUndefinedDeep({
     ...measurement,
     createdAt: now,
     updatedAt: now,
-  });
+  }));
   return docRef.id;
 };
 
 export const updateFinanceMeasurement = async (id: string, updates: Partial<FinanceMeasurement>) => {
   const docRef = doc(db, 'financeMeasurements', id);
-  await updateDoc(docRef, {
+  await updateDoc(docRef, stripUndefinedDeep({
     ...updates,
     updatedAt: new Date().toISOString(),
-  });
+  }));
 };
 
 export const deleteFinanceMeasurement = async (id: string) => {

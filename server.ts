@@ -1480,6 +1480,22 @@ const financeAddMonths = (value: string, months: number, preferredDay?: number):
   return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), day, 12)).toISOString().slice(0, 10);
 };
 
+
+const financeCardInvoiceDueDate = (purchaseDate: string, closingDayInput: unknown, dueDayInput: unknown): string => {
+  const normalized = normalizeFinanceDate(purchaseDate);
+  if (!normalized) return '';
+  const source = new Date(`${normalized}T12:00:00.000Z`);
+  const closingDay = Math.max(1, Math.min(31, Math.floor(Number(closingDayInput || 0) || 1)));
+  const dueDay = Math.max(1, Math.min(31, Math.floor(Number(dueDayInput || 0) || 10)));
+  const closingMonthOffset = source.getUTCDate() > closingDay ? 1 : 0;
+  const closingMonth = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + closingMonthOffset, 1, 12));
+  const dueMonthOffset = dueDay > closingDay ? 0 : 1;
+  const dueMonth = new Date(Date.UTC(closingMonth.getUTCFullYear(), closingMonth.getUTCMonth() + dueMonthOffset, 1, 12));
+  const lastDay = new Date(Date.UTC(dueMonth.getUTCFullYear(), dueMonth.getUTCMonth() + 1, 0, 12)).getUTCDate();
+  dueMonth.setUTCDate(Math.min(dueDay, lastDay));
+  return dueMonth.toISOString().slice(0, 10);
+};
+
 const normalizeFinanceOperationKind = (value: unknown): string => {
   const kind = asLimitedString(value, 40).toLowerCase();
   return FINANCE_OPERATION_KINDS.has(kind) ? kind : '';
@@ -1561,13 +1577,20 @@ const normalizeFinanceOperationInput = (raw: any, existing?: any): { data?: Reco
     const cardLast4 = asLimitedString(mergedDetails.cardLast4, 4).replace(/\D/g, '').slice(-4);
     const establishment = asLimitedString(mergedDetails.establishment || contactName, 240);
     const receiptAttached = mergedDetails.receiptAttached === true || String(mergedDetails.receiptAttached).toLowerCase() === 'sim';
+    const cardClosingDayRaw = Number(mergedDetails.cardClosingDay || mergedDetails.closingDay || 0);
+    const cardDueDayRaw = Number(mergedDetails.cardDueDay || mergedDetails.dueDay || 0);
+    const cardClosingDay = Number.isFinite(cardClosingDayRaw) && cardClosingDayRaw > 0 ? Math.max(1, Math.min(31, Math.floor(cardClosingDayRaw))) : 0;
+    const cardDueDay = Number.isFinite(cardDueDayRaw) && cardDueDayRaw > 0 ? Math.max(1, Math.min(31, Math.floor(cardDueDayRaw))) : 0;
+    if (date && cardClosingDay && cardDueDay) {
+      dueDate = financeCardInvoiceDueDate(date, cardClosingDay, cardDueDay);
+    }
     if (!establishment || amount === null || amount <= 0 || !date || !dueDate || (!cardId && cardLast4.length !== 4)) return { error: 'Cartão, estabelecimento, valor, data e vencimento da fatura são obrigatórios.' };
     title = title || establishment;
     category = category || 'Despesas de Cartão';
     contactName = establishment;
     status = 'registrado';
     approvalStatus = 'nao_aplicavel';
-    details = { cardId, cardLast4, establishment, receiptAttached };
+    details = { cardId, cardLast4, establishment, receiptAttached, ...(cardClosingDay ? { cardClosingDay } : {}), ...(cardDueDay ? { cardDueDay } : {}) };
   } else if (kind === 'reembolso') {
     const employee = asLimitedString(mergedDetails.employee || contactName, 180);
     const purpose = asLimitedString(mergedDetails.purpose || description, 600);
@@ -4028,11 +4051,20 @@ app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, wr
   const config = ARCHIVABLE_COLLECTIONS[collectionName];
   if (!config || !recordId) return res.status(400).json({ error: 'INVALID_ARCHIVE_TARGET' });
 
-  const allowed = isAdministratorProfile(req.user) ||
+  let freshProfile: any = null;
+  try {
+    freshProfile = await findPortalUserForAuth(req.user);
+  } catch (error) {
+    console.warn('Could not refresh archive authorization profile:', error);
+  }
+  const isFreshAdministrator = isAdministratorProfile(freshProfile || req.user);
+  const allowed = isFreshAdministrator ||
     (config.area === 'rh' && isRhEditor(req.user)) ||
     (config.area === 'health' && userCanEditModule(req.user as any, 'health_programs')) ||
-    (config.area === 'payslip' && (isRhEditor(req.user) || isFinanceEditor(req.user))) ||
-    (config.area === 'finance' && isFinanceEditor(req.user));
+    (config.area === 'payslip' && (isRhEditor(req.user) || isFinanceEditor(req.user)));
+  // Exclusões/arquivamentos do Financeiro exigem Administrador, inclusive quando
+  // o usuário possui permissão de edição financeira.
+  if (config.area === 'finance' && !isFreshAdministrator) return res.status(403).json({ error: 'ADMIN_REQUIRED' });
   if (!allowed) return res.status(403).json({ error: 'FORBIDDEN' });
 
   try {

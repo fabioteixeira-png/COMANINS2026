@@ -1,14 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Search, Filter, Edit, Trash2, CheckCircle, Clock, AlertCircle,
   X, Landmark, DollarSign, Eye, CreditCard
 } from 'lucide-react';
-import { FinanceDocumentAttachment, FinanceTransaction } from '../../types';
-import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction, uploadCorporateFile } from '../../lib/firebase';
+import { FinanceContract, FinanceDocumentAttachment, FinanceTransaction } from '../../types';
+import { syncFinanceTransactions, deleteFinanceTransaction, addFinanceTransaction, updateFinanceTransaction, settleFinanceTransaction, uploadCorporateFile, syncFinanceContracts, syncFinanceCollection } from '../../lib/firebase';
 import FinanceSpreadsheetActions from './FinanceSpreadsheetActions';
 import FinanceAttachmentField from './FinanceAttachmentField';
 import { financeFormatDatePt, financeTodayLocal } from './finance-date';
 import FinanceTransactionDetailsModal from './FinanceTransactionDetailsModal';
+
+
+interface FinanceBankAccountOption {
+  id: string;
+  bank: string;
+  agency?: string;
+  account: string;
+  type?: string;
+}
+
+const bankAccountLabel = (account: FinanceBankAccountOption) =>
+  [account.bank, account.agency ? `Ag. ${account.agency}` : '', account.account ? `C/C ${account.account}` : '']
+    .filter(Boolean)
+    .join(' • ');
 
 interface ContasPagarProps {
   requestAdminDelete?: (type: string, id: string, name: string) => void;
@@ -18,6 +32,8 @@ interface ContasPagarProps {
 
 export default function ContasPagar({ requestAdminDelete, canEdit = false, currentUserName = '' }: ContasPagarProps) {
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
+  const [contracts, setContracts] = useState<FinanceContract[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<FinanceBankAccountOption[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
   const [costCenterFilter, setCostCenterFilter] = useState('todos');
@@ -34,7 +50,8 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
   const [transactionDate, setTransactionDate] = useState(financeTodayLocal());
   const [dueDate, setDueDate] = useState('');
   const [category, setCategory] = useState('Pessoal');
-  const [costCenter, setCostCenter] = useState('Sede (Corporativo)');
+  const [costCenter, setCostCenter] = useState('');
+  const [contractId, setContractId] = useState('');
   const [contactName, setContactName] = useState('');
   const [contactDocument, setContactDocument] = useState('');
   const [documentNumber, setDocumentNumber] = useState('');
@@ -54,8 +71,40 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
     const unsubscribe = syncFinanceTransactions((data) => {
       setTransactions(data.filter(t => t.type === 'despesa'));
     });
-    return () => unsubscribe();
+    const unsubscribeContracts = syncFinanceContracts(setContracts);
+    const unsubscribeBanks = syncFinanceCollection<FinanceBankAccountOption>('financeBankAccounts', setBankAccounts, 1000);
+    return () => {
+      unsubscribe();
+      unsubscribeContracts();
+      unsubscribeBanks();
+    };
   }, []);
+
+  const availableContracts = useMemo(
+    () => contracts.filter(contract => contract.status === 'ativo'),
+    [contracts],
+  );
+
+  const costCenterOptions = useMemo(() => {
+    const values = new Set<string>();
+    contracts.forEach(contract => {
+      if (contract.costCenter?.trim()) values.add(contract.costCenter.trim());
+    });
+    if (costCenter.trim()) values.add(costCenter.trim());
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contracts, costCenter]);
+
+  const bankOptions = useMemo(
+    () => bankAccounts.map(account => ({ id: account.id, label: bankAccountLabel(account) })),
+    [bankAccounts],
+  );
+
+  const handleContractSelection = (nextContractId: string) => {
+    setContractId(nextContractId);
+    if (!nextContractId) return;
+    const contract = contracts.find(item => item.id === nextContractId);
+    if (contract?.costCenter) setCostCenter(contract.costCenter);
+  };
 
   const handleDelete = async (tx: FinanceTransaction) => {
     if (!canEdit) return;
@@ -78,6 +127,7 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
       setDueDate(tx.dueDate);
       setCategory(tx.category);
       setCostCenter(tx.costCenter);
+      setContractId(tx.contractId || contracts.find(contract => contract.contractNumber === tx.contractNumber)?.id || '');
       setContactName(tx.contactName);
       setContactDocument(tx.contactDocument);
       setDocumentNumber(tx.documentNumber);
@@ -92,7 +142,8 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
       setTransactionDate(financeTodayLocal());
       setDueDate(financeTodayLocal());
       setCategory('Sede');
-      setCostCenter('Sede (Corporativo)');
+      setCostCenter('');
+      setContractId('');
       setContactName('');
       setContactDocument('');
       setDocumentNumber('');
@@ -121,6 +172,9 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
         status: selectedTx ? selectedTx.status : 'pendente',
         category,
         costCenter,
+        contractId: contractId || '',
+        contractNumber: contracts.find(contract => contract.id === contractId)?.contractNumber || '',
+        contractClientName: contracts.find(contract => contract.id === contractId)?.clientName || '',
         contactName,
         contactDocument,
         documentNumber,
@@ -361,9 +415,22 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Centro de Custo de Alocação *</label>
-                <input type="text" required value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="Ex.: Sede, Laboratório, Contrato Acelen" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Contrato Vinculado</label>
+                  <select value={contractId} onChange={(e) => handleContractSelection(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                    <option value="">Sem contrato / despesa corporativa</option>
+                    {availableContracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contractNumber} — {contract.clientName}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Centro de Custo de Alocação *</label>
+                  <select required value={costCenter} onChange={(e) => setCostCenter(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                    <option value="">Selecione um centro de custo cadastrado...</option>
+                    {costCenterOptions.map(center => <option key={center} value={center}>{center}</option>)}
+                  </select>
+                  {costCenterOptions.length === 0 && <p className="mt-1 text-[10px] text-amber-700">Cadastre o centro de custo em Contratos antes de lançar a despesa.</p>}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -398,7 +465,11 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">Conta Bancária de Origem</label>
-                  <input type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Bradesco Sede" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                  <select value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                    <option value="">Selecione uma conta cadastrada...</option>
+                    {bankAccount && !bankOptions.some(option => option.label === bankAccount) && <option value={bankAccount}>{bankAccount} (legado)</option>}
+                    {bankOptions.map(option => <option key={option.id} value={option.label}>{option.label}</option>)}
+                  </select>
                 </div>
               </div>
 
@@ -465,7 +536,11 @@ export default function ContasPagar({ requestAdminDelete, canEdit = false, curre
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Conta Bancária de Saída *</label>
-                <input type="text" required value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} placeholder="Conta bancária utilizada" className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue" />
+                <select required value={bajaBankAccount} onChange={(e) => setBajaBankAccount(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-royal-blue focus:border-royal-blue">
+                  <option value="">Selecione uma conta cadastrada...</option>
+                  {bajaBankAccount && !bankOptions.some(option => option.label === bajaBankAccount) && <option value={bajaBankAccount}>{bajaBankAccount} (legado)</option>}
+                  {bankOptions.map(option => <option key={option.id} value={option.label}>{option.label}</option>)}
+                </select>
               </div>
 
               <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
