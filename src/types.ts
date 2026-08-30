@@ -363,6 +363,7 @@ export interface RentalService {
 export interface RentalAsset {
   id: string;
   assetCode: string;
+  tag?: string;
   description: string;
   brand?: string;
   model?: string;
@@ -388,6 +389,7 @@ export interface RentalAsset {
 export interface RentalContractItem {
   assetId: string;
   assetCode: string;
+  tag?: string;
   description: string;
   brand?: string;
   model?: string;

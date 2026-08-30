@@ -106,15 +106,23 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   const [editingCell, setEditingCell] = useState<{rowId: string, colId: string} | null>(null);
 
   const handleInlineSave = async (record: FieldServiceRecord, colId: string, newVal: string) => {
-    setEditingCell(null);
     if (!canEdit) {
+      setEditingCell(null);
       alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
       return;
     }
-    if (String((record as any)[colId] || '') === newVal) return;
+
+    const previousValue = String((record as any)[colId] || '');
+    if (previousValue === newVal) {
+      setEditingCell(null);
+      return;
+    }
     
     if (colId === 'certificate' && newVal.trim() !== '') {
-      const isDup = records.some(r => r.certificate === newVal && r.id !== record.id);
+      const normalizedCertificate = newVal.trim().toUpperCase();
+      const isDup = records.some(
+        (r) => String(r.certificate || '').trim().toUpperCase() === normalizedCertificate && r.id !== record.id,
+      );
       if (isDup) {
         alert("Erro: Este Certificado já está registrado na planilha!");
         return;
@@ -122,18 +130,31 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
 
     if (colId === 'tag' && newVal.trim() !== '') {
-      const isDup = records.some(r => r.tag === newVal && r.id !== record.id);
+      const normalizedTag = newVal.trim().toUpperCase();
+      const isDup = records.some(
+        (r) => String(r.tag || '').trim().toUpperCase() === normalizedTag && r.id !== record.id,
+      );
       if (isDup) {
         alert("Erro: Esta TAG já está registrada na planilha!");
         return;
       }
     }
 
+    // Atualização otimista: evita a célula voltar visualmente ao valor antigo
+    // enquanto o Firestore confirma a gravação, especialmente no campo Certificado.
+    setRecords((current) => current.map((item) => (
+      item.id === record.id ? { ...item, [colId]: newVal } as FieldServiceRecord : item
+    )));
+    setEditingCell(null);
+
     try {
       await updateFieldServiceRecord(record.id, { [colId]: newVal });
     } catch (e) {
       console.error(e);
-      alert("Erro ao salvar célula.");
+      setRecords((current) => current.map((item) => (
+        item.id === record.id ? { ...item, [colId]: previousValue } as FieldServiceRecord : item
+      )));
+      alert("Erro ao salvar célula. O valor anterior foi restaurado.");
     }
   };
 

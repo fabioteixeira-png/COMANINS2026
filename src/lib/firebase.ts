@@ -2594,6 +2594,8 @@ const rentalApiRequest = async <T = any>(url: string, options: RequestInit = {})
       MODULE_EDIT_DENIED: 'Seu perfil permite apenas visualizar o módulo de Locação.',
       RENTAL_NOT_FOUND: 'Locação não encontrada.',
       RENTAL_ASSET_NOT_AVAILABLE: 'Um ou mais equipamentos selecionados não estão disponíveis.',
+      RENTAL_ASSET_NOT_FOUND: 'Equipamento locável não encontrado.',
+      RENTAL_ASSET_IN_USE: 'Este equipamento está vinculado a uma locação ativa e não pode ser excluído.',
       RENTAL_ASSET_CALIBRATION_EXPIRED: 'Um ou mais manômetros estão com a calibração vencida. Atualize a calibração antes de registrar a saída da locação.',
       RENTAL_NOT_ACTIVE: 'Esta locação não está ativa.',
       RENTAL_ALREADY_DISPATCHED: 'A saída desta locação já foi registrada.',
@@ -2668,6 +2670,7 @@ export const saveRentalAsset = async (asset: Partial<RentalAsset>): Promise<stri
   const existing = await getDoc(refDoc);
   const payload = {
     assetCode: String(asset.assetCode || '').trim(),
+    tag: String(asset.tag || '').trim(),
     description: String(asset.description || 'Manômetro com base').trim(),
     brand: String(asset.brand || '').trim(),
     model: String(asset.model || '').trim(),
@@ -2785,6 +2788,13 @@ export const generateRentalInvoice = async (id: string): Promise<{ invoice: Rent
     body: JSON.stringify({}),
   });
   return { invoice: result.invoice, financeTransactionId: result.financeTransactionId };
+};
+
+export const deleteRentalAsset = async (id: string, reason: string): Promise<void> => {
+  await rentalApiRequest<{ success: true }>(`/api/rentals/assets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason }),
+  });
 };
 
 export const deleteRentalInvoice = async (id: string, reason: string): Promise<{ deletedFinanceTransactionId?: string }> => {

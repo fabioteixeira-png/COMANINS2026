@@ -35,6 +35,7 @@ import type { PortalUser } from '../lib/firebase';
 import { isAdministratorAccess } from '../access-control';
 import {
   createRentalContract,
+  deleteRentalAsset,
   deleteRentalContract,
   deleteRentalInvoice,
   dispatchRentalContract,
@@ -171,6 +172,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
   const [showAssetForm, setShowAssetForm] = useState(false);
   const [assetDraft, setAssetDraft] = useState<Partial<RentalAsset>>({ description: 'Manômetro com base', status: 'disponivel' });
   const [showRentalForm, setShowRentalForm] = useState(false);
+  const [availableAssetSearch, setAvailableAssetSearch] = useState('');
   const [rentalDraft, setRentalDraft] = useState({
     clientId: '',
     startDate: todayIso(),
@@ -214,6 +216,15 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     const due = String(asset.calibrationDueDate || '').slice(0, 10);
     return !due || due >= todayIso();
   }), [assets]);
+  const filteredAvailableAssets = useMemo(() => {
+    const term = normalizeText(availableAssetSearch);
+    if (!term) return availableAssets;
+    return availableAssets.filter((asset) => [
+      asset.tag,
+      asset.calibrationCertificateNumber,
+      asset.assetCode,
+    ].some((value) => normalizeText(value).includes(term)));
+  }, [availableAssets, availableAssetSearch]);
 
   const filteredRentals = useMemo(() => {
     const term = normalizeText(search);
@@ -272,11 +283,11 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     clearMessages();
     if (!ensureEditable()) return;
     if (!String(assetDraft.assetCode || '').trim()) {
-      setError('Informe a identificação/COMA do equipamento locável.');
+      setError('Informe a identificação CM do equipamento locável.');
       return;
     }
     if (assets.some((asset) => normalizeText(asset.assetCode) === normalizeText(assetDraft.assetCode) && asset.id !== assetDraft.id)) {
-      setError('Já existe um equipamento locável com esta identificação/COMA.');
+      setError('Já existe um equipamento locável com esta identificação CM.');
       return;
     }
     setBusy(true);
@@ -432,6 +443,35 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     return reason;
   };
 
+  const removeAsset = async (asset: RentalAsset) => {
+    clearMessages();
+    if (!isAdmin) {
+      setError('Somente o perfil Administrador pode excluir equipamentos locáveis.');
+      return;
+    }
+    if (asset.status === 'locado' || asset.currentRentalId) {
+      setError('Este equipamento está vinculado a uma locação ativa e não pode ser excluído.');
+      return;
+    }
+    const label = asset.assetCode || asset.calibrationCertificateNumber || asset.id;
+    const reason = requireDeletionReason(`o equipamento locável ${label}`);
+    if (!reason) return;
+    setBusy(true);
+    try {
+      await deleteRentalAsset(asset.id, reason);
+      if (assetDraft.id === asset.id) {
+        setAssetDraft({ description: 'Manômetro com base', status: 'disponivel' });
+        setShowAssetForm(false);
+      }
+      setRentalItemDrafts((current) => current.filter((item) => item.assetId !== asset.id));
+      setNotice(`Equipamento locável ${label} excluído pelo Administrador.`);
+    } catch (e: any) {
+      setError(e?.message || 'Não foi possível excluir o equipamento locável.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const removeInvoice = async (invoice: RentalInvoice) => {
     clearMessages();
     if (!isAdmin) {
@@ -567,7 +607,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm" placeholder="Buscar por locação, cliente, CNPJ, PC ou obra..." />
             </div>
-            {canEdit && <button onClick={() => { setShowRentalForm(true); clearMessages(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold flex items-center gap-2"><Plus className="w-4 h-4" /> Nova Locação</button>}
+            {canEdit && <button onClick={() => { setAvailableAssetSearch(''); setShowRentalForm(true); clearMessages(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold flex items-center gap-2"><Plus className="w-4 h-4" /> Nova Locação</button>}
           </div>
 
           {filteredRentals.length === 0 ? (
@@ -632,9 +672,9 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
         <div className="space-y-4">
           <div className="flex justify-between items-center"><div><h3 className="font-extrabold text-slate-900">Equipamentos locáveis</h3><p className="text-xs text-slate-500">Cadastre cada conjunto físico de manômetro + base para rastrear saída, devolução e disponibilidade.</p></div>{canEdit && <button onClick={() => { setAssetDraft({ description: 'Manômetro com base', status: 'disponivel' }); setShowAssetForm(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold flex gap-1 items-center"><Plus className="w-4 h-4" /> Novo Equipamento</button>}</div>
           <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-            <table className="w-full text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3 text-left">Identificação/COMA</th><th className="p-3 text-left">Descrição</th><th className="p-3 text-left">Faixa</th><th className="p-3 text-left">Base</th><th className="p-3 text-left">Calibração</th><th className="p-3 text-left">Status</th><th className="p-3"></th></tr></thead><tbody>{assets.map((asset) => {
+            <table className="w-full text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3 text-left">Identificação / CM</th><th className="p-3 text-left">TAG</th><th className="p-3 text-left">Descrição</th><th className="p-3 text-left">Faixa</th><th className="p-3 text-left">Base</th><th className="p-3 text-left">Certificado / COMA</th><th className="p-3 text-left">Status</th><th className="p-3"></th></tr></thead><tbody>{assets.map((asset) => {
               const calibrationExpired = !!asset.calibrationDueDate && asset.calibrationDueDate < todayIso();
-              return <tr key={asset.id} className="border-t border-slate-100"><td className="p-3 font-mono font-bold">{asset.assetCode}</td><td className="p-3">{asset.description}<div className="text-[10px] text-slate-400">{[asset.brand, asset.model, asset.serialNumber].filter(Boolean).join(' • ')}</div></td><td className="p-3">{rangeText(asset) || '-'}</td><td className="p-3">{asset.baseIdentification || '-'}</td><td className="p-3">{asset.calibrationCertificateNumber || '-'}<div className={`text-[10px] ${calibrationExpired ? 'text-red-600 font-bold' : 'text-slate-400'}`}>{asset.calibrationDueDate ? `${calibrationExpired ? 'VENCIDA' : 'Validade'} ${formatDate(asset.calibrationDueDate)}` : 'Validade não informada'}</div></td><td className="p-3"><span className="px-2 py-1 rounded-full bg-slate-100 font-bold">{asset.status}</span></td><td className="p-3 text-right">{canEdit && asset.status !== 'locado' && <button onClick={() => { setAssetDraft(asset); setShowAssetForm(true); }} className="p-2 hover:bg-slate-100 rounded"><Pencil className="w-4 h-4" /></button>}</td></tr>;
+              return <tr key={asset.id} className="border-t border-slate-100"><td className="p-3 font-mono font-bold">{asset.assetCode}</td><td className="p-3 font-mono">{asset.tag || '-'}</td><td className="p-3">{asset.description}<div className="text-[10px] text-slate-400">{[asset.brand, asset.model, asset.serialNumber].filter(Boolean).join(' • ')}</div></td><td className="p-3">{rangeText(asset) || '-'}</td><td className="p-3">{asset.baseIdentification || '-'}</td><td className="p-3">{asset.calibrationCertificateNumber || '-'}<div className={`text-[10px] ${calibrationExpired ? 'text-red-600 font-bold' : 'text-slate-400'}`}>{asset.calibrationDueDate ? `${calibrationExpired ? 'VENCIDA' : 'Validade'} ${formatDate(asset.calibrationDueDate)}` : 'Validade não informada'}</div></td><td className="p-3"><span className="px-2 py-1 rounded-full bg-slate-100 font-bold">{asset.status}</span></td><td className="p-3 text-right"><div className="inline-flex items-center gap-1">{canEdit && asset.status !== 'locado' && <button onClick={() => { setAssetDraft(asset); setShowAssetForm(true); }} className="p-2 hover:bg-slate-100 rounded" title="Editar equipamento"><Pencil className="w-4 h-4" /></button>}{isAdmin && asset.status !== 'locado' && !asset.currentRentalId && <button onClick={() => removeAsset(asset)} disabled={busy} className="p-2 hover:bg-red-50 text-red-600 rounded disabled:opacity-50" title="Excluir equipamento locável — somente Administrador"><Trash2 className="w-4 h-4" /></button>}</div></td></tr>;
             })}</tbody></table>
           </div>
         </div>
@@ -688,7 +728,8 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
       {showAssetForm && (
         <Modal title={assetDraft.id ? 'Editar Equipamento Locável' : 'Novo Equipamento Locável'} onClose={() => setShowAssetForm(false)} wide>
           <form onSubmit={saveAsset} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-            <Field label="Identificação / COMA *"><input required value={assetDraft.assetCode || ''} onChange={(e) => setAssetDraft({ ...assetDraft, assetCode: e.target.value })} className="input-rental" /></Field>
+            <Field label="Identificação / CM *"><input required value={assetDraft.assetCode || ''} onChange={(e) => setAssetDraft({ ...assetDraft, assetCode: e.target.value })} className="input-rental" placeholder="Ex.: CM-001" /></Field>
+            <Field label="TAG"><input value={assetDraft.tag || ''} onChange={(e) => setAssetDraft({ ...assetDraft, tag: e.target.value })} className="input-rental" placeholder="TAG do equipamento" /></Field>
             <Field label="Descrição"><input value={assetDraft.description || ''} onChange={(e) => setAssetDraft({ ...assetDraft, description: e.target.value })} className="input-rental" /></Field>
             <Field label="Marca"><input value={assetDraft.brand || ''} onChange={(e) => setAssetDraft({ ...assetDraft, brand: e.target.value })} className="input-rental" /></Field>
             <Field label="Modelo"><input value={assetDraft.model || ''} onChange={(e) => setAssetDraft({ ...assetDraft, model: e.target.value })} className="input-rental" /></Field>
@@ -698,7 +739,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             <Field label="Faixa máxima"><input type="number" step="any" value={assetDraft.rangeMax ?? ''} onChange={(e) => setAssetDraft({ ...assetDraft, rangeMax: e.target.value === '' ? undefined : Number(e.target.value) })} className="input-rental" /></Field>
             <Field label="Unidade"><input value={assetDraft.unit || ''} onChange={(e) => setAssetDraft({ ...assetDraft, unit: e.target.value })} className="input-rental" placeholder="bar, kgf/cm²..." /></Field>
             <Field label="Serviço mensal padrão"><select value={assetDraft.defaultServiceId || ''} onChange={(e) => setAssetDraft({ ...assetDraft, defaultServiceId: e.target.value })} className="input-rental"><option value="">Selecione</option>{activeServices.map((service) => <option value={service.id} key={service.id}>{service.name} — {formatCurrency(service.monthlyPrice)}</option>)}</select></Field>
-            <Field label="Certificado de calibração"><input value={assetDraft.calibrationCertificateNumber || ''} onChange={(e) => setAssetDraft({ ...assetDraft, calibrationCertificateNumber: e.target.value })} className="input-rental" /></Field>
+            <Field label="Certificado de calibração / COMA"><input value={assetDraft.calibrationCertificateNumber || ''} onChange={(e) => setAssetDraft({ ...assetDraft, calibrationCertificateNumber: e.target.value })} className="input-rental" /></Field>
             <Field label="Validade da calibração"><input type="date" value={assetDraft.calibrationDueDate || ''} onChange={(e) => setAssetDraft({ ...assetDraft, calibrationDueDate: e.target.value })} className="input-rental" /></Field>
             <Field label="Status"><select value={assetDraft.status || 'disponivel'} disabled={assetDraft.status === 'locado'} onChange={(e) => setAssetDraft({ ...assetDraft, status: e.target.value as RentalAsset['status'] })} className="input-rental"><option value="disponivel">Disponível</option><option value="manutencao">Manutenção</option><option value="inativo">Inativo</option>{assetDraft.status === 'locado' && <option value="locado">Locado</option>}</select></Field>
             <Field label="Observações"><textarea value={assetDraft.notes || ''} onChange={(e) => setAssetDraft({ ...assetDraft, notes: e.target.value })} className="input-rental min-h-20" /></Field>
@@ -717,13 +758,14 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             </div>
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900"><CalendarClock className="w-4 h-4 inline mr-1" /> Cobrança exclusivamente mensal: cada ciclo possui <b>30 dias completos</b>. O sistema não calcula diária, fração ou pró-rata.</div>
             <div>
-              <div className="flex justify-between items-center mb-2"><h4 className="font-bold text-slate-700">Equipamentos disponíveis *</h4><span className="text-xs text-slate-500">{rentalItemDrafts.length} selecionado(s)</span></div>
+              <div className="flex flex-col gap-2 mb-2 sm:flex-row sm:items-center sm:justify-between"><div><h4 className="font-bold text-slate-700">Equipamentos disponíveis *</h4><span className="text-xs text-slate-500">{rentalItemDrafts.length} selecionado(s)</span></div><div className="relative w-full sm:w-80"><Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" /><input value={availableAssetSearch} onChange={(e) => setAvailableAssetSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="Filtrar por TAG ou certificado..." /></div></div>
               <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
-                {availableAssets.map((asset) => {
+                {filteredAvailableAssets.map((asset) => {
                   const selected = rentalItemDrafts.find((item) => item.assetId === asset.id);
-                  return <div key={asset.id} className={`p-3 grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3 ${selected ? 'bg-blue-50' : 'bg-white'}`}><label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" className="mt-1" checked={!!selected} onChange={() => toggleRentalAsset(asset)} /><span><b>{asset.assetCode}</b> — {asset.description}{asset.baseIdentification ? ` / Base ${asset.baseIdentification}` : ''}<span className="block text-[10px] text-slate-500">{rangeText(asset)} {asset.calibrationDueDate ? `• Calibração válida até ${formatDate(asset.calibrationDueDate)}` : ''}</span></span></label>{selected && <select required value={selected.serviceId} onChange={(e) => setRentalItemDrafts((current) => current.map((item) => item.assetId === asset.id ? { ...item, serviceId: e.target.value } : item))} className="input-rental"><option value="">Serviço mensal...</option>{activeServices.map((service) => <option value={service.id} key={service.id}>{service.name} — {formatCurrency(service.monthlyPrice)}</option>)}</select>}</div>;
+                  return <div key={asset.id} className={`p-3 grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3 ${selected ? 'bg-blue-50' : 'bg-white'}`}><label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" className="mt-1" checked={!!selected} onChange={() => toggleRentalAsset(asset)} /><span><b>{asset.assetCode}</b>{asset.tag ? ` • TAG ${asset.tag}` : ''} — {asset.description}{asset.baseIdentification ? ` / Base ${asset.baseIdentification}` : ''}<span className="block text-[10px] text-slate-500">{asset.calibrationCertificateNumber ? `Certificado ${asset.calibrationCertificateNumber} • ` : ''}{rangeText(asset)} {asset.calibrationDueDate ? `• Calibração válida até ${formatDate(asset.calibrationDueDate)}` : ''}</span></span></label>{selected && <select required value={selected.serviceId} onChange={(e) => setRentalItemDrafts((current) => current.map((item) => item.assetId === asset.id ? { ...item, serviceId: e.target.value } : item))} className="input-rental"><option value="">Serviço mensal...</option>{activeServices.map((service) => <option value={service.id} key={service.id}>{service.name} — {formatCurrency(service.monthlyPrice)}</option>)}</select>}</div>;
                 })}
                 {availableAssets.length === 0 && <div className="p-5 text-center text-slate-500 text-xs">Nenhum equipamento disponível com calibração válida. Cadastre/receba a devolução ou atualize a calibração vencida antes da saída.</div>}
+                {availableAssets.length > 0 && filteredAvailableAssets.length === 0 && <div className="p-5 text-center text-slate-500 text-xs">Nenhum equipamento encontrado para a TAG ou certificado informado.</div>}
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -830,7 +872,7 @@ function MovementPrint({ movement, rental, companyData, logoUrl }: { movement: R
     <CompanyHeader companyData={companyData} logoUrl={logoUrl} />
     <div className="border-x border-b border-black p-3 text-center"><h1 className="text-lg font-black uppercase">{isDispatch ? 'COMPROVANTE DE SAÍDA DE MATERIAL LOCADO' : 'COMPROVANTE DE RECEBIMENTO DE MATERIAL DEVOLVIDO'}</h1><div className="text-xs mt-1">Nº {movement.movementNumber} • Locação {movement.rentalNumber}</div></div>
     <div className="border-x border-b border-black p-4 text-sm leading-6"><b>CLIENTE:</b> {movement.clientName}<br /><b>CNPJ:</b> {movement.clientCnpj}<br /><b>ENDEREÇO:</b> {movement.clientAddress || '-'}<br /><b>DATA:</b> {formatDate(movement.date)}</div>
-    <table className="w-full border-collapse text-xs"><thead><tr><th className="border border-black p-2 text-left">Identificação / COMA</th><th className="border border-black p-2 text-left">Material</th><th className="border border-black p-2 text-left">Base</th><th className="border border-black p-2 text-left">Condição</th></tr></thead><tbody>{movement.items.map((item) => <tr key={item.assetId}><td className="border border-black p-2 font-mono font-bold">{item.assetCode}</td><td className="border border-black p-2">{item.description}{item.serialNumber ? ` • Série ${item.serialNumber}` : ''}</td><td className="border border-black p-2">{item.baseIdentification || '-'}</td><td className="border border-black p-2">{item.condition ? item.condition.toUpperCase() : (isDispatch ? 'ENTREGUE' : '-')}{item.notes ? ` — ${item.notes}` : ''}</td></tr>)}</tbody></table>
+    <table className="w-full border-collapse text-xs"><thead><tr><th className="border border-black p-2 text-left">Identificação / CM</th><th className="border border-black p-2 text-left">Material</th><th className="border border-black p-2 text-left">Base</th><th className="border border-black p-2 text-left">Condição</th></tr></thead><tbody>{movement.items.map((item) => <tr key={item.assetId}><td className="border border-black p-2 font-mono font-bold">{item.assetCode}</td><td className="border border-black p-2">{item.description}{item.serialNumber ? ` • Série ${item.serialNumber}` : ''}</td><td className="border border-black p-2">{item.baseIdentification || '-'}</td><td className="border border-black p-2">{item.condition ? item.condition.toUpperCase() : (isDispatch ? 'ENTREGUE' : '-')}{item.notes ? ` — ${item.notes}` : ''}</td></tr>)}</tbody></table>
     <div className="border-x border-b border-black p-4 text-xs min-h-24"><b>OBSERVAÇÕES:</b><br />{movement.notes || (isDispatch ? 'Material entregue para locação mensal em condições de uso, conforme relação acima.' : 'Material recebido e conferido conforme relação acima.')}</div>
     {rental && isDispatch && <div className="border-x border-b border-black p-4 text-xs"><b>Regra comercial:</b> locação em ciclos fixos de 30 dias, sem cobrança diária ou pró-rata. Primeiro vencimento: {formatDate(rental.firstDueDate)}.</div>}
     <div className="grid grid-cols-2 gap-16 mt-24 text-xs text-center"><div className="border-t border-black pt-2"><b>{movement.responsibleComanins}</b><br />Responsável COMANINS</div><div className="border-t border-black pt-2"><b>{movement.responsibleClient}</b><br />Responsável Cliente{movement.responsibleClientDocument ? ` • ${movement.responsibleClientDocument}` : ''}</div></div>

@@ -2442,18 +2442,11 @@
                 </p>
               </div>
               <button
-                onClick={() => {
-                  setSelectedCertificateId("");
-                  setFieldServiceTag("");
-                  setFieldServiceEquip("");
-                  setFieldServiceCertificateContext(null);
-                  setFieldServiceCertificateClientId("");
-                  setActiveTab("instruments");
-                }}
+                onClick={() => closeCertificateView()}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 border border-slate-200 shadow-sm cursor-pointer"
               >
                 <X className="h-4 w-4" />
-                <span>Voltar para Calibração</span>
+                <span>{certificateReturnTab === "field_service" ? "Voltar para Serviço de Campo" : "Voltar para Calibração"}</span>
               </button>
             </div>
 
@@ -2708,16 +2701,9 @@
                             <span>Excluir Calibração</span>
                           </button>
                           <button
-                            onClick={() => {
-                              setSelectedCertificateId("");
-                              setFieldServiceTag("");
-                              setFieldServiceEquip("");
-                              setFieldServiceCertificateContext(null);
-                              setFieldServiceCertificateClientId("");
-                              setActiveTab("instruments");
-                            }}
+                            onClick={() => closeCertificateView()}
                             className="p-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-all flex items-center text-xs font-bold shadow-sm cursor-pointer"
-                            title="Fechar e voltar para Calibração"
+                            title={certificateReturnTab === "field_service" ? "Fechar e voltar para Serviço de Campo" : "Fechar e voltar para Calibração"}
                           >
                             <X className="h-4 w-4" />
                           </button>
@@ -3319,6 +3305,7 @@
                 return;
               }
 
+              setCertificateReturnTab("field_service");
               setSelectedCertificateId(instId);
               setFieldServiceTag(tagData);
               setFieldServiceEquip(equipmentData);

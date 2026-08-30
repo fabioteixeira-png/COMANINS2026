@@ -1972,6 +1972,7 @@ app.post('/api/rentals/contracts', requireAuth, requireInternalAccount, requireE
         return {
           assetId: item.assetId,
           assetCode: asLimitedString(asset.assetCode, 120),
+          tag: asLimitedString(asset.tag, 160),
           description: asLimitedString(asset.description || 'Manômetro com base', 240),
           brand: asLimitedString(asset.brand, 120),
           model: asLimitedString(asset.model, 120),
@@ -2366,6 +2367,61 @@ app.post('/api/rentals/contracts/:id/return', requireAuth, requireInternalAccoun
   }
 });
 
+
+app.delete('/api/rentals/assets/:id', requireAuth, requireInternalAccount, requireAdministratorAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const assetId = asLimitedString(req.params.id, 180);
+  const reason = asLimitedString(req.body?.reason, 1000);
+  if (!assetId) return res.status(400).json({ error: 'INVALID_RENTAL_ASSET' });
+  if (!reason) return res.status(400).json({ error: 'DELETE_REASON_REQUIRED' });
+
+  const assetRef = firestoreDb.collection('rentalAssets').doc(assetId);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const { actorName, actorUid, actorRole } = rentalActor(req);
+  const nowIso = new Date().toISOString();
+
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const assetSnap = await transaction.get(assetRef);
+      if (!assetSnap.exists) {
+        const error: any = new Error('RENTAL_ASSET_NOT_FOUND');
+        error.code = 'RENTAL_ASSET_NOT_FOUND';
+        throw error;
+      }
+      const asset: any = assetSnap.data() || {};
+      if (String(asset.status || '') === 'locado' || asLimitedString(asset.currentRentalId, 180)) {
+        const error: any = new Error('RENTAL_ASSET_IN_USE');
+        error.code = 'RENTAL_ASSET_IN_USE';
+        throw error;
+      }
+
+      transaction.delete(assetRef);
+      transaction.set(auditRef, {
+        action: 'RENTAL_ASSET_DELETED',
+        entityType: 'rentalAsset',
+        entityId: assetId,
+        actorUid, actorName, actorRole,
+        createdAt: nowIso,
+        immutable: true,
+        summary: `Equipamento locável ${asLimitedString(asset.assetCode, 120) || assetId} excluído por administrador`,
+        metadata: {
+          reason,
+          assetCode: asLimitedString(asset.assetCode, 120),
+          tag: asLimitedString(asset.tag, 160),
+          calibrationCertificateNumber: asLimitedString(asset.calibrationCertificateNumber, 180),
+          status: asLimitedString(asset.status, 60),
+        },
+      });
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('RENTAL_ASSET_NOT_FOUND')) return res.status(404).json({ error: 'RENTAL_ASSET_NOT_FOUND' });
+    if (code.includes('RENTAL_ASSET_IN_USE')) return res.status(409).json({ error: 'RENTAL_ASSET_IN_USE' });
+    console.error('Rental asset delete failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
 
 app.delete('/api/rentals/contracts/:id', requireAuth, requireInternalAccount, requireAdministratorAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
