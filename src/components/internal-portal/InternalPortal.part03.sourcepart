@@ -2446,6 +2446,8 @@
                   setSelectedCertificateId("");
                   setFieldServiceTag("");
                   setFieldServiceEquip("");
+                  setFieldServiceCertificateContext(null);
+                  setFieldServiceCertificateClientId("");
                   setActiveTab("instruments");
                 }}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 border border-slate-200 shadow-sm cursor-pointer"
@@ -2463,7 +2465,11 @@
                     const inst = instruments.find(
                       (i) => i.id === selectedCertificateId,
                     );
-                    const client = clients.find((c) => c.id === inst?.clientId);
+                    const inventoryClient = clients.find((c) => c.id === inst?.clientId);
+                    const fieldServiceClient = fieldServiceCertificateClientId
+                      ? clients.find((c) => c.id === fieldServiceCertificateClientId)
+                      : undefined;
+                    const client = fieldServiceClient || inventoryClient;
                     if (!inst) return null;
 
                     const report = [...reports]
@@ -2704,7 +2710,10 @@
                           <button
                             onClick={() => {
                               setSelectedCertificateId("");
-                  setFieldServiceEquip("");
+                              setFieldServiceTag("");
+                              setFieldServiceEquip("");
+                              setFieldServiceCertificateContext(null);
+                              setFieldServiceCertificateClientId("");
                               setActiveTab("instruments");
                             }}
                             className="p-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-all flex items-center text-xs font-bold shadow-sm cursor-pointer"
@@ -2773,11 +2782,11 @@
                             <div className="pl-4">
                               <p>
                                 <span className="font-bold">Nome:</span>{" "}
-                                {client?.name || "Cliente Padrão"}
+                                {client?.name || (client as any)?.razaoSocial || "Cliente Padrão"}
                               </p>
                               <p>
                                 <span className="font-bold">Endereço:</span>{" "}
-                                {client?.city || "Endereço não informado"}
+                                {getCertificateClientAddress(client)}
                               </p>
                               <p>
                                 <span className="font-bold">Contato:</span>{" "}
@@ -3286,7 +3295,39 @@
         )}
 
         {/* TAB: FINANCEIRO E PROGRAMAS DE SAUDE */}
-        {activeTab === "field_service" && canAccessModule("field_service") && <FieldService canEdit={canEditFieldService} onPrintCertificate={(instId, tagData, equipmentData) => { setSelectedCertificateId(instId); setFieldServiceTag(tagData); setFieldServiceEquip(equipmentData); setActiveTab("certificados"); }} />}
+        {activeTab === "field_service" && canAccessModule("field_service") && (
+          <FieldService
+            canEdit={canEditFieldService}
+            onPrintCertificate={(instId, tagData, equipmentData, context) => {
+              const mappingError = getFieldServiceClientMappingError(context);
+              if (mappingError) {
+                alert(mappingError);
+                return;
+              }
+
+              const instrument = instruments.find((item) => item.id === instId);
+              const resolvedClient = resolveFieldServiceCertificateClient(
+                clients,
+                instrument?.clientId,
+                context,
+              );
+
+              if (resolvedClient.expectedAliases && !resolvedClient.client) {
+                alert(
+                  `Não foi encontrado no Cadastro de Clientes o cliente necessário para este certificado: ${resolvedClient.expectedAliases[0]}. Cadastre/corrija o cliente antes de imprimir.`,
+                );
+                return;
+              }
+
+              setSelectedCertificateId(instId);
+              setFieldServiceTag(tagData);
+              setFieldServiceEquip(equipmentData);
+              setFieldServiceCertificateContext(context);
+              setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
+              setActiveTab("certificados");
+            }}
+          />
+        )}
         {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}
         {activeTab === "locacao_instrumentos" && canAccessModule("rental") && <RentalManagement clients={clients} currentUser={currentUser} canEdit={canEditModule("rental")} companyData={companyData} />}
         {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}

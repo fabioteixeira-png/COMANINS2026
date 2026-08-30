@@ -48,9 +48,21 @@ const COLUMNS = [
 ] as const;
 
 
+export interface FieldServiceCertificateContext {
+  fieldServiceRecordId: string;
+  clientId?: string;
+  cliente?: string;
+  unidade?: string;
+}
+
 interface FieldServiceProps {
   canEdit?: boolean;
-  onPrintCertificate?: (instId: string, tagData: string, equipmentData: string) => void;
+  onPrintCertificate?: (
+    instId: string,
+    tagData: string,
+    equipmentData: string,
+    context: FieldServiceCertificateContext,
+  ) => void;
 }
 export default function FieldService({ canEdit = false, onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
@@ -790,16 +802,41 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                     })}
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       {(() => {
-                        const extractNum = (s) => String(s || '').replace(/\D/g, '');
-                        const recNum = extractNum(record.certificate);
-                        const matchingInst = instruments.find(i => {
-                          const instNum = extractNum(i.certificateNumber);
-                          return instNum && recNum && instNum === recNum;
+                        const normalizeCertificate = (value: unknown) =>
+                          String(value || '').trim().toUpperCase();
+                        const extractNum = (value: unknown) =>
+                          normalizeCertificate(value).replace(/\D/g, '');
+                        const recordCertificate = normalizeCertificate(record.certificate);
+                        const recordNumericCertificate = extractNum(record.certificate);
+                        const matchingInst = instruments.find((instrument) => {
+                          const certificateNumber = normalizeCertificate(instrument.certificateNumber);
+                          const coma = normalizeCertificate(instrument.coma);
+
+                          if (recordCertificate && (certificateNumber === recordCertificate || coma === recordCertificate)) {
+                            return true;
+                          }
+
+                          const certificateNumeric = extractNum(instrument.certificateNumber);
+                          const comaNumeric = extractNum(instrument.coma);
+                          return Boolean(
+                            recordNumericCertificate &&
+                            (certificateNumeric === recordNumericCertificate || comaNumeric === recordNumericCertificate)
+                          );
                         });
                         if (matchingInst && onPrintCertificate) {
                           return (
                             <button 
-                              onClick={() => onPrintCertificate(matchingInst.id, record.tag || '', record.equipamento || '')} 
+                              onClick={() => onPrintCertificate(
+                                matchingInst.id,
+                                record.tag || '',
+                                record.equipamento || '',
+                                {
+                                  fieldServiceRecordId: record.id,
+                                  clientId: record.clientId,
+                                  cliente: record.cliente || '',
+                                  unidade: record.unidade || '',
+                                },
+                              )}
                               className="text-emerald-500 hover:text-emerald-600 mr-3" 
                               title="Imprimir Certificado (Calibração)"
                             >
