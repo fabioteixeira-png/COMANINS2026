@@ -3,16 +3,17 @@ import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Instrument } from '../types';
-import { 
-  FieldServiceRecord, 
-  syncFieldServiceRecords, 
-  addFieldServiceRecord, 
-  updateFieldServiceRecord, 
+import {
+  FieldServiceRecord,
+  syncFieldServiceRecords,
+  addFieldServiceRecord,
+  updateFieldServiceRecord,
   bulkAddFieldServiceRecords,
   bulkUpsertFieldServiceRecords,
   deleteFieldServiceRecord, syncInstruments, refreshFieldServiceRecords
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
+import { buildFieldServiceA4Workbook } from '../utils/fieldServiceA4Workbook';
 
 const parseDateForSort = (dString: string) => {
   if (!dString) return 0;
@@ -68,11 +69,11 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(100);
-  
+
   // Filter states
   const [filters, setFilters] = useState<Record<string, string>>({
     certificate: '', dataCalibracao: '', cliente: '', tag: '', equipamento: '', localizacao: '',
@@ -80,7 +81,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     operacao: '', unidadeMedida: '', categoria: '', emissaoPdf: '',
     ordemServico: '', tipoServico: '', observacao: '', unidade: ''
   });
-  
+
   // Column Visibility State
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     certificate: true, dataCalibracao: true, cliente: true, tag: true, equipamento: true,
@@ -90,8 +91,8 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
-  
-  
+
+
   // Sorting State
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
 
@@ -117,7 +118,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
       setEditingCell(null);
       return;
     }
-    
+
     if (colId === 'certificate' && newVal.trim() !== '') {
       const normalizedCertificate = newVal.trim().toUpperCase();
       const isDup = records.some(
@@ -204,11 +205,11 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState<Partial<FieldServiceRecord>>({});
-  
+
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isRefreshingRecords, setIsRefreshingRecords] = useState(false);
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -266,27 +267,25 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     return formatCalibrationDate(instrument?.lastCalibrationDate || record.dataCalibracao || '');
   };
 
-  const escapeHtml = (value: unknown): string => String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  const loadComaninsLogoBytes = async (): Promise<Uint8Array> => {
+    const response = await fetch('/COMANINS%202026_logo_horizontal_transparente.png', { cache: 'force-cache' });
+    if (!response.ok) throw new Error('Não foi possível carregar a logo COMANINS.');
+    return new Uint8Array(await response.arrayBuffer());
+  };
 
-  const loadComaninsLogoDataUrl = async (): Promise<string> => {
-    try {
-      const response = await fetch('/COMANINS%202026_logo_horizontal_transparente.png');
-      if (!response.ok) return '';
-      const blob = await response.blob();
-      return await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => resolve('');
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return '';
-    }
+  const triggerWorkbookDownload = (bytes: Uint8Array, fileName: string) => {
+    const workbookBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const blob = new Blob([workbookBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   };
 
   const resolveClientId = (record: Partial<FieldServiceRecord>): string => {
@@ -365,7 +364,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws, { raw: false });
-        
+
         let addedCount = 0;
         let updatedCount = 0;
         let skippedCount = 0;
@@ -385,7 +384,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
 
           const cert = normalizedRow['certificado'] || normalizedRow['cert'] || '';
           const strCert = String(cert).trim();
-          
+
           const tagRaw = normalizedRow['tag'] || '';
           const strTag = String(tagRaw).trim();
 
@@ -462,11 +461,11 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             addedCount++;
           }
         }
-        
+
         if (newRecordsToImport.length > 0 || recordsToUpdate.length > 0) {
           await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
         }
-        
+
         alert(`Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} ignorados (já estavam idênticos ou duplicados no arquivo).`);
       } catch (error) {
         console.error("Error reading excel:", error);
@@ -479,156 +478,79 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     reader.readAsBinaryString(file);
   };
 
-  const handleExportExcel = async () => {
+  const handleExportExcel = () => {
     if (sortedRecords.length === 0) {
       alert("Nenhum registro encontrado para o filtro atual.");
       return;
     }
 
-    const logoDataUrl = await loadComaninsLogoDataUrl();
-    const exportRows = sortedRecords.map((record) => ({
-      certificate: record.certificate || '',
-      dataCalibracao: resolveCalibrationDate(record) || '',
-      interventionDate: record.interventionDate || '',
-      tag: record.tag || '',
-      equipamento: record.equipamento || '',
-      localizacao: record.localizacao || '',
-      technician: record.technician || '',
-      area: record.area || '',
-      range: record.range || '',
-      operacao: record.operacao || '',
-      unidadeMedida: record.unidadeMedida || '',
-      categoria: record.categoria || '',
-      emissaoPdf: record.emissaoPdf || '',
-      ordemServico: record.ordemServico || '',
-      tipoServico: record.tipoServico || '',
-      observacao: record.observacao || '',
-      unidade: record.unidade || '',
-      cliente: record.cliente || '',
-    }));
+    const worksheet = XLSX.utils.json_to_sheet(sortedRecords.map((record) => ({
+      'Certificado': record.certificate || '',
+      'Data Calibração': resolveCalibrationDate(record) || '',
+      'Data de Intervenção': record.interventionDate || '',
+      'Tag': record.tag || '',
+      'Equipamento': record.equipamento || '',
+      'Localização': record.localizacao || '',
+      'Técnico': record.technician || '',
+      'Área': record.area || '',
+      'Range': record.range || '',
+      'Operação': record.operacao || '',
+      'Unidade de Medida': record.unidadeMedida || '',
+      'Categoria': record.categoria || '',
+      'Emissão PDF': record.emissaoPdf || '',
+      'Ordem de Serviço': record.ordemServico || '',
+      'Tipo de Serviço': record.tipoServico || '',
+      'Observação': record.observacao || '',
+      'Unidade': record.unidade || '',
+      'Cliente': record.cliente || '',
+    })));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'ServicoCampo');
+    XLSX.writeFile(workbook, 'Servico_de_Campo_Export.xlsx');
+  };
 
-    const columns: Array<{ label: string; key: keyof typeof exportRows[number] }> = [
-      { label: 'CERTIFICADO', key: 'certificate' },
-      { label: 'DATA CALIBRAÇÃO', key: 'dataCalibracao' },
-      { label: 'DATA INTERVENÇÃO', key: 'interventionDate' },
-      { label: 'TAG', key: 'tag' },
-      { label: 'EQUIPAMENTO', key: 'equipamento' },
-      { label: 'LOCALIZAÇÃO', key: 'localizacao' },
-      { label: 'TÉCNICO', key: 'technician' },
-      { label: 'ÁREA', key: 'area' },
-      { label: 'RANGE', key: 'range' },
-      { label: 'OPERAÇÃO', key: 'operacao' },
-      { label: 'UM', key: 'unidadeMedida' },
-      { label: 'CATEGORIA', key: 'categoria' },
-      { label: 'EMISSÃO PDF', key: 'emissaoPdf' },
-      { label: 'OS', key: 'ordemServico' },
-      { label: 'TIPO DE SERVIÇO', key: 'tipoServico' },
-      { label: 'OBSERVAÇÃO', key: 'observacao' },
-      { label: 'UNIDADE', key: 'unidade' },
-      { label: 'CLIENTE', key: 'cliente' },
-    ];
+  const handleExportA4 = async () => {
+    if (sortedRecords.length === 0) {
+      alert("Nenhum registro encontrado para o filtro atual.");
+      return;
+    }
 
-    const uniqueUnits = Array.from(new Set(exportRows.map((row) => row.unidade.trim()).filter(Boolean)));
-    const uniqueClients = Array.from(new Set(exportRows.map((row) => row.cliente.trim()).filter(Boolean)));
-    const titleSuffix = uniqueUnits.length === 1 ? ` - ${uniqueUnits[0]}` : '';
-    const subtitleParts = [
-      uniqueClients.length === 1 ? `Cliente: ${uniqueClients[0]}` : '',
-      uniqueUnits.length === 1 ? `Unidade: ${uniqueUnits[0]}` : '',
-      `Registros: ${exportRows.length}`,
-      `Gerado em: ${new Date().toLocaleString('pt-BR')}`,
-    ].filter(Boolean);
+    try {
+      const logoPng = await loadComaninsLogoBytes();
+      const workbookBytes = buildFieldServiceA4Workbook(
+        sortedRecords.map((record) => ({
+          tag: String(record.tag || ''),
+          equipamento: String(record.equipamento || ''),
+          localizacao: String(record.localizacao || ''),
+          area: String(record.area || ''),
+          range: String(record.range || ''),
+          operacao: String(record.operacao || ''),
+          unidadeMedida: String(record.unidadeMedida || ''),
+          certificate: String(record.certificate || ''),
+          tipoServico: String(record.tipoServico || ''),
+          ordemServico: String(record.ordemServico || ''),
+          observacao: String(record.observacao || ''),
+          unidade: String(record.unidade || ''),
+        })),
+        logoPng,
+      );
 
-    const htmlRows = exportRows.map((row) => (
-      `<tr>${columns.map((column) => `<td>${escapeHtml(row[column.key])}</td>`).join('')}</tr>`
-    )).join('');
+      const uniqueUnits: string[] = Array.from(new Set<string>(
+        sortedRecords.map((record) => String(record.unidade || '').trim()).filter(Boolean),
+      ));
+      const suffix = (uniqueUnits.length === 1 ? uniqueUnits[0] : 'FILTRO')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '_');
 
-    const html = `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office"
-      xmlns:x="urn:schemas-microsoft-com:office:excel"
-      xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8" />
-<style>
-  @page { size: A4 landscape; margin: 0.30in; }
-  body { font-family: Arial, sans-serif; color: #111827; margin: 0; }
-  table { border-collapse: collapse; width: 100%; table-layout: auto; }
-  .brand td { border: 0; vertical-align: middle; padding: 3px 5px; }
-  .brand-logo { width: 185px; max-height: 62px; object-fit: contain; }
-  .title { font-size: 17px; font-weight: 700; text-align: center; }
-  .subtitle { font-size: 9px; text-align: center; color: #475569; }
-  .data th { background: #17365d; color: #ffffff; border: 1px solid #9ca3af; font-size: 7px; padding: 4px 3px; text-align: center; vertical-align: middle; white-space: nowrap; }
-  .data td { border: 1px solid #b7c0cc; font-size: 7px; padding: 3px 3px; vertical-align: middle; }
-  .data tr:nth-child(even) td { background: #f8fafc; }
-  .footer { margin-top: 5px; font-size: 8px; color: #64748b; }
-</style>
-<!--[if gte mso 9]>
-<xml>
-<x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
-<x:Name>Serviço de Campo</x:Name>
-<x:WorksheetOptions>
-<x:PageSetup>
-  <x:Layout x:Orientation="Landscape"/>
-  <x:Header x:Margin="0.15"/>
-  <x:Footer x:Margin="0.15"/>
-  <x:PageMargins x:Bottom="0.30" x:Left="0.20" x:Right="0.20" x:Top="0.30"/>
-</x:PageSetup>
-<x:FitToPage/>
-<x:Print><x:FitWidth>1</x:FitWidth><x:FitHeight>0</x:FitHeight><x:PaperSizeIndex>9</x:PaperSizeIndex></x:Print>
-<x:Selected/>
-<x:FreezePanes/><x:FrozenNoSplit/><x:SplitHorizontal>3</x:SplitHorizontal><x:TopRowBottomPane>3</x:TopRowBottomPane>
-</x:WorksheetOptions>
-</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook>
-</xml>
-<![endif]-->
-</head>
-<body>
-<table class="brand">
-  <tr>
-    <td style="width:22%">${logoDataUrl ? `<img class="brand-logo" src="${logoDataUrl}" />` : '<b>COMANINS</b>'}</td>
-    <td style="width:78%"><div class="title">LISTA DE SERVIÇOS${escapeHtml(titleSuffix)}</div><div class="subtitle">${escapeHtml(subtitleParts.join(' | '))}</div></td>
-  </tr>
-</table>
-<table class="data">
-<thead><tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
-<tbody>${htmlRows}</tbody>
-</table>
-<div class="footer">Documento gerado pelo módulo Serviço de Campo — COMANINS.</div>
-</body></html>`;
-
-    const logoBase64 = logoDataUrl.includes(',') ? logoDataUrl.split(',')[1] : '';
-    const exportContent = logoBase64
-      ? [
-          'MIME-Version: 1.0',
-          'Content-Type: multipart/related; boundary="COMANINS_XLS_BOUNDARY"',
-          '',
-          '--COMANINS_XLS_BOUNDARY',
-          'Content-Type: text/html; charset="utf-8"',
-          'Content-Location: file:///comanins-lista-servicos.htm',
-          '',
-          html.replace(logoDataUrl, 'cid:comanins-logo'),
-          '--COMANINS_XLS_BOUNDARY',
-          'Content-Type: image/png',
-          'Content-Transfer-Encoding: base64',
-          'Content-Location: comanins-logo.png',
-          'Content-ID: <comanins-logo>',
-          '',
-          logoBase64,
-          '--COMANINS_XLS_BOUNDARY--',
-          '',
-        ].join('\r\n')
-      : `\ufeff${html}`;
-    const blob = new Blob([exportContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    const suffix = (uniqueUnits.length === 1 ? uniqueUnits[0] : 'FILTRO')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_');
-    anchor.href = url;
-    anchor.download = `LISTA_DE_SERVICOS_${suffix || 'CAMPO'}.xls`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+      triggerWorkbookDownload(
+        workbookBytes,
+        `LISTA_DE_SERVICOS_${suffix || 'CAMPO'}.xlsx`,
+      );
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Não foi possível gerar a planilha A4.');
+    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -722,7 +644,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
   };
 
-  
+
   const dateMask = (value) => {
     if (!value) return '';
     return value
@@ -852,13 +774,13 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           <h2 className="text-xl font-bold text-slate-800">Serviço de Campo</h2>
           <p className="text-sm text-slate-500">Gerencie registros, importe em lote e utilize filtros completos.</p>
         </div>
-        
+
         <div className="flex flex-wrap gap-2">
           {/* Hidden inputs */}
           <input type="file" accept=".xlsx,.xls,.csv" ref={excelInputRef} className="hidden" onChange={handleExcelImport} />
           <input type="file" accept="image/*,.heic,.heif" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
-          
-          <button 
+
+          <button
             onClick={handleDownloadTemplate}
             className="flex items-center space-x-2 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg transition-colors text-sm"
           >
@@ -876,14 +798,23 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
               <span>{isImporting ? 'Importando...' : 'Importar Planilha'}</span>
             </button>
           )}
-          
-          <button 
+
+          <button
             onClick={handleExportExcel}
             className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
-            title="Gera a lista filtrada com logo COMANINS e impressão A4 paisagem"
+            title="Exporta os registros do filtro atual em um arquivo Excel editável"
           >
             <Download className="h-4 w-4" />
-            <span>Gerar XLS A4</span>
+            <span>Exportar Excel</span>
+          </button>
+
+          <button
+            onClick={handleExportA4}
+            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
+            title="Gera a lista filtrada em XLSX real, com logo COMANINS e página A4 horizontal"
+          >
+            <Printer className="h-4 w-4" />
+            <span>Gerar Planilha A4</span>
           </button>
 
           <button
@@ -925,17 +856,17 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             <div className="flex items-center text-sm font-semibold text-slate-700">
               Filtros por coluna abaixo <span className="ml-2 text-xs font-normal text-slate-500">({sortedRecords.length} de {records.length})</span>
             </div>
-            
+
             {/* Column Visibility Menu */}
             <div className="relative">
-              <button 
+              <button
                 onClick={() => setShowColumnMenu(!showColumnMenu)}
                 className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors"
               >
                 <Columns className="h-4 w-4" />
                 Colunas
               </button>
-              
+
               {showColumnMenu && (
                 <div className="absolute top-full left-0 mt-2 w-56 bg-white border border-slate-200 rounded-lg shadow-xl z-20 py-2 max-h-80 overflow-y-auto">
                   <div className="px-3 pb-2 mb-2 border-b border-slate-100">
@@ -943,8 +874,8 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                   </div>
                   {COLUMNS.map(col => (
                     <label key={col.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={visibleColumns[col.id]}
                         onChange={() => toggleColumn(col.id)}
                         className="rounded text-royal-blue focus:ring-royal-blue"
@@ -956,12 +887,12 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
               )}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4">
              <div className="flex items-center gap-2 text-sm text-slate-600">
                <span>Página:</span>
-               <select 
-                 value={itemsPerPage} 
+               <select
+                 value={itemsPerPage}
                  onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
                  className="border-slate-300 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-royal-blue"
                >
@@ -971,9 +902,9 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                  <option value={1000}>1000</option>
                </select>
              </div>
-             
+
              <div className="flex items-center gap-2">
-               <button 
+               <button
                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                  disabled={currentPage === 1}
                  className="p-1 rounded hover:bg-slate-200 disabled:opacity-50"
@@ -981,7 +912,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                  <ChevronLeft className="h-5 w-5 text-slate-600" />
                </button>
                <span className="text-sm font-semibold text-slate-700">Página {currentPage} de {totalPages || 1}</span>
-               <button 
+               <button
                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                  disabled={currentPage === totalPages || totalPages === 0}
                  className="p-1 rounded hover:bg-slate-200 disabled:opacity-50"
@@ -991,7 +922,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
              </div>
           </div>
         </div>
-        
+
         <div
           ref={topScrollRef}
           onScroll={syncTopScroll}
@@ -1006,7 +937,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
               <tr>
                 {COLUMNS.filter(c => visibleColumns[c.id]).map(col => (
                   <th key={col.id} className="px-4 py-3" style={{ minWidth: col.minW }}>
-                    <div 
+                    <div
                       className="flex items-center gap-1 cursor-pointer hover:text-royal-blue select-none"
                       onClick={() => handleSort(col.id)}
                       title="Clique para ordenar"
@@ -1018,12 +949,12 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                         <ChevronsUpDown className="w-3 h-3 opacity-30 hover:opacity-100" />
                       )}
                     </div>
-                    <input 
-                      type="text" 
-                      value={filters[col.id] || ''} 
-                      onChange={e => handleFilterChange(col.id, e.target.value)} 
-                      className="w-full mt-2 px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-normal outline-none focus:border-royal-blue" 
-                      placeholder="Filtrar..." 
+                    <input
+                      type="text"
+                      value={filters[col.id] || ''}
+                      onChange={e => handleFilterChange(col.id, e.target.value)}
+                      className="w-full mt-2 px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-normal outline-none focus:border-royal-blue"
+                      placeholder="Filtrar..."
                     />
                   </th>
                 ))}
@@ -1036,21 +967,21 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
               ) : paginatedRecords.length === 0 ? (
                 <tr><td colSpan={18} className="text-center py-12 text-slate-500">Nenhum registro encontrado.</td></tr>
               ) : (
-                
+
                 paginatedRecords.map(record => (
                   <tr key={record.id} className="hover:bg-slate-50 transition-colors">
                     {COLUMNS.filter(c => visibleColumns[c.id]).map(col => {
                       let value = (record as any)[col.id];
-                      
+
                       if (col.id === 'dataCalibracao') {
                         value = resolveCalibrationDate(record) || '-';
                       }
-                      
+
                       const isEditing = canEdit && editingCell?.rowId === record.id && editingCell?.colId === col.id;
                       if (isEditing && col.id !== 'dataCalibracao') {
                         return (
                           <td key={col.id} className="px-4 py-2">
-                            <input 
+                            <input
                               autoFocus
                               defaultValue={value}
                               onBlur={e => handleInlineSave(record, col.id, e.target.value)}
@@ -1065,7 +996,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                       if (col.id === 'certificate' || col.id === 'tag') {
                         return <td key={col.id} className={`px-4 py-3 font-medium whitespace-nowrap ${canEdit ? 'cursor-pointer hover:bg-blue-50 transition-colors' : ''}`} onClick={() => canEdit && setEditingCell({rowId: record.id, colId: col.id})} title={canEdit ? "Clique para editar" : "Somente visualização"}>{value || '-'}</td>;
                       }
-                      
+
                       if (col.id === 'observacao') {
                         return <td key={col.id} className={`px-4 py-3 max-w-[200px] truncate ${canEdit ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''}`} title={canEdit ? "Clique para editar" : "Somente visualização"} onClick={() => canEdit && setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
                       }
@@ -1077,7 +1008,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                         const matchingInst = findInstrumentByCertificate(record.certificate);
                         if (matchingInst && onPrintCertificate) {
                           return (
-                            <button 
+                            <button
                               onClick={() => onPrintCertificate(
                                 matchingInst.id,
                                 record.tag || '',
@@ -1089,7 +1020,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                                   unidade: record.unidade || '',
                                 },
                               )}
-                              className="text-emerald-500 hover:text-emerald-600 mr-3" 
+                              className="text-emerald-500 hover:text-emerald-600 mr-3"
                               title="Imprimir Certificado (Calibração)"
                             >
                               <Printer className="w-4 h-4" />
@@ -1128,32 +1059,32 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao').map(col => (
                   <div key={col.id}>
                     <label className="block text-xs font-bold text-slate-700 mb-1">{col.label}</label>
-                    <input 
-                      type="text" 
-                      value={(formData as any)[col.id] || ''} 
-                      onChange={e => setFormData({...formData, [col.id]: e.target.value})} 
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none" 
+                    <input
+                      type="text"
+                      value={(formData as any)[col.id] || ''}
+                      onChange={e => setFormData({...formData, [col.id]: e.target.value})}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none"
                     />
                   </div>
                 ))}
-                
+
                 <div className="sm:col-span-3">
                   <label className="block text-xs font-bold text-slate-700 mb-1">Observação</label>
-                  <textarea 
-                    value={formData.observacao || ''} 
-                    onChange={e => setFormData({...formData, observacao: e.target.value})} 
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none min-h-[80px]" 
+                  <textarea
+                    value={formData.observacao || ''}
+                    onChange={e => setFormData({...formData, observacao: e.target.value})}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none min-h-[80px]"
                   />
                 </div>
               </div>
             </div>
-            
+
             <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
               <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition-colors text-sm">
                 Cancelar
