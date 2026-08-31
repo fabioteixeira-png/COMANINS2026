@@ -4296,6 +4296,16 @@
         </div>
       )}
 
+      {activeTab === "etiqueta_caixa" && canAccessModule("material_intake") && (
+        <BoxLabelSheet
+          clients={clients}
+          instruments={instruments}
+          reports={reports}
+          currentUser={currentUser}
+          canEdit={canEditMaterialIntake}
+        />
+      )}
+
       {selectedInstLabelToPrint && (
         <CalibrationLabelPrintModal
           certificateNumber={selectedInstLabelToPrint.certificateNumber}

@@ -72,6 +72,108 @@ service cloud.firestore {
       );
     }
 
+    // Lote 24 REV1 — integridade das folhas A4363.
+    // Cada posição possui índice físico fixo e, após impressa, torna-se imutável
+    // inclusive quanto a certificado, instrumento, cliente, autor e data.
+    function isValidBoxLabelSlot(slot, position) {
+      return slot is map
+        && slot.keys().hasOnly([
+          'position',
+          'status',
+          'certificateNumber',
+          'instrumentId',
+          'clientName',
+          'printedAt',
+          'printedBy',
+          'printedById'
+        ])
+        && slot.position == position
+        && slot.status in ['available', 'unavailable', 'printed']
+        && (
+          slot.status != 'printed' || (
+            slot.get('certificateNumber', '') is string
+            && slot.get('certificateNumber', '').size() > 0
+            && slot.get('instrumentId', '') is string
+            && slot.get('instrumentId', '').size() > 0
+            && slot.get('clientName', '') is string
+            && slot.get('clientName', '').size() > 0
+            && slot.get('printedAt', '') is string
+            && slot.get('printedAt', '').size() > 0
+            && slot.get('printedBy', '') is string
+            && slot.get('printedBy', '').size() > 0
+          )
+        );
+    }
+
+    function areValidBoxLabelSlots() {
+      return request.resource.data.slots is list
+        && request.resource.data.slots.size() == 14
+        && isValidBoxLabelSlot(request.resource.data.slots[0], 1)
+        && isValidBoxLabelSlot(request.resource.data.slots[1], 2)
+        && isValidBoxLabelSlot(request.resource.data.slots[2], 3)
+        && isValidBoxLabelSlot(request.resource.data.slots[3], 4)
+        && isValidBoxLabelSlot(request.resource.data.slots[4], 5)
+        && isValidBoxLabelSlot(request.resource.data.slots[5], 6)
+        && isValidBoxLabelSlot(request.resource.data.slots[6], 7)
+        && isValidBoxLabelSlot(request.resource.data.slots[7], 8)
+        && isValidBoxLabelSlot(request.resource.data.slots[8], 9)
+        && isValidBoxLabelSlot(request.resource.data.slots[9], 10)
+        && isValidBoxLabelSlot(request.resource.data.slots[10], 11)
+        && isValidBoxLabelSlot(request.resource.data.slots[11], 12)
+        && isValidBoxLabelSlot(request.resource.data.slots[12], 13)
+        && isValidBoxLabelSlot(request.resource.data.slots[13], 14);
+    }
+
+    function isInitialBoxLabelSlot(slot, position) {
+      return slot is map
+        && slot.keys().hasOnly(['position', 'status'])
+        && slot.position == position
+        && slot.status == 'available';
+    }
+
+    function hasValidInitialBoxLabelSlots() {
+      return request.resource.data.slots is list
+        && request.resource.data.slots.size() == 14
+        && isInitialBoxLabelSlot(request.resource.data.slots[0], 1)
+        && isInitialBoxLabelSlot(request.resource.data.slots[1], 2)
+        && isInitialBoxLabelSlot(request.resource.data.slots[2], 3)
+        && isInitialBoxLabelSlot(request.resource.data.slots[3], 4)
+        && isInitialBoxLabelSlot(request.resource.data.slots[4], 5)
+        && isInitialBoxLabelSlot(request.resource.data.slots[5], 6)
+        && isInitialBoxLabelSlot(request.resource.data.slots[6], 7)
+        && isInitialBoxLabelSlot(request.resource.data.slots[7], 8)
+        && isInitialBoxLabelSlot(request.resource.data.slots[8], 9)
+        && isInitialBoxLabelSlot(request.resource.data.slots[9], 10)
+        && isInitialBoxLabelSlot(request.resource.data.slots[10], 11)
+        && isInitialBoxLabelSlot(request.resource.data.slots[11], 12)
+        && isInitialBoxLabelSlot(request.resource.data.slots[12], 13)
+        && isInitialBoxLabelSlot(request.resource.data.slots[13], 14);
+    }
+
+    function preservesPrintedBoxLabelSlot(index) {
+      return resource.data.slots[index].status != 'printed'
+        || request.resource.data.slots[index] == resource.data.slots[index];
+    }
+
+    function preservesAllPrintedBoxLabelSlots() {
+      return resource.data.slots is list
+        && resource.data.slots.size() == 14
+        && preservesPrintedBoxLabelSlot(0)
+        && preservesPrintedBoxLabelSlot(1)
+        && preservesPrintedBoxLabelSlot(2)
+        && preservesPrintedBoxLabelSlot(3)
+        && preservesPrintedBoxLabelSlot(4)
+        && preservesPrintedBoxLabelSlot(5)
+        && preservesPrintedBoxLabelSlot(6)
+        && preservesPrintedBoxLabelSlot(7)
+        && preservesPrintedBoxLabelSlot(8)
+        && preservesPrintedBoxLabelSlot(9)
+        && preservesPrintedBoxLabelSlot(10)
+        && preservesPrintedBoxLabelSlot(11)
+        && preservesPrintedBoxLabelSlot(12)
+        && preservesPrintedBoxLabelSlot(13);
+    }
+
     function isCalibrationScopedIntakeUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         'devolutionGeneratedAt',
@@ -363,6 +465,44 @@ service cloud.firestore {
           resource.data.get('instrumentId', null) == null ||
           get(/databases/$(database)/documents/instruments/$(resource.data.instrumentId)).data.status != 'Entregue'
         );
+      allow delete: if false;
+    }
+    match /boxLabelSheets/{sheetId} {
+      // Controle operacional das folhas Pimaco A4363 utilizadas pela Recepção.
+      // A coleção não altera instrumentos ou certificados; registra apenas a
+      // disponibilidade física das 14 posições e a trilha de impressão.
+      allow read: if hasModule('material_intake');
+
+      // Uma nova folha nasce sempre aberta e com as 14 posições disponíveis.
+      allow create: if hasEditModule('material_intake')
+        && request.resource.data.keys().hasOnly([
+          'id', 'model', 'displayCode', 'status', 'slots',
+          'createdAt', 'createdBy', 'createdById',
+          'updatedAt', 'updatedBy', 'updatedById'
+        ])
+        && request.resource.data.id == sheetId
+        && request.resource.data.model == 'PIMACO_A4363'
+        && request.resource.data.status == 'open'
+        && request.resource.data.displayCode is string
+        && request.resource.data.createdAt is string
+        && request.resource.data.createdBy is string
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy is string
+        && hasValidInitialBoxLabelSlots();
+
+      // Campos de identidade/criação da folha não podem ser reescritos.
+      // Posições já impressas são integralmente imutáveis; apenas posições ainda
+      // não impressas podem alternar entre available/unavailable ou virar printed.
+      allow update: if hasEditModule('material_intake')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'slots', 'status', 'updatedAt', 'updatedBy', 'updatedById'
+        ])
+        && request.resource.data.status in ['open', 'completed']
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy is string
+        && areValidBoxLabelSlots()
+        && preservesAllPrintedBoxLabelSlots();
+
       allow delete: if false;
     }
     match /savedIntakes/{intakeId} {

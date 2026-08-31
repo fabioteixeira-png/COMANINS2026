@@ -111,6 +111,19 @@
               Entrada de Material
             </button>
           )}
+          {canAccessModule("material_intake") && (
+            <button
+              onClick={() => setActiveTab("etiqueta_caixa")}
+              className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center gap-2 ${
+                activeTab === "etiqueta_caixa"
+                  ? "bg-blue-50 text-royal-blue font-bold"
+                  : "text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Tag className="h-4 w-4 text-slate-500" />
+              <span>Etiqueta Caixa</span>
+            </button>
+          )}
 
           <div className="pt-4 pb-1">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">

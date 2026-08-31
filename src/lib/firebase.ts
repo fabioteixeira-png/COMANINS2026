@@ -1763,6 +1763,135 @@ export async function saveIntakeDoc(intake: SavedIntake): Promise<void> {
   await updateDoc(doc(db, 'savedIntakes', intake.id), intake as any);
 }
 
+
+export type BoxLabelSheetSlotStatus = 'available' | 'unavailable' | 'printed';
+
+export interface BoxLabelSheetSlot {
+  position: number;
+  status: BoxLabelSheetSlotStatus;
+  certificateNumber?: string;
+  instrumentId?: string;
+  clientName?: string;
+  printedAt?: string;
+  printedBy?: string;
+  printedById?: string;
+}
+
+export interface BoxLabelSheetRecord {
+  id: string;
+  model: 'PIMACO_A4363';
+  displayCode: string;
+  status: 'open' | 'completed';
+  slots: BoxLabelSheetSlot[];
+  createdAt: string;
+  createdBy: string;
+  createdById?: string;
+  updatedAt: string;
+  updatedBy?: string;
+  updatedById?: string;
+}
+
+const normalizeBoxLabelSlots = (slots: unknown): BoxLabelSheetSlot[] => {
+  const source = Array.isArray(slots) ? slots : [];
+  const byPosition = new Map<number, BoxLabelSheetSlot>();
+  for (const item of source) {
+    const position = Math.trunc(Number((item as any)?.position));
+    if (position < 1 || position > 14 || byPosition.has(position)) continue;
+    const rawStatus = String((item as any)?.status || 'available');
+    const status: BoxLabelSheetSlotStatus =
+      rawStatus === 'printed' || rawStatus === 'unavailable' ? rawStatus : 'available';
+    byPosition.set(position, {
+      position,
+      status,
+      certificateNumber: String((item as any)?.certificateNumber || '').trim() || undefined,
+      instrumentId: String((item as any)?.instrumentId || '').trim() || undefined,
+      clientName: String((item as any)?.clientName || '').trim() || undefined,
+      printedAt: String((item as any)?.printedAt || '').trim() || undefined,
+      printedBy: String((item as any)?.printedBy || '').trim() || undefined,
+      printedById: String((item as any)?.printedById || '').trim() || undefined,
+    });
+  }
+  return Array.from({ length: 14 }, (_, index) => byPosition.get(index + 1) || {
+    position: index + 1,
+    status: 'available' as const,
+  });
+};
+
+const sanitizeBoxLabelSheet = (id: string, raw: any): BoxLabelSheetRecord => {
+  const slots = normalizeBoxLabelSlots(raw?.slots);
+  const createdAt = String(raw?.createdAt || new Date().toISOString());
+  return {
+    id,
+    model: 'PIMACO_A4363',
+    displayCode: String(raw?.displayCode || id),
+    status: raw?.status === 'completed' || slots.every((slot) => slot.status !== 'available') ? 'completed' : 'open',
+    slots,
+    createdAt,
+    createdBy: String(raw?.createdBy || 'Usuário interno'),
+    createdById: String(raw?.createdById || '').trim() || undefined,
+    updatedAt: String(raw?.updatedAt || createdAt),
+    updatedBy: String(raw?.updatedBy || '').trim() || undefined,
+    updatedById: String(raw?.updatedById || '').trim() || undefined,
+  };
+};
+
+export async function syncBoxLabelSheets(callback: (sheets: BoxLabelSheetRecord[]) => void) {
+  // Buscamos diretamente todas as folhas ainda abertas. Assim, uma folha parcial
+  // antiga nunca desaparece apenas porque existem muitas folhas concluídas mais
+  // recentes. A ordenação é local para evitar exigir índice composto no Firestore.
+  const q = query(collection(db, 'boxLabelSheets'), where('status', '==', 'open'));
+  return onSnapshot(q, (snapshot) => {
+    const sheets = snapshot.docs
+      .map((item) => sanitizeBoxLabelSheet(item.id, item.data()))
+      .filter((sheet) => sheet.status === 'open')
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    callback(sheets);
+  }, (err) => {
+    handleQuotaOrError(err);
+    callback([]);
+  });
+}
+
+const boxLabelDisplayCode = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `A4363-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+};
+
+export async function createBoxLabelSheetDoc(actor: { id?: string; name?: string }): Promise<BoxLabelSheetRecord> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const id = `a4363_${random}`;
+  const record: BoxLabelSheetRecord = {
+    id,
+    model: 'PIMACO_A4363',
+    displayCode: boxLabelDisplayCode(now),
+    status: 'open',
+    slots: Array.from({ length: 14 }, (_, index) => ({ position: index + 1, status: 'available' as const })),
+    createdAt: nowIso,
+    createdBy: String(actor?.name || 'Usuário interno'),
+    createdById: String(actor?.id || '').trim() || undefined,
+    updatedAt: nowIso,
+    updatedBy: String(actor?.name || 'Usuário interno'),
+    updatedById: String(actor?.id || '').trim() || undefined,
+  };
+  await setDoc(doc(db, 'boxLabelSheets', id), stripUndefinedDeep(record));
+  return record;
+}
+
+export async function saveBoxLabelSheetDoc(
+  id: string,
+  updates: Partial<Omit<BoxLabelSheetRecord, 'id' | 'model' | 'displayCode' | 'createdAt' | 'createdBy'>>,
+): Promise<void> {
+  if (!id) throw new Error('Folha A4363 sem identificador válido.');
+  const payload: Record<string, any> = { ...updates };
+  if (updates.slots) payload.slots = normalizeBoxLabelSlots(updates.slots);
+  if (!payload.updatedAt) payload.updatedAt = new Date().toISOString();
+  await setDoc(doc(db, 'boxLabelSheets', id), stripUndefinedDeep(payload), { merge: true });
+}
+
 export async function updateIntakeDevolutionPhoto(id: string, photoBase64: string): Promise<void> {
   const ref = doc(db, 'savedIntakes', id);
   if (photoBase64) {

@@ -272,6 +272,7 @@ export const activeTabAccessModule = (activeTab: string): AccessModuleId | null 
     dashboard: "dashboard",
     clients: "clients",
     entrada_material: "material_intake",
+    etiqueta_caixa: "material_intake",
     instruments: "calibration",
     bench: "calibration",
     registro_calibracao: "calibration",

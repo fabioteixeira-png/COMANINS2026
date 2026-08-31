@@ -222,6 +222,7 @@ import RentalManagement from "./RentalManagement";
 import MySignature from "./MySignature";
 import InternalCommunication from "./InternalCommunication";
 import AccessProfileManagement from "./AccessProfileManagement";
+import BoxLabelSheet from "./BoxLabelSheet";
 import { generateAuthKey, getReportAuthKey } from "../utils/authKey";
 import {
   activeTabAccessModule,
