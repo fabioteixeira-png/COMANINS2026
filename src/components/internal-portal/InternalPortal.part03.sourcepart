@@ -2456,7 +2456,7 @@
 
             <div className="w-full text-xs print:block">
               {/* Printable Report Sheet */}
-              <div className="printable-area bg-white p-10 rounded-sm border border-slate-200 shadow-md flex flex-col justify-between min-h-[1056px] w-full max-w-[816px] mx-auto text-slate-900 font-sans relative print:min-h-0 print:h-auto print:shadow-none print:border-none print:p-0 print:max-w-none print:block">
+              <div id="certificate-printable-area" className="printable-area bg-white p-10 rounded-sm border border-slate-200 shadow-md flex flex-col justify-between min-h-[1056px] w-full max-w-[816px] mx-auto text-slate-900 font-sans relative print:min-h-0 print:h-auto print:shadow-none print:border-none print:p-0 print:max-w-none print:block">
                 {selectedCertificateId ? (
                   (() => {
                     const inst = instruments.find(
@@ -2679,7 +2679,7 @@
                     return (
                       <div className="space-y-6">
                         {/* Sheet actions - HIDDEN in printing */}
-                        <div className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
+                        <div data-certificate-pdf-ignore="true" className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
                           <button
                             onClick={() => window.print()}
                             className="p-2 px-4 bg-royal-blue text-white hover:bg-blue-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"

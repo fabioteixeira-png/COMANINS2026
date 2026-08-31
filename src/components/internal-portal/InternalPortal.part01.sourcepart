@@ -1373,6 +1373,50 @@ export default function InternalPortal({
     setActiveTab(targetTab || certificateReturnTab);
   };
 
+  const downloadFieldServiceCertificatePdf = async (fileName: string) => {
+    const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
+    if (!printableArea) {
+      throw new Error("Área do certificado não encontrada para gerar o PDF.");
+    }
+
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const baseName = fileName.replace(/\.pdf$/i, "");
+
+    await new Promise<void>((resolve, reject) => {
+      pdf.html(printableArea, {
+        x: 0,
+        y: 0,
+        margin: [0, 0, 0, 0],
+        width: pageWidth,
+        windowWidth: Math.max(printableArea.scrollWidth, printableArea.offsetWidth, 816),
+        autoPaging: "text",
+        html2canvas: {
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          scale: 1,
+          logging: false,
+          ignoreElements: (element) =>
+            element instanceof HTMLElement && element.dataset.certificatePdfIgnore === "true",
+        },
+        callback: (doc) => {
+          try {
+            doc.setProperties({
+              title: baseName,
+              subject: "Certificado de calibração COMANINS",
+              creator: "Sistema COMANINS",
+            });
+            doc.save(fileName);
+            resolve();
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error("Falha ao salvar o PDF."));
+          }
+        },
+      });
+    });
+  };
+
   useEffect(() => {
     if (
       !pendingFieldServiceCertificateDownload ||
@@ -1382,20 +1426,22 @@ export default function InternalPortal({
       return;
     }
 
-    // O certificado já é a fonte oficial usada na visualização/impressão. Para não
-    // manter uma segunda implementação de PDF, o download direto abre imediatamente
-    // o diálogo nativo Salvar como PDF, usando o título do documento como nome padrão.
     const timer = window.setTimeout(() => {
-      const originalTitle = document.title;
-      const pdfBaseName = pendingFieldServiceCertificateDownload.fileName.replace(/\.pdf$/i, "");
-      document.title = pdfBaseName;
-      try {
-        window.print();
-      } finally {
-        document.title = originalTitle;
-        setPendingFieldServiceCertificateDownload(null);
-        closeCertificateView("field_service");
-      }
+      void (async () => {
+        try {
+          await downloadFieldServiceCertificatePdf(pendingFieldServiceCertificateDownload.fileName);
+        } catch (error: any) {
+          console.error("Erro ao gerar download direto do certificado:", error);
+          alert(
+            `Não foi possível gerar o PDF diretamente.
+
+${error?.message || "Falha ao montar o certificado em PDF."}`,
+          );
+        } finally {
+          setPendingFieldServiceCertificateDownload(null);
+          closeCertificateView("field_service");
+        }
+      })();
     }, 700);
 
     return () => window.clearTimeout(timer);
