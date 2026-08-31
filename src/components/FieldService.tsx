@@ -64,8 +64,15 @@ interface FieldServiceProps {
     equipmentData: string,
     context: FieldServiceCertificateContext,
   ) => void;
+  onDownloadCertificate?: (
+    instId: string,
+    tagData: string,
+    equipmentData: string,
+    context: FieldServiceCertificateContext,
+    fileName: string,
+  ) => void;
 }
-export default function FieldService({ canEdit = false, onPrintCertificate }: FieldServiceProps = {}) {
+export default function FieldService({ canEdit = false, onPrintCertificate, onDownloadCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -90,6 +97,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     emissaoPdf: false, ordemServico: true, tipoServico: true, observacao: false, unidade: false
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(() => new Set());
 
 
 
@@ -510,15 +518,16 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   };
 
   const handleExportA4 = async () => {
-    if (sortedRecords.length === 0) {
-      alert("Nenhum registro encontrado para o filtro atual.");
+    const exportRecords = sortedRecords.filter((record) => selectedRecordIds.has(record.id));
+    if (exportRecords.length === 0) {
+      alert("Selecione ao menos um registro na coluna Selecionar antes de gerar a Planilha A4.");
       return;
     }
 
     try {
       const logoPng = await loadComaninsLogoBytes();
       const workbookBytes = buildFieldServiceA4Workbook(
-        sortedRecords.map((record) => ({
+        exportRecords.map((record) => ({
           tag: String(record.tag || ''),
           equipamento: String(record.equipamento || ''),
           localizacao: String(record.localizacao || ''),
@@ -536,7 +545,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
       );
 
       const uniqueUnits: string[] = Array.from(new Set<string>(
-        sortedRecords.map((record) => String(record.unidade || '').trim()).filter(Boolean),
+        exportRecords.map((record) => String(record.unidade || '').trim()).filter(Boolean),
       ));
       const suffix = (uniqueUnits.length === 1 ? uniqueUnits[0] : 'FILTRO')
         .normalize('NFD')
@@ -735,6 +744,43 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     return filtered;
   }, [records, filters, sortConfig, instruments]);
 
+  const selectedFilteredRecords = useMemo(
+    () => sortedRecords.filter((record) => selectedRecordIds.has(record.id)),
+    [sortedRecords, selectedRecordIds],
+  );
+  const allFilteredSelected = sortedRecords.length > 0 && selectedFilteredRecords.length === sortedRecords.length;
+  const someFilteredSelected = selectedFilteredRecords.length > 0 && !allFilteredSelected;
+
+  const toggleRecordSelection = (recordId: string) => {
+    setSelectedRecordIds((current) => {
+      const next = new Set(current);
+      if (next.has(recordId)) next.delete(recordId);
+      else next.add(recordId);
+      return next;
+    });
+  };
+
+  const toggleAllFilteredRecords = () => {
+    setSelectedRecordIds((current) => {
+      const next = new Set(current);
+      if (allFilteredSelected) {
+        sortedRecords.forEach((record) => next.delete(record.id));
+      } else {
+        sortedRecords.forEach((record) => next.add(record.id));
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const existingIds = new Set(records.map((record) => record.id));
+    setSelectedRecordIds((current) => {
+      const next = new Set(Array.from(current).filter((id) => existingIds.has(id)));
+      if (next.size === current.size && Array.from(next).every((id) => current.has(id))) return current;
+      return next;
+    });
+  }, [records]);
+
   const totalPages = Math.ceil(sortedRecords.length / itemsPerPage);
   const paginatedRecords = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
@@ -811,7 +857,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           <button
             onClick={handleExportA4}
             className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
-            title="Gera a lista filtrada em XLSX real, com logo COMANINS e página A4 horizontal"
+            title="Gera somente os registros marcados na coluna Selecionar, em XLSX real com logo COMANINS e página A4 horizontal"
           >
             <Printer className="h-4 w-4" />
             <span>Gerar Planilha A4</span>
@@ -855,6 +901,18 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           <div className="flex items-center gap-4">
             <div className="flex items-center text-sm font-semibold text-slate-700">
               Filtros por coluna abaixo <span className="ml-2 text-xs font-normal text-slate-500">({sortedRecords.length} de {records.length})</span>
+              <span className="ml-3 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-700">
+                {selectedFilteredRecords.length} selecionado(s)
+              </span>
+              {selectedFilteredRecords.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedRecordIds(new Set())}
+                  className="ml-2 text-[11px] font-bold text-slate-500 hover:text-rose-600 underline"
+                >
+                  Limpar seleção
+                </button>
+              )}
             </div>
 
             {/* Column Visibility Menu */}
@@ -935,6 +993,20 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           <table className="w-full text-left text-sm text-slate-600">
             <thead className="bg-slate-50 text-slate-700 text-xs uppercase font-bold border-b border-slate-200">
               <tr>
+                <th className="px-3 py-3 min-w-[92px] text-center align-top">
+                  <div className="flex flex-col items-center gap-2">
+                    <span>Selecionar</span>
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      ref={(element) => { if (element) element.indeterminate = someFilteredSelected; }}
+                      onChange={toggleAllFilteredRecords}
+                      disabled={sortedRecords.length === 0}
+                      className="h-4 w-4 rounded border-slate-300 text-royal-blue focus:ring-royal-blue"
+                      title={allFilteredSelected ? 'Desmarcar todos os registros filtrados' : 'Selecionar todos os registros filtrados'}
+                    />
+                  </div>
+                </th>
                 {COLUMNS.filter(c => visibleColumns[c.id]).map(col => (
                   <th key={col.id} className="px-4 py-3" style={{ minWidth: col.minW }}>
                     <div
@@ -963,13 +1035,22 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan={18} className="text-center py-12 text-slate-500">Carregando registros...</td></tr>
+                <tr><td colSpan={COLUMNS.filter(c => visibleColumns[c.id]).length + 2} className="text-center py-12 text-slate-500">Carregando registros...</td></tr>
               ) : paginatedRecords.length === 0 ? (
-                <tr><td colSpan={18} className="text-center py-12 text-slate-500">Nenhum registro encontrado.</td></tr>
+                <tr><td colSpan={COLUMNS.filter(c => visibleColumns[c.id]).length + 2} className="text-center py-12 text-slate-500">Nenhum registro encontrado.</td></tr>
               ) : (
 
                 paginatedRecords.map(record => (
-                  <tr key={record.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={record.id} className={`transition-colors ${selectedRecordIds.has(record.id) ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-slate-50'}`}>
+                    <td className="px-3 py-3 text-center align-middle">
+                      <input
+                        type="checkbox"
+                        checked={selectedRecordIds.has(record.id)}
+                        onChange={() => toggleRecordSelection(record.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-royal-blue focus:ring-royal-blue"
+                        aria-label={`Selecionar TAG ${record.tag || record.id}`}
+                      />
+                    </td>
                     {COLUMNS.filter(c => visibleColumns[c.id]).map(col => {
                       let value = (record as any)[col.id];
 
@@ -1006,25 +1087,51 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       {(() => {
                         const matchingInst = findInstrumentByCertificate(record.certificate);
-                        if (matchingInst && onPrintCertificate) {
+                        if (matchingInst && (onPrintCertificate || onDownloadCertificate)) {
+                          const context: FieldServiceCertificateContext = {
+                            fieldServiceRecordId: record.id,
+                            clientId: record.clientId,
+                            cliente: record.cliente || '',
+                            unidade: record.unidade || '',
+                          };
+                          const safeFilePart = (value: unknown, fallback: string) =>
+                            String(value || fallback)
+                              .trim()
+                              .replace(/[\\/:*?"<>|]+/g, '-')
+                              .replace(/\s+/g, ' ');
+                          const downloadFileName = `${safeFilePart(record.tag || matchingInst.tag, 'SEM TAG')} - ${safeFilePart(record.certificate || matchingInst.certificateNumber || matchingInst.coma, 'SEM CERTIFICADO')}.pdf`;
                           return (
-                            <button
-                              onClick={() => onPrintCertificate(
-                                matchingInst.id,
-                                record.tag || '',
-                                record.equipamento || '',
-                                {
-                                  fieldServiceRecordId: record.id,
-                                  clientId: record.clientId,
-                                  cliente: record.cliente || '',
-                                  unidade: record.unidade || '',
-                                },
+                            <>
+                              {onPrintCertificate && (
+                                <button
+                                  onClick={() => onPrintCertificate(
+                                    matchingInst.id,
+                                    record.tag || '',
+                                    record.equipamento || '',
+                                    context,
+                                  )}
+                                  className="text-emerald-500 hover:text-emerald-600 mr-3"
+                                  title="Visualizar / imprimir Certificado de Calibração"
+                                >
+                                  <Printer className="w-4 h-4" />
+                                </button>
                               )}
-                              className="text-emerald-500 hover:text-emerald-600 mr-3"
-                              title="Imprimir Certificado (Calibração)"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
+                              {onDownloadCertificate && (
+                                <button
+                                  onClick={() => onDownloadCertificate(
+                                    matchingInst.id,
+                                    record.tag || '',
+                                    record.equipamento || '',
+                                    context,
+                                    downloadFileName,
+                                  )}
+                                  className="text-blue-600 hover:text-blue-700 mr-3"
+                                  title={`Baixar / salvar PDF: ${downloadFileName}`}
+                                >
+                                  <Download className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
                           );
                         }
                         return null;

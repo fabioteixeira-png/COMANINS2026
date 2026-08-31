@@ -3325,6 +3325,45 @@
                 );
               }
             }}
+            onDownloadCertificate={async (instId, tagData, equipmentData, context, fileName) => {
+              const mappingError = getFieldServiceClientMappingError(context);
+              if (mappingError) {
+                alert(mappingError);
+                return;
+              }
+
+              const instrument = instruments.find((item) => item.id === instId);
+              const resolvedClient = resolveFieldServiceCertificateClient(
+                clients,
+                instrument?.clientId,
+                context,
+              );
+
+              if (resolvedClient.expectedAliases && !resolvedClient.client) {
+                alert(
+                  `Não foi encontrado no Cadastro de Clientes o cliente necessário para este certificado: ${resolvedClient.expectedAliases[0]}. Cadastre/corrija o cliente antes de baixar.`,
+                );
+                return;
+              }
+
+              setCertificateReturnTab("field_service");
+              setSelectedCertificateId(instId);
+              setFieldServiceTag(tagData);
+              setFieldServiceEquip(equipmentData);
+              setFieldServiceCertificateContext(context);
+              setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
+              setPendingFieldServiceCertificateDownload({ instrumentId: instId, fileName });
+              try {
+                await markCertificateIssued(instId);
+                setActiveTab("certificados");
+              } catch (error: any) {
+                setPendingFieldServiceCertificateDownload(null);
+                console.error("Erro ao baixar/emitir certificado pelo Serviço de Campo:", error);
+                alert(
+                  `Não foi possível preparar o certificado para download.\n\n${error?.message || "Falha ao atualizar o status do instrumento."}`,
+                );
+              }
+            }}
           />
         )}
         {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}

@@ -1362,6 +1362,8 @@ export default function InternalPortal({
     useState<FieldServiceCertificateContext | null>(null);
   const [fieldServiceCertificateClientId, setFieldServiceCertificateClientId] =
     useState<string>("");
+  const [pendingFieldServiceCertificateDownload, setPendingFieldServiceCertificateDownload] =
+    useState<{ instrumentId: string; fileName: string } | null>(null);
   const closeCertificateView = (targetTab?: "instruments" | "field_service") => {
     setSelectedCertificateId("");
     setFieldServiceTag("");
@@ -1370,6 +1372,35 @@ export default function InternalPortal({
     setFieldServiceCertificateClientId("");
     setActiveTab(targetTab || certificateReturnTab);
   };
+
+  useEffect(() => {
+    if (
+      !pendingFieldServiceCertificateDownload ||
+      activeTab !== "certificados" ||
+      selectedCertificateId !== pendingFieldServiceCertificateDownload.instrumentId
+    ) {
+      return;
+    }
+
+    // O certificado já é a fonte oficial usada na visualização/impressão. Para não
+    // manter uma segunda implementação de PDF, o download direto abre imediatamente
+    // o diálogo nativo Salvar como PDF, usando o título do documento como nome padrão.
+    const timer = window.setTimeout(() => {
+      const originalTitle = document.title;
+      const pdfBaseName = pendingFieldServiceCertificateDownload.fileName.replace(/\.pdf$/i, "");
+      document.title = pdfBaseName;
+      try {
+        window.print();
+      } finally {
+        document.title = originalTitle;
+        setPendingFieldServiceCertificateDownload(null);
+        closeCertificateView("field_service");
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingFieldServiceCertificateDownload, activeTab, selectedCertificateId]);
+
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");
   const [selectedImportClient, setSelectedImportClient] = useState<any>("");

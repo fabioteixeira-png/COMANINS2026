@@ -1835,7 +1835,60 @@ const sanitizeBoxLabelSheet = (id: string, raw: any): BoxLabelSheetRecord => {
   };
 };
 
-export async function syncBoxLabelSheets(callback: (sheets: BoxLabelSheetRecord[]) => void) {
+const isBoxLabelPermissionDenied = (error: any): boolean => {
+  const code = String(error?.code || '').toLowerCase();
+  const message = String(error?.message || error || '').toLowerCase();
+  return code.includes('permission-denied') || message.includes('missing or insufficient permissions');
+};
+
+const boxLabelPermissionMessage = (error: any): string => {
+  if (!isBoxLabelPermissionDenied(error)) {
+    return String(error?.message || 'Não foi possível acessar as folhas A4363.');
+  }
+  return 'Permissão do Firebase recusada para Etiqueta Caixa. A sessão foi atualizada, mas o banco continua negando a operação. Verifique se as regras Firestore atuais foram publicadas e se o perfil possui Entrada de Material (material_intake) com permissão de edição.';
+};
+
+const refreshBoxLabelAuthToken = async (): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente antes de usar Etiqueta Caixa.');
+  await user.getIdToken(true);
+};
+
+const runBoxLabelWrite = async <T>(operation: () => Promise<T>): Promise<T> => {
+  try {
+    await refreshBoxLabelAuthToken();
+  } catch (error) {
+    console.warn('Não foi possível atualizar o token antes da operação A4363:', error);
+  }
+
+  try {
+    return await operation();
+  } catch (error: any) {
+    if (!isBoxLabelPermissionDenied(error)) throw error;
+    try {
+      await refreshBoxLabelAuthToken();
+      return await operation();
+    } catch (retryError: any) {
+      if (isBoxLabelPermissionDenied(retryError)) {
+        throw new Error(boxLabelPermissionMessage(retryError));
+      }
+      throw retryError;
+    }
+  }
+};
+
+export async function syncBoxLabelSheets(
+  callback: (sheets: BoxLabelSheetRecord[]) => void,
+  onError?: (message: string) => void,
+) {
+  // Força a renovação das custom claims antes de abrir o listener. Isso evita
+  // permission-denied quando o perfil foi atualizado depois do login.
+  try {
+    await refreshBoxLabelAuthToken();
+  } catch (error) {
+    console.warn('Não foi possível atualizar o token antes de ler folhas A4363:', error);
+  }
+
   // Buscamos diretamente todas as folhas ainda abertas. Assim, uma folha parcial
   // antiga nunca desaparece apenas porque existem muitas folhas concluídas mais
   // recentes. A ordenação é local para evitar exigir índice composto no Firestore.
@@ -1849,6 +1902,7 @@ export async function syncBoxLabelSheets(callback: (sheets: BoxLabelSheetRecord[
   }, (err) => {
     handleQuotaOrError(err);
     callback([]);
+    onError?.(boxLabelPermissionMessage(err));
   });
 }
 
@@ -1877,7 +1931,7 @@ export async function createBoxLabelSheetDoc(actor: { id?: string; name?: string
     updatedBy: String(actor?.name || 'Usuário interno'),
     updatedById: String(actor?.id || '').trim() || undefined,
   };
-  await setDoc(doc(db, 'boxLabelSheets', id), stripUndefinedDeep(record));
+  await runBoxLabelWrite(() => setDoc(doc(db, 'boxLabelSheets', id), stripUndefinedDeep(record)));
   return record;
 }
 
@@ -1889,7 +1943,7 @@ export async function saveBoxLabelSheetDoc(
   const payload: Record<string, any> = { ...updates };
   if (updates.slots) payload.slots = normalizeBoxLabelSlots(updates.slots);
   if (!payload.updatedAt) payload.updatedAt = new Date().toISOString();
-  await setDoc(doc(db, 'boxLabelSheets', id), stripUndefinedDeep(payload), { merge: true });
+  await runBoxLabelWrite(() => setDoc(doc(db, 'boxLabelSheets', id), stripUndefinedDeep(payload), { merge: true }));
 }
 
 export async function updateIntakeDevolutionPhoto(id: string, photoBase64: string): Promise<void> {

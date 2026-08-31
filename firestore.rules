@@ -72,6 +72,13 @@ service cloud.firestore {
       );
     }
 
+    // Lote 25 — gate explícito da Etiqueta Caixa. Mantém a autorização
+    // centralizada no módulo de Entrada de Material e facilita validar/publicar
+    // as regras junto com a versão do frontend que usa boxLabelSheets.
+    function canManageBoxLabelSheets() {
+      return hasEditModule('material_intake');
+    }
+
     // Lote 24 REV1 — integridade das folhas A4363.
     // Cada posição possui índice físico fixo e, após impressa, torna-se imutável
     // inclusive quanto a certificado, instrumento, cliente, autor e data.
@@ -474,7 +481,7 @@ service cloud.firestore {
       allow read: if hasModule('material_intake');
 
       // Uma nova folha nasce sempre aberta e com as 14 posições disponíveis.
-      allow create: if hasEditModule('material_intake')
+      allow create: if canManageBoxLabelSheets()
         && request.resource.data.keys().hasOnly([
           'id', 'model', 'displayCode', 'status', 'slots',
           'createdAt', 'createdBy', 'createdById',
@@ -493,7 +500,7 @@ service cloud.firestore {
       // Campos de identidade/criação da folha não podem ser reescritos.
       // Posições já impressas são integralmente imutáveis; apenas posições ainda
       // não impressas podem alternar entre available/unavailable ou virar printed.
-      allow update: if hasEditModule('material_intake')
+      allow update: if canManageBoxLabelSheets()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'slots', 'status', 'updatedAt', 'updatedBy', 'updatedById'
         ])

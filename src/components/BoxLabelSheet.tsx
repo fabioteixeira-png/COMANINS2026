@@ -230,6 +230,7 @@ export default function BoxLabelSheet({
   const [pendingPrintedPositions, setPendingPrintedPositions] = React.useState<number[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
   const [loadingSheets, setLoadingSheets] = React.useState(true);
+  const [sheetAccessError, setSheetAccessError] = React.useState('');
   const [calibration, setCalibration] = React.useState<A4363PrintCalibration>(() => {
     try {
       return normalizeA4363Calibration(JSON.parse(localStorage.getItem('comanins_a4363_print_calibration') || '{}'));
@@ -239,18 +240,27 @@ export default function BoxLabelSheet({
   });
 
   React.useEffect(() => {
-    const unsubscribePromise = syncBoxLabelSheets((items) => {
-      setSheets(items);
-      setLoadingSheets(false);
-      setActiveSheetId((current) => {
-        if (current && items.some((item) => item.id === current)) return current;
-        return items.find((item) => item.status === 'open')?.id || '';
-      });
-    });
+    setSheetAccessError('');
+    const unsubscribePromise = syncBoxLabelSheets(
+      (items) => {
+        setSheets(items);
+        setLoadingSheets(false);
+        setActiveSheetId((current) => {
+          if (current && items.some((item) => item.id === current)) return current;
+          return items.find((item) => item.status === 'open')?.id || '';
+        });
+      },
+      (message) => {
+        setSheetAccessError(message);
+        setLoadingSheets(false);
+      },
+    );
     return () => {
-      Promise.resolve(unsubscribePromise).then((unsubscribe) => {
-        if (typeof unsubscribe === 'function') unsubscribe();
-      });
+      Promise.resolve(unsubscribePromise)
+        .then((unsubscribe) => {
+          if (typeof unsubscribe === 'function') unsubscribe();
+        })
+        .catch((error) => console.warn('Falha ao encerrar listener A4363:', error));
     };
   }, []);
 
@@ -308,11 +318,14 @@ export default function BoxLabelSheet({
     if (!canEdit) return;
     setIsSaving(true);
     try {
+      setSheetAccessError('');
       const created = await createBoxLabelSheetDoc(actor);
       setActiveSheetId(created.id);
       resetDrafts();
     } catch (error: any) {
-      alert(error?.message || 'Não foi possível criar a folha A4363.');
+      const message = error?.message || 'Não foi possível criar a folha A4363.';
+      setSheetAccessError(message);
+      alert(message);
     } finally {
       setIsSaving(false);
     }
@@ -527,6 +540,13 @@ export default function BoxLabelSheet({
           </button>
         </div>
       </div>
+
+      {sheetAccessError && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="font-bold">Acesso à Etiqueta Caixa precisa de atenção</div>
+          <div className="mt-1">{sheetAccessError}</div>
+        </div>
+      )}
 
       <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 shadow-sm">
         <div className="grid md:grid-cols-[minmax(0,1fr)_auto] gap-4 items-end">
