@@ -6428,7 +6428,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             const { collection, getDocs, updateDoc, doc } = await import('firebase/firestore');
             const { db } = await import('../../lib/firebase');
             
-            alert("Iniciando correção. Buscando cliente Comanins no banco de dados...");
+            alert("Iniciando correção com busca flexível. Buscando cliente Comanins no banco de dados...");
             const clientsSnap = await getDocs(collection(db, 'clients'));
             let comaninsId = null;
             let nsmId = null;
@@ -6440,15 +6440,12 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             });
             
             if (!comaninsId) {
-              alert("Erro: Cliente Comanins não encontrado no banco de dados. Atualize a página e tente novamente.");
+              alert("Erro: Cliente Comanins não encontrado.");
               return;
             }
             
-            // Search for COMA + numbers and the numbers themselves
             const rawIds = ["232529", "232530", "232531", "232532", "232533", "232534", "232535", "232536", "232537", "232538"];
-            const targetIds = [...rawIds, ...rawIds.map(id => "COMA" + id)];
-            
-            alert("Comanins ID: " + comaninsId + "\nBuscando os 10 instrumentos...");
+            alert("Comanins ID: " + comaninsId + "\nBuscando os 10 instrumentos (qualquer formato COMA-XXXX)...");
             
             const instSnap = await getDocs(collection(db, 'instruments'));
             let count = 0;
@@ -6456,14 +6453,27 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             
             for (const d of instSnap.docs) {
               const data = d.data();
-              if (targetIds.includes(data.certificateNumber) || targetIds.includes(data.id) || targetIds.includes(data.tag) || targetIds.includes(data.coma)) {
+              
+              let isTarget = false;
+              for (const rid of rawIds) {
+                if (
+                  (data.certificateNumber && typeof data.certificateNumber === 'string' && data.certificateNumber.includes(rid)) ||
+                  (data.id && typeof data.id === 'string' && data.id.includes(rid)) ||
+                  (data.coma && typeof data.coma === 'string' && data.coma.includes(rid))
+                ) {
+                  isTarget = true;
+                  break;
+                }
+              }
+
+              if (isTarget) {
                 updates.push(updateDoc(d.ref, { clientId: comaninsId }));
                 count++;
               }
             }
             
             if (updates.length === 0) {
-              alert("Nenhum instrumento correspondente foi encontrado para atualizar. Certifique-se de que os números de certificado estão corretos.");
+              alert("Nenhum instrumento correspondente foi encontrado para atualizar. Verifique os dados no banco.");
               return;
             }
             
