@@ -8,8 +8,10 @@ const closingTagEnd = content.indexOf('</button>', buttonEnd) + '</button>'.leng
 
 if (buttonStart !== -1 && buttonEnd !== -1) {
   content = content.slice(0, buttonStart) + content.slice(closingTagEnd);
-  // clean up any leftover empty lines
-  content = content.replace(/\n\s*\n\s*\{/g, '\n      {');
+  // Optional formatting cleanup
+  content = content.replace(/<div className="h-screen sm:h-\[100dvh\] bg-slate-50 flex overflow-hidden print:h-auto print:overflow-visible print:block">\s*\{\/\* Signature Alert Modal \*\/\}/g, '<div className="h-screen sm:h-[100dvh] bg-slate-50 flex overflow-hidden print:h-auto print:overflow-visible print:block">\n      {/* Signature Alert Modal */}');
+  fs.writeFileSync('src/components/internal-portal/InternalPortal.part01.sourcepart', content);
+  console.log("Button removed.");
+} else {
+  console.log("Could not find button.");
 }
-
-fs.writeFileSync('src/components/internal-portal/InternalPortal.part01.sourcepart', content);

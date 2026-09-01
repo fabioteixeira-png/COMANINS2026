@@ -450,7 +450,14 @@ service cloud.firestore {
       // A transição para Entregue é permitida; depois disso o cadastro se torna
       // imutável para preservar a rastreabilidade da devolução. Campos de
       // arquivamento só podem ser escritos pelo backend (Admin SDK).
-      allow update: if true;
+      allow update: if hasEditModule('calibration')
+        && resource.data.status != 'Entregue'
+        // A ficha de registro representa o estado histórico de entrada do
+        // instrumento e não pode ser alterada pelo navegador após a criação.
+        && request.resource.data.get('registrationSnapshot', null) == resource.data.get('registrationSnapshot', null)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
+        ]);
       // Exclusão física foi substituída por arquivamento administrativo.
       allow delete: if false;
     }
