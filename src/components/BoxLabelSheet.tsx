@@ -497,7 +497,7 @@ export default function BoxLabelSheet({
       </div>
 
       <div className="grid xl:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start">
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="min-w-0 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-4 md:p-5 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-slate-900">Grade da folha</div>
