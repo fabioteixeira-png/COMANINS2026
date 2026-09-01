@@ -1237,6 +1237,7 @@ export default function InternalPortal({
   const [clientIsFieldService, setClientIsFieldService] = useState<boolean>(false);
   const [clientEmail, setClientEmail] = useState<any>("");
   const [clientName, setClientName] = useState<any>("");
+  const [clientSubmitting, setClientSubmitting] = useState(false);
   const [clientPhone, setClientPhone] = useState<any>("");
   const [clientSearch, setClientSearch] = useState<any>("");
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -3271,6 +3272,8 @@ Status atual: ${e.status}.`,
 
   const handleClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (clientSubmitting) return;
+    setClientSubmitting(true);
     if (!canEditClients) {
       alert("Seu perfil possui somente permissão de visualização no módulo Clientes.");
       return;

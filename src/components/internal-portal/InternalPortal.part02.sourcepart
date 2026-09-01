@@ -1127,11 +1127,10 @@
                   <div className="col-span-full flex items-end space-x-2 mt-2">
                     <button
                       type="submit"
-                      className="flex-grow py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded cursor-pointer transition-colors"
+                      disabled={clientSubmitting}
+                      className="flex-grow py-2 bg-royal-blue hover:bg-blue-700 text-white font-semibold rounded cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      {editingClient
-                        ? "Atualizar Cadastro do Cliente"
-                        : "Salvar Cliente"}
+                      {clientSubmitting ? "Salvando..." : editingClient ? "Atualizar Cadastro do Cliente" : "Salvar Cliente"}
                     </button>
                     <button
                       type="button"
