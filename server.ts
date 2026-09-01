@@ -2249,6 +2249,7 @@ app.post('/api/rentals/contracts/:id/return', requireAuth, requireInternalAccoun
   const responsibleClientDocument = asLimitedString(req.body?.responsibleClientDocument, 120);
   const notes = asLimitedString(req.body?.notes, 2000);
   const returnDate = rentalDate(req.body?.date || new Date().toISOString().slice(0, 10));
+  const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments.slice(0, 10).map(String) : [];
   const rawItems = Array.isArray(req.body?.items) ? req.body.items.slice(0, 100) : [];
   if (!rentalId || !responsibleClient || !returnDate || rawItems.length === 0) return res.status(400).json({ error: 'INVALID_RENTAL_DATA' });
 
@@ -2369,6 +2370,7 @@ app.post('/api/rentals/contracts/:id/return', requireAuth, requireInternalAccoun
         responsibleClient,
         responsibleClientDocument,
         items: movementItems,
+        attachments,
         notes,
         createdAt: nowIso,
       };
@@ -2625,7 +2627,8 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
   while (occupiedCycles.has(cycleIndex) && cycleIndex < 600) cycleIndex += 1;
   if (cycleIndex >= 600) return res.status(409).json({ error: 'RENTAL_BILLING_LIMIT_REACHED' });
 
-  const dueDate = rentalAddDays(rentalForCycle.firstDueDate, cycleIndex * RENTAL_BILLING_DAYS);
+  const manualDueDate = asLimitedString(req.body.dueDate, 10);
+  const dueDate = manualDueDate || rentalAddDays(rentalForCycle.firstDueDate, cycleIndex * RENTAL_BILLING_DAYS);
   const periodStart = rentalAddDays(rentalForCycle.startDate, cycleIndex * RENTAL_BILLING_DAYS);
   const periodEnd = rentalAddDays(periodStart, RENTAL_BILLING_DAYS - 1);
   if (!dueDate || !periodStart || !periodEnd) return res.status(409).json({ error: 'INVALID_RENTAL_DATA' });

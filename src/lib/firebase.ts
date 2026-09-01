@@ -2962,7 +2962,7 @@ export const dispatchRentalContract = async (
 
 export const returnRentalItems = async (
   id: string,
-  payload: { responsibleClient: string; responsibleClientDocument?: string; notes?: string; date?: string; items: Array<{ assetId: string; condition: string; notes?: string }> },
+  payload: { responsibleClient: string; responsibleClientDocument?: string; attachments?: string[]; notes?: string; date?: string; items: Array<{ assetId: string; condition: string; notes?: string }> },
 ): Promise<{ rental: RentalContract; movement: RentalMovement }> => {
   const result = await rentalApiRequest<{ success: true; rental: RentalContract; movement: RentalMovement }>(`/api/rentals/contracts/${encodeURIComponent(id)}/return`, {
     method: 'POST',
@@ -2971,7 +2971,7 @@ export const returnRentalItems = async (
   return { rental: result.rental, movement: result.movement };
 };
 
-export const generateRentalInvoice = async (id: string, payload: { invoiceNumber?: string } = {}): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
+export const generateRentalInvoice = async (id: string, payload: { invoiceNumber?: string; dueDate?: string } = {}): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
   const result = await rentalApiRequest<{ success: true; invoice: RentalInvoice; financeTransactionId: string }>(`/api/rentals/contracts/${encodeURIComponent(id)}/invoices`, {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -3686,4 +3686,11 @@ export async function updateHealthProgramDoc(id: string, updates: Partial<Health
 
 export async function deleteHealthProgramDoc(id: string): Promise<void> {
   await archiveCriticalRecord('health_program_docs', id);
+}
+
+export async function uploadRentalAttachment(rentalId: string, file: File): Promise<string> {
+  const path = `rental-attachments/${safeStorageSegment(rentalId)}/${Date.now()}_${safeStorageSegment(file.name)}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'application/octet-stream' });
+  return await getDownloadURL(storageRef);
 }

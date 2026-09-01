@@ -32,6 +32,7 @@ import type {
   RentalSettings,
 } from '../types';
 import type { PortalUser } from '../lib/firebase';
+import { uploadRentalAttachment } from '../lib/firebase';
 import { isAdministratorAccess } from '../access-control';
 import {
   createRentalContract,
@@ -166,6 +167,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
   const [printDocument, setPrintDocument] = useState<PrintDocument>(null);
   const [invoicePromptTarget, setInvoicePromptTarget] = useState<RentalContract | null>(null);
   const [manualInvoiceNumber, setManualInvoiceNumber] = useState('');
+  const [manualDueDate, setManualDueDate] = useState('');
 
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [serviceDraft, setServiceDraft] = useState<Partial<RentalService>>({ active: true, monthlyPrice: 0 });
@@ -190,7 +192,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
   const [dispatchTarget, setDispatchTarget] = useState<RentalContract | null>(null);
   const [dispatchForm, setDispatchForm] = useState({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso() });
   const [returnTarget, setReturnTarget] = useState<RentalContract | null>(null);
-  const [returnForm, setReturnForm] = useState({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso() });
+  const [returnForm, setReturnForm] = useState({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso(), attachments: [] as File[] });
   const [returnItems, setReturnItems] = useState<Record<string, { selected: boolean; condition: RentalReturnCondition; notes: string }>>({});
   const [settingsDraft, setSettingsDraft] = useState<RentalSettings>(DEFAULT_SETTINGS);
 
@@ -373,7 +375,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     });
     setReturnItems(items);
     setReturnForm({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso() });
-    setReturnTarget(rental);
+    setReturnForm({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso(), attachments: [] }); setReturnTarget(rental);
   };
 
   const registerReturn = async (event: React.FormEvent) => {
@@ -389,7 +391,19 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     }
     setBusy(true);
     try {
-      const result = await returnRentalItems(returnTarget.id, { ...returnForm, items: selected });
+      const attachmentUrls = [];
+      if (returnForm.attachments.length > 0) {
+        setNotice('Enviando anexos... Isso pode demorar um pouco.');
+        for (const file of returnForm.attachments) {
+          try {
+            const url = await uploadRentalAttachment(returnTarget.id, file);
+            attachmentUrls.push(url);
+          } catch (err) {
+            console.error('Failed to upload', file.name, err);
+          }
+        }
+      }
+      const result = await returnRentalItems(returnTarget.id, { ...returnForm, attachments: attachmentUrls, items: selected });
       setNotice(result.rental.status === 'encerrado'
         ? `Locação ${result.rental.rentalNumber} encerrada com todos os itens recebidos.`
         : `Devolução parcial da locação ${result.rental.rentalNumber} registrada.`);
@@ -409,11 +423,12 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     if (!ensureEditable()) return;
     setBusy(true);
     try {
-      const result = await generateRentalInvoice(invoicePromptTarget.id, { invoiceNumber: manualInvoiceNumber.trim() });
+      const result = await generateRentalInvoice(invoicePromptTarget.id, { invoiceNumber: manualInvoiceNumber.trim(), dueDate: manualDueDate });
       setNotice(`Fatura ${result.invoice.invoiceNumber} emitida e integrada ao Contas a Receber.`);
       setPrintDocument({ kind: 'invoice', invoice: result.invoice, rental: invoicePromptTarget });
       setInvoicePromptTarget(null);
       setManualInvoiceNumber('');
+      setManualDueDate('');
     } catch (e: any) {
       setError(e?.message || 'Não foi possível gerar a fatura.');
     } finally {
@@ -502,6 +517,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
       if (invoicePromptTarget?.id === rental.id) {
         setInvoicePromptTarget(null);
         setManualInvoiceNumber('');
+        setManualDueDate('');
       }
       setNotice(
         `Locação ${rental.rentalNumber} excluída com correção dos vínculos: ${result.deletedInvoices} fatura(s), ${result.deletedFinanceTransactions} lançamento(s) financeiro(s) e ${result.deletedMovements} comprovante(s).`,
@@ -547,6 +563,9 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             <p className="text-sm text-slate-600 mb-2">Informe manualmente o número da Fatura (vinculado à Ordem de Serviço) para esta locação/renovação.</p>
             <Field label="Número da Fatura / OS *">
               <input required value={manualInvoiceNumber} onChange={(e) => setManualInvoiceNumber(e.target.value)} className="input-rental" placeholder="Ex: OS-2026-001" />
+            </Field>
+            <Field label="Data de Vencimento *">
+              <input required type="date" value={manualDueDate} onChange={(e) => setManualDueDate(e.target.value)} className="input-rental" />
             </Field>
             <button disabled={busy} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold disabled:opacity-50 mt-4">Emitir Fatura</button>
           </form>
@@ -644,7 +663,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {rental.status === 'rascunho' && canEdit && <button onClick={() => { setDispatchTarget(rental); setDispatchForm({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso() }); }} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> Registrar Saída</button>}
-                      {canGenerateInvoice && <button onClick={() => { setInvoicePromptTarget(rental); setManualInvoiceNumber(rental.processNumber || ''); }} disabled={busy} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center gap-1 disabled:opacity-50"><FileText className="w-3.5 h-3.5" /> {rental.status === 'encerrado' ? 'Gerar Fatura Pendente' : 'Gerar Próxima Fatura'}</button>}
+                      {canGenerateInvoice && <button onClick={() => { setInvoicePromptTarget(rental); setManualInvoiceNumber(rental.processNumber || ''); setManualDueDate(''); }} disabled={busy} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center gap-1 disabled:opacity-50"><FileText className="w-3.5 h-3.5" /> {rental.status === 'encerrado' ? 'Gerar Fatura Pendente' : 'Gerar Próxima Fatura'}</button>}
                       {rental.status === 'ativo' && canEdit && <button onClick={() => openReturn(rental)} className="px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-bold flex items-center gap-1"><RotateCcw className="w-3.5 h-3.5" /> Receber Devolução</button>}
                       {dispatchMovement && <button onClick={() => setPrintDocument({ kind: 'movement', movement: dispatchMovement, rental })} className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Comprovante Saída</button>}
                       {lastReturn && <button onClick={() => setPrintDocument({ kind: 'movement', movement: lastReturn, rental })} className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1"><PackageCheck className="w-3.5 h-3.5" /> Última Devolução</button>}
@@ -790,7 +809,16 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
         <Modal title={`Receber Material Devolvido — ${returnTarget.rentalNumber}`} onClose={() => setReturnTarget(null)} wide>
           <form onSubmit={registerReturn} className="space-y-4 text-sm">
             <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">{activeRentalItems(returnTarget).map((item) => { const state = returnItems[item.assetId] || { selected: false, condition: 'conforme' as RentalReturnCondition, notes: '' }; return <div key={item.assetId} className={`p-3 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3 ${state.selected ? 'bg-blue-50' : ''}`}><label className="flex gap-2 items-start"><input type="checkbox" className="mt-1" checked={state.selected} onChange={(e) => setReturnItems({ ...returnItems, [item.assetId]: { ...state, selected: e.target.checked } })} /><span><b>{item.assetCode}</b> — {item.description}{item.baseIdentification ? ` / Base ${item.baseIdentification}` : ''}<input disabled={!state.selected} value={state.notes} onChange={(e) => setReturnItems({ ...returnItems, [item.assetId]: { ...state, notes: e.target.value } })} className="mt-2 w-full border border-slate-300 rounded px-2 py-1 text-xs" placeholder="Observação do item" /></span></label><select disabled={!state.selected} value={state.condition} onChange={(e) => setReturnItems({ ...returnItems, [item.assetId]: { ...state, condition: e.target.value as RentalReturnCondition } })} className="input-rental"><option value="conforme">Conforme</option><option value="avaria">Com avaria</option><option value="faltante">Item faltante</option></select></div>; })}</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><Field label="Data do recebimento"><input type="date" value={returnForm.date} onChange={(e) => setReturnForm({ ...returnForm, date: e.target.value })} className="input-rental" /></Field><Field label="Devolvido por (cliente) *"><input required value={returnForm.responsibleClient} onChange={(e) => setReturnForm({ ...returnForm, responsibleClient: e.target.value })} className="input-rental" /></Field><Field label="Documento / Matrícula"><input value={returnForm.responsibleClientDocument} onChange={(e) => setReturnForm({ ...returnForm, responsibleClientDocument: e.target.value })} className="input-rental" /></Field><Field label="Observações gerais"><input value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} className="input-rental" /></Field></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><Field label="Data do recebimento"><input type="date" value={returnForm.date} onChange={(e) => setReturnForm({ ...returnForm, date: e.target.value })} className="input-rental" /></Field><Field label="Devolvido por (cliente) *"><input required value={returnForm.responsibleClient} onChange={(e) => setReturnForm({ ...returnForm, responsibleClient: e.target.value })} className="input-rental" /></Field><Field label="Documento / Matrícula"><input value={returnForm.responsibleClientDocument} onChange={(e) => setReturnForm({ ...returnForm, responsibleClientDocument: e.target.value })} className="input-rental" /></Field><Field label="Observações gerais"><input value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} className="input-rental" /></Field>
+<Field label="Fotos / Documentos (Opcional)">
+  <input type="file" multiple accept="image/*,.pdf" onChange={(e) => {
+    if (e.target.files) {
+      setReturnForm({ ...returnForm, attachments: Array.from(e.target.files) });
+    }
+  }} className="input-rental file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+  {returnForm.attachments.length > 0 && <div className="text-xs text-slate-500 mt-1">{returnForm.attachments.length} arquivo(s) selecionado(s)</div>}
+</Field>
+</div>
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">Itens marcados <b>Com avaria</b> serão enviados automaticamente para status <b>Manutenção</b>. Itens conformes retornam para <b>Disponível</b>. A devolução pode ser parcial.</div>
             <button disabled={busy} className="w-full py-2.5 bg-slate-800 text-white rounded-lg font-bold disabled:opacity-50">Confirmar Recebimento e Gerar Comprovante</button>
           </form>
@@ -865,6 +893,18 @@ function MovementPrint({ movement, rental, companyData, logoUrl }: { movement: R
     <div className="border-x border-b border-black p-4 text-sm leading-6"><b>CLIENTE:</b> {movement.clientName}<br /><b>CNPJ:</b> {movement.clientCnpj}<br /><b>ENDEREÇO:</b> {movement.clientAddress || '-'}<br /><b>DATA:</b> {formatDate(movement.date)}</div>
     <table className="w-full border-collapse text-xs"><thead><tr><th className="border border-black p-2 text-left">Identificação / CM</th><th className="border border-black p-2 text-left">Material</th><th className="border border-black p-2 text-left">Base</th><th className="border border-black p-2 text-left">Condição</th></tr></thead><tbody>{movement.items.map((item) => <tr key={item.assetId}><td className="border border-black p-2 font-mono font-bold">{item.assetCode}</td><td className="border border-black p-2">{item.description}{item.serialNumber ? ` • Série ${item.serialNumber}` : ''}</td><td className="border border-black p-2">{item.baseIdentification || '-'}</td><td className="border border-black p-2">{item.condition ? item.condition.toUpperCase() : (isDispatch ? 'ENTREGUE' : '-')}{item.notes ? ` — ${item.notes}` : ''}</td></tr>)}</tbody></table>
     <div className="border-x border-b border-black p-4 text-xs min-h-24"><b>OBSERVAÇÕES:</b><br />{movement.notes || (isDispatch ? 'Material entregue para locação mensal em condições de uso, conforme relação acima.' : 'Material recebido e conferido conforme relação acima.')}</div>
+    {movement.attachments && movement.attachments.length > 0 && (
+      <div className="border-x border-b border-black p-4 rental-no-print">
+        <b className="text-xs">ANEXOS / FOTOS:</b>
+        <div className="flex flex-wrap gap-2 mt-2">
+          {movement.attachments.map((url, i) => (
+            <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block w-24 h-24 border border-slate-300 rounded overflow-hidden">
+              <img src={url} alt={"Anexo " + (i + 1)} className="w-full h-full object-cover" />
+            </a>
+          ))}
+        </div>
+      </div>
+    )}
     {rental && isDispatch && <div className="border-x border-b border-black p-4 text-xs"><b>Regra comercial:</b> locação em ciclos fixos de 30 dias, sem cobrança diária ou pró-rata. Primeiro vencimento: {formatDate(rental.firstDueDate)}.</div>}
     <div className="grid grid-cols-2 gap-16 mt-24 text-xs text-center"><div className="border-t border-black pt-2"><b>{movement.responsibleComanins}</b><br />Responsável COMANINS</div><div className="border-t border-black pt-2"><b>{movement.responsibleClient}</b><br />Responsável Cliente{movement.responsibleClientDocument ? ` • ${movement.responsibleClientDocument}` : ''}</div></div>
     <div className="mt-16 text-[9px] text-slate-500">Documento emitido pelo Portal Interno COMANINS em {new Date(movement.createdAt).toLocaleString('pt-BR')}.</div>
