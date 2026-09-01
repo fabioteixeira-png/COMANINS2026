@@ -2971,10 +2971,10 @@ export const returnRentalItems = async (
   return { rental: result.rental, movement: result.movement };
 };
 
-export const generateRentalInvoice = async (id: string): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
+export const generateRentalInvoice = async (id: string, payload: { invoiceNumber?: string } = {}): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
   const result = await rentalApiRequest<{ success: true; invoice: RentalInvoice; financeTransactionId: string }>(`/api/rentals/contracts/${encodeURIComponent(id)}/invoices`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify(payload),
   });
   return { invoice: result.invoice, financeTransactionId: result.financeTransactionId };
 };

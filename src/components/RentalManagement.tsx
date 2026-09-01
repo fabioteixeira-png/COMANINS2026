@@ -409,16 +409,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     if (!ensureEditable()) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/rentals/contracts/${invoicePromptTarget.id}/invoices`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${(window as any).currentUserToken}` },
-        body: JSON.stringify({ invoiceNumber: manualInvoiceNumber.trim() })
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Não foi possível gerar a fatura.');
-      }
-      const result = await response.json();
+      const result = await generateRentalInvoice(invoicePromptTarget.id, { invoiceNumber: manualInvoiceNumber.trim() });
       setNotice(`Fatura ${result.invoice.invoiceNumber} emitida e integrada ao Contas a Receber.`);
       setPrintDocument({ kind: 'invoice', invoice: result.invoice, rental: invoicePromptTarget });
       setInvoicePromptTarget(null);
