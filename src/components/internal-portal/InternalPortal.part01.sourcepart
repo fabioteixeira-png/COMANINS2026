@@ -6444,7 +6444,10 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
               return;
             }
             
-            const targetIds = ["232529", "232530", "232531", "232532", "232533", "232534", "232535", "232536", "232537", "232538"];
+            // Search for COMA + numbers and the numbers themselves
+            const rawIds = ["232529", "232530", "232531", "232532", "232533", "232534", "232535", "232536", "232537", "232538"];
+            const targetIds = [...rawIds, ...rawIds.map(id => "COMA" + id)];
+            
             alert("Comanins ID: " + comaninsId + "\nBuscando os 10 instrumentos...");
             
             const instSnap = await getDocs(collection(db, 'instruments'));
@@ -6453,7 +6456,7 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             
             for (const d of instSnap.docs) {
               const data = d.data();
-              if (targetIds.includes(data.certificateNumber) || targetIds.includes(data.id) || targetIds.includes(data.tag)) {
+              if (targetIds.includes(data.certificateNumber) || targetIds.includes(data.id) || targetIds.includes(data.tag) || targetIds.includes(data.coma)) {
                 updates.push(updateDoc(d.ref, { clientId: comaninsId }));
                 count++;
               }
