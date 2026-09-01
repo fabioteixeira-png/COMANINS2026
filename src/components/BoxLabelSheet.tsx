@@ -442,7 +442,7 @@ export default function BoxLabelSheet({
   const temporarySheetCode = `TEMP-${String(sheetKey).slice(-6)}`;
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-6 h-full min-h-0">
+    <div className="p-4 md:p-6 lg:p-8 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-1">
@@ -496,12 +496,12 @@ export default function BoxLabelSheet({
         </div>
       </div>
 
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_340px] gap-6 min-h-0">
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-0">
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-4 md:p-5 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-slate-900">Grade da folha</div>
-              <div className="text-xs text-slate-500">Com rolagem para facilitar o preenchimento.</div>
+              <div className="text-xs text-slate-500">Preencha as posições que receberão as etiquetas.</div>
             </div>
             <button
               type="button"
@@ -513,7 +513,7 @@ export default function BoxLabelSheet({
             </button>
           </div>
 
-          <div className="max-h-[70vh] overflow-auto p-4 md:p-5">
+          <div className="overflow-x-auto p-4 md:p-5">
             <div className="min-w-[760px]">
               <div className="grid grid-cols-2 gap-4">
                 {slots.map((slot) => {
