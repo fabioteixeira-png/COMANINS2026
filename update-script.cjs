@@ -29,7 +29,7 @@ app.get('/api/run-temp-update', async (req, res) => {
     const foundIds = [];
     instSnap.forEach(doc => {
       const data = doc.data();
-      if (ids.includes(data.certificateNumber) || ids.includes(data.id) || ids.includes(data.coma)) {
+      if (ids.includes(data.certificateNumber) || ids.includes(data.id)) {
          batch.update(doc.ref, { clientId: comaninsId });
          count++;
          foundIds.push(data.certificateNumber || data.id);
@@ -44,4 +44,4 @@ app.get('/api/run-temp-update', async (req, res) => {
 });
 `;
 
-fs.writeFileSync('server.ts', content.replace("app.get('/api/health'", newRoute + "\napp.get('/api/health'"));
+fs.writeFileSync('server.ts', content.replace('app.get("/api/health",', newRoute + '\napp.get("/api/health",'));
