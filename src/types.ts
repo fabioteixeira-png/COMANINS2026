@@ -512,6 +512,7 @@ export interface RentalMovement {
   responsibleClient: string;
   responsibleClientDocument?: string;
   items: RentalMovementItem[];
+  attachments?: string[];
   notes?: string;
   createdAt: string;
 }

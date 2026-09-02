@@ -373,8 +373,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     activeRentalItems(rental).forEach((item) => {
       items[item.assetId] = { selected: true, condition: 'conforme', notes: '' };
     });
-    setReturnItems(items);
-    setReturnForm({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso() });
+
     setReturnForm({ responsibleClient: '', responsibleClientDocument: '', notes: '', date: todayIso(), attachments: [] }); setReturnTarget(rental);
   };
 

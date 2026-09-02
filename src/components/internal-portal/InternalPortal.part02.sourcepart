@@ -331,7 +331,7 @@
           </button>
         </nav>
       </aside>
-      <div className="flex-1 min-w-0 p-3 sm:p-6 md:p-8 overflow-y-auto w-full h-full">
+      <div className="flex-1 min-w-0 min-h-0 p-3 sm:p-6 md:p-8 overflow-y-auto w-full">
         {/* Top Navigation Header with Notification Bell */}
         <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
@@ -348,6 +348,10 @@
             <h2 className="text-lg sm:text-xl font-display font-extrabold text-slate-900 capitalize">
               {activeTab === "consumo_firebase"
                 ? "Controle de Consumo Firebase"
+                : activeTab === "etiqueta_caixa"
+                ? "Etiqueta Caixa"
+                : activeTab === "entrada_material"
+                ? "Entrada de Material"
                 : activeTab === "dashboard"
                 ? "Painel Geral & Indicadores"
                 : activeTab === "instruments"
