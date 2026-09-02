@@ -659,7 +659,7 @@ export default function BoxLabelSheet({
               </div>
               <button type="button" onClick={() => setPreviewOpen(false)} className="p-2 rounded-lg hover:bg-slate-100"><X className="w-5 h-5" /></button>
             </div>
-            <div className="bg-slate-100 p-4 overflow-auto max-h-[75vh]">
+            <div className="bg-slate-100 p-4">
               <div className="bg-white border border-slate-300 min-w-[620px] mx-auto p-5 grid grid-cols-2 gap-x-2 gap-y-0" style={{ aspectRatio: '210 / 297' }}>
                 {Array.from({ length: A4363.labelsPerSheet }, (_, index) => index + 1).map((position) => {
                   const data = resolvedByPosition.get(position)?.state === 'valid' ? resolvedByPosition.get(position)?.data : undefined;

@@ -333,7 +333,7 @@
       </aside>
       <div className="flex-1 min-w-0 min-h-0 p-3 sm:p-6 md:p-8 overflow-y-auto w-full">
         {/* Top Navigation Header with Notification Bell */}
-        <div className="mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
+        <div className="sticky top-0 z-30 bg-slate-50 mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 print:static">
           <div className="flex items-center space-x-3">
             <button
               onClick={() => setIsMobileMenuOpen(true)}
@@ -393,6 +393,16 @@
             </div>
           </div>
         </div>
+
+        {activeTab === "etiqueta_caixa" && canAccessModule("material_intake") && (
+          <BoxLabelSheet
+            clients={clients}
+            instruments={instruments}
+            reports={reports}
+            currentUser={currentUser}
+            canEdit={canEditMaterialIntake}
+          />
+        )}
 
         {activeTab === "dashboard" && canAccessModule("dashboard") && (
           <div className="space-y-8">
