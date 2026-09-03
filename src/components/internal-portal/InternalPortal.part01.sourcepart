@@ -219,6 +219,7 @@ import {
 import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
 import FieldService, { type FieldServiceCertificateContext } from "./FieldService";
+import { downloadFieldServiceCertificatePdf } from "../utils/fieldServiceCertificatePdf";
 import FinanceManagement from "./FinanceManagement";
 import RentalManagement from "./RentalManagement";
 import MySignature from "./MySignature";
@@ -1368,8 +1369,6 @@ export default function InternalPortal({
     useState<FieldServiceCertificateContext | null>(null);
   const [fieldServiceCertificateClientId, setFieldServiceCertificateClientId] =
     useState<string>("");
-  const [pendingFieldServiceCertificateDownload, setPendingFieldServiceCertificateDownload] =
-    useState<{ instrumentId: string; fileName: string } | null>(null);
   const closeCertificateView = (targetTab?: "instruments" | "field_service") => {
     setSelectedCertificateId("");
     setFieldServiceTag("");
@@ -1378,82 +1377,6 @@ export default function InternalPortal({
     setFieldServiceCertificateClientId("");
     setActiveTab(targetTab || certificateReturnTab);
   };
-
-  const downloadFieldServiceCertificatePdf = async (fileName: string) => {
-    const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
-    if (!printableArea) {
-      throw new Error("Área do certificado não encontrada para gerar o PDF.");
-    }
-
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const baseName = fileName.replace(/\.pdf$/i, "");
-
-    await new Promise<void>((resolve, reject) => {
-      pdf.html(printableArea, {
-        x: 0,
-        y: 0,
-        margin: [0, 0, 0, 0],
-        width: pageWidth,
-        windowWidth: Math.max(printableArea.scrollWidth, printableArea.offsetWidth, 816),
-        autoPaging: "text",
-        html2canvas: {
-          useCORS: true,
-          backgroundColor: "#ffffff",
-          scale: 1,
-          logging: false,
-          ignoreElements: (element) =>
-            element instanceof HTMLElement && element.dataset.certificatePdfIgnore === "true",
-        },
-        callback: (doc) => {
-          try {
-            doc.setProperties({
-              title: baseName,
-              subject: "Certificado de calibração COMANINS",
-              creator: "Sistema COMANINS",
-            });
-            doc.save(fileName);
-            resolve();
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error("Falha ao salvar o PDF."));
-          }
-        },
-      });
-    });
-  };
-
-  useEffect(() => {
-    if (
-      !pendingFieldServiceCertificateDownload ||
-      selectedCertificateId !== pendingFieldServiceCertificateDownload.instrumentId
-    ) {
-      return;
-    }
-
-    // O certificado é renderizado fora da viewport quando o download parte do
-    // Serviço de Campo. Assim preservamos exatamente o layout oficial sem trocar
-    // de aba, sem abrir a visualização e sem bloquear a navegação do operador.
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          await downloadFieldServiceCertificatePdf(pendingFieldServiceCertificateDownload.fileName);
-        } catch (error: any) {
-          console.error("Erro ao gerar download direto do certificado:", error);
-          alert(
-            `Não foi possível gerar o PDF diretamente.
-
-${error?.message || "Falha ao montar o certificado em PDF."}`,
-          );
-        } finally {
-          setPendingFieldServiceCertificateDownload(null);
-          closeCertificateView("field_service");
-        }
-      })();
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [pendingFieldServiceCertificateDownload, selectedCertificateId]);
 
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");

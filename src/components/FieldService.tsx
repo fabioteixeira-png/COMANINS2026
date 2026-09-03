@@ -70,10 +70,11 @@ interface FieldServiceProps {
     equipmentData: string,
     context: FieldServiceCertificateContext,
     fileName: string,
-  ) => void;
+  ) => void | Promise<void>;
 }
 export default function FieldService({ canEdit = false, onPrintCertificate, onDownloadCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
+  const [downloadingCertificateId, setDownloadingCertificateId] = useState<string>('');
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -1118,17 +1119,26 @@ export default function FieldService({ canEdit = false, onPrintCertificate, onDo
                               )}
                               {onDownloadCertificate && (
                                 <button
-                                  onClick={() => onDownloadCertificate(
-                                    matchingInst.id,
-                                    record.tag || '',
-                                    record.equipamento || '',
-                                    context,
-                                    downloadFileName,
-                                  )}
-                                  className="text-blue-600 hover:text-blue-700 mr-3"
-                                  title={`Baixar / salvar PDF: ${downloadFileName}`}
+                                  onClick={async () => {
+                                    if (downloadingCertificateId) return;
+                                    setDownloadingCertificateId(record.id);
+                                    try {
+                                      await onDownloadCertificate(
+                                        matchingInst.id,
+                                        record.tag || '',
+                                        record.equipamento || '',
+                                        context,
+                                        downloadFileName,
+                                      );
+                                    } finally {
+                                      setDownloadingCertificateId('');
+                                    }
+                                  }}
+                                  disabled={Boolean(downloadingCertificateId)}
+                                  className="text-blue-600 hover:text-blue-700 disabled:text-slate-300 disabled:cursor-wait mr-3"
+                                  title={downloadingCertificateId === record.id ? 'Gerando PDF...' : `Baixar PDF: ${downloadFileName}`}
                                 >
-                                  <Download className="w-4 h-4" />
+                                  <Download className={`w-4 h-4 ${downloadingCertificateId === record.id ? 'animate-pulse' : ''}`} />
                                 </button>
                               )}
                             </>

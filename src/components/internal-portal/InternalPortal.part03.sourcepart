@@ -2434,15 +2434,8 @@
             </div>
             </>
           ))}
-        {(activeTab === "certificados" || Boolean(pendingFieldServiceCertificateDownload)) && (
-          <div
-            className={
-              activeTab === "certificados"
-                ? "space-y-6 print:space-y-0"
-                : "fixed left-[-12000px] top-0 w-[816px] bg-white pointer-events-none space-y-6 print:space-y-0"
-            }
-            aria-hidden={activeTab !== "certificados"}
-          >
+        {activeTab === "certificados" && (
+          <div className="space-y-6 print:space-y-0">
             <div className="print:hidden flex items-center justify-between">
               <div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
@@ -3353,23 +3346,40 @@
                 return;
               }
 
-              setCertificateReturnTab("field_service");
-              setSelectedCertificateId(instId);
-              setFieldServiceTag(tagData);
-              setFieldServiceEquip(equipmentData);
-              setFieldServiceCertificateContext(context);
-              setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
               try {
                 await markCertificateIssued(instId);
-                // Não navegar para a aba de certificados. O estado pendente faz o
-                // certificado ser montado fora da viewport somente para gerar o PDF.
-                setPendingFieldServiceCertificateDownload({ instrumentId: instId, fileName });
+
+                const report = [...reports]
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                  .find((item: any) => item.instrumentId === instId);
+                const certNumber =
+                  report?.certNumber ||
+                  instrument?.certificateNumber ||
+                  instrument?.coma ||
+                  `COMA-${instId.substring(0, 4).toUpperCase()}`;
+                const certAuthKey = getReportAuthKey(
+                  report,
+                  instId + certNumber,
+                );
+
+                await downloadFieldServiceCertificatePdf({
+                  fileName,
+                  certificateNumber: certNumber,
+                  authKey: certAuthKey,
+                  logoSrc: logoPreview || "/COMANINS%202026_logo_horizontal_transparente.png",
+                  company: companyData,
+                  client: resolvedClient.client,
+                  clientAddress: getCertificateClientAddress(resolvedClient.client),
+                  instrument,
+                  fieldServiceTag: tagData,
+                  fieldServiceEquip: equipmentData,
+                  report,
+                  referenceStandards,
+                });
               } catch (error: any) {
-                setPendingFieldServiceCertificateDownload(null);
-                closeCertificateView("field_service");
                 console.error("Erro ao baixar/emitir certificado pelo Serviço de Campo:", error);
                 alert(
-                  `Não foi possível preparar o certificado para download.\n\n${error?.message || "Falha ao atualizar o status do instrumento."}`,
+                  `Não foi possível gerar o certificado em PDF.\n\n${error?.message || "Falha ao gerar ou salvar o arquivo PDF."}`,
                 );
               }
             }}
