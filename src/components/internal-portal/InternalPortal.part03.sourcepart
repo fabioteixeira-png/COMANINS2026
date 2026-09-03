@@ -2434,8 +2434,15 @@
             </div>
             </>
           ))}
-        {activeTab === "certificados" && (
-          <div className="space-y-6 print:space-y-0">
+        {(activeTab === "certificados" || pendingFieldServiceCertificateDownload) && (
+          <div
+            className={
+              activeTab === "certificados"
+                ? "space-y-6 print:space-y-0"
+                : "fixed left-[-12000px] top-0 z-[-10] w-[718px] bg-white pointer-events-none"
+            }
+            aria-hidden={activeTab !== "certificados"}
+          >
             <div className="print:hidden flex items-center justify-between">
               <div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
@@ -2456,7 +2463,24 @@
 
             <div className="w-full text-xs print:block">
               {/* Printable Report Sheet */}
-              <div id="certificate-printable-area" className="printable-area bg-white p-10 rounded-sm border border-slate-200 shadow-md flex flex-col justify-between min-h-[1056px] w-full max-w-[816px] mx-auto text-slate-900 font-sans relative print:min-h-0 print:h-auto print:shadow-none print:border-none print:p-0 print:max-w-none print:block">
+              <div
+                id="certificate-printable-area"
+                className="printable-area bg-white p-10 rounded-sm border border-slate-200 shadow-md flex flex-col justify-between min-h-[1056px] w-full max-w-[816px] mx-auto text-slate-900 font-sans relative print:min-h-0 print:h-auto print:shadow-none print:border-none print:p-0 print:max-w-none print:block"
+                style={
+                  pendingFieldServiceCertificateDownload && activeTab !== "certificados"
+                    ? {
+                        width: "718px",
+                        maxWidth: "718px",
+                        minHeight: 0,
+                        padding: 0,
+                        margin: 0,
+                        border: "none",
+                        borderRadius: 0,
+                        boxShadow: "none",
+                      }
+                    : undefined
+                }
+              >
                 {selectedCertificateId ? (
                   (() => {
                     const inst = instruments.find(
@@ -2681,7 +2705,7 @@
                         {/* Sheet actions - HIDDEN in printing */}
                         <div data-certificate-pdf-ignore="true" className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
                           <button
-                            onClick={() => window.print()}
+                            onClick={handleCertificatePrint}
                             className="p-2 px-4 bg-royal-blue text-white hover:bg-blue-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
                             title="Imprimir Certificado de Calibração"
                           >
@@ -3349,37 +3373,27 @@
               try {
                 await markCertificateIssued(instId);
 
-                const report = [...reports]
-                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                  .find((item: any) => item.instrumentId === instId);
-                const certNumber =
-                  report?.certNumber ||
-                  instrument?.certificateNumber ||
-                  instrument?.coma ||
-                  `COMA-${instId.substring(0, 4).toUpperCase()}`;
-                const certAuthKey = getReportAuthKey(
-                  report,
-                  instId + certNumber,
-                );
+                setCertificateReturnTab("field_service");
+                setSelectedCertificateId(instId);
+                setFieldServiceTag(tagData);
+                setFieldServiceEquip(equipmentData);
+                setFieldServiceCertificateContext(context);
+                setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
 
-                await downloadFieldServiceCertificatePdf({
-                  fileName,
-                  certificateNumber: certNumber,
-                  authKey: certAuthKey,
-                  logoSrc: logoPreview || "/COMANINS%202026_logo_horizontal_transparente.png",
-                  company: companyData,
-                  client: resolvedClient.client,
-                  clientAddress: getCertificateClientAddress(resolvedClient.client),
-                  instrument,
-                  fieldServiceTag: tagData,
-                  fieldServiceEquip: equipmentData,
-                  report,
-                  referenceStandards,
+                await new Promise<void>((resolve) => {
+                  fieldServiceDownloadCompletionRef.current = resolve;
+                  setPendingFieldServiceCertificateDownload({
+                    instrumentId: instId,
+                    fileName,
+                  });
                 });
               } catch (error: any) {
+                fieldServiceDownloadCompletionRef.current = null;
+                setPendingFieldServiceCertificateDownload(null);
+                resetFieldServiceCertificateState();
                 console.error("Erro ao baixar/emitir certificado pelo Serviço de Campo:", error);
                 alert(
-                  `Não foi possível gerar o certificado em PDF.\n\n${error?.message || "Falha ao gerar ou salvar o arquivo PDF."}`,
+                  `Não foi possível preparar o certificado padrão para download.\n\n${error?.message || "Falha ao preparar o certificado."}`,
                 );
               }
             }}

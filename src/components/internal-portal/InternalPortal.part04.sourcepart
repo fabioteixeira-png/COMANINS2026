@@ -3010,92 +3010,200 @@
 
               {/* Transactions */}
               <div className="space-y-4">
-                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
-                    <h3 className="font-bold text-slate-800 flex items-center space-x-2">
-                      <ArrowRightLeft className="h-5 w-5 text-slate-500" />
-                      <span>Últimas Movimentações</span>
-                    </h3>
-                  </div>
-                  {inventoryTransactions.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 text-sm">
-                      Nenhuma movimentação registrada.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-                      {inventoryTransactions.slice(0, 50).map((tx) => {
-                        const item = inventoryItems.find(
-                          (i) => i.id === tx.itemId,
-                        );
-                        const isEntrada = tx.type === "entrada";
-                        return (
-                          <div
-                            key={tx.id}
-                            className="p-4 hover:bg-slate-50 transition-colors"
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <div
-                                className={`flex items-center space-x-1.5 text-xs font-bold ${isEntrada ? "text-emerald-600" : "text-amber-600"}`}
-                              >
-                                {isEntrada ? (
-                                  <TrendingUp className="h-3.5 w-3.5" />
-                                ) : (
-                                  <TrendingDown className="h-3.5 w-3.5" />
-                                )}
-                                <span className="uppercase">{tx.type}</span>
-                              </div>
-                              <span className="text-xs text-slate-500 font-mono">
-                                {new Date(tx.date).toLocaleDateString("pt-BR")}
-                              </span>
-                            </div>
-                            <div className="text-sm font-bold text-slate-900 mb-1">
-                              {item?.name || "Item Removido"}
-                            </div>
-                            <div className="flex justify-between items-end">
-                              <div className="text-xs text-slate-600">
-                                Resp: {tx.responsible}
-                                {tx.employeeId && (
-                                  <span className="block text-slate-500">
-                                    Para:{" "}
-                                    {internalUsers.find(
-                                      (u) => u.id === tx.employeeId,
-                                    )?.name || "Desconhecido"}
-                                  </span>
-                                )}
-                              </div>
-                              <div
-                                className={`font-mono font-bold ${isEntrada ? "text-emerald-600" : "text-amber-600"}`}
-                              >
-                                {isEntrada ? "+" : "-"}
-                                {tx.quantity} {item?.unit}
-                              </div>
-                            </div>
-                            {tx.attachments && tx.attachments.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-2 pt-1 border-t border-slate-100">
-                                {tx.attachments.map((attRaw: string, attIdx: number) => {
-                                  let name = `Comprovante ${attIdx + 1}`;
-                                  if (attRaw.includes("||data:")) name = attRaw.split("||")[0];
-                                  return (
-                                    <button
-                                      key={attIdx}
-                                      type="button"
-                                      onClick={() => openStockAttachment(attRaw)}
-                                      className="inline-flex items-center space-x-1 text-[10px] bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer"
-                                      title="Clique para visualizar/baixar"
-                                    >
-                                      <Paperclip className="h-2.5 w-2.5 text-slate-500" />
-                                      <span className="truncate max-w-[100px]">{name}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
+                {(() => {
+                  const normalizedSearch = inventoryTransactionSearchTerm.trim().toLowerCase();
+                  const startTimestamp = inventoryTransactionStartDate
+                    ? new Date(`${inventoryTransactionStartDate}T00:00:00`).getTime()
+                    : null;
+                  const endTimestamp = inventoryTransactionEndDate
+                    ? new Date(`${inventoryTransactionEndDate}T23:59:59.999`).getTime()
+                    : null;
+
+                  const filteredTransactions = inventoryTransactions.filter((tx) => {
+                    const item = inventoryItems.find((inventoryItem) => inventoryItem.id === tx.itemId);
+                    const employee = tx.employeeId
+                      ? internalUsers.find((user) => user.id === tx.employeeId)
+                      : undefined;
+                    const txTimestamp = new Date(tx.date).getTime();
+
+                    if (
+                      inventoryTransactionTypeFilter !== "Todos" &&
+                      tx.type !== inventoryTransactionTypeFilter
+                    ) {
+                      return false;
+                    }
+                    if (startTimestamp !== null && (!Number.isFinite(txTimestamp) || txTimestamp < startTimestamp)) {
+                      return false;
+                    }
+                    if (endTimestamp !== null && (!Number.isFinite(txTimestamp) || txTimestamp > endTimestamp)) {
+                      return false;
+                    }
+                    if (!normalizedSearch) return true;
+
+                    return [
+                      item?.name,
+                      item?.category,
+                      item?.location,
+                      tx.responsible,
+                      employee?.name,
+                      tx.reason,
+                      tx.type,
+                      tx.quantity,
+                    ].some((value) => String(value ?? "").toLowerCase().includes(normalizedSearch));
+                  });
+
+                  return (
+                    <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 sm:px-6 py-4 border-b border-slate-200 bg-slate-50 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                          <h3 className="font-bold text-slate-800 flex items-center space-x-2">
+                            <ArrowRightLeft className="h-5 w-5 text-slate-500" />
+                            <span>Movimentações de Estoque</span>
+                          </h3>
+                          <span className="text-xs font-semibold text-slate-500">
+                            {filteredTransactions.length} resultado(s)
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_150px_160px_160px_auto] gap-2">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                            <input
+                              type="text"
+                              value={inventoryTransactionSearchTerm}
+                              onChange={(event) => setInventoryTransactionSearchTerm(event.target.value)}
+                              placeholder="Consultar item, responsável, colaborador, motivo..."
+                              className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs text-slate-800 outline-none focus:border-royal-blue focus:ring-1 focus:ring-royal-blue"
+                            />
                           </div>
-                        );
-                      })}
+                          <select
+                            value={inventoryTransactionTypeFilter}
+                            onChange={(event) => setInventoryTransactionTypeFilter(event.target.value)}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:border-royal-blue focus:ring-1 focus:ring-royal-blue"
+                          >
+                            <option value="Todos">Entrada e saída</option>
+                            <option value="entrada">Somente entradas</option>
+                            <option value="saida">Somente saídas</option>
+                          </select>
+                          <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            De
+                            <input
+                              type="date"
+                              value={inventoryTransactionStartDate}
+                              onChange={(event) => setInventoryTransactionStartDate(event.target.value)}
+                              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-700 outline-none focus:border-royal-blue focus:ring-1 focus:ring-royal-blue"
+                            />
+                          </label>
+                          <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            Até
+                            <input
+                              type="date"
+                              value={inventoryTransactionEndDate}
+                              onChange={(event) => setInventoryTransactionEndDate(event.target.value)}
+                              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-700 outline-none focus:border-royal-blue focus:ring-1 focus:ring-royal-blue"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInventoryTransactionSearchTerm("");
+                              setInventoryTransactionTypeFilter("Todos");
+                              setInventoryTransactionStartDate("");
+                              setInventoryTransactionEndDate("");
+                            }}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-100"
+                          >
+                            Limpar filtros
+                          </button>
+                        </div>
+                      </div>
+
+                      {inventoryTransactions.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500 text-sm">
+                          Nenhuma movimentação registrada.
+                        </div>
+                      ) : filteredTransactions.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500 text-sm">
+                          Nenhuma movimentação encontrada para os filtros informados.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+                          {filteredTransactions.slice(0, 200).map((tx) => {
+                            const item = inventoryItems.find((inventoryItem) => inventoryItem.id === tx.itemId);
+                            const isEntrada = tx.type === "entrada";
+                            return (
+                              <div
+                                key={tx.id}
+                                className="p-4 hover:bg-slate-50 transition-colors"
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <div
+                                    className={`flex items-center space-x-1.5 text-xs font-bold ${isEntrada ? "text-emerald-600" : "text-amber-600"}`}
+                                  >
+                                    {isEntrada ? (
+                                      <TrendingUp className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <TrendingDown className="h-3.5 w-3.5" />
+                                    )}
+                                    <span className="uppercase">{tx.type}</span>
+                                  </div>
+                                  <span className="text-xs text-slate-500 font-mono">
+                                    {new Date(tx.date).toLocaleDateString("pt-BR")}
+                                  </span>
+                                </div>
+                                <div className="text-sm font-bold text-slate-900 mb-1">
+                                  {item?.name || "Item Removido"}
+                                </div>
+                                <div className="flex justify-between items-end gap-3">
+                                  <div className="text-xs text-slate-600">
+                                    Resp: {tx.responsible}
+                                    {tx.employeeId && (
+                                      <span className="block text-slate-500">
+                                        Para:{" "}
+                                        {internalUsers.find((user) => user.id === tx.employeeId)?.name || "Desconhecido"}
+                                      </span>
+                                    )}
+                                    {tx.reason && (
+                                      <span className="block text-slate-500 mt-0.5">
+                                        Motivo: {tx.reason}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div
+                                    className={`font-mono font-bold ${isEntrada ? "text-emerald-600" : "text-amber-600"}`}
+                                  >
+                                    {isEntrada ? "+" : "-"}
+                                    {tx.quantity} {item?.unit}
+                                  </div>
+                                </div>
+                                {tx.attachments && tx.attachments.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2 pt-1 border-t border-slate-100">
+                                    {tx.attachments.map((attRaw: string, attIdx: number) => {
+                                      let name = `Comprovante ${attIdx + 1}`;
+                                      if (attRaw.includes("||data:")) name = attRaw.split("||")[0];
+                                      return (
+                                        <button
+                                          key={attIdx}
+                                          type="button"
+                                          onClick={() => openStockAttachment(attRaw)}
+                                          className="inline-flex items-center space-x-1 text-[10px] bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer"
+                                          title="Clique para visualizar/baixar"
+                                        >
+                                          <Paperclip className="h-2.5 w-2.5 text-slate-500" />
+                                          <span className="truncate max-w-[100px]">{name}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

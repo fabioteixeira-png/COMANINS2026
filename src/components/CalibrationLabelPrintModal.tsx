@@ -292,61 +292,125 @@ export default function CalibrationLabelPrintModal({
     if (!printContent) return;
 
     const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
     iframe.style.position = "fixed";
     iframe.style.right = "0";
     iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
     iframe.style.border = "0";
-    document.body.appendChild(iframe);
 
-    const doc = iframe.contentWindow?.document;
-    if (doc) {
-      doc.open();
-      doc.write(`
+    const cleanup = () => {
+      window.setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 250);
+    };
+
+    if (isComaninsStandard) {
+      // O padrão COMANINS usa uma impressão totalmente isolada: somente o SVG
+      // da etiqueta é enviado ao contexto de impressão. Isso impede que o
+      // navegador herde qualquer elemento do Portal Interno.
+      const svg = printContent.querySelector("svg");
+      if (!svg) return;
+
+      iframe.onload = () => {
+        const printWindow = iframe.contentWindow;
+        if (!printWindow) {
+          cleanup();
+          return;
+        }
+        printWindow.addEventListener("afterprint", cleanup, { once: true });
+        window.setTimeout(() => {
+          printWindow.focus();
+          printWindow.print();
+          window.setTimeout(cleanup, 2000);
+        }, 120);
+      };
+
+      iframe.srcdoc = `
+        <!doctype html>
         <html>
           <head>
-            <title>Imprimir Etiqueta</title>
+            <meta charset="utf-8" />
+            <title>Etiqueta Padrão COMANINS</title>
             <style>
-              @page {
-                size: 36mm ${labelHeightMm}mm;
-                margin: 0;
-              }
+              @page { size: 36mm 36mm; margin: 0; }
               html, body {
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 36mm !important;
-                height: ${labelHeightMm}mm !important;
+                height: 36mm !important;
                 overflow: hidden !important;
                 background: transparent !important;
               }
+              body { display: block !important; }
               svg {
                 display: block !important;
                 width: 36mm !important;
-                height: ${labelHeightMm}mm !important;
+                height: 36mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
               }
-              .tze661-tape-background {
-                fill: transparent !important;
-              }
+              .tze661-tape-background { fill: transparent !important; }
             </style>
           </head>
-          <body>
-            ${printContent.outerHTML}
-          </body>
+          <body>${svg.outerHTML}</body>
         </html>
-      `);
-      doc.close();
-
-      iframe.contentWindow?.focus();
-      setTimeout(() => {
-        iframe.contentWindow?.print();
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        }, 1000);
-      }, 250);
+      `;
+      document.body.appendChild(iframe);
+      return;
     }
+
+    // Mantém intacto o fluxo que já funciona para as etiquetas dos demais instrumentos.
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      cleanup();
+      return;
+    }
+
+    doc.open();
+    doc.write(`
+      <html>
+        <head>
+          <title>Imprimir Etiqueta</title>
+          <style>
+            @page {
+              size: 36mm ${labelHeightMm}mm;
+              margin: 0;
+            }
+            html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 36mm !important;
+              height: ${labelHeightMm}mm !important;
+              overflow: hidden !important;
+              background: transparent !important;
+            }
+            svg {
+              display: block !important;
+              width: 36mm !important;
+              height: ${labelHeightMm}mm !important;
+            }
+            .tze661-tape-background {
+              fill: transparent !important;
+            }
+          </style>
+        </head>
+        <body>
+          ${printContent.outerHTML}
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    iframe.contentWindow?.focus();
+    setTimeout(() => {
+      iframe.contentWindow?.print();
+      setTimeout(cleanup, 1000);
+    }, 250);
   };
 
   return (

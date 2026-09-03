@@ -219,7 +219,7 @@ import {
 import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
 import FieldService, { type FieldServiceCertificateContext } from "./FieldService";
-import { downloadFieldServiceCertificatePdf } from "../utils/fieldServiceCertificatePdf";
+import { downloadCertificateDomAsPdf } from "../utils/certificateDomPdf";
 import FinanceManagement from "./FinanceManagement";
 import RentalManagement from "./RentalManagement";
 import MySignature from "./MySignature";
@@ -1314,6 +1314,10 @@ export default function InternalPortal({
   const [inventorySearchTerm, setInventorySearchTerm] = useState<any>("");
   const [inventoryCategoryFilter, setInventoryCategoryFilter] =
     useState<any>("Todos");
+  const [inventoryTransactionSearchTerm, setInventoryTransactionSearchTerm] = useState<string>("");
+  const [inventoryTransactionTypeFilter, setInventoryTransactionTypeFilter] = useState<string>("Todos");
+  const [inventoryTransactionStartDate, setInventoryTransactionStartDate] = useState<string>("");
+  const [inventoryTransactionEndDate, setInventoryTransactionEndDate] = useState<string>("");
   const [isCatalogOpen, setIsCatalogOpen] = useState<any>(false);
   const [labBenchName, setLabBenchName] = useState<any>("");
   const [labBenchSuccessMessage, setLabBenchSuccessMessage] = useState<any>("");
@@ -1369,14 +1373,83 @@ export default function InternalPortal({
     useState<FieldServiceCertificateContext | null>(null);
   const [fieldServiceCertificateClientId, setFieldServiceCertificateClientId] =
     useState<string>("");
-  const closeCertificateView = (targetTab?: "instruments" | "field_service") => {
+  const [pendingFieldServiceCertificateDownload, setPendingFieldServiceCertificateDownload] =
+    useState<{ instrumentId: string; fileName: string } | null>(null);
+  const fieldServiceDownloadCompletionRef = React.useRef<(() => void) | null>(null);
+
+  const resetFieldServiceCertificateState = () => {
     setSelectedCertificateId("");
     setFieldServiceTag("");
     setFieldServiceEquip("");
     setFieldServiceCertificateContext(null);
     setFieldServiceCertificateClientId("");
+  };
+
+  const closeCertificateView = (targetTab?: "instruments" | "field_service") => {
+    resetFieldServiceCertificateState();
     setActiveTab(targetTab || certificateReturnTab);
   };
+
+  const handleCertificatePrint = () => {
+    document.body.classList.add("printing-certificate-only");
+    const cleanup = () => document.body.classList.remove("printing-certificate-only");
+    window.addEventListener("afterprint", cleanup, { once: true });
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(cleanup, 1500);
+    }, 50);
+  };
+
+  useEffect(() => {
+    if (
+      !pendingFieldServiceCertificateDownload ||
+      selectedCertificateId !== pendingFieldServiceCertificateDownload.instrumentId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())),
+          );
+          if (cancelled) return;
+
+          const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
+          if (!printableArea) {
+            throw new Error("O certificado padrão não ficou disponível para gerar o arquivo.");
+          }
+
+          await downloadCertificateDomAsPdf(
+            printableArea,
+            pendingFieldServiceCertificateDownload.fileName,
+          );
+        } catch (error: any) {
+          console.error("Erro ao gerar PDF do certificado padrão:", error);
+          if (!cancelled) {
+            alert(
+              `Não foi possível baixar o certificado no layout padrão.\n\n${error?.message || "Falha ao capturar o certificado."}`,
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setPendingFieldServiceCertificateDownload(null);
+            resetFieldServiceCertificateState();
+            const resolveDownload = fieldServiceDownloadCompletionRef.current;
+            fieldServiceDownloadCompletionRef.current = null;
+            resolveDownload?.();
+          }
+        }
+      })();
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [pendingFieldServiceCertificateDownload, selectedCertificateId]);
 
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");
