@@ -17,13 +17,13 @@ service firebase.storage {
       return isInternalAccount() && (
         request.auth.token.accessProfileId == 'administrator' ||
         (request.auth.token.accessProfileId == null && (
-          request.auth.token.permissionLevel == 'Administrador' ||
-          request.auth.token.role == 'Administrador' ||
+          request.auth.token.permissionLevel in ['Administrador', 'administrador'] ||
+          request.auth.token.role in ['Administrador', 'administrador'] ||
           request.auth.token.role == 'Admin' ||
           request.auth.token.role == 'admin' ||
           request.auth.token.role == 'master' ||
-          request.auth.token.role == 'Diretor' ||
-          request.auth.token.role == 'Diretoria'
+          request.auth.token.role in ['Diretor', 'diretor'] ||
+          request.auth.token.role in ['Diretoria', 'diretoria']
         ))
       );
     }

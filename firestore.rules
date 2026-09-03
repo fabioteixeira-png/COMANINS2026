@@ -15,13 +15,13 @@ service cloud.firestore {
       return isInternalAccount() && (
         request.auth.token.accessProfileId == 'administrator' ||
         (request.auth.token.accessProfileId == null && (
-          request.auth.token.permissionLevel == 'Administrador' ||
-          request.auth.token.role == 'Administrador' ||
+          request.auth.token.permissionLevel in ['Administrador', 'administrador'] ||
+          request.auth.token.role in ['Administrador', 'administrador'] ||
           request.auth.token.role == 'Admin' ||
           request.auth.token.role == 'admin' ||
           request.auth.token.role == 'master' ||
-          request.auth.token.role == 'Diretor' ||
-          request.auth.token.role == 'Diretoria'
+          request.auth.token.role in ['Diretor', 'diretor'] ||
+          request.auth.token.role in ['Diretoria', 'diretoria']
         ))
       );
     }
@@ -275,11 +275,7 @@ service cloud.firestore {
       allow write: if (documentId == 'certSequence' && hasEditModule('calibration')) ||
         (documentId == 'intakeSequence' && hasEditModule('material_intake')) ||
         (documentId == 'examTypes' && canEditRh()) ||
-        (documentId in ['calibrationLogo', 'boxLabelLogo'] && isAdministrator() &&
-          request.resource.data.keys().hasOnly(['url']) &&
-          request.resource.data.url is string &&
-          request.resource.data.url.size() <= 750000) ||
-        (documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos', 'dropdownOptions'] && isAdministrator());
+        (documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos', 'dropdownOptions', 'calibrationLogo', 'boxLabelLogo'] && isAdministrator());
     }
     match /sitePhotos/{document=**} {
       allow read: if true;
