@@ -1426,12 +1426,14 @@ export default function InternalPortal({
   useEffect(() => {
     if (
       !pendingFieldServiceCertificateDownload ||
-      activeTab !== "certificados" ||
       selectedCertificateId !== pendingFieldServiceCertificateDownload.instrumentId
     ) {
       return;
     }
 
+    // O certificado é renderizado fora da viewport quando o download parte do
+    // Serviço de Campo. Assim preservamos exatamente o layout oficial sem trocar
+    // de aba, sem abrir a visualização e sem bloquear a navegação do operador.
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
@@ -1448,10 +1450,10 @@ ${error?.message || "Falha ao montar o certificado em PDF."}`,
           closeCertificateView("field_service");
         }
       })();
-    }, 700);
+    }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [pendingFieldServiceCertificateDownload, activeTab, selectedCertificateId]);
+  }, [pendingFieldServiceCertificateDownload, selectedCertificateId]);
 
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");

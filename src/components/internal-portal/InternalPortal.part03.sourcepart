@@ -2434,8 +2434,15 @@
             </div>
             </>
           ))}
-        {activeTab === "certificados" && (
-          <div className="space-y-6 print:space-y-0">
+        {(activeTab === "certificados" || Boolean(pendingFieldServiceCertificateDownload)) && (
+          <div
+            className={
+              activeTab === "certificados"
+                ? "space-y-6 print:space-y-0"
+                : "fixed left-[-12000px] top-0 w-[816px] bg-white pointer-events-none space-y-6 print:space-y-0"
+            }
+            aria-hidden={activeTab !== "certificados"}
+          >
             <div className="print:hidden flex items-center justify-between">
               <div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
@@ -3352,12 +3359,14 @@
               setFieldServiceEquip(equipmentData);
               setFieldServiceCertificateContext(context);
               setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
-              setPendingFieldServiceCertificateDownload({ instrumentId: instId, fileName });
               try {
                 await markCertificateIssued(instId);
-                setActiveTab("certificados");
+                // Não navegar para a aba de certificados. O estado pendente faz o
+                // certificado ser montado fora da viewport somente para gerar o PDF.
+                setPendingFieldServiceCertificateDownload({ instrumentId: instId, fileName });
               } catch (error: any) {
                 setPendingFieldServiceCertificateDownload(null);
+                closeCertificateView("field_service");
                 console.error("Erro ao baixar/emitir certificado pelo Serviço de Campo:", error);
                 alert(
                   `Não foi possível preparar o certificado para download.\n\n${error?.message || "Falha ao atualizar o status do instrumento."}`,
