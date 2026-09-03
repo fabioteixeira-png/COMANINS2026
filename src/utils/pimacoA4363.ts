@@ -114,9 +114,18 @@ const printLabel = (
   const textX = x + leftPadding + logoBoxWidth + 2.3;
   const textMaxWidth = A4363.labelWidthMm - (textX - x) - 2.6;
 
-  // A imagem fornecida possui proporção aproximadamente quadrada. Mantemos
-  // contain dentro da área da esquerda para preservar a marca sem distorção.
-  doc.addImage(logoDataUrl, 'PNG', x + leftPadding, y + 5.1, logoBoxWidth, logoBoxWidth, undefined, 'FAST');
+  // A logo pode ser quadrada, vertical ou horizontal. Calculamos o contain
+  // dentro da área reservada para preservar a proporção sem distorção.
+  const logoFormat = /^data:image\/jpe?g/i.test(logoDataUrl) ? 'JPEG' : 'PNG';
+  const imageProperties = doc.getImageProperties(logoDataUrl);
+  const naturalWidth = Number(imageProperties.width || 1);
+  const naturalHeight = Number(imageProperties.height || 1);
+  const scale = Math.min(logoBoxWidth / naturalWidth, logoBoxHeight / naturalHeight);
+  const renderedWidth = naturalWidth * scale;
+  const renderedHeight = naturalHeight * scale;
+  const logoX = x + leftPadding + (logoBoxWidth - renderedWidth) / 2;
+  const logoY = y + (A4363.labelHeightMm - renderedHeight) / 2;
+  doc.addImage(logoDataUrl, logoFormat, logoX, logoY, renderedWidth, renderedHeight, undefined, 'FAST');
 
   doc.setTextColor(10, 38, 77);
   doc.setFont('helvetica', 'bold');

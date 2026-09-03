@@ -401,6 +401,7 @@
             reports={reports}
             currentUser={currentUser}
             canEdit={canEditMaterialIntake}
+            boxLabelLogo={boxLabelLogo}
           />
         )}
 

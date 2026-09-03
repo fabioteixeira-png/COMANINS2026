@@ -238,6 +238,214 @@
                   </div>
                 </div>
 
+                {/* LOGO DA ETIQUETA CAIXA */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 space-y-6 shadow-xs">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-4">
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl shadow-inner">
+                        <Image className="h-6 w-6 text-royal-blue" />
+                      </div>
+                      <div>
+                        <h3 className="font-display font-extrabold text-slate-900 text-base">
+                          Logomarca da Etiqueta Caixa
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Logomarca exclusiva usada na pré-visualização e no PDF Pimaco A4363 da Etiqueta Caixa.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {boxLabelLogoSuccessMsg && (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                      <span>{boxLabelLogoSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {boxLabelLogoErrorMsg && (
+                    <div className="bg-red-50 border border-red-200 text-red-800 p-3.5 rounded-xl text-xs font-bold flex items-center space-x-2">
+                      <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                      <span>{boxLabelLogoErrorMsg}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                    <div className="md:col-span-5 bg-slate-50 p-5 rounded-xl border border-slate-200 text-center space-y-3">
+                      <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-widest block">
+                        Pré-visualização na Etiqueta Caixa
+                      </span>
+                      <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-inner flex items-center justify-center min-h-[120px]">
+                        <img
+                          src={boxLabelLogoPreview || "/comanins-box-label-logo.png"}
+                          alt="Logomarca da Etiqueta Caixa"
+                          className="max-h-24 max-w-full object-contain"
+                          onError={() =>
+                            setBoxLabelLogoErrorMsg(
+                              "A imagem informada não pôde ser carregada. Selecione outro arquivo ou confira a URL.",
+                            )
+                          }
+                        />
+                      </div>
+                      {!boxLabelLogoPreview && (
+                        <span className="text-[9px] text-slate-400 font-mono">
+                          Logo padrão atual da Etiqueta Caixa
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="md:col-span-7 space-y-4 text-xs">
+                      <div>
+                        <label className="block font-bold text-slate-800 mb-1">
+                          URL da Imagem
+                        </label>
+                        <input
+                          type="text"
+                          value={boxLabelLogoPreview.startsWith('data:') ? '' : boxLabelLogoPreview}
+                          onChange={(e) => {
+                            setBoxLabelLogoPreview(e.target.value);
+                            setBoxLabelLogoSuccessMsg("");
+                            setBoxLabelLogoErrorMsg("");
+                          }}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue focus:outline-none"
+                          placeholder={boxLabelLogoPreview.startsWith('data:') ? 'Imagem local carregada...' : 'https://sua-imagem.com/logo-etiqueta-caixa.png'}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-800 mb-1.5">
+                          Ou Enviar Arquivo de Imagem
+                        </label>
+                        <label className="cursor-pointer bg-slate-50 hover:bg-slate-100 border border-slate-300 border-dashed rounded-xl p-3 text-center transition-colors flex items-center justify-center space-x-2 text-slate-600 font-medium">
+                          <Upload className="h-4 w-4 text-royal-blue" />
+                          <span>
+                            Clique para carregar arquivo (PNG, JPG, WebP ou SVG)
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                            onChange={async (e) => {
+                              const input = e.currentTarget;
+                              const file = input.files?.[0];
+                              if (file) {
+                                try {
+                                  setBoxLabelLogoSuccessMsg("");
+                                  setBoxLabelLogoErrorMsg("");
+                                  const preserveTransparency = [
+                                    'image/png',
+                                    'image/svg+xml',
+                                    'image/webp',
+                                  ].includes(file.type);
+                                  const compressedDataUrl =
+                                    await compressImageToWebResolution(
+                                      file,
+                                      600,
+                                      600,
+                                      0.78,
+                                      preserveTransparency,
+                                    );
+
+                                  if (!/^data:image\/(png|jpeg|webp);/i.test(compressedDataUrl)) {
+                                    throw new Error('O arquivo selecionado não pôde ser convertido em imagem.');
+                                  }
+
+                                  if (compressedDataUrl.length > 750_000) {
+                                    throw new Error('A imagem ficou muito grande. Use uma logo PNG, JPG, WebP ou SVG mais leve.');
+                                  }
+
+                                  setBoxLabelLogoPreview(compressedDataUrl);
+                                } catch (err) {
+                                  console.error("Error compressing box label logo:", err);
+                                  setBoxLabelLogoErrorMsg(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "Não foi possível preparar a logomarca selecionada.",
+                                  );
+                                } finally {
+                                  input.value = '';
+                                }
+                              }
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex items-center space-x-3 pt-2">
+                        <button
+                          type="button"
+                          disabled={isSavingBoxLabelLogo || !boxLabelLogoPreview.trim()}
+                          onClick={async () => {
+                            setIsSavingBoxLabelLogo(true);
+                            setBoxLabelLogoSuccessMsg("");
+                            setBoxLabelLogoErrorMsg("");
+                            try {
+                              const uploadedUrl = boxLabelLogoPreview.trim();
+                              if (!uploadedUrl) {
+                                throw new Error("Selecione uma imagem ou informe uma URL HTTPS antes de salvar.");
+                              }
+                              await saveBoxLabelLogoConfig(uploadedUrl);
+                              setBoxLabelLogo(uploadedUrl);
+                              setBoxLabelLogoPreview(uploadedUrl);
+                              setBoxLabelLogoSuccessMsg(
+                                "✓ Logo da Etiqueta Caixa salva e aplicada em todo o sistema!",
+                              );
+                              setTimeout(() => setBoxLabelLogoSuccessMsg(""), 4000);
+                            } catch (err) {
+                              console.error("Error saving box label logo:", err);
+                              setBoxLabelLogoErrorMsg(
+                                err instanceof Error
+                                  ? err.message
+                                  : "Erro ao salvar a logo. Tente novamente.",
+                              );
+                            } finally {
+                              setIsSavingBoxLabelLogo(false);
+                            }
+                          }}
+                          className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Save className="h-4 w-4" />
+                          <span>{isSavingBoxLabelLogo ? "Salvando..." : "Salvar Logo da Etiqueta Caixa"}</span>
+                        </button>
+
+                        {boxLabelLogoPreview && (
+                          <button
+                            type="button"
+                            disabled={isSavingBoxLabelLogo}
+                            onClick={async () => {
+                              setIsSavingBoxLabelLogo(true);
+                              setBoxLabelLogoSuccessMsg("");
+                              setBoxLabelLogoErrorMsg("");
+                              try {
+                                await saveBoxLabelLogoConfig("");
+                                setBoxLabelLogo("");
+                                setBoxLabelLogoPreview("");
+                                setBoxLabelLogoSuccessMsg(
+                                  "✓ Logo da Etiqueta Caixa restaurada para o padrão!",
+                                );
+                                setTimeout(() => setBoxLabelLogoSuccessMsg(""), 4000);
+                              } catch (err) {
+                                console.error("Error restoring box label logo:", err);
+                                setBoxLabelLogoErrorMsg(
+                                  err instanceof Error
+                                    ? err.message
+                                    : "Não foi possível restaurar a logo padrão.",
+                                );
+                              } finally {
+                                setIsSavingBoxLabelLogo(false);
+                              }
+                            }}
+                            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl font-bold transition-colors flex items-center space-x-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>Restaurar Padrão</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* CARD 2: LOGO DE RELATÓRIO E CERTIFICADOS */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">

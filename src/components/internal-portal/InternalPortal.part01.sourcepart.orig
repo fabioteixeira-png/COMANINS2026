@@ -55,8 +55,6 @@ import {
   saveHeaderLogoConfig,
   syncCalibrationLogoConfig,
   saveCalibrationLogoConfig,
-  syncBoxLabelLogoConfig,
-  saveBoxLabelLogoConfig,
   syncCustomLogo,
   saveCustomLogoConfig,
   syncSitePhotosConfig,
@@ -2136,12 +2134,6 @@ ${error?.message || "Falha ao montar o certificado em PDF."}`,
   const [calibrationLogoErrorMsg, setCalibrationLogoErrorMsg] = useState("");
   const [isSavingCalibrationLogo, setIsSavingCalibrationLogo] = useState(false);
 
-  const [boxLabelLogo, setBoxLabelLogo] = useState("");
-  const [boxLabelLogoPreview, setBoxLabelLogoPreview] = useState("");
-  const [boxLabelLogoSuccessMsg, setBoxLabelLogoSuccessMsg] = useState("");
-  const [boxLabelLogoErrorMsg, setBoxLabelLogoErrorMsg] = useState("");
-  const [isSavingBoxLabelLogo, setIsSavingBoxLabelLogo] = useState(false);
-
   const DEFAULT_SITE_PHOTOS = [
     {
       id: "photo1",
@@ -2433,17 +2425,6 @@ ${error?.message || "Falha ao montar o certificado em PDF."}`,
         } else {
           setCalibrationLogo("");
           setCalibrationLogoPreview("");
-        }
-      }),
-    );
-    unsubs.push(
-      syncBoxLabelLogoConfig((url) => {
-        if (url) {
-          setBoxLabelLogo(url);
-          setBoxLabelLogoPreview(url);
-        } else {
-          setBoxLabelLogo("");
-          setBoxLabelLogoPreview("");
         }
       }),
     );

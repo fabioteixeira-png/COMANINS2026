@@ -275,7 +275,7 @@ service cloud.firestore {
       allow write: if (documentId == 'certSequence' && hasEditModule('calibration')) ||
         (documentId == 'intakeSequence' && hasEditModule('material_intake')) ||
         (documentId == 'examTypes' && canEditRh()) ||
-        (documentId == 'calibrationLogo' && isAdministrator() &&
+        (documentId in ['calibrationLogo', 'boxLabelLogo'] && isAdministrator() &&
           request.resource.data.keys().hasOnly(['url']) &&
           request.resource.data.url is string &&
           request.resource.data.url.size() <= 750000) ||

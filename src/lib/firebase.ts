@@ -2320,6 +2320,45 @@ export async function saveCalibrationLogoConfig(url: string): Promise<void> {
   await setDoc(docRef, { url: normalizedUrl });
 }
 
+export async function syncBoxLabelLogoConfig(callback: (url: string) => void) {
+  const docRef = doc(db, 'systemSettings', 'boxLabelLogo');
+  return onSnapshot(docRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      callback(data?.url || '');
+      return;
+    }
+    callback('');
+  }, (err) => {
+    if (err && err.code === 'permission-denied') {
+      console.warn('Firestore sync boxLabelLogo permission denied.');
+    } else {
+      console.error('Error syncing boxLabelLogo config:', err);
+    }
+    callback('');
+  });
+}
+
+export async function saveBoxLabelLogoConfig(url: string): Promise<void> {
+  const normalizedUrl = String(url || '').trim();
+  const isAcceptedSource =
+    normalizedUrl === '' ||
+    normalizedUrl.startsWith('data:image/') ||
+    normalizedUrl.startsWith('/') ||
+    /^https:\/\//i.test(normalizedUrl);
+
+  if (!isAcceptedSource) {
+    throw new Error('A logomarca deve ser uma imagem enviada ou uma URL HTTPS válida.');
+  }
+
+  if (normalizedUrl.length > 750_000) {
+    throw new Error('A logomarca ficou muito grande. Selecione uma imagem menor.');
+  }
+
+  const docRef = doc(db, 'systemSettings', 'boxLabelLogo');
+  await setDoc(docRef, { url: normalizedUrl });
+}
+
 export async function saveHeaderLogoConfig(url: string): Promise<void> {
   try {
     const docRef = doc(db, 'systemSettings', 'headerLogo');
