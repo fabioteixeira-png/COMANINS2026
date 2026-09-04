@@ -219,7 +219,7 @@ import {
 import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
 import FieldService, { type FieldServiceCertificateContext } from "./FieldService";
-import { downloadCertificateDomAsPdf } from "../utils/certificateDomPdf";
+import { downloadCertificateDomAsPdf, printCertificateDomOnly } from "../utils/certificateDomPdf";
 import FinanceManagement from "./FinanceManagement";
 import RentalManagement from "./RentalManagement";
 import MySignature from "./MySignature";
@@ -1391,13 +1391,18 @@ export default function InternalPortal({
   };
 
   const handleCertificatePrint = () => {
-    document.body.classList.add("printing-certificate-only");
-    const cleanup = () => document.body.classList.remove("printing-certificate-only");
-    window.addEventListener("afterprint", cleanup, { once: true });
-    window.setTimeout(() => {
-      window.print();
-      window.setTimeout(cleanup, 1500);
-    }, 50);
+    const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
+    if (!printableArea) {
+      alert("Não foi possível localizar o certificado para impressão.");
+      return;
+    }
+
+    void printCertificateDomOnly(printableArea).catch((error: any) => {
+      console.error("Erro ao imprimir somente o certificado:", error);
+      alert(
+        `Não foi possível preparar a impressão do certificado.\n\n${error?.message || "Falha ao isolar o certificado."}`,
+      );
+    });
   };
 
   useEffect(() => {
