@@ -1,5 +1,5 @@
+import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import { toPng } from "html-to-image";
 
 const waitForImages = async (root: Document | HTMLElement): Promise<void> => {
   const images = Array.from(root.querySelectorAll("img"));
@@ -15,7 +15,6 @@ const waitForImages = async (root: Document | HTMLElement): Promise<void> => {
   );
 };
 
-
 const waitForStylesheets = async (root: Document): Promise<void> => {
   const links = Array.from(root.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'));
   await Promise.all(
@@ -30,7 +29,7 @@ const waitForStylesheets = async (root: Document): Promise<void> => {
         };
         link.addEventListener("load", finish, { once: true });
         link.addEventListener("error", finish, { once: true });
-        window.setTimeout(finish, 1500);
+        window.setTimeout(finish, 2000);
       });
     }),
   );
@@ -46,50 +45,208 @@ const waitForStableCertificate = async (element: HTMLElement): Promise<void> => 
   );
 };
 
+const blobToDataUrl = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Falha ao converter imagem para DataURL."));
+    reader.readAsDataURL(blob);
+  });
+
 /**
- * Baixa exatamente o mesmo DOM do certificado oficial mostrado no Portal.
- * Não recria o certificado, não altera largura/padding/min-height e não aplica
- * uma segunda formatação para o Serviço de Campo.
+ * Tenta transformar imagens HTTP(S) do certificado em DataURL dentro do clone
+ * isolado. Isso evita que canvas/download dependa de CORS durante a captura.
+ * Se uma imagem externa não permitir fetch, mantemos o src original para que
+ * o html2canvas ainda possa tentar carregá-la com useCORS.
+ */
+const inlineCertificateImages = async (root: HTMLElement): Promise<void> => {
+  const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
+
+  await Promise.all(
+    images.map(async (image) => {
+      const src = image.currentSrc || image.src;
+      if (!src || src.startsWith("data:") || src.startsWith("blob:")) return;
+
+      try {
+        const response = await fetch(src, {
+          method: "GET",
+          mode: "cors",
+          cache: "force-cache",
+          credentials: "omit",
+        });
+        if (!response.ok) return;
+        const blob = await response.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        if (!dataUrl) return;
+        image.src = dataUrl;
+      } catch (error) {
+        console.warn("Não foi possível embutir uma imagem do certificado antes da captura:", src, error);
+      }
+    }),
+  );
+
+  await waitForImages(root);
+};
+
+type CertificateFrame = {
+  iframe: HTMLIFrameElement;
+  frameWindow: Window;
+  frameDocument: Document;
+  clone: HTMLElement;
+};
+
+const createCertificateFrame = async (element: HTMLElement): Promise<CertificateFrame> => {
+  await waitForStableCertificate(element);
+
+  const width = Math.max(
+    1,
+    Math.ceil(element.getBoundingClientRect().width || element.offsetWidth || 816),
+  );
+  const height = Math.max(
+    1,
+    Math.ceil(element.scrollHeight || element.getBoundingClientRect().height || 1056),
+  );
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-20000px";
+  iframe.style.top = "0";
+  iframe.style.width = `${width}px`;
+  iframe.style.height = `${height}px`;
+  iframe.style.border = "0";
+  iframe.style.pointerEvents = "none";
+  iframe.style.background = "#ffffff";
+  document.body.appendChild(iframe);
+
+  const frameWindow = iframe.contentWindow;
+  const frameDocument = iframe.contentDocument;
+  if (!frameWindow || !frameDocument) {
+    iframe.remove();
+    throw new Error("Não foi possível criar a área isolada do certificado.");
+  }
+
+  frameDocument.open();
+  frameDocument.write(
+    `<!doctype html><html><head><base href="${document.baseURI}"></head><body></body></html>`,
+  );
+  frameDocument.close();
+
+  document.querySelectorAll('link[rel="stylesheet"], style').forEach((styleNode) => {
+    frameDocument.head.appendChild(styleNode.cloneNode(true));
+  });
+
+  const isolationStyle = frameDocument.createElement("style");
+  isolationStyle.textContent = `
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: ${width}px !important;
+      min-width: ${width}px !important;
+      background: #fff !important;
+      overflow: visible !important;
+    }
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+      caret-color: transparent !important;
+    }
+  `;
+  frameDocument.head.appendChild(isolationStyle);
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll<HTMLElement>('[data-certificate-pdf-ignore="true"]').forEach((node) => node.remove());
+  clone.removeAttribute("id");
+  frameDocument.body.appendChild(clone);
+
+  await waitForStylesheets(frameDocument);
+  await inlineCertificateImages(clone);
+  if (frameDocument.fonts?.ready) {
+    await frameDocument.fonts.ready;
+  }
+  await new Promise<void>((resolve) =>
+    frameWindow.requestAnimationFrame(() => frameWindow.requestAnimationFrame(() => resolve())),
+  );
+
+  return { iframe, frameWindow, frameDocument, clone };
+};
+
+/**
+ * Baixa o mesmo DOM do certificado oficial mostrado no Portal.
+ * A captura ocorre em um iframe isolado, com os mesmos estilos do sistema,
+ * evitando a dependência do html-to-image (que pode falhar em produção ao
+ * processar webfonts/CSS externos). O html2canvas renderiza somente o clone
+ * do certificado, nunca a página inteira do Portal.
  */
 export const downloadCertificateDomAsPdf = async (
   element: HTMLElement,
   fileName: string,
 ): Promise<void> => {
-  await waitForStableCertificate(element);
+  let frame: CertificateFrame | null = null;
 
-  const width = Math.ceil(element.getBoundingClientRect().width || element.offsetWidth || 816);
-  const height = Math.ceil(element.scrollHeight || element.getBoundingClientRect().height || 1056);
+  try {
+    frame = await createCertificateFrame(element);
 
-  const dataUrl = await toPng(element, {
-    cacheBust: true,
-    backgroundColor: "#ffffff",
-    pixelRatio: 2,
-    width,
-    height,
-    filter: (node) => {
-      if (!(node instanceof HTMLElement)) return true;
-      return node.dataset.certificatePdfIgnore !== "true";
-    },
-  });
+    const captureWidth = Math.max(
+      1,
+      Math.ceil(frame.clone.getBoundingClientRect().width || frame.clone.offsetWidth || 816),
+    );
+    const captureHeight = Math.max(
+      1,
+      Math.ceil(frame.clone.scrollHeight || frame.clone.getBoundingClientRect().height || 1056),
+    );
 
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-    compress: true,
-  });
+    const canvas = await html2canvas(frame.clone, {
+      backgroundColor: "#ffffff",
+      scale: 1.5,
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      imageTimeout: 15000,
+      removeContainer: true,
+      foreignObjectRendering: false,
+      width: captureWidth,
+      height: captureHeight,
+      windowWidth: captureWidth,
+      windowHeight: captureHeight,
+      scrollX: 0,
+      scrollY: 0,
+    });
 
-  const image = pdf.getImageProperties(dataUrl);
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const scale = Math.min(pageWidth / image.width, pageHeight / image.height);
-  const renderWidth = image.width * scale;
-  const renderHeight = image.height * scale;
-  const x = (pageWidth - renderWidth) / 2;
-  const y = (pageHeight - renderHeight) / 2;
+    if (!canvas.width || !canvas.height) {
+      throw new Error("A captura do certificado retornou uma imagem vazia.");
+    }
 
-  pdf.addImage(dataUrl, "PNG", x, y, renderWidth, renderHeight, undefined, "FAST");
-  pdf.save(fileName);
+    const dataUrl = canvas.toDataURL("image/png", 1);
+    if (!dataUrl || dataUrl === "data:,") {
+      throw new Error("A captura do certificado não gerou uma imagem válida.");
+    }
+
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+      compress: true,
+    });
+
+    const image = pdf.getImageProperties(dataUrl);
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const scale = Math.min(pageWidth / image.width, pageHeight / image.height);
+    const renderWidth = image.width * scale;
+    const renderHeight = image.height * scale;
+    const x = (pageWidth - renderWidth) / 2;
+    const y = (pageHeight - renderHeight) / 2;
+
+    pdf.addImage(dataUrl, "PNG", x, y, renderWidth, renderHeight, undefined, "FAST");
+    pdf.save(fileName);
+  } catch (error) {
+    console.error("Falha na captura isolada do certificado:", error);
+    const detail = error instanceof Error ? error.message : String(error || "Erro desconhecido");
+    throw new Error(`Falha ao capturar o certificado: ${detail}`);
+  } finally {
+    frame?.iframe.remove();
+  }
 };
 
 /**
