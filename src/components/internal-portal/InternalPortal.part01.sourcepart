@@ -1505,6 +1505,8 @@ export default function InternalPortal({
     useState<any>(false);
   const [showInventoryTransactionForm, setShowInventoryTransactionForm] =
     useState<any>(false);
+  const [inventoryTransactionSearch, setInventoryTransactionSearch] =
+    useState<string>("");
   const [showTrainingForm, setShowTrainingForm] = useState<any>(false);
   const [statusFilter, setStatusFilter] = useState<any>("");
   const [switchFalling, setSwitchFalling] = useState<any>("");
