@@ -1,4 +1,4 @@
-import html2canvas from "html2canvas";
+import { toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 
 const waitForImages = async (root: Document | HTMLElement): Promise<void> => {
@@ -57,7 +57,7 @@ const blobToDataUrl = (blob: Blob): Promise<string> =>
  * Tenta transformar imagens HTTP(S) do certificado em DataURL dentro do clone
  * isolado. Isso evita que canvas/download dependa de CORS durante a captura.
  * Se uma imagem externa não permitir fetch, mantemos o src original para que
- * o html2canvas ainda possa tentar carregá-la com useCORS.
+ * o html-to-image ainda possa tentar carregá-la com useCORS.
  */
 const inlineCertificateImages = async (root: HTMLElement): Promise<void> => {
   const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
@@ -175,7 +175,7 @@ const createCertificateFrame = async (element: HTMLElement): Promise<Certificate
  * Baixa o mesmo DOM do certificado oficial mostrado no Portal.
  * A captura ocorre em um iframe isolado, com os mesmos estilos do sistema,
  * evitando a dependência do html-to-image (que pode falhar em produção ao
- * processar webfonts/CSS externos). O html2canvas renderiza somente o clone
+ * processar webfonts/CSS externos). O html-to-image renderiza somente o clone
  * do certificado, nunca a página inteira do Portal.
  */
 export const downloadCertificateDomAsPdf = async (
@@ -196,28 +196,18 @@ export const downloadCertificateDomAsPdf = async (
       Math.ceil(frame.clone.scrollHeight || frame.clone.getBoundingClientRect().height || 1056),
     );
 
-    const canvas = await html2canvas(frame.clone, {
+    const dataUrl = await toPng(frame.clone, {
+      cacheBust: true,
       backgroundColor: "#ffffff",
-      scale: 1.5,
-      useCORS: true,
-      allowTaint: false,
-      logging: false,
-      imageTimeout: 15000,
-      removeContainer: true,
-      foreignObjectRendering: false,
+      pixelRatio: 1.5,
       width: captureWidth,
       height: captureHeight,
-      windowWidth: captureWidth,
-      windowHeight: captureHeight,
-      scrollX: 0,
-      scrollY: 0,
+      style: {
+        transform: 'none',
+        margin: '0',
+      },
     });
 
-    if (!canvas.width || !canvas.height) {
-      throw new Error("A captura do certificado retornou uma imagem vazia.");
-    }
-
-    const dataUrl = canvas.toDataURL("image/png", 1);
     if (!dataUrl || dataUrl === "data:,") {
       throw new Error("A captura do certificado não gerou uma imagem válida.");
     }
