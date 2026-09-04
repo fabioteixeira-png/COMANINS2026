@@ -1216,6 +1216,73 @@ app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
 });
 
+
+app.get(
+  '/api/internal/certificate-image-proxy',
+  requireAuth,
+  requireInternalAccount,
+  async (req: AuthRequest, res) => {
+    const rawUrl = asLimitedString(req.query?.url, 4096);
+    if (!rawUrl) return res.status(400).json({ error: 'CERTIFICATE_IMAGE_URL_REQUIRED' });
+
+    let requestedUrl: URL;
+    try {
+      requestedUrl = new URL(rawUrl);
+    } catch {
+      return res.status(400).json({ error: 'CERTIFICATE_IMAGE_URL_INVALID' });
+    }
+
+    const allowedHosts = new Set([
+      'firebasestorage.googleapis.com',
+      'storage.googleapis.com',
+    ]);
+
+    if (requestedUrl.protocol !== 'https:' || !allowedHosts.has(requestedUrl.hostname.toLowerCase())) {
+      return res.status(400).json({ error: 'CERTIFICATE_IMAGE_HOST_NOT_ALLOWED' });
+    }
+
+    try {
+      const upstream = await fetch(requestedUrl.toString(), {
+        method: 'GET',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!upstream.ok) {
+        return res.status(502).json({ error: 'CERTIFICATE_IMAGE_UPSTREAM_ERROR' });
+      }
+
+      const finalUrl = new URL(upstream.url);
+      if (finalUrl.protocol !== 'https:' || !allowedHosts.has(finalUrl.hostname.toLowerCase())) {
+        return res.status(400).json({ error: 'CERTIFICATE_IMAGE_REDIRECT_NOT_ALLOWED' });
+      }
+
+      const contentType = String(upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(contentType)) {
+        return res.status(415).json({ error: 'CERTIFICATE_IMAGE_CONTENT_TYPE_NOT_ALLOWED' });
+      }
+
+      const advertisedSize = Number(upstream.headers.get('content-length') || 0);
+      if (Number.isFinite(advertisedSize) && advertisedSize > 5 * 1024 * 1024) {
+        return res.status(413).json({ error: 'CERTIFICATE_IMAGE_TOO_LARGE' });
+      }
+
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
+        return res.status(413).json({ error: 'CERTIFICATE_IMAGE_TOO_LARGE' });
+      }
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Content-Length', String(buffer.length));
+      return res.status(200).send(buffer);
+    } catch (error) {
+      console.error('Certificate image proxy failed:', error);
+      return res.status(502).json({ error: 'CERTIFICATE_IMAGE_PROXY_FAILED' });
+    }
+  },
+);
+
 app.post('/api/inventory/items', requireAuth, requireInternalAccount, requireEditModule('inventory'), writeApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
 
