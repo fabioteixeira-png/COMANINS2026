@@ -1318,6 +1318,10 @@ export default function InternalPortal({
   const [inventoryTransactionTypeFilter, setInventoryTransactionTypeFilter] = useState<string>("Todos");
   const [inventoryTransactionStartDate, setInventoryTransactionStartDate] = useState<string>("");
   const [inventoryTransactionEndDate, setInventoryTransactionEndDate] = useState<string>("");
+  const [inventoryMovementItemQuery, setInventoryMovementItemQuery] = useState<string>("");
+  const [inventoryMovementItemId, setInventoryMovementItemId] = useState<string>("");
+  const [inventoryMovementItemListOpen, setInventoryMovementItemListOpen] = useState<boolean>(false);
+  const [inventoryMovementItemActiveIndex, setInventoryMovementItemActiveIndex] = useState<number>(-1);
   const [isCatalogOpen, setIsCatalogOpen] = useState<any>(false);
   const [labBenchName, setLabBenchName] = useState<any>("");
   const [labBenchSuccessMessage, setLabBenchSuccessMessage] = useState<any>("");
@@ -6296,6 +6300,47 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
   const [inventoryTransactions, setInventoryTransactions] = useState<any[]>([]);
   const [itemAttachments, setItemAttachments] = useState<string[]>([]);
   const [transactionAttachments, setTransactionAttachments] = useState<string[]>([]);
+
+  const normalizedInventoryMovementQuery = inventoryMovementItemQuery
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  const filteredInventoryMovementItems = React.useMemo(
+    () =>
+      inventoryItems
+        .filter((item) => {
+          if (!normalizedInventoryMovementQuery) return true;
+          return [item.name, item.category, item.location]
+            .filter(Boolean)
+            .some((value) =>
+              String(value)
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .includes(normalizedInventoryMovementQuery),
+            );
+        })
+        .sort((first, second) =>
+          String(first.name || "").localeCompare(String(second.name || ""), "pt-BR"),
+        )
+        .slice(0, 50),
+    [inventoryItems, normalizedInventoryMovementQuery],
+  );
+
+  const selectInventoryMovementItem = (item: any) => {
+    setInventoryMovementItemId(String(item.id));
+    setInventoryMovementItemQuery(String(item.name || ""));
+    setInventoryMovementItemListOpen(false);
+    setInventoryMovementItemActiveIndex(-1);
+  };
+
+  const resetInventoryMovementItemSearch = () => {
+    setInventoryMovementItemId("");
+    setInventoryMovementItemQuery("");
+    setInventoryMovementItemListOpen(false);
+    setInventoryMovementItemActiveIndex(-1);
+  };
 
   const openStockAttachment = (attRaw: string) => {
     if (!attRaw) return;
