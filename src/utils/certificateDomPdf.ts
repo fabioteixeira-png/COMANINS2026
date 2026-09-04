@@ -131,6 +131,11 @@ const copyComputedStyle = (source: Element, target: Element): void => {
 };
 
 const freezeCertificateStyles = (source: HTMLElement, clone: HTMLElement): void => {
+  // IMPORTANT: source must be the real, connected certificate DOM. Calling
+  // getComputedStyle() on a detached clone returns browser defaults and destroys
+  // the Tailwind layout (logo grows, grids collapse and text becomes tiny after
+  // the final PDF fit). Keep source/clone trees identical until every computed
+  // style has been copied.
   const sourceNodes: Element[] = [source, ...Array.from(source.querySelectorAll("*"))];
   const cloneNodes: Element[] = [clone, ...Array.from(clone.querySelectorAll("*"))];
 
@@ -157,17 +162,17 @@ const createFrozenCertificateClone = async (element: HTMLElement): Promise<Certi
   const height = Math.max(1, Math.ceil(element.scrollHeight || sourceRect.height || 1056));
 
   const clone = element.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll<HTMLElement>('[data-certificate-pdf-ignore="true"]').forEach((node) => node.remove());
-  clone.removeAttribute("id");
 
-  const sourceWithoutActions = element.cloneNode(true) as HTMLElement;
-  sourceWithoutActions
+  // Freeze from the LIVE certificate before removing any descendants. The
+  // previous implementation froze a detached clone, so computed styles were
+  // defaults instead of the actual certificate styles. That is the root cause
+  // of the giant logo / collapsed columns seen in the downloaded PDF.
+  freezeCertificateStyles(element, clone);
+
+  clone
     .querySelectorAll<HTMLElement>('[data-certificate-pdf-ignore="true"]')
     .forEach((node) => node.remove());
-
-  // Freeze the exact screen-computed layout into inline styles. This makes
-  // the PDF capture independent of Google Fonts/CSS imports in Hostinger.
-  freezeCertificateStyles(sourceWithoutActions, clone);
+  clone.removeAttribute("id");
 
   clone.style.setProperty("width", `${width}px`, "important");
   clone.style.setProperty("max-width", `${width}px`, "important");
@@ -206,7 +211,7 @@ const createFrozenCertificateClone = async (element: HTMLElement): Promise<Certi
 /**
  * Baixa o mesmo certificado oficial exibido pelo Portal.
  *
- * A REV7 REV3 não usa html-to-image e não clona folhas de estilo externas.
+ * A REV7 REV4 mantém o fluxo same-origin da REV3 e corrige fidelidade/paginação.
  * O layout computado da tela é congelado em estilos inline e todas as imagens
  * externas (principalmente assinatura do técnico no Firebase Storage) passam
  * por um proxy autenticado e same-origin antes da captura. Assim o canvas não
@@ -253,16 +258,61 @@ export const downloadCertificateDomAsPdf = async (
       compress: true,
     });
 
-    const image = pdf.getImageProperties(dataUrl);
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const scale = Math.min(pageWidth / image.width, pageHeight / image.height);
-    const renderWidth = image.width * scale;
-    const renderHeight = image.height * scale;
-    const x = (pageWidth - renderWidth) / 2;
-    const y = (pageHeight - renderHeight) / 2;
 
-    pdf.addImage(dataUrl, "PNG", x, y, renderWidth, renderHeight, undefined, "FAST");
+    // Never squeeze the whole certificate canvas into one A4 page. The normal
+    // browser print paginates the certificate, while the old download path
+    // scaled the entire long canvas to fit one page, making all text microscopic.
+    // Map the full certificate width to A4 width and slice vertically using the
+    // exact A4 aspect ratio. The existing screen padding (p-10 ~= 10 mm at this
+    // scale) becomes the same visual page margin used by the normal print flow.
+    const a4SliceHeightPx = Math.max(1, Math.floor(canvas.width * (pageHeight / pageWidth)));
+    const pageCanvas = document.createElement("canvas");
+    pageCanvas.width = canvas.width;
+    pageCanvas.height = a4SliceHeightPx;
+    const pageContext = pageCanvas.getContext("2d");
+    if (!pageContext) {
+      throw new Error("Não foi possível preparar as páginas A4 do certificado.");
+    }
+
+    let sourceY = 0;
+    let pageIndex = 0;
+    while (sourceY < canvas.height) {
+      const sourceHeight = Math.min(a4SliceHeightPx, canvas.height - sourceY);
+      pageContext.save();
+      pageContext.fillStyle = "#ffffff";
+      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageContext.drawImage(
+        canvas,
+        0,
+        sourceY,
+        canvas.width,
+        sourceHeight,
+        0,
+        0,
+        canvas.width,
+        sourceHeight,
+      );
+      pageContext.restore();
+
+      const pageDataUrl = pageCanvas.toDataURL("image/png", 1);
+      if (pageIndex > 0) pdf.addPage("a4", "portrait");
+      pdf.addImage(
+        pageDataUrl,
+        "PNG",
+        0,
+        0,
+        pageWidth,
+        pageHeight,
+        undefined,
+        "FAST",
+      );
+
+      sourceY += sourceHeight;
+      pageIndex += 1;
+    }
+
     pdf.save(fileName);
   } catch (error) {
     console.error("Falha ao gerar o certificado PDF no modo same-origin:", error);
