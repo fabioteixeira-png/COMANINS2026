@@ -4,7 +4,17 @@ import { authJsonFetch } from "./authApi";
 
 const CERTIFICATE_CAPTURE_SCALE = 1.5;
 const IMAGE_WAIT_TIMEOUT_MS = 8000;
+const A4_PAGE_WIDTH_MM = 210;
+const A4_PAGE_HEIGHT_MM = 297;
 const PDF_PAGE_MARGIN_MM = 10;
+const PRINT_CONTENT_WIDTH_MM = A4_PAGE_WIDTH_MM - PDF_PAGE_MARGIN_MM * 2;
+const PRINT_CONTENT_HEIGHT_MM = A4_PAGE_HEIGHT_MM - PDF_PAGE_MARGIN_MM * 2;
+const CSS_PIXELS_PER_MM = 96 / 25.4;
+const PRINT_CONTENT_WIDTH_PX = Math.round(PRINT_CONTENT_WIDTH_MM * CSS_PIXELS_PER_MM);
+const SAFE_PAGE_BREAK_SEARCH_PX = Math.round(72 * CERTIFICATE_CAPTURE_SCALE);
+const MIN_SAFE_BLANK_ROWS = Math.max(3, Math.round(2 * CERTIFICATE_CAPTURE_SCALE));
+const CERTIFICATE_FONT_STYLESHEET_URL =
+  "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap";
 
 const waitForImages = async (root: Document | HTMLElement): Promise<void> => {
   const images = Array.from(root.querySelectorAll("img"));
@@ -201,11 +211,6 @@ const copyComputedStyle = (source: Element, target: Element): void => {
     // html2canvas consultar novamente folhas/fontes externas na Hostinger e
     // poderiam contaminar o canvas com CORS.
     if (/url\s*\(/i.test(value)) continue;
-    if (property === "font-family") {
-      value = /JetBrains Mono|monospace/i.test(value)
-        ? '"Courier New", Courier, monospace'
-        : "Arial, Helvetica, sans-serif";
-    }
     value = normalizeStyleValueForHtml2Canvas(value);
     try {
       targetStyle.setProperty(property, value, computed.getPropertyPriority(property));
@@ -247,82 +252,187 @@ type CertificateClone = {
   height: number;
 };
 
+const applyCertificatePrintLayout = (element: HTMLElement): void => {
+  element.removeAttribute("id");
+  element.setAttribute("data-certificate-download-root", "true");
+  element.style.setProperty("display", "block", "important");
+  element.style.setProperty("position", "relative", "important");
+  element.style.setProperty("width", "100%", "important");
+  element.style.setProperty("max-width", "100%", "important");
+  element.style.setProperty("min-width", "0", "important");
+  element.style.setProperty("height", "auto", "important");
+  element.style.setProperty("min-height", "0", "important");
+  element.style.setProperty("margin", "0", "important");
+  element.style.setProperty("padding", "0", "important");
+  element.style.setProperty("border", "none", "important");
+  element.style.setProperty("border-radius", "0", "important");
+  element.style.setProperty("box-shadow", "none", "important");
+  element.style.setProperty("overflow", "visible", "important");
+  element.style.setProperty("transform", "none", "important");
+  element.style.setProperty("box-sizing", "border-box", "important");
+  element.style.setProperty("background", "#ffffff", "important");
+  element.style.setProperty("color", "#000000", "important");
+};
+
+const waitForCertificateFonts = async (fontSet: FontFaceSet): Promise<void> => {
+  await Promise.all([
+    fontSet.load('400 11px "Inter"'),
+    fontSet.load('700 14px "Inter"'),
+    fontSet.load('500 10px "JetBrains Mono"'),
+  ]);
+  await fontSet.ready;
+};
+
 const createFrozenCertificateClone = async (element: HTMLElement): Promise<CertificateClone> => {
   await waitForStableCertificate(element);
 
-  const sourceRect = element.getBoundingClientRect();
-  const width = Math.max(1, Math.ceil(sourceRect.width || element.offsetWidth || 816));
-  const height = Math.max(1, Math.ceil(element.scrollHeight || sourceRect.height || 1056));
-
-  const clone = element.cloneNode(true) as HTMLElement;
-
-  // Freeze from the LIVE certificate before removing any descendants. The
-  // previous implementation froze a detached clone, so computed styles were
-  // defaults instead of the actual certificate styles. That is the root cause
-  // of the giant logo / collapsed columns seen in the downloaded PDF.
-  freezeCertificateStyles(element, clone);
-
-  clone
+  // Monte primeiro a mesma geometria usada pelo @page da impressão: A4 com
+  // margens de 10 mm, portanto 190 mm úteis. O clone de origem continua ligado
+  // ao documento real para usar exatamente Inter, JetBrains Mono e as regras
+  // Tailwind já carregadas pelo Portal.
+  const printSource = element.cloneNode(true) as HTMLElement;
+  printSource
     .querySelectorAll<HTMLElement>('[data-certificate-pdf-ignore="true"]')
     .forEach((node) => node.remove());
-  clone.removeAttribute("id");
-
-  clone.style.setProperty("width", `${width}px`, "important");
-  clone.style.setProperty("max-width", `${width}px`, "important");
-  clone.style.setProperty("min-width", `${width}px`, "important");
-  clone.style.setProperty("margin", "0", "important");
-  clone.style.setProperty("transform", "none", "important");
-  clone.style.setProperty("box-sizing", "border-box", "important");
-  clone.style.setProperty("background", "#ffffff", "important");
-  clone.style.setProperty("overflow", "visible", "important");
+  applyCertificatePrintLayout(printSource);
 
   const container = document.createElement("div");
   container.setAttribute("aria-hidden", "true");
   container.style.position = "fixed";
   container.style.left = "-30000px";
   container.style.top = "0";
-  container.style.width = `${width}px`;
-  container.style.minWidth = `${width}px`;
+  container.style.width = `${PRINT_CONTENT_WIDTH_PX}px`;
+  container.style.minWidth = `${PRINT_CONTENT_WIDTH_PX}px`;
+  container.style.maxWidth = `${PRINT_CONTENT_WIDTH_PX}px`;
   container.style.background = "#ffffff";
   container.style.overflow = "visible";
   container.style.pointerEvents = "none";
   container.style.zIndex = "-2147483647";
-  container.appendChild(clone);
+  container.appendChild(printSource);
   document.body.appendChild(container);
 
   try {
-    await inlineCertificateImages(clone);
-    await new Promise<void>((resolve) =>
-      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())),
-    );
-    return { container, clone, width, height: Math.max(height, clone.scrollHeight) };
+    await inlineCertificateImages(printSource);
+    if (document.fonts) await waitForCertificateFonts(document.fonts);
+    await waitForStableCertificate(printSource);
+
+    // Congele somente depois que o clone estiver em largura de impressão. Isso
+    // evita copiar o display:flex, o padding de tela e a largura de 816 px que
+    // não existem no PDF produzido pelo botão Imprimir.
+    const clone = printSource.cloneNode(true) as HTMLElement;
+    freezeCertificateStyles(printSource, clone);
+    applyCertificatePrintLayout(clone);
+    container.replaceChildren(clone);
+
+    await waitForStableCertificate(clone);
+    const cloneRect = clone.getBoundingClientRect();
+    const width = Math.max(1, Math.round(cloneRect.width || PRINT_CONTENT_WIDTH_PX));
+    const height = Math.max(1, Math.ceil(clone.scrollHeight || cloneRect.height));
+    return { container, clone, width, height };
   } catch (error) {
     container.remove();
     throw error;
   }
 };
 
-const isolateHtml2CanvasDocument = (clonedDocument: Document): void => {
-  // A árvore-alvo já recebeu estilos inline com cores compatíveis. Remover as
-  // folhas da cópia interna impede que o html2canvas reprocesse Tailwind 4,
-  // Google Fonts ou qualquer outro recurso externo durante a exportação.
+const stabilizeHtml2CanvasDocument = async (clonedDocument: Document): Promise<void> => {
+  // O layout já está integralmente congelado. Remova o Tailwind da cópia para
+  // impedir qualquer reintrodução de OKLCH, mas recoloque apenas o stylesheet
+  // de @font-face usado pelo botão Imprimir para manter Inter/JetBrains Mono.
   clonedDocument
     .querySelectorAll('link[rel="stylesheet"], style')
     .forEach((stylesheet) => stylesheet.remove());
+
+  const fontStylesheet = clonedDocument.createElement("link");
+  fontStylesheet.rel = "stylesheet";
+  fontStylesheet.href = CERTIFICATE_FONT_STYLESHEET_URL;
+  clonedDocument.head.appendChild(fontStylesheet);
 
   const isolationStyle = clonedDocument.createElement("style");
   isolationStyle.textContent = `
     html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
     img, svg { max-width: none; }
+    [data-certificate-download-root="true"] {
+      display: block !important;
+      width: ${PRINT_CONTENT_WIDTH_PX}px !important;
+      max-width: ${PRINT_CONTENT_WIDTH_PX}px !important;
+      min-width: 0 !important;
+      height: auto !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      overflow: visible !important;
+      background: #fff !important;
+    }
   `;
   clonedDocument.head.appendChild(isolationStyle);
+
+  await waitForStylesheets(clonedDocument);
+  if (clonedDocument.fonts) await waitForCertificateFonts(clonedDocument.fonts);
+};
+
+const isNearlyWhiteRow = (
+  pixels: Uint8ClampedArray,
+  width: number,
+  row: number,
+): boolean => {
+  let nonWhitePixels = 0;
+  const start = row * width * 4;
+  const end = start + width * 4;
+  for (let offset = start; offset < end; offset += 4) {
+    if (pixels[offset] < 247 || pixels[offset + 1] < 247 || pixels[offset + 2] < 247) {
+      nonWhitePixels += 1;
+      if (nonWhitePixels > 2) return false;
+    }
+  }
+  return true;
+};
+
+const findSafePageSliceHeight = (
+  canvas: HTMLCanvasElement,
+  sourceY: number,
+  desiredHeight: number,
+): number => {
+  const remainingHeight = canvas.height - sourceY;
+  if (remainingHeight <= desiredHeight) return remainingHeight;
+
+  const desiredEnd = sourceY + desiredHeight;
+  const searchStart = Math.max(sourceY + 1, desiredEnd - SAFE_PAGE_BREAK_SEARCH_PX);
+  const searchHeight = desiredEnd - searchStart;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context || searchHeight <= MIN_SAFE_BLANK_ROWS) return desiredHeight;
+
+  try {
+    const pixels = context.getImageData(0, searchStart, canvas.width, searchHeight).data;
+    let blankRows = 0;
+    let blankRunEnd = searchHeight;
+
+    for (let row = searchHeight - 1; row >= 0; row -= 1) {
+      if (isNearlyWhiteRow(pixels, canvas.width, row)) {
+        if (blankRows === 0) blankRunEnd = row + 1;
+        blankRows += 1;
+        if (blankRows >= MIN_SAFE_BLANK_ROWS) {
+          return Math.max(1, searchStart + blankRunEnd - sourceY);
+        }
+      } else {
+        blankRows = 0;
+      }
+    }
+  } catch {
+    // A captura já usa somente imagens DataURL. Ainda assim, se o navegador
+    // impedir a leitura dos pixels, preserve a paginação geométrica A4.
+  }
+
+  return desiredHeight;
 };
 
 /**
  * Baixa o mesmo certificado oficial exibido pelo Portal.
  *
- * A REV7 REV6 mantém o fluxo same-origin, a fidelidade/paginação da REV5 e
- * converte cores CSS modernas do Tailwind 4 para RGBA antes do html2canvas 1.4.
+ * A REV7 REV7 captura a mesma geometria de impressão A4, preserva Inter e
+ * JetBrains Mono e escolhe quebras em áreas brancas para não cortar conteúdo.
  * O layout computado da tela é congelado em estilos inline e todas as imagens
  * externas (principalmente assinatura do técnico no Firebase Storage) passam
  * por um proxy autenticado e same-origin antes da captura. Assim o canvas não
@@ -351,7 +461,7 @@ export const downloadCertificateDomAsPdf = async (
       windowHeight: prepared.height,
       scrollX: 0,
       scrollY: 0,
-      onclone: isolateHtml2CanvasDocument,
+      onclone: stabilizeHtml2CanvasDocument,
     });
 
     if (!canvas.width || !canvas.height) {
@@ -367,16 +477,18 @@ export const downloadCertificateDomAsPdf = async (
 
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
+    const pageContentWidth = pageWidth - PDF_PAGE_MARGIN_MM * 2;
+    const pageContentHeight = pageHeight - PDF_PAGE_MARGIN_MM * 2;
 
-    // O canvas conserva o padding horizontal de 10 mm do certificado. Na
-    // vertical, reserve também 10 mm no fim da primeira página e em ambas as
-    // bordas das páginas seguintes, reproduzindo o @page do botão Imprimir.
-    const a4PageHeightPx = Math.max(1, Math.floor(canvas.width * (pageHeight / pageWidth)));
-    const pageMarginPx = Math.max(1, Math.round(canvas.width * (PDF_PAGE_MARGIN_MM / pageWidth)));
-    const continuationContentHeightPx = Math.max(1, a4PageHeightPx - pageMarginPx * 2);
+    // O clone já possui exatamente os 190 mm úteis do @page correto. Cada
+    // página recebe 10 mm reais ao redor, sem reaproveitar o padding de tela.
+    const pageContentHeightPx = Math.max(
+      1,
+      Math.floor(canvas.width * (PRINT_CONTENT_HEIGHT_MM / PRINT_CONTENT_WIDTH_MM)),
+    );
     const pageCanvas = document.createElement("canvas");
     pageCanvas.width = canvas.width;
-    pageCanvas.height = a4PageHeightPx;
+    pageCanvas.height = pageContentHeightPx;
     const pageContext = pageCanvas.getContext("2d");
     if (!pageContext) {
       throw new Error("Não foi possível preparar as páginas A4 do certificado.");
@@ -385,10 +497,7 @@ export const downloadCertificateDomAsPdf = async (
     let sourceY = 0;
     let pageIndex = 0;
     while (sourceY < canvas.height) {
-      const destinationY = pageIndex === 0 ? 0 : pageMarginPx;
-      const availableSourceHeight =
-        pageIndex === 0 ? a4PageHeightPx - pageMarginPx : continuationContentHeightPx;
-      const sourceHeight = Math.min(availableSourceHeight, canvas.height - sourceY);
+      const sourceHeight = findSafePageSliceHeight(canvas, sourceY, pageContentHeightPx);
       pageContext.save();
       pageContext.fillStyle = "#ffffff";
       pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
@@ -399,7 +508,7 @@ export const downloadCertificateDomAsPdf = async (
         canvas.width,
         sourceHeight,
         0,
-        destinationY,
+        0,
         canvas.width,
         sourceHeight,
       );
@@ -413,10 +522,10 @@ export const downloadCertificateDomAsPdf = async (
       pdf.addImage(
         pageDataUrl,
         "PNG",
-        0,
-        0,
-        pageWidth,
-        pageHeight,
+        PDF_PAGE_MARGIN_MM,
+        PDF_PAGE_MARGIN_MM,
+        pageContentWidth,
+        pageContentHeight,
         undefined,
         "FAST",
       );
