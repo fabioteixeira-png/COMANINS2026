@@ -2,7 +2,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { authJsonFetch } from "./authApi";
 
-const CERTIFICATE_CAPTURE_SCALE = 1.5;
+const CERTIFICATE_CAPTURE_SCALE = 2;
 const IMAGE_WAIT_TIMEOUT_MS = 8000;
 const A4_PAGE_WIDTH_MM = 210;
 const A4_PAGE_HEIGHT_MM = 297;
@@ -15,6 +15,14 @@ const SAFE_PAGE_BREAK_SEARCH_PX = Math.round(72 * CERTIFICATE_CAPTURE_SCALE);
 const MIN_SAFE_BLANK_ROWS = Math.max(3, Math.round(2 * CERTIFICATE_CAPTURE_SCALE));
 const CERTIFICATE_FONT_STYLESHEET_URL =
   "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap";
+const DERIVED_BLOCK_SIZE_PROPERTIES = new Set([
+  "height",
+  "min-height",
+  "max-height",
+  "block-size",
+  "min-block-size",
+  "max-block-size",
+]);
 
 const waitForImages = async (root: Document | HTMLElement): Promise<void> => {
   const images = Array.from(root.querySelectorAll("img"));
@@ -200,9 +208,24 @@ const copyComputedStyle = (source: Element, target: Element): void => {
   const targetStyle = (target as HTMLElement | SVGElement).style;
   if (!targetStyle) return;
 
+  // Alturas devolvidas por getComputedStyle() são dimensões já resolvidas do
+  // layout atual, não necessariamente regras autorais. Reaplicá-las em texto,
+  // linhas e células de tabela faz o html2canvas limitar o conteúdo à métrica
+  // anterior da fonte. Isso corta especialmente células com rowSpan e textos
+  // pequenos. Preserve altura somente onde ela foi declarada de propósito.
+  const preserveBlockSize =
+    source.matches("img, svg, canvas, video") ||
+    Array.from(source.classList).some((className) =>
+      /^(?:h|min-h|max-h)-/.test(className),
+    ) ||
+    ["height", "min-height", "max-height"].some((property) =>
+      (source as HTMLElement | SVGElement).style?.getPropertyValue(property),
+    );
+
   for (let index = 0; index < computed.length; index += 1) {
     const property = computed.item(index);
     if (!property) continue;
+    if (!preserveBlockSize && DERIVED_BLOCK_SIZE_PROPERTIES.has(property)) continue;
     let value = computed.getPropertyValue(property);
     if (!value) continue;
 
@@ -250,6 +273,10 @@ type CertificateClone = {
   clone: HTMLElement;
   width: number;
   height: number;
+  resultsPageBreak?: {
+    firstPageEndY: number;
+    continuationStartY: number;
+  };
 };
 
 const applyCertificatePrintLayout = (element: HTMLElement): void => {
@@ -275,12 +302,61 @@ const applyCertificatePrintLayout = (element: HTMLElement): void => {
 };
 
 const waitForCertificateFonts = async (fontSet: FontFaceSet): Promise<void> => {
-  await Promise.all([
+  const loadedFaces = await Promise.all([
     fontSet.load('400 11px "Inter"'),
     fontSet.load('700 14px "Inter"'),
     fontSet.load('500 10px "JetBrains Mono"'),
   ]);
+  if (loadedFaces.some((faces) => faces.length === 0)) {
+    throw new Error("As fontes oficiais do certificado não foram carregadas.");
+  }
   await fontSet.ready;
+};
+
+const loadCertificateFontStylesheet = async (root: Document): Promise<void> => {
+  const fontStylesheet = root.createElement("link");
+  fontStylesheet.rel = "stylesheet";
+  fontStylesheet.href = CERTIFICATE_FONT_STYLESHEET_URL;
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Tempo excedido ao carregar as fontes oficiais do certificado."));
+    }, IMAGE_WAIT_TIMEOUT_MS);
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      fontStylesheet.onload = null;
+      fontStylesheet.onerror = null;
+      if (error) reject(error);
+      else resolve();
+    };
+    fontStylesheet.onload = () => finish();
+    fontStylesheet.onerror = () =>
+      finish(new Error("Falha ao carregar as fontes oficiais do certificado."));
+    root.head.appendChild(fontStylesheet);
+  });
+};
+
+const measureResultsPageBreak = (
+  root: HTMLElement,
+): CertificateClone["resultsPageBreak"] => {
+  const table = Array.from(root.querySelectorAll("table")).find((candidate) =>
+    candidate.nextElementSibling?.textContent?.includes("Índice de Classe"),
+  );
+  const continuation = table?.nextElementSibling;
+  if (!table || !(continuation instanceof HTMLElement)) return undefined;
+
+  const rootRect = root.getBoundingClientRect();
+  const tableRect = table.getBoundingClientRect();
+  const continuationRect = continuation.getBoundingClientRect();
+  const firstPageEndY = Math.ceil(tableRect.bottom - rootRect.top);
+  const continuationStartY = Math.floor(continuationRect.top - rootRect.top);
+  if (firstPageEndY <= 0 || continuationStartY <= firstPageEndY) return undefined;
+  return { firstPageEndY, continuationStartY };
 };
 
 const createFrozenCertificateClone = async (element: HTMLElement): Promise<CertificateClone> => {
@@ -328,7 +404,8 @@ const createFrozenCertificateClone = async (element: HTMLElement): Promise<Certi
     const cloneRect = clone.getBoundingClientRect();
     const width = Math.max(1, Math.round(cloneRect.width || PRINT_CONTENT_WIDTH_PX));
     const height = Math.max(1, Math.ceil(clone.scrollHeight || cloneRect.height));
-    return { container, clone, width, height };
+    const resultsPageBreak = measureResultsPageBreak(clone);
+    return { container, clone, width, height, resultsPageBreak };
   } catch (error) {
     container.remove();
     throw error;
@@ -342,11 +419,6 @@ const stabilizeHtml2CanvasDocument = async (clonedDocument: Document): Promise<v
   clonedDocument
     .querySelectorAll('link[rel="stylesheet"], style')
     .forEach((stylesheet) => stylesheet.remove());
-
-  const fontStylesheet = clonedDocument.createElement("link");
-  fontStylesheet.rel = "stylesheet";
-  fontStylesheet.href = CERTIFICATE_FONT_STYLESHEET_URL;
-  clonedDocument.head.appendChild(fontStylesheet);
 
   const isolationStyle = clonedDocument.createElement("style");
   isolationStyle.textContent = `
@@ -369,7 +441,7 @@ const stabilizeHtml2CanvasDocument = async (clonedDocument: Document): Promise<v
   `;
   clonedDocument.head.appendChild(isolationStyle);
 
-  await waitForStylesheets(clonedDocument);
+  await loadCertificateFontStylesheet(clonedDocument);
   if (clonedDocument.fonts) await waitForCertificateFonts(clonedDocument.fonts);
 };
 
@@ -431,9 +503,9 @@ const findSafePageSliceHeight = (
 /**
  * Baixa o mesmo certificado oficial exibido pelo Portal.
  *
- * A REV7 REV7 captura a mesma geometria de impressão A4, preserva Inter e
- * JetBrains Mono e escolhe quebras em áreas brancas para não cortar conteúdo.
- * O layout computado da tela é congelado em estilos inline e todas as imagens
+ * A REV7 REV8 captura a mesma geometria de impressão A4, preserva Inter e
+ * JetBrains Mono e escolhe quebras sem cortar tabelas ou conteúdo textual.
+ * O layout computado para impressão é congelado em estilos inline e as imagens
  * externas (principalmente assinatura do técnico no Firebase Storage) passam
  * por um proxy autenticado e same-origin antes da captura. Assim o canvas não
  * depende de CORS de fontes/imagens no navegador da Hostinger.
@@ -494,10 +566,34 @@ export const downloadCertificateDomAsPdf = async (
       throw new Error("Não foi possível preparar as páginas A4 do certificado.");
     }
 
+    const captureCoordinateScale = canvas.width / prepared.width;
+    const measuredResultsBreak = prepared.resultsPageBreak
+      ? {
+          firstPageEndY: Math.ceil(
+            prepared.resultsPageBreak.firstPageEndY * captureCoordinateScale,
+          ),
+          continuationStartY: Math.floor(
+            prepared.resultsPageBreak.continuationStartY * captureCoordinateScale,
+          ),
+        }
+      : null;
+    const resultsBreakFitsFirstPage =
+      measuredResultsBreak !== null &&
+      measuredResultsBreak.firstPageEndY > 0 &&
+      measuredResultsBreak.firstPageEndY <= pageContentHeightPx &&
+      measuredResultsBreak.continuationStartY > measuredResultsBreak.firstPageEndY &&
+      measuredResultsBreak.continuationStartY < canvas.height;
+
     let sourceY = 0;
     let pageIndex = 0;
     while (sourceY < canvas.height) {
-      const sourceHeight = findSafePageSliceHeight(canvas, sourceY, pageContentHeightPx);
+      const useMeasuredResultsBreak = pageIndex === 0 && resultsBreakFitsFirstPage;
+      const sourceHeight = useMeasuredResultsBreak
+        ? measuredResultsBreak.firstPageEndY
+        : findSafePageSliceHeight(canvas, sourceY, pageContentHeightPx);
+      const nextSourceY = useMeasuredResultsBreak
+        ? measuredResultsBreak.continuationStartY
+        : sourceY + sourceHeight;
       pageContext.save();
       pageContext.fillStyle = "#ffffff";
       pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
@@ -530,7 +626,7 @@ export const downloadCertificateDomAsPdf = async (
         "FAST",
       );
 
-      sourceY += sourceHeight;
+      sourceY = nextSourceY;
       pageIndex += 1;
     }
 
