@@ -15,15 +15,6 @@ const SAFE_PAGE_BREAK_SEARCH_PX = Math.round(72 * CERTIFICATE_CAPTURE_SCALE);
 const MIN_SAFE_BLANK_ROWS = Math.max(3, Math.round(2 * CERTIFICATE_CAPTURE_SCALE));
 const CERTIFICATE_FONT_STYLESHEET_URL =
   "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap";
-const DERIVED_BLOCK_SIZE_PROPERTIES = new Set([
-  "height",
-  "min-height",
-  "max-height",
-  "block-size",
-  "min-block-size",
-  "max-block-size",
-]);
-
 const waitForImages = async (root: Document | HTMLElement): Promise<void> => {
   const images = Array.from(root.querySelectorAll("img"));
   await Promise.all(
@@ -202,69 +193,36 @@ const convertModernCssColorToRgba = (color: string): string => {
 const normalizeStyleValueForHtml2Canvas = (value: string): string =>
   value.replace(MODERN_CSS_COLOR_FUNCTION_PATTERN, (color) => convertModernCssColorToRgba(color));
 
-const copyComputedStyle = (source: Element, target: Element): void => {
-  const computed = window.getComputedStyle(source);
-  target.removeAttribute("style");
-  const targetStyle = (target as HTMLElement | SVGElement).style;
-  if (!targetStyle) return;
+const inlineHtml2CanvasUnsafeStyles = (root: HTMLElement): void => {
+  // Preserve the browser's native layout. We only inline computed values that
+  // html2canvas 1.4.1 cannot parse (mainly Tailwind 4 OKLCH/LAB colors).
+  // Copying every computed property changes table/rowSpan sizing and is the
+  // source of the layout drift between native Print and direct Download.
+  const nodes: Element[] = [root, ...Array.from(root.querySelectorAll("*"))];
 
-  // Alturas devolvidas por getComputedStyle() são dimensões já resolvidas do
-  // layout atual, não necessariamente regras autorais. Reaplicá-las em texto,
-  // linhas e células de tabela faz o html2canvas limitar o conteúdo à métrica
-  // anterior da fonte. Isso corta especialmente células com rowSpan e textos
-  // pequenos. Preserve altura somente onde ela foi declarada de propósito.
-  const preserveBlockSize =
-    source.matches("img, svg, canvas, video") ||
-    Array.from(source.classList).some((className) =>
-      /^(?:h|min-h|max-h)-/.test(className),
-    ) ||
-    ["height", "min-height", "max-height"].some((property) =>
-      (source as HTMLElement | SVGElement).style?.getPropertyValue(property),
-    );
+  nodes.forEach((node) => {
+    const view = node.ownerDocument.defaultView || window;
+    const computed = view.getComputedStyle(node);
+    const targetStyle = (node as HTMLElement | SVGElement).style;
+    if (!targetStyle) return;
 
-  for (let index = 0; index < computed.length; index += 1) {
-    const property = computed.item(index);
-    if (!property) continue;
-    if (!preserveBlockSize && DERIVED_BLOCK_SIZE_PROPERTIES.has(property)) continue;
-    let value = computed.getPropertyValue(property);
-    if (!value) continue;
+    for (let index = 0; index < computed.length; index += 1) {
+      const property = computed.item(index);
+      if (!property) continue;
+      const value = computed.getPropertyValue(property);
+      if (!value || !/\b(?:oklch|oklab|lab|lch|color)\(/i.test(value)) continue;
 
-    // Imagens do certificado são incorporadas separadamente como DataURL. Não
-    // copie referências url(...) de CSS para a árvore congelada: elas fariam o
-    // html2canvas consultar novamente folhas/fontes externas na Hostinger e
-    // poderiam contaminar o canvas com CORS.
-    if (/url\s*\(/i.test(value)) continue;
-    value = normalizeStyleValueForHtml2Canvas(value);
-    try {
-      targetStyle.setProperty(property, value, computed.getPropertyPriority(property));
-    } catch {
-      // Some browser-only computed properties are read-only when reapplied.
+      const normalizedValue = normalizeStyleValueForHtml2Canvas(value);
+      try {
+        targetStyle.setProperty(property, normalizedValue, computed.getPropertyPriority(property));
+      } catch {
+        // Ignore browser-only/read-only computed properties.
+      }
     }
-  }
 
-  targetStyle.setProperty("animation", "none", "important");
-  targetStyle.setProperty("transition", "none", "important");
-  targetStyle.setProperty("caret-color", "transparent", "important");
-  targetStyle.setProperty("background-image", "none", "important");
-  targetStyle.setProperty("list-style-image", "none", "important");
-  targetStyle.setProperty("mask-image", "none", "important");
-  targetStyle.setProperty("-webkit-mask-image", "none", "important");
-};
-
-const freezeCertificateStyles = (source: HTMLElement, clone: HTMLElement): void => {
-  // IMPORTANT: source must be the real, connected certificate DOM. Calling
-  // getComputedStyle() on a detached clone returns browser defaults and destroys
-  // the Tailwind layout (logo grows, grids collapse and text becomes tiny after
-  // the final PDF fit). Keep source/clone trees identical until every computed
-  // style has been copied.
-  const sourceNodes: Element[] = [source, ...Array.from(source.querySelectorAll("*"))];
-  const cloneNodes: Element[] = [clone, ...Array.from(clone.querySelectorAll("*"))];
-
-  sourceNodes.forEach((sourceNode, index) => {
-    const cloneNode = cloneNodes[index];
-    if (!cloneNode) return;
-    copyComputedStyle(sourceNode, cloneNode);
-    cloneNode.removeAttribute("class");
+    targetStyle.setProperty("animation", "none", "important");
+    targetStyle.setProperty("transition", "none", "important");
+    targetStyle.setProperty("caret-color", "transparent", "important");
   });
 };
 
@@ -392,20 +350,17 @@ const createFrozenCertificateClone = async (element: HTMLElement): Promise<Certi
     if (document.fonts) await waitForCertificateFonts(document.fonts);
     await waitForStableCertificate(printSource);
 
-    // Congele somente depois que o clone estiver em largura de impressão. Isso
-    // evita copiar o display:flex, o padding de tela e a largura de 816 px que
-    // não existem no PDF produzido pelo botão Imprimir.
-    const clone = printSource.cloneNode(true) as HTMLElement;
-    freezeCertificateStyles(printSource, clone);
-    applyCertificatePrintLayout(clone);
-    container.replaceChildren(clone);
+    // Keep the print-width clone under the same Tailwind stylesheet used by the
+    // native Print button. Only unsupported modern colors are converted inline;
+    // geometry, table layout, rowSpan/colSpan, fonts and spacing remain native.
+    inlineHtml2CanvasUnsafeStyles(printSource);
+    await waitForStableCertificate(printSource);
 
-    await waitForStableCertificate(clone);
-    const cloneRect = clone.getBoundingClientRect();
+    const cloneRect = printSource.getBoundingClientRect();
     const width = Math.max(1, Math.round(cloneRect.width || PRINT_CONTENT_WIDTH_PX));
-    const height = Math.max(1, Math.ceil(clone.scrollHeight || cloneRect.height));
-    const resultsPageBreak = measureResultsPageBreak(clone);
-    return { container, clone, width, height, resultsPageBreak };
+    const height = Math.max(1, Math.ceil(printSource.scrollHeight || cloneRect.height));
+    const resultsPageBreak = measureResultsPageBreak(printSource);
+    return { container, clone: printSource, width, height, resultsPageBreak };
   } catch (error) {
     container.remove();
     throw error;
@@ -413,13 +368,10 @@ const createFrozenCertificateClone = async (element: HTMLElement): Promise<Certi
 };
 
 const stabilizeHtml2CanvasDocument = async (clonedDocument: Document): Promise<void> => {
-  // O layout já está integralmente congelado. Remova o Tailwind da cópia para
-  // impedir qualquer reintrodução de OKLCH, mas recoloque apenas o stylesheet
-  // de @font-face usado pelo botão Imprimir para manter Inter/JetBrains Mono.
-  clonedDocument
-    .querySelectorAll('link[rel="stylesheet"], style')
-    .forEach((stylesheet) => stylesheet.remove());
-
+  // Do NOT remove the application's stylesheets here. The direct download must
+  // use the same native CSS layout as the Print button. Removing Tailwind and
+  // replacing the whole computed style tree with inline declarations changes
+  // table metrics and causes clipped headers / different page breaks.
   const isolationStyle = clonedDocument.createElement("style");
   isolationStyle.textContent = `
     html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
@@ -434,15 +386,27 @@ const stabilizeHtml2CanvasDocument = async (clonedDocument: Document): Promise<v
       margin: 0 !important;
       padding: 0 !important;
       border: 0 !important;
+      border-radius: 0 !important;
       box-shadow: none !important;
       overflow: visible !important;
+      transform: none !important;
+      box-sizing: border-box !important;
       background: #fff !important;
+      color: #000 !important;
     }
   `;
   clonedDocument.head.appendChild(isolationStyle);
 
+  await waitForStylesheets(clonedDocument);
   await loadCertificateFontStylesheet(clonedDocument);
   if (clonedDocument.fonts) await waitForCertificateFonts(clonedDocument.fonts);
+
+  const root = clonedDocument.querySelector<HTMLElement>('[data-certificate-download-root="true"]');
+  if (!root) {
+    throw new Error("A cópia do certificado não foi localizada durante a captura.");
+  }
+  inlineHtml2CanvasUnsafeStyles(root);
+  await waitForImages(clonedDocument);
 };
 
 const isNearlyWhiteRow = (
@@ -503,10 +467,10 @@ const findSafePageSliceHeight = (
 /**
  * Baixa o mesmo certificado oficial exibido pelo Portal.
  *
- * A REV7 REV8 captura a mesma geometria de impressão A4, preserva Inter e
+ * O download captura a mesma geometria de impressão A4, preserva Inter e
  * JetBrains Mono e escolhe quebras sem cortar tabelas ou conteúdo textual.
- * O layout computado para impressão é congelado em estilos inline e as imagens
- * externas (principalmente assinatura do técnico no Firebase Storage) passam
+ * O layout permanece sob o CSS nativo do Portal; somente cores modernas que o
+ * html2canvas não interpreta são convertidas inline. As imagens externas passam
  * por um proxy autenticado e same-origin antes da captura. Assim o canvas não
  * depende de CORS de fontes/imagens no navegador da Hostinger.
  */
