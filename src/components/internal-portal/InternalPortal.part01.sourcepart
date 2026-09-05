@@ -1370,6 +1370,7 @@ export default function InternalPortal({
   const [psvTechnician, setPsvTechnician] = useState<any>("");
   const [psvType, setPsvType] = useState<any>("");
   const [selectedCertificateId, setSelectedCertificateId] = useState<any>("");
+  const [isDownloadingCertificatePdf, setIsDownloadingCertificatePdf] = useState(false);
   const [certificateReturnTab, setCertificateReturnTab] = useState<"instruments" | "field_service">("instruments");
   const [fieldServiceEquip, setFieldServiceEquip] = useState<string>("");
   const [fieldServiceTag, setFieldServiceTag] = useState<string>("");
@@ -1377,9 +1378,6 @@ export default function InternalPortal({
     useState<FieldServiceCertificateContext | null>(null);
   const [fieldServiceCertificateClientId, setFieldServiceCertificateClientId] =
     useState<string>("");
-  const [pendingFieldServiceCertificateDownload, setPendingFieldServiceCertificateDownload] =
-    useState<{ instrumentId: string; fileName: string } | null>(null);
-  const fieldServiceDownloadCompletionRef = React.useRef<(() => void) | null>(null);
 
   const resetFieldServiceCertificateState = () => {
     setSelectedCertificateId("");
@@ -1409,56 +1407,41 @@ export default function InternalPortal({
     });
   };
 
-  useEffect(() => {
-    if (
-      !pendingFieldServiceCertificateDownload ||
-      selectedCertificateId !== pendingFieldServiceCertificateDownload.instrumentId
-    ) {
+  const handleCertificateDownload = async (
+    certificateNumber: unknown,
+    clientTag: unknown,
+  ) => {
+    if (isDownloadingCertificatePdf) {
       return;
     }
 
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          await new Promise<void>((resolve) =>
-            window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())),
-          );
-          if (cancelled) return;
+    const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
+    if (!printableArea || !selectedCertificateId) {
+      alert("Não foi possível localizar o certificado aberto para download.");
+      return;
+    }
 
-          const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
-          if (!printableArea) {
-            throw new Error("O certificado padrão não ficou disponível para gerar o arquivo.");
-          }
+    const safeFilePart = (value: unknown, fallback: string) =>
+      String(value || fallback)
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, "-")
+        .replace(/\s+/g, " ");
+    const fileName =
+      `${safeFilePart(certificateNumber, "SEM CERTIFICADO")} - ` +
+      `${safeFilePart(clientTag, "SEM TAG")}.pdf`;
 
-          await downloadCertificateDomAsPdf(
-            printableArea,
-            pendingFieldServiceCertificateDownload.fileName,
-          );
-        } catch (error: any) {
-          console.error("Erro ao gerar PDF do certificado padrão:", error);
-          if (!cancelled) {
-            alert(
-              `Não foi possível baixar o certificado no layout padrão.\n\n${error?.message || "Falha ao capturar o certificado."}`,
-            );
-          }
-        } finally {
-          if (!cancelled) {
-            setPendingFieldServiceCertificateDownload(null);
-            resetFieldServiceCertificateState();
-            const resolveDownload = fieldServiceDownloadCompletionRef.current;
-            fieldServiceDownloadCompletionRef.current = null;
-            resolveDownload?.();
-          }
-        }
-      })();
-    }, 120);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [pendingFieldServiceCertificateDownload, selectedCertificateId]);
+    setIsDownloadingCertificatePdf(true);
+    try {
+      await downloadCertificateDomAsPdf(printableArea, fileName);
+    } catch (error: any) {
+      console.error("Erro ao baixar o certificado aberto:", error);
+      alert(
+        `Não foi possível baixar o certificado aberto.\n\n${error?.message || "Falha ao gerar o arquivo PDF."}`,
+      );
+    } finally {
+      setIsDownloadingCertificatePdf(false);
+    }
+  };
 
   const [selectedEtiquetaInstId, setSelectedEtiquetaInstId] = useState<any>("");
   const [loadedEtiquetaInstId, setLoadedEtiquetaInstId] = useState<any>("");

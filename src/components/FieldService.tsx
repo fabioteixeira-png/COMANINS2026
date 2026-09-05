@@ -64,17 +64,9 @@ interface FieldServiceProps {
     equipmentData: string,
     context: FieldServiceCertificateContext,
   ) => void;
-  onDownloadCertificate?: (
-    instId: string,
-    tagData: string,
-    equipmentData: string,
-    context: FieldServiceCertificateContext,
-    fileName: string,
-  ) => void | Promise<void>;
 }
-export default function FieldService({ canEdit = false, onPrintCertificate, onDownloadCertificate }: FieldServiceProps = {}) {
+export default function FieldService({ canEdit = false, onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
-  const [downloadingCertificateId, setDownloadingCertificateId] = useState<string>('');
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -1088,60 +1080,26 @@ export default function FieldService({ canEdit = false, onPrintCertificate, onDo
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       {(() => {
                         const matchingInst = findInstrumentByCertificate(record.certificate);
-                        if (matchingInst && (onPrintCertificate || onDownloadCertificate)) {
+                        if (matchingInst && onPrintCertificate) {
                           const context: FieldServiceCertificateContext = {
                             fieldServiceRecordId: record.id,
                             clientId: record.clientId,
                             cliente: record.cliente || '',
                             unidade: record.unidade || '',
                           };
-                          const safeFilePart = (value: unknown, fallback: string) =>
-                            String(value || fallback)
-                              .trim()
-                              .replace(/[\\/:*?"<>|]+/g, '-')
-                              .replace(/\s+/g, ' ');
-                          const downloadFileName = `${safeFilePart(record.tag || matchingInst.tag, 'SEM TAG')} - ${safeFilePart(record.certificate || matchingInst.certificateNumber || matchingInst.coma, 'SEM CERTIFICADO')}.pdf`;
                           return (
-                            <>
-                              {onPrintCertificate && (
-                                <button
-                                  onClick={() => onPrintCertificate(
-                                    matchingInst.id,
-                                    record.tag || '',
-                                    record.equipamento || '',
-                                    context,
-                                  )}
-                                  className="text-emerald-500 hover:text-emerald-600 mr-3"
-                                  title="Visualizar / imprimir Certificado de Calibração"
-                                >
-                                  <Printer className="w-4 h-4" />
-                                </button>
+                            <button
+                              onClick={() => onPrintCertificate(
+                                matchingInst.id,
+                                record.tag || '',
+                                record.equipamento || '',
+                                context,
                               )}
-                              {onDownloadCertificate && (
-                                <button
-                                  onClick={async () => {
-                                    if (downloadingCertificateId) return;
-                                    setDownloadingCertificateId(record.id);
-                                    try {
-                                      await onDownloadCertificate(
-                                        matchingInst.id,
-                                        record.tag || '',
-                                        record.equipamento || '',
-                                        context,
-                                        downloadFileName,
-                                      );
-                                    } finally {
-                                      setDownloadingCertificateId('');
-                                    }
-                                  }}
-                                  disabled={Boolean(downloadingCertificateId)}
-                                  className="text-blue-600 hover:text-blue-700 disabled:text-slate-300 disabled:cursor-wait mr-3"
-                                  title={downloadingCertificateId === record.id ? 'Gerando PDF...' : `Baixar PDF: ${downloadFileName}`}
-                                >
-                                  <Download className={`w-4 h-4 ${downloadingCertificateId === record.id ? 'animate-pulse' : ''}`} />
-                                </button>
-                              )}
-                            </>
+                              className="text-emerald-500 hover:text-emerald-600 mr-3"
+                              title="Visualizar / imprimir Certificado de Calibração"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
                           );
                         }
                         return null;

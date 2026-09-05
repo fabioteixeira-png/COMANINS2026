@@ -2434,15 +2434,8 @@
             </div>
             </>
           ))}
-        {(activeTab === "certificados" || pendingFieldServiceCertificateDownload) && (
-          <div
-            className={
-              activeTab === "certificados"
-                ? "space-y-6 print:space-y-0"
-                : "fixed left-[-12000px] top-0 z-[-10] w-[816px] bg-white pointer-events-none"
-            }
-            aria-hidden={activeTab !== "certificados"}
-          >
+        {activeTab === "certificados" && (
+          <div className="space-y-6 print:space-y-0">
             <div className="print:hidden flex items-center justify-between">
               <div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-950">
@@ -2697,6 +2690,22 @@
                           >
                             <Printer className="h-4 w-4" />
                             <span>Imprimir PDF</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleCertificateDownload(
+                                certNumber,
+                                fieldServiceTag || inst.tag,
+                              )
+                            }
+                            disabled={isDownloadingCertificatePdf}
+                            aria-busy={isDownloadingCertificatePdf}
+                            className="p-2 px-4 bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-wait rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
+                            title="Baixar o certificado aberto em PDF"
+                          >
+                            <Download className={`h-4 w-4 ${isDownloadingCertificatePdf ? "animate-pulse" : ""}`} />
+                            <span>{isDownloadingCertificatePdf ? "Baixando..." : "Baixar PDF"}</span>
                           </button>
                           <button
                             type="button"
@@ -3332,54 +3341,6 @@
                 console.error("Erro ao abrir/emitir certificado pelo Serviço de Campo:", error);
                 alert(
                   `Não foi possível concluir a emissão do certificado.\n\n${error?.message || "Falha ao atualizar o status do instrumento."}`,
-                );
-              }
-            }}
-            onDownloadCertificate={async (instId, tagData, equipmentData, context, fileName) => {
-              const mappingError = getFieldServiceClientMappingError(context);
-              if (mappingError) {
-                alert(mappingError);
-                return;
-              }
-
-              const instrument = instruments.find((item) => item.id === instId);
-              const resolvedClient = resolveFieldServiceCertificateClient(
-                clients,
-                instrument?.clientId,
-                context,
-              );
-
-              if (resolvedClient.expectedAliases && !resolvedClient.client) {
-                alert(
-                  `Não foi encontrado no Cadastro de Clientes o cliente necessário para este certificado: ${resolvedClient.expectedAliases[0]}. Cadastre/corrija o cliente antes de baixar.`,
-                );
-                return;
-              }
-
-              try {
-                await markCertificateIssued(instId);
-
-                setCertificateReturnTab("field_service");
-                setSelectedCertificateId(instId);
-                setFieldServiceTag(tagData);
-                setFieldServiceEquip(equipmentData);
-                setFieldServiceCertificateContext(context);
-                setFieldServiceCertificateClientId(resolvedClient.client?.id || "");
-
-                await new Promise<void>((resolve) => {
-                  fieldServiceDownloadCompletionRef.current = resolve;
-                  setPendingFieldServiceCertificateDownload({
-                    instrumentId: instId,
-                    fileName,
-                  });
-                });
-              } catch (error: any) {
-                fieldServiceDownloadCompletionRef.current = null;
-                setPendingFieldServiceCertificateDownload(null);
-                resetFieldServiceCertificateState();
-                console.error("Erro ao baixar/emitir certificado pelo Serviço de Campo:", error);
-                alert(
-                  `Não foi possível preparar o certificado padrão para download.\n\n${error?.message || "Falha ao preparar o certificado."}`,
                 );
               }
             }}
