@@ -644,7 +644,7 @@ export const downloadCertificateDomAsPdf = async (
  * recebe os mesmos estilos carregados pelo Portal, mas nenhum cabeçalho,
  * sidebar, barra fixa ou outro elemento do sistema é copiado para a impressão.
  */
-export const printCertificateDomOnly = async (element: HTMLElement): Promise<void> => {
+export const printCertificateDomOnly = async (element: HTMLElement, documentTitle?: string): Promise<void> => {
   await waitForStableCertificate(element);
 
   const iframe = document.createElement("iframe");
@@ -671,7 +671,8 @@ export const printCertificateDomOnly = async (element: HTMLElement): Promise<voi
     }
 
     frameDocument.open();
-    frameDocument.write("<!doctype html><html><head></head><body></body></html>");
+    const titleHtml = documentTitle ? `<title>${documentTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</title>` : "<title>Certificado de Calibração</title>";
+    frameDocument.write(`<!doctype html><html><head>${titleHtml}</head><body></body></html>`);
     frameDocument.close();
 
     document.querySelectorAll('link[rel="stylesheet"], style').forEach((styleNode) => {

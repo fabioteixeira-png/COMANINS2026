@@ -2684,7 +2684,7 @@
                         {/* Sheet actions - HIDDEN in printing */}
                         <div data-certificate-pdf-ignore="true" className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
                           <button
-                            onClick={handleCertificatePrint}
+                            onClick={() => handleCertificatePrint(certNumber, fieldServiceTag || inst.tag)}
                             className="p-2 px-4 bg-royal-blue text-white hover:bg-blue-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
                             title="Imprimir Certificado de Calibração"
                           >
