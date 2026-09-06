@@ -11,7 +11,7 @@ import type { AuthRequest } from './src/middleware/auth.ts';
 import cron from 'node-cron';
 import nodemailer from 'nodemailer';
 import { adminAuth, adminDb, adminStorage, adminStorageBucketName } from './src/lib/firebase-admin.ts';
-import { FieldPath, FieldValue, type DocumentReference } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, type DocumentReference, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import {
   ACCESS_MODULE_CATALOG,
   ALL_ACCESS_MODULES,
@@ -3822,6 +3822,115 @@ const getFreshAdministrator = async (req: AuthRequest) => {
   const profile = await findPortalUserForAuth(req.user);
   return profile && isAdministratorProfile(profile) ? profile : null;
 };
+
+
+app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb || !adminAuth) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+
+  const password = String(req.body?.password || '');
+  if (!password) return res.status(400).json({ error: 'PASSWORD_REQUIRED' });
+
+  const currentUid = asLimitedString(req.user?.uid, 160);
+  const currentEmail = String(req.user?.email || '').trim().toLowerCase();
+  if (!currentUid || !currentEmail.endsWith('@comanins.internal')) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
+
+  try {
+    // Reautentica exatamente a conta que está logada. Uma senha de outro
+    // administrador não autoriza a limpeza em nome do usuário atual.
+    const authResponse = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentEmail, password, returnSecureToken: true }),
+      },
+    );
+
+    if (!authResponse.ok) {
+      return res.status(401).json({ error: 'INVALID_CURRENT_ADMIN_PASSWORD' });
+    }
+
+    const authPayload: any = await authResponse.json();
+    if (!authPayload?.idToken || String(authPayload?.localId || '') !== currentUid) {
+      return res.status(401).json({ error: 'INVALID_CURRENT_ADMIN_PASSWORD' });
+    }
+
+    const confirmedToken = await adminAuth.verifyIdToken(authPayload.idToken);
+    if (String(confirmedToken.uid || '') !== currentUid) {
+      return res.status(401).json({ error: 'INVALID_CURRENT_ADMIN_PASSWORD' });
+    }
+
+    const confirmedProfile = await findPortalUserForAuth(confirmedToken);
+    if (!confirmedProfile || !isAdministratorProfile(confirmedProfile)) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(
+      req.user?.name || req.user?.username || req.user?.email,
+      160,
+    ) || 'Administrador';
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+    const pageSize = 400;
+    let cursor: QueryDocumentSnapshot | null = null;
+    let clearedCount = 0;
+    let scannedCount = 0;
+
+    while (true) {
+      let pageQuery: Query = firestoreDb
+        .collection('fieldServiceRecords')
+        .orderBy(FieldPath.documentId())
+        .limit(pageSize);
+      if (cursor) pageQuery = pageQuery.startAfter(cursor);
+
+      const page = await pageQuery.get();
+      if (page.empty) break;
+      scannedCount += page.size;
+
+      const activeDocs = page.docs.filter((recordDoc) => recordDoc.data()?.isDeleted !== true);
+      if (activeDocs.length > 0) {
+        const batch = firestoreDb.batch();
+        for (const recordDoc of activeDocs) {
+          batch.update(recordDoc.ref, {
+            isDeleted: true,
+            deletedAt: nowIso,
+            deletedBy: actorName,
+            deletedByUid: currentUid,
+          });
+        }
+        await batch.commit();
+        clearedCount += activeDocs.length;
+      }
+
+      cursor = page.docs[page.docs.length - 1] || null;
+      if (page.size < pageSize || !cursor) break;
+    }
+
+    await firestoreDb.collection('systemAuditLogs').add({
+      action: 'FIELD_SERVICE_ALL_RECORDS_ARCHIVED',
+      entityType: 'fieldService',
+      entityId: 'fieldServiceRecords',
+      actorUid: currentUid,
+      actorName,
+      actorRole,
+      createdAt: nowIso,
+      immutable: true,
+      summary: `Limpeza administrativa de Serviço de Campo: ${clearedCount} registro(s) arquivado(s)`,
+      metadata: {
+        clearedCount,
+        scannedCount,
+        authentication: 'CURRENT_ADMIN_PASSWORD_REAUTH',
+      },
+    });
+
+    return res.json({ success: true, clearedCount });
+  } catch (error) {
+    console.error('Field service clear-all failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
 
 app.post(
   '/api/internal/calibration-reports/:reportId/delete-and-reopen',

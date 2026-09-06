@@ -2471,6 +2471,10 @@
                       : undefined;
                     const client = fieldServiceClient || inventoryClient;
                     if (!inst) return null;
+                    const certificateClientTag =
+                      certificateReturnTab === "field_service"
+                        ? String(fieldServiceTag || "")
+                        : String(inst.tag || "");
 
                     const report = [...reports]
                       .sort(
@@ -2684,29 +2688,41 @@
                         {/* Sheet actions - HIDDEN in printing */}
                         <div data-certificate-pdf-ignore="true" className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
                           <button
-                            onClick={() => handleCertificatePrint(certNumber, fieldServiceTag || inst.tag)}
+                            onClick={() => handleCertificatePrint()}
                             className="p-2 px-4 bg-royal-blue text-white hover:bg-blue-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
                             title="Imprimir Certificado de Calibração"
                           >
                             <Printer className="h-4 w-4" />
                             <span>Imprimir PDF</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void handleCertificateDownload(
-                                certNumber,
-                                fieldServiceTag || inst.tag,
-                              )
-                            }
-                            disabled={isDownloadingCertificatePdf}
-                            aria-busy={isDownloadingCertificatePdf}
-                            className="p-2 px-4 bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-wait rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
-                            title="Baixar o certificado aberto em PDF"
-                          >
-                            <Download className={`h-4 w-4 ${isDownloadingCertificatePdf ? "animate-pulse" : ""}`} />
-                            <span>{isDownloadingCertificatePdf ? "Baixando..." : "Baixar PDF"}</span>
-                          </button>
+                          {certificateReturnTab === "field_service" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleCertificateSave(certNumber, certificateClientTag)}
+                              className="p-2 px-4 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
+                              title="Abrir a impressão nativa para salvar o certificado em PDF com nome sugerido automaticamente"
+                            >
+                              <Save className="h-4 w-4" />
+                              <span>Salvar PDF</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCertificateDownload(
+                                  certNumber,
+                                  certificateClientTag,
+                                )
+                              }
+                              disabled={isDownloadingCertificatePdf}
+                              aria-busy={isDownloadingCertificatePdf}
+                              className="p-2 px-4 bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-wait rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
+                              title="Baixar o certificado aberto em PDF"
+                            >
+                              <Download className={`h-4 w-4 ${isDownloadingCertificatePdf ? "animate-pulse" : ""}`} />
+                              <span>{isDownloadingCertificatePdf ? "Baixando..." : "Baixar PDF"}</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() =>
@@ -2816,7 +2832,9 @@
                               </p>
                               <p>
                                 <span className="font-bold">TAG do Cliente:</span>{" "}
-                                {fieldServiceTag || inst.tag || "—"}
+                                {certificateReturnTab === "field_service"
+                                  ? certificateClientTag
+                                  : certificateClientTag || "—"}
                               </p>
                               {fieldServiceEquip && (
                                 <p>
@@ -3307,6 +3325,7 @@
         {activeTab === "field_service" && canAccessModule("field_service") && (
           <FieldService
             canEdit={canEditFieldService}
+            canClearData={isUserAdmin}
             onPrintCertificate={async (instId, tagData, equipmentData, context) => {
               const mappingError = getFieldServiceClientMappingError(context);
               if (mappingError) {

@@ -3655,8 +3655,36 @@ export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecor
   notifyFieldServiceSubscribers();
 }
 
-export async function clearAllFieldServiceRecords(): Promise<void> {
-  throw new Error('Exclusão em massa de Serviço de Campo foi desativada para proteção dos dados.');
+export async function clearAllFieldServiceRecords(password: string): Promise<number> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  if (!password) throw new Error('Digite a senha do administrador logado.');
+
+  const token = await user.getIdToken();
+  const response = await fetch('/api/field-service/clear-all', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password }),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    if (response.status === 401 && payload?.error === 'INVALID_CURRENT_ADMIN_PASSWORD') {
+      throw new Error('Senha incorreta para o administrador atualmente logado.');
+    }
+    if (response.status === 403) {
+      throw new Error('Somente o administrador logado pode limpar os dados de Serviço de Campo.');
+    }
+    throw new Error(payload?.message || payload?.error || 'Não foi possível limpar os dados de Serviço de Campo.');
+  }
+
+  fieldServiceCache = [];
+  fieldServiceInitialLoadComplete = true;
+  notifyFieldServiceSubscribers();
+  return Number(payload?.clearedCount || 0);
 }
 
 export async function bulkUpsertFieldServiceRecords(

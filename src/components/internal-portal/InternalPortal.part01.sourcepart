@@ -1392,28 +1392,51 @@ export default function InternalPortal({
     setActiveTab(targetTab || certificateReturnTab);
   };
 
-  const handleCertificatePrint = (certificateNumber: unknown, clientTag: unknown) => {
+  const sanitizeCertificateFilePart = (value: unknown): string =>
+    String(value || '')
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/\s+/g, ' ');
+
+  const buildCertificateSuggestedTitle = (
+    certificateNumber: unknown,
+    clientTag: unknown,
+  ): string => {
+    const certificate = sanitizeCertificateFilePart(certificateNumber);
+    const tag = sanitizeCertificateFilePart(clientTag);
+    if (!certificate) return '';
+    return tag ? `${certificate} - ${tag}` : certificate;
+  };
+
+  const printCurrentCertificate = (documentTitle?: string) => {
     const printableArea = document.getElementById("certificate-printable-area") as HTMLElement | null;
     if (!printableArea) {
       alert("Não foi possível localizar o certificado para impressão.");
       return;
     }
 
-    const safeFilePart = (value: unknown, fallback: string) =>
-      String(value || fallback)
-        .trim()
-        .replace(/[\\/:*?"<>|]+/g, "-")
-        .replace(/\s+/g, " ");
-    const fileName =
-      `${safeFilePart(certificateNumber, "SEM CERTIFICADO")} - ` +
-      `${safeFilePart(clientTag, "SEM TAG")}.pdf`;
-
-    void printCertificateDomOnly(printableArea, fileName).catch((error: any) => {
+    void printCertificateDomOnly(printableArea, documentTitle).catch((error: any) => {
       console.error("Erro ao imprimir somente o certificado:", error);
       alert(
         `Não foi possível preparar a impressão do certificado.\n\n${error?.message || "Falha ao isolar o certificado."}`,
       );
     });
+  };
+
+  const handleCertificatePrint = () => {
+    printCurrentCertificate();
+  };
+
+  const handleCertificateSave = (certificateNumber: unknown, clientTag: unknown) => {
+    const suggestedTitle = buildCertificateSuggestedTitle(certificateNumber, clientTag);
+    if (!suggestedTitle) {
+      alert("Não foi possível identificar o número do certificado para sugerir o nome do PDF.");
+      return;
+    }
+    // O navegador usa o <title> do iframe de impressão como sugestão de nome
+    // quando o usuário escolhe "Salvar como PDF". Não acrescentamos .pdf
+    // para evitar nomes duplicados como arquivo.pdf.pdf.
+    printCurrentCertificate(suggestedTitle);
   };
 
   const handleCertificateDownload = async (

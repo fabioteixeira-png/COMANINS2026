@@ -10,7 +10,7 @@ import {
   updateFieldServiceRecord,
   bulkAddFieldServiceRecords,
   bulkUpsertFieldServiceRecords,
-  deleteFieldServiceRecord, syncInstruments, refreshFieldServiceRecords
+  deleteFieldServiceRecord, clearAllFieldServiceRecords, syncInstruments, refreshFieldServiceRecords
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 import { buildFieldServiceA4Workbook } from '../utils/fieldServiceA4Workbook';
@@ -31,7 +31,7 @@ const COLUMNS = [
   { id: 'certificate', label: 'Certificado', minW: '120px' },
   { id: 'dataCalibracao', label: 'Data Calibração', minW: '120px' },
   { id: 'interventionDate', label: 'Data Intervenção', minW: '120px' },
-  { id: 'tag', label: 'Tag', minW: '120px' },
+  { id: 'tag', label: 'TAG do Cliente', minW: '140px' },
   { id: 'equipamento', label: 'Equipamento', minW: '150px' },
   { id: 'localizacao', label: 'Localização', minW: '150px' },
   { id: 'technician', label: 'Técnico', minW: '120px' },
@@ -58,6 +58,7 @@ export interface FieldServiceCertificateContext {
 
 interface FieldServiceProps {
   canEdit?: boolean;
+  canClearData?: boolean;
   onPrintCertificate?: (
     instId: string,
     tagData: string,
@@ -65,7 +66,7 @@ interface FieldServiceProps {
     context: FieldServiceCertificateContext,
   ) => void;
 }
-export default function FieldService({ canEdit = false, onPrintCertificate }: FieldServiceProps = {}) {
+export default function FieldService({ canEdit = false, canClearData = false, onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -210,6 +211,10 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isRefreshingRecords, setIsRefreshingRecords] = useState(false);
+  const [showClearDataModal, setShowClearDataModal] = useState(false);
+  const [clearDataPassword, setClearDataPassword] = useState('');
+  const [clearDataError, setClearDataError] = useState('');
+  const [isClearingData, setIsClearingData] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -223,7 +228,12 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
       setShowAddModal(false);
       setFormData({});
     }
-  }, [canEdit]);
+    if (!canClearData) {
+      setShowClearDataModal(false);
+      setClearDataPassword('');
+      setClearDataError('');
+    }
+  }, [canEdit, canClearData]);
 
   useEffect(() => {
     const unsubscribeInst = syncInstruments((data) => setInstruments(data));
@@ -238,6 +248,98 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
   }, []);
 
   const normalizeKey = (k: string) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const normalizeIdentityValue = (value: unknown): string =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+
+  const buildTaglessIdentityKey = (record: Partial<FieldServiceRecord>): string => {
+    const equipment = normalizeIdentityValue(record.equipamento);
+    if (!equipment) return '';
+    return [
+      normalizeIdentityValue(record.cliente),
+      normalizeIdentityValue(record.unidade),
+      equipment,
+    ].join('|');
+  };
+
+  const findUniqueFieldServiceImportMatch = (
+    incoming: Partial<FieldServiceRecord>,
+  ): { record?: FieldServiceRecord; ambiguous?: boolean } => {
+    const incomingTag = normalizeIdentityValue(incoming.tag);
+    const incomingCertificate = normalizeCertificate(incoming.certificate);
+
+    if (incomingTag) {
+      const tagMatches = records.filter(
+        (record) => normalizeIdentityValue(record.tag) === incomingTag,
+      );
+      if (tagMatches.length === 1) return { record: tagMatches[0] };
+      if (tagMatches.length > 1) return { ambiguous: true };
+
+      // Permite completar um registro antigo que ainda estava sem TAG, sem
+      // duplicá-lo, desde que o certificado identifique um único registro.
+      if (incomingCertificate) {
+        const certificateMatches = records.filter(
+          (record) => normalizeCertificate(record.certificate) === incomingCertificate,
+        );
+        if (certificateMatches.length === 1) {
+          const currentTag = normalizeIdentityValue(certificateMatches[0].tag);
+          if (!currentTag || currentTag === incomingTag) return { record: certificateMatches[0] };
+          return { ambiguous: true };
+        }
+        if (certificateMatches.length > 1) return { ambiguous: true };
+      }
+    } else if (incomingCertificate) {
+      const certificateMatches = records.filter(
+        (record) => normalizeCertificate(record.certificate) === incomingCertificate,
+      );
+      if (certificateMatches.length === 1) {
+        // Uma linha importada sem TAG só pode atualizar automaticamente um
+        // registro que também esteja sem TAG. Nunca apagamos uma TAG já
+        // cadastrada porque a célula veio vazia na nova planilha.
+        if (!normalizeIdentityValue(certificateMatches[0].tag)) {
+          return { record: certificateMatches[0] };
+        }
+        return { ambiguous: true };
+      }
+      if (certificateMatches.length > 1) return { ambiguous: true };
+    }
+
+    // Quando não existe TAG do Cliente (ou quando uma TAG está sendo preenchida
+    // pela primeira vez), usa uma chave técnica estável: Cliente + Unidade +
+    // Equipamento. A Localização só é usada para desempatar. Nunca atualiza
+    // automaticamente quando houver mais de um candidato.
+    const fallbackKey = buildTaglessIdentityKey(incoming);
+    if (!fallbackKey) return {};
+
+    let candidates = records.filter((record) => {
+      const currentKey = buildTaglessIdentityKey(record);
+      if (currentKey !== fallbackKey) return false;
+      if (incomingTag) {
+        const currentTag = normalizeIdentityValue(record.tag);
+        return !currentTag || currentTag === incomingTag;
+      }
+      return normalizeIdentityValue(record.tag) === '';
+    });
+
+    if (candidates.length === 1) return { record: candidates[0] };
+    if (candidates.length > 1) {
+      const incomingLocation = normalizeIdentityValue(incoming.localizacao);
+      if (incomingLocation) {
+        candidates = candidates.filter(
+          (record) => normalizeIdentityValue(record.localizacao) === incomingLocation,
+        );
+        if (candidates.length === 1) return { record: candidates[0] };
+      }
+      return { ambiguous: true };
+    }
+
+    return {};
+  };
 
   const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
   const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
@@ -321,12 +423,39 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
     }
   };
 
+  const handleClearAllFieldServiceData = async () => {
+    if (!canClearData) {
+      setClearDataError('Somente o administrador logado pode limpar os dados de Serviço de Campo.');
+      return;
+    }
+    if (!clearDataPassword) {
+      setClearDataError('Digite a senha do administrador logado.');
+      return;
+    }
+
+    setIsClearingData(true);
+    setClearDataError('');
+    try {
+      const clearedCount = await clearAllFieldServiceRecords(clearDataPassword);
+      setSelectedRecordIds(new Set());
+      setCurrentPage(1);
+      setShowClearDataModal(false);
+      setClearDataPassword('');
+      alert(`${clearedCount} registro(s) de Serviço de Campo foram removidos da base ativa com sucesso.`);
+    } catch (error: any) {
+      console.error('Erro ao limpar dados de Serviço de Campo:', error);
+      setClearDataError(error?.message || 'Não foi possível limpar os dados de Serviço de Campo.');
+    } finally {
+      setIsClearingData(false);
+    }
+  };
+
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([{
       'Certificado': '',
       'Data Calibração': '',
       'Data de Intervenção': '',
-      'Tag': '',
+      'TAG do Cliente': '',
       'Equipamento': '',
       'Localização': '',
       'Técnico': '',
@@ -373,9 +502,10 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
         const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
         const recordsToUpdate: {id: string, data: Partial<FieldServiceRecord>}[] = [];
 
-        // Track what we process in this batch to avoid duplicates within the Excel file itself
-        const processedCerts = new Set();
-        const processedTags = new Set();
+        // Track identities already processed in this workbook to avoid creating
+        // duplicates inside the same import operation.
+        const processedImportKeys = new Set<string>();
+        let conflictCount = 0;
 
         for (const row of data as any[]) {
           const normalizedRow = Object.keys(row).reduce((acc, key) => {
@@ -384,24 +514,16 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           }, {} as Record<string, any>);
 
           const cert = normalizedRow['certificado'] || normalizedRow['cert'] || '';
-          const strCert = String(cert).trim();
+          const strCert = String(cert).trim().toUpperCase();
 
-          const tagRaw = normalizedRow['tag'] || '';
+          // A planilha oficial pode trazer "TAG do Cliente". Mantemos aliases
+          // legados para não quebrar arquivos já utilizados pela COMANINS.
+          const tagRaw =
+            normalizedRow['tagdocliente'] ??
+            normalizedRow['tagcliente'] ??
+            normalizedRow['tag'] ??
+            '';
           const strTag = String(tagRaw).trim();
-
-          // Excel rows must have either a cert or a tag to be useful
-          if (strCert === '' && strTag === '') {
-            continue;
-          }
-
-          // If the Excel itself has duplicates, we just skip the subsequent ones
-          if ((strCert !== '' && processedCerts.has(strCert)) || (strTag !== '' && processedTags.has(strTag))) {
-            skippedCount++;
-            continue;
-          }
-
-          if (strCert !== '') processedCerts.add(strCert);
-          if (strTag !== '') processedTags.add(strTag);
 
           const interventionDateRaw = String(normalizedRow['data'] || normalizedRow['date'] || normalizedRow['datadeintervencao'] || normalizedRow['dataintervencao'] || normalizedRow['datadeinterveno'] || normalizedRow['datadeint'] || '');
           const formattedInterventionDate = dateMask(interventionDateRaw);
@@ -427,25 +549,47 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             observacao: String(normalizedRow['observacao'] || normalizedRow['observao'] || normalizedRow['notas'] || ''),
             unidade: String(normalizedRow['unidade'] || normalizedRow['und'] || '')
           };
+
+          const normalizedTag = normalizeIdentityValue(parsedRecord.tag);
+          const normalizedCert = normalizeCertificate(parsedRecord.certificate);
+          const fallbackKey = buildTaglessIdentityKey(parsedRecord);
+
+          // Sem TAG ainda é possível importar/atualizar quando existir certificado
+          // ou uma chave técnica Cliente + Unidade + Equipamento.
+          if (!normalizedTag && !normalizedCert && !fallbackKey) {
+            skippedCount++;
+            continue;
+          }
+
+          const batchIdentity = normalizedTag
+            ? `TAG:${normalizedTag}`
+            : fallbackKey
+              ? `SEM_TAG:${fallbackKey}`
+              : `CERT:${normalizedCert}`;
+
+          if (processedImportKeys.has(batchIdentity)) {
+            skippedCount++;
+            continue;
+          }
+          processedImportKeys.add(batchIdentity);
+
           const linkedInstrument = findInstrumentByCertificate(parsedRecord.certificate);
           if (linkedInstrument?.lastCalibrationDate) {
             parsedRecord.dataCalibracao = linkedInstrument.lastCalibrationDate;
           }
           parsedRecord.clientId = resolveClientId(parsedRecord);
 
-          // Find existing match
-          let existingMatch = null;
-          if (strCert !== '') {
-            existingMatch = records.find(r => r.certificate === strCert);
-          } else if (strTag !== '') {
-            existingMatch = records.find(r => r.tag === strTag);
+          const matchResult = findUniqueFieldServiceImportMatch(parsedRecord);
+          if (matchResult.ambiguous) {
+            conflictCount++;
+            continue;
           }
 
+          const existingMatch = matchResult.record;
           if (existingMatch) {
-            // Check if there are differences
             let hasDifferences = false;
             for (const key of Object.keys(parsedRecord)) {
-              if ((parsedRecord as any)[key] !== (existingMatch as any)[key]) {
+              if (String((parsedRecord as any)[key] ?? '') !== String((existingMatch as any)[key] ?? '')) {
                 hasDifferences = true;
                 break;
               }
@@ -467,7 +611,12 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
         }
 
-        alert(`Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} ignorados (já estavam idênticos ou duplicados no arquivo).`);
+        alert(
+          `Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} ignorados (idênticos/duplicados).\n${conflictCount} conflitos não alterados por segurança.` +
+          (conflictCount > 0
+            ? '\n\nConflitos ocorrem quando um registro sem TAG do Cliente encontra mais de um candidato com a mesma chave técnica. Revise esses itens manualmente.'
+            : ''),
+        );
       } catch (error) {
         console.error("Error reading excel:", error);
         alert("Erro ao importar planilha.");
@@ -489,7 +638,7 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
       'Certificado': record.certificate || '',
       'Data Calibração': resolveCalibrationDate(record) || '',
       'Data de Intervenção': record.interventionDate || '',
-      'Tag': record.tag || '',
+      'TAG do Cliente': record.tag || '',
       'Equipamento': record.equipamento || '',
       'Localização': record.localizacao || '',
       'Técnico': record.technician || '',
@@ -866,6 +1015,22 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
             <span>Atualizar Dados</span>
           </button>
 
+          {canClearData && (
+            <button
+              type="button"
+              onClick={() => {
+                setClearDataPassword('');
+                setClearDataError('');
+                setShowClearDataModal(true);
+              }}
+              className="flex items-center space-x-2 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg transition-colors text-sm"
+              title="Limpar todos os registros ativos de Serviço de Campo. Requer a senha do administrador atualmente logado."
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>Limpar Dados</span>
+            </button>
+          )}
+
           {canEdit && (
             <>
               <button
@@ -1122,6 +1287,67 @@ export default function FieldService({ canEdit = false, onPrintCertificate }: Fi
           </table>
         </div>
       </div>
+
+      {showClearDataModal && canClearData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-rose-50">
+              <div>
+                <h3 className="font-bold text-lg text-rose-800">Limpar dados de Serviço de Campo</h3>
+                <p className="text-xs text-rose-700 mt-1">Ação restrita ao administrador atualmente logado.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { if (!isClearingData) setShowClearDataModal(false); }}
+                disabled={isClearingData}
+                className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Todos os registros ativos desta aba serão arquivados e sairão da listagem. Instrumentos, certificados, calibrações, clientes e demais módulos não serão excluídos.
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Senha do administrador logado</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={clearDataPassword}
+                  onChange={(event) => { setClearDataPassword(event.target.value); setClearDataError(''); }}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && !isClearingData) void handleClearAllFieldServiceData(); }}
+                  disabled={isClearingData}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-rose-500 outline-none disabled:bg-slate-100"
+                  placeholder="Digite sua senha"
+                />
+              </div>
+              {clearDataError && (
+                <p className="text-sm font-semibold text-rose-600">{clearDataError}</p>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowClearDataModal(false)}
+                disabled={isClearingData}
+                className="px-4 py-2 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition-colors text-sm disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearAllFieldServiceData()}
+                disabled={isClearingData || !clearDataPassword}
+                className="px-4 py-2 bg-rose-600 text-white font-bold rounded-lg hover:bg-rose-700 transition-colors flex items-center gap-2 text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isClearingData ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {isClearingData ? 'Limpando...' : 'Confirmar limpeza'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddModal && canEdit && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
