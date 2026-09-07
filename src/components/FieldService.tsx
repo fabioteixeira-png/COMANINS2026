@@ -257,89 +257,163 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       .replace(/\s+/g, ' ')
       .toUpperCase();
 
-  const buildTaglessIdentityKey = (record: Partial<FieldServiceRecord>): string => {
-    const equipment = normalizeIdentityValue(record.equipamento);
-    if (!equipment) return '';
-    return [
-      normalizeIdentityValue(record.cliente),
-      normalizeIdentityValue(record.unidade),
-      equipment,
-    ].join('|');
+  const TAG_IMPORT_PLACEHOLDERS = new Set([
+    '0',
+    '-',
+    'N/A',
+    'NA',
+    'SEM TAG',
+    'S/T',
+    'ST',
+    'CAD. TAG',
+    'CAD TAG',
+  ]);
+
+  const normalizeImportTag = (value: unknown): string => {
+    const normalized = normalizeIdentityValue(value);
+    return TAG_IMPORT_PLACEHOLDERS.has(normalized) ? '' : normalized;
+  };
+
+  const FIELD_SERVICE_IMPORT_COMPARISON_FIELDS: Array<keyof FieldServiceRecord> = [
+    'cliente',
+    'equipamento',
+    'localizacao',
+    'dataCalibracao',
+    'interventionDate',
+    'technician',
+    'area',
+    'range',
+    'operacao',
+    'unidadeMedida',
+    'categoria',
+    'emissaoPdf',
+    'ordemServico',
+    'tipoServico',
+    'observacao',
+    'unidade',
+  ];
+
+  const normalizeImportDate = (value: unknown): string => {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      const day = String(value.getDate()).padStart(2, '0');
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      return `${day}/${month}/${value.getFullYear()}`;
+    }
+
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+
+    const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+    if (iso) {
+      return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}/${iso[1]}`;
+    }
+
+    const br = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+    if (br) {
+      return `${br[1].padStart(2, '0')}/${br[2].padStart(2, '0')}/${br[3]}`;
+    }
+
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 8) {
+      return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+    }
+
+    return raw;
+  };
+
+  const normalizeImportComparisonValue = (field: keyof FieldServiceRecord, value: unknown): string => {
+    if (field === 'interventionDate' || field === 'dataCalibracao') {
+      return normalizeIdentityValue(normalizeImportDate(value));
+    }
+    return normalizeIdentityValue(value);
+  };
+
+  const buildFieldServiceContentFingerprint = (record: Partial<FieldServiceRecord>): string => {
+    const normalizedValues = FIELD_SERVICE_IMPORT_COMPARISON_FIELDS.map((field) =>
+      normalizeImportComparisonValue(field, record[field]),
+    );
+    return normalizedValues.some(Boolean) ? normalizedValues.join('|') : '';
   };
 
   const findUniqueFieldServiceImportMatch = (
     incoming: Partial<FieldServiceRecord>,
-  ): { record?: FieldServiceRecord; ambiguous?: boolean } => {
-    const incomingTag = normalizeIdentityValue(incoming.tag);
+    candidateRecords: FieldServiceRecord[] = records,
+  ): { record?: FieldServiceRecord; ambiguous?: boolean; reason?: string } => {
+    const incomingTag = normalizeImportTag(incoming.tag);
     const incomingCertificate = normalizeCertificate(incoming.certificate);
 
-    if (incomingTag) {
-      const tagMatches = records.filter(
-        (record) => normalizeIdentityValue(record.tag) === incomingTag,
-      );
-      if (tagMatches.length === 1) return { record: tagMatches[0] };
-      if (tagMatches.length > 1) return { ambiguous: true };
-
-      // Permite completar um registro antigo que ainda estava sem TAG, sem
-      // duplicá-lo, desde que o certificado identifique um único registro.
-      if (incomingCertificate) {
-        const certificateMatches = records.filter(
+    const tagMatches = incomingTag
+      ? candidateRecords.filter((record) => normalizeImportTag(record.tag) === incomingTag)
+      : [];
+    const certificateMatches = incomingCertificate
+      ? candidateRecords.filter(
           (record) => normalizeCertificate(record.certificate) === incomingCertificate,
-        );
-        if (certificateMatches.length === 1) {
-          const currentTag = normalizeIdentityValue(certificateMatches[0].tag);
-          if (!currentTag || currentTag === incomingTag) return { record: certificateMatches[0] };
-          return { ambiguous: true };
-        }
-        if (certificateMatches.length > 1) return { ambiguous: true };
-      }
-    } else if (incomingCertificate) {
-      const certificateMatches = records.filter(
-        (record) => normalizeCertificate(record.certificate) === incomingCertificate,
-      );
-      if (certificateMatches.length === 1) {
-        // Uma linha importada sem TAG só pode atualizar automaticamente um
-        // registro que também esteja sem TAG. Nunca apagamos uma TAG já
-        // cadastrada porque a célula veio vazia na nova planilha.
-        if (!normalizeIdentityValue(certificateMatches[0].tag)) {
-          return { record: certificateMatches[0] };
-        }
-        return { ambiguous: true };
-      }
-      if (certificateMatches.length > 1) return { ambiguous: true };
+        )
+      : [];
+
+    if (tagMatches.length > 1) {
+      return {
+        ambiguous: true,
+        reason: `A TAG do Cliente "${incomingTag}" já possui ${tagMatches.length} registros ativos no sistema.`,
+      };
+    }
+    if (certificateMatches.length > 1) {
+      return {
+        ambiguous: true,
+        reason: `O Certificado "${incomingCertificate}" já possui ${certificateMatches.length} registros ativos no sistema.`,
+      };
     }
 
-    // Quando não existe TAG do Cliente (ou quando uma TAG está sendo preenchida
-    // pela primeira vez), usa uma chave técnica estável: Cliente + Unidade +
-    // Equipamento. A Localização só é usada para desempatar. Nunca atualiza
-    // automaticamente quando houver mais de um candidato.
-    const fallbackKey = buildTaglessIdentityKey(incoming);
-    if (!fallbackKey) return {};
+    const tagMatch = tagMatches[0];
+    const certificateMatch = certificateMatches[0];
+    if (tagMatch && certificateMatch && tagMatch.id !== certificateMatch.id) {
+      return {
+        ambiguous: true,
+        reason: `A TAG do Cliente "${incomingTag}" e o Certificado "${incomingCertificate}" apontam para registros diferentes.`,
+      };
+    }
 
-    let candidates = records.filter((record) => {
-      const currentKey = buildTaglessIdentityKey(record);
-      if (currentKey !== fallbackKey) return false;
-      if (incomingTag) {
-        const currentTag = normalizeIdentityValue(record.tag);
-        return !currentTag || currentTag === incomingTag;
-      }
-      return normalizeIdentityValue(record.tag) === '';
-    });
+    const identifierMatch = tagMatch || certificateMatch;
+    if (identifierMatch) return { record: identifierMatch };
 
-    if (candidates.length === 1) return { record: candidates[0] };
-    if (candidates.length > 1) {
-      const incomingLocation = normalizeIdentityValue(incoming.localizacao);
-      if (incomingLocation) {
-        candidates = candidates.filter(
-          (record) => normalizeIdentityValue(record.localizacao) === incomingLocation,
-        );
-        if (candidates.length === 1) return { record: candidates[0] };
+    // TAG e Certificado podem vir em branco. Nessa situação, a importação
+    // compara todos os demais campos normalizados. Só faz atualização
+    // automática quando existir exatamente um registro equivalente.
+    if (!incomingTag && !incomingCertificate) {
+      const contentFingerprint = buildFieldServiceContentFingerprint(incoming);
+      if (!contentFingerprint) return {};
+
+      const contentMatches = candidateRecords.filter(
+        (record) => buildFieldServiceContentFingerprint(record) === contentFingerprint,
+      );
+      if (contentMatches.length === 1) return { record: contentMatches[0] };
+      if (contentMatches.length > 1) {
+        return {
+          ambiguous: true,
+          reason: `Foram encontrados ${contentMatches.length} registros equivalentes pelos demais campos, sem TAG e Certificado para desempate.`,
+        };
       }
-      return { ambiguous: true };
     }
 
     return {};
   };
+
+  const mergeImportedFieldServiceRecord = (
+    existing: FieldServiceRecord,
+    incoming: Omit<FieldServiceRecord, 'id'>,
+  ): Omit<FieldServiceRecord, 'id'> => {
+    const merged: Omit<FieldServiceRecord, 'id'> = { ...incoming };
+    for (const field of Object.keys(incoming) as Array<keyof Omit<FieldServiceRecord, 'id'>>) {
+      const incomingValue = incoming[field];
+      if (String(incomingValue ?? '').trim() === '') {
+        (merged as any)[field] = (existing as any)[field] ?? '';
+      }
+    }
+    merged.tag = normalizeImportTag(merged.tag);
+    merged.certificate = normalizeCertificate(merged.certificate);
+    return merged;
+  };
+
 
   const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
   const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
@@ -485,141 +559,351 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     const file = e.target.files?.[0];
     if (!file) return;
 
+    type ImportIssue = {
+      sourceRow: number;
+      status: string;
+      reason: string;
+      suggestedAction: string;
+      record: Omit<FieldServiceRecord, 'id'>;
+    };
+
+    const getImportValue = (normalizedRow: Record<string, any>, aliases: string[]): any => {
+      let firstDefined: any = '';
+      let hasDefined = false;
+      for (const alias of aliases) {
+        const key = normalizeKey(alias);
+        if (!Object.prototype.hasOwnProperty.call(normalizedRow, key)) continue;
+        const value = normalizedRow[key];
+        if (!hasDefined) {
+          firstDefined = value;
+          hasDefined = true;
+        }
+        if (String(value ?? '').trim() !== '') return value;
+      }
+      return hasDefined ? firstDefined : '';
+    };
+
+    const makeIssueReport = (issues: ImportIssue[]) => {
+      if (issues.length === 0) return;
+      const rows = issues.map((issue) => ({
+        'Linha de Origem': issue.sourceRow,
+        'Status': issue.status,
+        'Motivo': issue.reason,
+        'Ação Sugerida': issue.suggestedAction,
+        'Certificado': issue.record.certificate || '',
+        'Data Calibração': issue.record.dataCalibracao || '',
+        'Data de Intervenção': issue.record.interventionDate || '',
+        'TAG do Cliente': issue.record.tag || '',
+        'Equipamento': issue.record.equipamento || '',
+        'Localização': issue.record.localizacao || '',
+        'Técnico': issue.record.technician || '',
+        'Área': issue.record.area || '',
+        'Range': issue.record.range || '',
+        'Operação': issue.record.operacao || '',
+        'Unidade de Medida': issue.record.unidadeMedida || '',
+        'Categoria': issue.record.categoria || '',
+        'Emissão PDF': issue.record.emissaoPdf || '',
+        'Ordem de Serviço': issue.record.ordemServico || '',
+        'Tipo de Serviço': issue.record.tipoServico || '',
+        'Observação': issue.record.observacao || '',
+        'Unidade': issue.record.unidade || '',
+        'Cliente': issue.record.cliente || '',
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 14 }, { wch: 22 }, { wch: 58 }, { wch: 42 },
+        { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 30 },
+        { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
+        { wch: 16 }, { wch: 20 }, { wch: 22 }, { wch: 42 }, { wch: 18 }, { wch: 24 },
+      ];
+      worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:V1' };
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Nao_Inseridos');
+      const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+      XLSX.writeFile(workbook, `RELATORIO_IMPORTACAO_SERVICO_CAMPO_NAO_INSERIDOS_${stamp}.xlsx`);
+    };
+
+    const emptyParsedRecord = (): Omit<FieldServiceRecord, 'id'> => ({
+      clientId: '',
+      cliente: '',
+      tag: '',
+      equipamento: '',
+      localizacao: '',
+      certificate: '',
+      dataCalibracao: '',
+      interventionDate: '',
+      technician: '',
+      area: '',
+      range: '',
+      operacao: '',
+      unidadeMedida: '',
+      categoria: '',
+      emissaoPdf: '',
+      ordemServico: '',
+      tipoServico: '',
+      observacao: '',
+      unidade: '',
+    });
+
     setIsImporting(true);
     const reader = new FileReader();
     reader.onload = async (evt) => {
+      const issues: ImportIssue[] = [];
       try {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { raw: false });
+        const data = XLSX.utils.sheet_to_json(ws, { raw: false, defval: '' });
 
         let addedCount = 0;
         let updatedCount = 0;
         let skippedCount = 0;
-
-        const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
-        const recordsToUpdate: {id: string, data: Partial<FieldServiceRecord>}[] = [];
-
-        // Track identities already processed in this workbook to avoid creating
-        // duplicates inside the same import operation.
-        const processedImportKeys = new Set<string>();
         let conflictCount = 0;
 
-        for (const row of data as any[]) {
+        const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
+        const recordsToUpdate: { id: string; data: Partial<FieldServiceRecord> }[] = [];
+        const workingRecords: FieldServiceRecord[] = records.map((record) => ({ ...record }));
+        const processedTags = new Map<string, number>();
+        const processedCertificates = new Map<string, number>();
+        const processedContentFingerprints = new Map<string, number>();
+        const processedExistingRecordIds = new Map<string, number>();
+
+        for (let rowIndex = 0; rowIndex < (data as any[]).length; rowIndex++) {
+          const row = (data as any[])[rowIndex];
+          const sourceRow = Number.isFinite(Number((row as any)?.__rowNum__))
+            ? Number((row as any).__rowNum__) + 1
+            : rowIndex + 2;
           const normalizedRow = Object.keys(row).reduce((acc, key) => {
-             acc[normalizeKey(key)] = row[key];
-             return acc;
+            acc[normalizeKey(key)] = row[key];
+            return acc;
           }, {} as Record<string, any>);
 
-          const cert = normalizedRow['certificado'] || normalizedRow['cert'] || '';
-          const strCert = String(cert).trim().toUpperCase();
+          const parsedRecord = emptyParsedRecord();
+          parsedRecord.certificate = normalizeCertificate(getImportValue(normalizedRow, [
+            'certificado', 'cert', 'certintervencao', 'cert intervenção', 'cert intervencao',
+          ]));
+          parsedRecord.dataCalibracao = normalizeImportDate(getImportValue(normalizedRow, [
+            'data calibracao', 'data de calibracao', 'datacalibracao', 'dtcalibracao',
+          ]));
+          parsedRecord.interventionDate = normalizeImportDate(getImportValue(normalizedRow, [
+            'data', 'date', 'data de intervencao', 'dataintervencao', 'dtintervencao',
+            'dtintevencao', 'data de int', 'datadeint',
+          ]));
+          parsedRecord.tag = normalizeImportTag(getImportValue(normalizedRow, [
+            'tag do cliente', 'tag cliente', 'tag',
+          ]));
+          parsedRecord.equipamento = String(getImportValue(normalizedRow, [
+            'equipamento', 'equip', 'descricao', 'descrição', 'descrio',
+          ]) ?? '').trim();
+          parsedRecord.localizacao = String(getImportValue(normalizedRow, [
+            'localizacao', 'localização', 'localiz', 'local', 'serie', 'série', 'srie',
+          ]) ?? '').trim();
+          parsedRecord.technician = String(getImportValue(normalizedRow, [
+            'tecnico', 'técnico', 'technician', 'executante', 'executor',
+          ]) ?? '').trim();
+          parsedRecord.area = String(getImportValue(normalizedRow, ['area', 'área']) ?? '').trim();
+          parsedRecord.range = String(getImportValue(normalizedRow, ['range', 'faixa']) ?? '').trim();
+          parsedRecord.operacao = String(getImportValue(normalizedRow, ['operacao', 'operação', 'op']) ?? '').trim();
+          parsedRecord.unidadeMedida = String(getImportValue(normalizedRow, [
+            'unidade de medida', 'unidadedemedida', 'unidade medida', 'um', 'medida',
+          ]) ?? '').trim();
+          parsedRecord.categoria = String(getImportValue(normalizedRow, ['categoria', 'cat']) ?? '').trim();
+          parsedRecord.emissaoPdf = String(getImportValue(normalizedRow, [
+            'emissao pdf', 'emissão pdf', 'emissaopdf', 'pdf',
+          ]) ?? '').trim();
+          parsedRecord.ordemServico = String(getImportValue(normalizedRow, [
+            'ordem de servico', 'ordem de serviço', 'ordemservico', 'os',
+          ]) ?? '').trim();
+          parsedRecord.tipoServico = String(getImportValue(normalizedRow, [
+            'tipo de servico', 'tipo de serviço', 'tiposervico', 'servico', 'serviço',
+          ]) ?? '').trim();
+          parsedRecord.observacao = String(getImportValue(normalizedRow, [
+            'observacao', 'observação', 'obs', 'notas',
+          ]) ?? '').trim();
+          parsedRecord.unidade = String(getImportValue(normalizedRow, ['unidade', 'und']) ?? '').trim();
+          parsedRecord.cliente = String(getImportValue(normalizedRow, ['cliente', 'client']) ?? '').trim();
 
-          // A planilha oficial pode trazer "TAG do Cliente". Mantemos aliases
-          // legados para não quebrar arquivos já utilizados pela COMANINS.
-          const tagRaw =
-            normalizedRow['tagdocliente'] ??
-            normalizedRow['tagcliente'] ??
-            normalizedRow['tag'] ??
-            '';
-          const strTag = String(tagRaw).trim();
-
-          const interventionDateRaw = String(normalizedRow['data'] || normalizedRow['date'] || normalizedRow['datadeintervencao'] || normalizedRow['dataintervencao'] || normalizedRow['datadeinterveno'] || normalizedRow['datadeint'] || '');
-          const formattedInterventionDate = dateMask(interventionDateRaw);
-
-          const parsedRecord = {
-            clientId: '',
-            cliente: String(normalizedRow['cliente'] || ''),
-            tag: strTag,
-            equipamento: String(normalizedRow['equipamento'] || normalizedRow['descrio'] || ''),
-            localizacao: String(normalizedRow['localizacao'] || normalizedRow['localizao'] || normalizedRow['local'] || normalizedRow['serie'] || normalizedRow['srie'] || ''),
-            certificate: strCert,
-            dataCalibracao: String(normalizedRow['datacalibracao'] || normalizedRow['datadecalibracao'] || ''),
-            interventionDate: formattedInterventionDate,
-            technician: String(normalizedRow['tecnico'] || normalizedRow['tcnico'] || normalizedRow['technician'] || ''),
-            area: String(normalizedRow['area'] || normalizedRow['rea'] || ''),
-            range: String(normalizedRow['range'] || normalizedRow['faixa'] || ''),
-            operacao: String(normalizedRow['operacao'] || normalizedRow['operao'] || ''),
-            unidadeMedida: String(normalizedRow['unidadedemedida'] || normalizedRow['um'] || ''),
-            categoria: String(normalizedRow['categoria'] || ''),
-            emissaoPdf: String(normalizedRow['emissaopdf'] || normalizedRow['emissopdf'] || ''),
-            ordemServico: String(normalizedRow['ordemdeservico'] || normalizedRow['os'] || normalizedRow['ordemservico'] || ''),
-            tipoServico: String(normalizedRow['tipodeservico'] || normalizedRow['tiposervico'] || ''),
-            observacao: String(normalizedRow['observacao'] || normalizedRow['observao'] || normalizedRow['notas'] || ''),
-            unidade: String(normalizedRow['unidade'] || normalizedRow['und'] || '')
-          };
-
-          const normalizedTag = normalizeIdentityValue(parsedRecord.tag);
+          const normalizedTag = normalizeImportTag(parsedRecord.tag);
           const normalizedCert = normalizeCertificate(parsedRecord.certificate);
-          const fallbackKey = buildTaglessIdentityKey(parsedRecord);
+          const contentFingerprint = buildFieldServiceContentFingerprint(parsedRecord);
 
-          // Sem TAG ainda é possível importar/atualizar quando existir certificado
-          // ou uma chave técnica Cliente + Unidade + Equipamento.
-          if (!normalizedTag && !normalizedCert && !fallbackKey) {
+          if (!normalizedTag && !normalizedCert && !contentFingerprint) {
             skippedCount++;
+            issues.push({
+              sourceRow,
+              status: 'NÃO INSERIDO - LINHA VAZIA/SEM DADOS',
+              reason: 'TAG e Certificado estão em branco e nenhum dos demais campos contém dados suficientes para cadastrar o registro.',
+              suggestedAction: 'Preencha os dados do registro ou remova a linha da planilha.',
+              record: parsedRecord,
+            });
             continue;
           }
 
-          const batchIdentity = normalizedTag
-            ? `TAG:${normalizedTag}`
-            : fallbackKey
-              ? `SEM_TAG:${fallbackKey}`
-              : `CERT:${normalizedCert}`;
-
-          if (processedImportKeys.has(batchIdentity)) {
+          if (normalizedTag && processedTags.has(normalizedTag)) {
             skippedCount++;
+            issues.push({
+              sourceRow,
+              status: 'NÃO INSERIDO - TAG DUPLICADA NO ARQUIVO',
+              reason: `A TAG do Cliente "${normalizedTag}" já apareceu na linha ${processedTags.get(normalizedTag)} desta importação.`,
+              suggestedAction: 'Mantenha apenas uma linha para esta TAG ou corrija a identificação antes de importar novamente.',
+              record: parsedRecord,
+            });
             continue;
           }
-          processedImportKeys.add(batchIdentity);
+
+          if (normalizedCert && processedCertificates.has(normalizedCert)) {
+            skippedCount++;
+            issues.push({
+              sourceRow,
+              status: 'NÃO INSERIDO - CERTIFICADO DUPLICADO NO ARQUIVO',
+              reason: `O Certificado "${normalizedCert}" já apareceu na linha ${processedCertificates.get(normalizedCert)} desta importação.`,
+              suggestedAction: 'Mantenha apenas uma linha para este certificado ou corrija o número antes de importar novamente.',
+              record: parsedRecord,
+            });
+            continue;
+          }
+
+          if (!normalizedTag && !normalizedCert && contentFingerprint && processedContentFingerprints.has(contentFingerprint)) {
+            skippedCount++;
+            issues.push({
+              sourceRow,
+              status: 'NÃO INSERIDO - REGISTRO DUPLICADO NO ARQUIVO',
+              reason: `TAG e Certificado estão em branco e todos os demais campos coincidem com a linha ${processedContentFingerprints.get(contentFingerprint)} desta importação.`,
+              suggestedAction: 'Mantenha apenas uma das linhas equivalentes ou preencha os identificadores que diferenciam os registros.',
+              record: parsedRecord,
+            });
+            continue;
+          }
+
+          const matchResult = findUniqueFieldServiceImportMatch(parsedRecord, workingRecords);
+          if (matchResult.ambiguous) {
+            conflictCount++;
+            issues.push({
+              sourceRow,
+              status: 'NÃO INSERIDO - CONFLITO',
+              reason: matchResult.reason || 'A linha encontrou mais de um registro possível e não foi alterada por segurança.',
+              suggestedAction: 'Revise TAG, Certificado e os demais campos; corrija a duplicidade no sistema ou na planilha antes de tentar novamente.',
+              record: parsedRecord,
+            });
+            continue;
+          }
 
           const linkedInstrument = findInstrumentByCertificate(parsedRecord.certificate);
           if (linkedInstrument?.lastCalibrationDate) {
-            parsedRecord.dataCalibracao = linkedInstrument.lastCalibrationDate;
+            parsedRecord.dataCalibracao = formatCalibrationDate(linkedInstrument.lastCalibrationDate);
           }
           parsedRecord.clientId = resolveClientId(parsedRecord);
 
-          const matchResult = findUniqueFieldServiceImportMatch(parsedRecord);
-          if (matchResult.ambiguous) {
-            conflictCount++;
-            continue;
-          }
-
           const existingMatch = matchResult.record;
           if (existingMatch) {
-            let hasDifferences = false;
-            for (const key of Object.keys(parsedRecord)) {
-              if (String((parsedRecord as any)[key] ?? '') !== String((existingMatch as any)[key] ?? '')) {
-                hasDifferences = true;
-                break;
-              }
+            if (processedExistingRecordIds.has(existingMatch.id)) {
+              skippedCount++;
+              issues.push({
+                sourceRow,
+                status: 'NÃO INSERIDO - MESMO REGISTRO JÁ PROCESSADO',
+                reason: `Esta linha aponta para o mesmo registro do sistema já tratado pela linha ${processedExistingRecordIds.get(existingMatch.id)} desta importação.`,
+                suggestedAction: 'Consolide as duas linhas em uma única linha antes de importar novamente.',
+                record: parsedRecord,
+              });
+              continue;
             }
 
+            const mergedRecord = mergeImportedFieldServiceRecord(existingMatch, parsedRecord);
+            const finalTag = normalizeImportTag(mergedRecord.tag);
+            const finalCertificate = normalizeCertificate(mergedRecord.certificate);
+
+            const duplicateTagRecord = finalTag
+              ? workingRecords.find(
+                  (record) => record.id !== existingMatch.id && normalizeImportTag(record.tag) === finalTag,
+                )
+              : undefined;
+            const duplicateCertificateRecord = finalCertificate
+              ? workingRecords.find(
+                  (record) => record.id !== existingMatch.id && normalizeCertificate(record.certificate) === finalCertificate,
+                )
+              : undefined;
+
+            if (duplicateTagRecord || duplicateCertificateRecord) {
+              conflictCount++;
+              issues.push({
+                sourceRow,
+                status: 'NÃO INSERIDO - IDENTIFICADOR JÁ UTILIZADO',
+                reason: duplicateTagRecord
+                  ? `A TAG do Cliente "${finalTag}" pertence a outro registro ativo.`
+                  : `O Certificado "${finalCertificate}" pertence a outro registro ativo.`,
+                suggestedAction: 'Corrija o identificador duplicado antes de importar novamente.',
+                record: parsedRecord,
+              });
+              continue;
+            }
+
+            const hasDifferences = Object.keys(mergedRecord).some(
+              (key) => String((mergedRecord as any)[key] ?? '') !== String((existingMatch as any)[key] ?? ''),
+            );
+
             if (hasDifferences) {
-              recordsToUpdate.push({ id: existingMatch.id, data: parsedRecord });
+              recordsToUpdate.push({ id: existingMatch.id, data: mergedRecord });
+              const workingIndex = workingRecords.findIndex((record) => record.id === existingMatch.id);
+              if (workingIndex >= 0) workingRecords[workingIndex] = { ...existingMatch, ...mergedRecord };
               updatedCount++;
             } else {
               skippedCount++;
+              issues.push({
+                sourceRow,
+                status: 'NÃO INSERIDO - JÁ EXISTENTE',
+                reason: 'O registro já existe no sistema com os mesmos dados; nenhuma gravação adicional foi necessária.',
+                suggestedAction: 'Nenhuma ação é necessária, a menos que queira alterar algum campo.',
+                record: parsedRecord,
+              });
             }
           } else {
             newRecordsToImport.push(parsedRecord);
+            workingRecords.push({ id: `__IMPORT_${sourceRow}_${newRecordsToImport.length}`, ...parsedRecord });
             addedCount++;
           }
+
+          if (normalizedTag) processedTags.set(normalizedTag, sourceRow);
+          if (normalizedCert) processedCertificates.set(normalizedCert, sourceRow);
+          if (!normalizedTag && !normalizedCert && contentFingerprint) {
+            processedContentFingerprints.set(contentFingerprint, sourceRow);
+          }
+          if (existingMatch) processedExistingRecordIds.set(existingMatch.id, sourceRow);
         }
 
         if (newRecordsToImport.length > 0 || recordsToUpdate.length > 0) {
-          await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
+          try {
+            await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
+          } catch (persistError: any) {
+            console.error('Erro ao gravar importação de Serviço de Campo:', persistError);
+            const genericRecord = emptyParsedRecord();
+            issues.push({
+              sourceRow: 0,
+              status: 'ERRO DE GRAVAÇÃO DO LOTE',
+              reason: persistError?.message || 'O sistema não conseguiu concluir a gravação do lote no banco de dados.',
+              suggestedAction: 'Não repita a importação sem antes verificar se algum registro foi gravado. Atualize a tela, confira os dados e tente novamente somente com os itens pendentes.',
+              record: genericRecord,
+            });
+            makeIssueReport(issues);
+            throw persistError;
+          }
         }
 
+        makeIssueReport(issues);
+
         alert(
-          `Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} ignorados (idênticos/duplicados).\n${conflictCount} conflitos não alterados por segurança.` +
-          (conflictCount > 0
-            ? '\n\nConflitos ocorrem quando um registro sem TAG do Cliente encontra mais de um candidato com a mesma chave técnica. Revise esses itens manualmente.'
-            : ''),
+          `Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} não inseridos/ignorados.\n${conflictCount} conflitos não alterados por segurança.` +
+          (issues.length > 0
+            ? `\n\nFoi gerada automaticamente uma planilha Excel com ${issues.length} item(ns) não inserido(s) e o respectivo motivo.`
+            : '\n\nNenhuma inconsistência foi encontrada.'),
         );
       } catch (error) {
-        console.error("Error reading excel:", error);
-        alert("Erro ao importar planilha.");
+        console.error("Error reading/importing excel:", error);
+        if (issues.length === 0) {
+          alert("Erro ao importar planilha. Verifique o formato do arquivo e tente novamente.");
+        } else {
+          alert("A importação encontrou um erro. O relatório de inconsistências foi gerado quando possível; confira a planilha antes de tentar novamente.");
+        }
       } finally {
         setIsImporting(false);
         if (excelInputRef.current) excelInputRef.current.value = '';
