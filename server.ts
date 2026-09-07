@@ -3721,6 +3721,7 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
         deletedAt: nowIso,
         deletedBy: actorName,
         deletedByUid: actorUid,
+        updatedAt: nowIso,
       });
       transaction.set(auditRef, {
         action: 'FIELD_SERVICE_RECORD_ARCHIVED',
@@ -3898,6 +3899,7 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
             deletedAt: nowIso,
             deletedBy: actorName,
             deletedByUid: currentUid,
+            updatedAt: nowIso,
           });
         }
         await batch.commit();
@@ -4944,39 +4946,8 @@ app.post("/api/test-notifications", requireAuth, requireAdministratorAccount, ad
   res.json({ success: true, message: "Notificações gerais e de locação verificadas." });
 });
 
-app.post("/api/generate-birthday-message", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
-  let name = asLimitedString(req.body?.name, 120);
-  try {
-    const requesterProfile = await findPortalUserForAuth(req.user);
-    name = asLimitedString(requesterProfile?.name || name, 120);
-  } catch {
-    // The signed internal token already passed authorization; keep the supplied
-    // display name only as a fallback if Firestore is temporarily unavailable.
-  }
-  if (!name) return res.status(400).json({ error: "Nome não fornecido" });
-
-  const genAI = getGeminiClient();
-  if (!genAI) {
-    return res.json({ message: `Feliz Aniversário, ${name}! A equipe COMANINS deseja a você um excelente dia, com muita saúde, paz e sucesso.` });
-  }
-
-  try {
-    const prompt = `Você é a inteligência artificial do sistema COMANINS Metrology. Hoje é o aniversário do colaborador ${name}. Escreva uma mensagem curta (máximo 3 frases), calorosa, amigável e profissional de feliz aniversário para ele, que aparecerá quando ele fizer login no sistema. Não use aspas na resposta.`;
-    const result = await genAI.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt
-    });
-    return res.json({ message: result.text || `Feliz Aniversário, ${name}!` });
-  } catch (error) {
-    console.error("Erro ao gerar mensagem de aniversário:", error);
-    return res.json({ message: `Feliz Aniversário, ${name}! A equipe COMANINS deseja a você um dia incrível!` });
-  }
-});
-
-
-
-
-
+// Mensagem individual de aniversário por IA desativada por decisão operacional.
+// Os alertas administrativos de RH/aniversários permanecem ativos.
 const passwordResetGenericResponse = {
   success: true,
   message: 'Se a conta estiver ativa e possuir um e-mail de recuperação válido, as instruções serão enviadas.',

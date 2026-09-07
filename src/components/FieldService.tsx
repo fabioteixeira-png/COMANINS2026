@@ -96,7 +96,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
 
   // Sorting State
-  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>({ key: 'interventionDate', direction: 'desc' });
 
   const handleSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -244,6 +244,27 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     return () => {
       unsubscribe.then(unsub => unsub());
       unsubscribeInst.then(u => u());
+    };
+  }, []);
+
+  // Mantém a tela atualizada sem exigir o botão manual. O cache atual permanece
+  // visível enquanto uma atualização completa e silenciosa ocorre em segundo plano.
+  useEffect(() => {
+    let disposed = false;
+    const refreshWhenReturning = () => {
+      if (disposed || document.visibilityState !== 'visible') return;
+      refreshFieldServiceRecords({ silent: true }).catch((error) => {
+        console.warn('Atualização automática de Serviço de Campo falhou:', error);
+      });
+    };
+
+    window.addEventListener('focus', refreshWhenReturning);
+    document.addEventListener('visibilitychange', refreshWhenReturning);
+    refreshWhenReturning();
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', refreshWhenReturning);
+      document.removeEventListener('visibilitychange', refreshWhenReturning);
     };
   }, []);
 
@@ -479,7 +500,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
         (instrument) => String(instrument.tag || '').trim().toUpperCase() === tag,
       );
       const clientIds = Array.from(new Set(tagMatches.map((instrument) => String(instrument.clientId || '').trim()).filter(Boolean)));
-      if (clientIds.length === 1) return clientIds[0];
+      if (clientIds.length === 1) return String(clientIds[0] || '');
     }
 
     return String(record.clientId || '').trim();
@@ -488,7 +509,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   const handleRefreshRecords = async () => {
     setIsRefreshingRecords(true);
     try {
-      await refreshFieldServiceRecords();
+      await refreshFieldServiceRecords({ force: true, silent: true });
     } catch (error) {
       console.error(error);
       alert('Não foi possível atualizar os registros de Serviço de Campo.');
@@ -1293,7 +1314,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             onClick={handleRefreshRecords}
             disabled={isRefreshingRecords}
             className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
-            title="Atualizar a base manualmente. A navegação entre abas usa o cache em memória."
+            title="Atualização automática ativa. Use este botão apenas para forçar uma sincronização completa imediata."
           >
             <RefreshCw className={`h-4 w-4 ${isRefreshingRecords ? 'animate-spin' : ''}`} />
             <span>Atualizar Dados</span>

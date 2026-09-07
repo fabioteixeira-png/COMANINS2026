@@ -3530,12 +3530,17 @@ export interface FieldServiceRecord {
   deletedAt?: string;
   deletedBy?: string;
   deletedByUid?: string;
+  updatedAt?: string;
 }
 
 const FIELD_SERVICE_PAGE_SIZE = 1000;
+const FIELD_SERVICE_CHANGE_FEED_SIZE = 1000;
+const FIELD_SERVICE_AUTO_REFRESH_MAX_AGE_MS = 5 * 60_000;
 let fieldServiceCache: FieldServiceRecord[] = [];
 let fieldServiceLoadPromise: Promise<void> | null = null;
 let fieldServiceInitialLoadComplete = false;
+let fieldServiceLastFullRefreshAt = 0;
+let fieldServiceLiveUnsubscribe: (() => void) | null = null;
 const fieldServiceSubscribers = new Set<(records: FieldServiceRecord[]) => void>();
 
 const notifyFieldServiceSubscribers = () => {
@@ -3543,13 +3548,61 @@ const notifyFieldServiceSubscribers = () => {
   fieldServiceSubscribers.forEach((subscriber) => subscriber(snapshot));
 };
 
-const loadFieldServiceRecordsInPages = async (force = false): Promise<void> => {
-  if (fieldServiceInitialLoadComplete && !force) return;
-  if (fieldServiceLoadPromise && !force) return fieldServiceLoadPromise;
+const mergeFieldServiceChangeSnapshot = (snapshot: any) => {
+  if (!snapshot || snapshot.empty) return;
+  const byId = new Map(fieldServiceCache.map((record) => [record.id, record]));
+  let changed = false;
 
+  snapshot.docChanges().forEach((change: any) => {
+    const incoming = { id: change.doc.id, ...change.doc.data() } as FieldServiceRecord;
+    if (incoming.isDeleted === true) {
+      if (byId.delete(incoming.id)) changed = true;
+      return;
+    }
+    // 'removed' pode significar apenas que o documento saiu da janela dos 1000
+    // mais recentemente alterados. Isso não significa exclusão do cadastro.
+    if (change.type === 'removed') return;
+    const previous = byId.get(incoming.id);
+    if (!previous || previous.updatedAt !== incoming.updatedAt) {
+      byId.set(incoming.id, incoming);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    fieldServiceCache = Array.from(byId.values());
+    notifyFieldServiceSubscribers();
+  }
+};
+
+const startFieldServiceLiveFeed = () => {
+  if (fieldServiceLiveUnsubscribe || fieldServiceSubscribers.size === 0) return;
+  const changesQuery = query(
+    collection(db, 'fieldServiceRecords'),
+    orderBy('updatedAt', 'desc'),
+    limit(FIELD_SERVICE_CHANGE_FEED_SIZE),
+  );
+
+  fieldServiceLiveUnsubscribe = onSnapshot(
+    changesQuery,
+    mergeFieldServiceChangeSnapshot,
+    (err) => {
+      // Registros legados sem updatedAt continuam cobertos pela carga completa.
+      // O feed em tempo real é apenas o canal incremental para novos/alterados.
+      console.warn('Field Service live change feed unavailable:', err);
+    },
+  );
+};
+
+const loadFieldServiceRecordsInPages = async (force = false, silent = false): Promise<void> => {
+  if (fieldServiceInitialLoadComplete && !force) return;
+  if (fieldServiceLoadPromise) return fieldServiceLoadPromise;
+
+  const hadVisibleCache = fieldServiceCache.length > 0;
   const task = (async () => {
     const loaded: FieldServiceRecord[] = [];
     let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
+    let isFirstPage = true;
 
     while (true) {
       const pageQuery = cursor
@@ -3570,15 +3623,24 @@ const loadFieldServiceRecordsInPages = async (force = false): Promise<void> => {
         if (record.isDeleted !== true) loaded.push(record);
       });
 
-      // Publica progressivamente para a tela não ficar bloqueada esperando 20k+ registros.
-      fieldServiceCache = [...loaded];
-      notifyFieldServiceSubscribers();
+      // Na primeira entrada, mostra o primeiro lote rapidamente. Depois disso,
+      // evita publicar 17/50 estados intermediários, reduzindo ordenações e renders.
+      // Em refresh silencioso, mantém a base antiga visível até a nova estar completa.
+      if (!silent && !hadVisibleCache && isFirstPage && loaded.length > 0) {
+        fieldServiceCache = [...loaded];
+        notifyFieldServiceSubscribers();
+      }
+      isFirstPage = false;
 
       if (page.size < FIELD_SERVICE_PAGE_SIZE) break;
       cursor = page.docs[page.docs.length - 1] || null;
       if (!cursor) break;
     }
+
+    fieldServiceCache = [...loaded];
     fieldServiceInitialLoadComplete = true;
+    fieldServiceLastFullRefreshAt = Date.now();
+    notifyFieldServiceSubscribers();
   })().finally(() => {
     if (fieldServiceLoadPromise === task) fieldServiceLoadPromise = null;
   });
@@ -3590,23 +3652,49 @@ const loadFieldServiceRecordsInPages = async (force = false): Promise<void> => {
 export async function syncFieldServiceRecords(callback: (records: FieldServiceRecord[]) => void) {
   fieldServiceSubscribers.add(callback);
   if (fieldServiceCache.length > 0) callback([...fieldServiceCache]);
-  loadFieldServiceRecordsInPages().catch((err) => {
-    console.error('Error loading field service records in pages:', err);
-  });
+
+  loadFieldServiceRecordsInPages()
+    .then(() => startFieldServiceLiveFeed())
+    .catch((err) => {
+      console.error('Error loading field service records in pages:', err);
+    });
+
   return () => {
+    // O feed incremental permanece ativo enquanto o portal estiver aberto, mesmo
+    // com Serviço de Campo fora da tela. Assim, o cache continua recebendo mudanças.
     fieldServiceSubscribers.delete(callback);
   };
 }
 
-export async function refreshFieldServiceRecords(): Promise<void> {
+export interface RefreshFieldServiceOptions {
+  force?: boolean;
+  silent?: boolean;
+  maxAgeMs?: number;
+}
+
+export async function refreshFieldServiceRecords(options: RefreshFieldServiceOptions = {}): Promise<boolean> {
+  const maxAgeMs = options.maxAgeMs ?? FIELD_SERVICE_AUTO_REFRESH_MAX_AGE_MS;
+  const age = Date.now() - fieldServiceLastFullRefreshAt;
+  if (!options.force && fieldServiceInitialLoadComplete && fieldServiceLastFullRefreshAt > 0 && age < maxAgeMs) {
+    startFieldServiceLiveFeed();
+    return false;
+  }
+
   fieldServiceInitialLoadComplete = false;
-  await loadFieldServiceRecordsInPages(true);
+  if (fieldServiceLiveUnsubscribe) {
+    fieldServiceLiveUnsubscribe();
+    fieldServiceLiveUnsubscribe = null;
+  }
+  await loadFieldServiceRecordsInPages(true, options.silent !== false);
+  startFieldServiceLiveFeed();
+  return true;
 }
 
 export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {
   const colRef = collection(db, 'fieldServiceRecords');
-  const docRef = await addDoc(colRef, data);
-  const created = { id: docRef.id, ...data };
+  const persistedData = { ...data, updatedAt: new Date().toISOString() };
+  const docRef = await addDoc(colRef, persistedData);
+  const created = { id: docRef.id, ...persistedData } as FieldServiceRecord;
   fieldServiceCache = [created, ...fieldServiceCache.filter((record) => record.id !== docRef.id)];
   notifyFieldServiceSubscribers();
   return created;
@@ -3614,9 +3702,10 @@ export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>
 
 export async function updateFieldServiceRecord(id: string, data: Partial<FieldServiceRecord>): Promise<void> {
   const docRef = doc(db, 'fieldServiceRecords', id);
-  await updateDoc(docRef, data);
+  const persistedData = { ...data, updatedAt: new Date().toISOString() } as Partial<FieldServiceRecord>;
+  await updateDoc(docRef, persistedData);
   fieldServiceCache = fieldServiceCache.map((record) =>
-    record.id === id ? { ...record, ...data } : record,
+    record.id === id ? { ...record, ...persistedData } : record,
   );
   notifyFieldServiceSubscribers();
 }
@@ -3644,10 +3733,12 @@ export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecor
   }
   for (const chunk of chunks) {
     const batch = writeBatch(db);
+    const updatedAt = new Date().toISOString();
     for (const record of chunk) {
       const docRef = doc(colRef);
-      batch.set(docRef, record);
-      createdRecords.push({ id: docRef.id, ...record });
+      const persistedData = { ...record, updatedAt };
+      batch.set(docRef, persistedData);
+      createdRecords.push({ id: docRef.id, ...persistedData } as FieldServiceRecord);
     }
     await batch.commit();
   }
@@ -3683,6 +3774,7 @@ export async function clearAllFieldServiceRecords(password: string): Promise<num
 
   fieldServiceCache = [];
   fieldServiceInitialLoadComplete = true;
+  fieldServiceLastFullRefreshAt = Date.now();
   notifyFieldServiceSubscribers();
   return Number(payload?.clearedCount || 0);
 }
@@ -3701,24 +3793,28 @@ export async function bulkUpsertFieldServiceRecords(
   adds.forEach((data) => allOps.push({ type: 'add', data }));
 
   const createdRecords: FieldServiceRecord[] = [];
+  const appliedUpdates = new Map<string, Partial<FieldServiceRecord>>();
   for (let i = 0; i < allOps.length; i += 400) {
     const chunk = allOps.slice(i, i + 400);
     const batch = writeBatch(db);
+    const updatedAt = new Date().toISOString();
     for (const op of chunk) {
       if (op.type === 'update') {
-        batch.update(doc(db, 'fieldServiceRecords', op.id), op.data);
+        const persistedData = { ...op.data, updatedAt } as Partial<FieldServiceRecord>;
+        batch.update(doc(db, 'fieldServiceRecords', op.id), persistedData);
+        appliedUpdates.set(op.id, persistedData);
       } else {
         const docRef = doc(colRef);
-        batch.set(docRef, op.data);
-        createdRecords.push({ id: docRef.id, ...op.data });
+        const persistedData = { ...op.data, updatedAt };
+        batch.set(docRef, persistedData);
+        createdRecords.push({ id: docRef.id, ...persistedData } as FieldServiceRecord);
       }
     }
     await batch.commit();
   }
 
-  const updatesById = new Map(updates.map((update) => [update.id, update.data]));
   fieldServiceCache = fieldServiceCache.map((record) => {
-    const patch = updatesById.get(record.id);
+    const patch = appliedUpdates.get(record.id);
     return patch ? { ...record, ...patch } : record;
   });
   fieldServiceCache = [...createdRecords, ...fieldServiceCache];
