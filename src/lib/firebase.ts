@@ -3531,6 +3531,8 @@ export interface FieldServiceRecord {
   deletedBy?: string;
   deletedByUid?: string;
   updatedAt?: string;
+  normalizedTag?: string;
+  normalizedCertificate?: string;
 }
 
 const FIELD_SERVICE_PAGE_SIZE = 1000;
@@ -3690,22 +3692,67 @@ export async function refreshFieldServiceRecords(options: RefreshFieldServiceOpt
   return true;
 }
 
+export interface FieldServiceBulkRejectedOperation {
+  type: 'add' | 'update';
+  id?: string;
+  index: number;
+  reason: 'DUPLICATE_TAG' | 'DUPLICATE_CERTIFICATE' | 'RECORD_NOT_FOUND' | 'DUPLICATE_TARGET';
+  field?: 'tag' | 'certificate';
+  value?: string;
+  conflictRecordIds?: string[];
+}
+
+export interface FieldServiceBulkUpsertResult {
+  addedCount: number;
+  updatedCount: number;
+  rejected: FieldServiceBulkRejectedOperation[];
+}
+
+const fieldServiceApiRequest = async (path: string, body: unknown): Promise<any> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 409 && payload?.error === 'FIELD_SERVICE_DUPLICATE') {
+      const label = payload?.field === 'tag' ? 'TAG do Cliente' : 'Certificado';
+      const value = String(payload?.value || '').trim();
+      const error: any = new Error(`${label}${value ? ` "${value}"` : ''} já está vinculado a outro registro.`);
+      error.code = payload?.reason || 'FIELD_SERVICE_DUPLICATE';
+      error.details = payload;
+      throw error;
+    }
+    if (response.status === 404 && payload?.error === 'FIELD_SERVICE_RECORD_NOT_FOUND') {
+      throw new Error('O registro de Serviço de Campo não existe mais ou foi arquivado.');
+    }
+    throw new Error(payload?.message || payload?.error || 'Não foi possível salvar o registro de Serviço de Campo.');
+  }
+  return payload;
+};
+
 export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>): Promise<FieldServiceRecord> {
-  const colRef = collection(db, 'fieldServiceRecords');
-  const persistedData = { ...data, updatedAt: new Date().toISOString() };
-  const docRef = await addDoc(colRef, persistedData);
-  const created = { id: docRef.id, ...persistedData } as FieldServiceRecord;
-  fieldServiceCache = [created, ...fieldServiceCache.filter((record) => record.id !== docRef.id)];
+  const payload = await fieldServiceApiRequest('/api/field-service/upsert', { data });
+  const created = payload?.record as FieldServiceRecord;
+  if (!created?.id) throw new Error('O servidor não retornou o registro criado.');
+  fieldServiceCache = [created, ...fieldServiceCache.filter((record) => record.id !== created.id)];
   notifyFieldServiceSubscribers();
   return created;
 }
 
 export async function updateFieldServiceRecord(id: string, data: Partial<FieldServiceRecord>): Promise<void> {
-  const docRef = doc(db, 'fieldServiceRecords', id);
-  const persistedData = { ...data, updatedAt: new Date().toISOString() } as Partial<FieldServiceRecord>;
-  await updateDoc(docRef, persistedData);
+  const payload = await fieldServiceApiRequest('/api/field-service/upsert', { id, data });
+  const updated = payload?.record as FieldServiceRecord;
+  if (!updated?.id) throw new Error('O servidor não retornou o registro atualizado.');
   fieldServiceCache = fieldServiceCache.map((record) =>
-    record.id === id ? { ...record, ...persistedData } : record,
+    record.id === id ? { ...record, ...updated } : record,
   );
   notifyFieldServiceSubscribers();
 }
@@ -3724,26 +3771,8 @@ export async function deleteFieldServiceRecord(id: string): Promise<void> {
   notifyFieldServiceSubscribers();
 }
 
-export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecord, 'id'>[]): Promise<void> {
-  const colRef = collection(db, 'fieldServiceRecords');
-  const createdRecords: FieldServiceRecord[] = [];
-  const chunks = [];
-  for (let i = 0; i < records.length; i += 400) {
-    chunks.push(records.slice(i, i + 400));
-  }
-  for (const chunk of chunks) {
-    const batch = writeBatch(db);
-    const updatedAt = new Date().toISOString();
-    for (const record of chunk) {
-      const docRef = doc(colRef);
-      const persistedData = { ...record, updatedAt };
-      batch.set(docRef, persistedData);
-      createdRecords.push({ id: docRef.id, ...persistedData } as FieldServiceRecord);
-    }
-    await batch.commit();
-  }
-  fieldServiceCache = [...createdRecords, ...fieldServiceCache];
-  notifyFieldServiceSubscribers();
+export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecord, 'id'>[]): Promise<FieldServiceBulkUpsertResult> {
+  return bulkUpsertFieldServiceRecords([], records);
 }
 
 export async function clearAllFieldServiceRecords(password: string): Promise<number> {
@@ -3782,43 +3811,48 @@ export async function clearAllFieldServiceRecords(password: string): Promise<num
 export async function bulkUpsertFieldServiceRecords(
   updates: { id: string; data: Partial<FieldServiceRecord> }[],
   adds: Omit<FieldServiceRecord, 'id'>[],
-): Promise<void> {
-  const colRef = collection(db, 'fieldServiceRecords');
-  const allOps: Array<
-    | { type: 'update'; id: string; data: Partial<FieldServiceRecord> }
-    | { type: 'add'; data: Omit<FieldServiceRecord, 'id'> }
-  > = [];
+): Promise<FieldServiceBulkUpsertResult> {
+  const payload = await fieldServiceApiRequest('/api/field-service/bulk-upsert', { updates, adds });
+  const acceptedUpdates = Array.isArray(payload?.updated) ? payload.updated : [];
+  const acceptedAdds = Array.isArray(payload?.added) ? payload.added : [];
+  const rejected = (Array.isArray(payload?.rejected) ? payload.rejected : []) as FieldServiceBulkRejectedOperation[];
 
-  updates.forEach((update) => allOps.push({ type: 'update', ...update }));
-  adds.forEach((data) => allOps.push({ type: 'add', data }));
+  const appliedUpdates = new Map<string, Partial<FieldServiceRecord>>();
+  for (const item of acceptedUpdates) {
+    const index = Number(item?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= updates.length) continue;
+    const source = updates[index];
+    if (!source) continue;
+    appliedUpdates.set(source.id, { ...source.data, updatedAt: String(item?.updatedAt || new Date().toISOString()) });
+  }
 
   const createdRecords: FieldServiceRecord[] = [];
-  const appliedUpdates = new Map<string, Partial<FieldServiceRecord>>();
-  for (let i = 0; i < allOps.length; i += 400) {
-    const chunk = allOps.slice(i, i + 400);
-    const batch = writeBatch(db);
-    const updatedAt = new Date().toISOString();
-    for (const op of chunk) {
-      if (op.type === 'update') {
-        const persistedData = { ...op.data, updatedAt } as Partial<FieldServiceRecord>;
-        batch.update(doc(db, 'fieldServiceRecords', op.id), persistedData);
-        appliedUpdates.set(op.id, persistedData);
-      } else {
-        const docRef = doc(colRef);
-        const persistedData = { ...op.data, updatedAt };
-        batch.set(docRef, persistedData);
-        createdRecords.push({ id: docRef.id, ...persistedData } as FieldServiceRecord);
-      }
-    }
-    await batch.commit();
+  for (const item of acceptedAdds) {
+    const index = Number(item?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= adds.length) continue;
+    const source = adds[index];
+    const id = String(item?.id || '');
+    if (!source || !id) continue;
+    createdRecords.push({
+      id,
+      ...source,
+      updatedAt: String(item?.updatedAt || new Date().toISOString()),
+    } as FieldServiceRecord);
   }
 
   fieldServiceCache = fieldServiceCache.map((record) => {
     const patch = appliedUpdates.get(record.id);
     return patch ? { ...record, ...patch } : record;
   });
-  fieldServiceCache = [...createdRecords, ...fieldServiceCache];
+  const createdIds = new Set(createdRecords.map((created) => created.id));
+  fieldServiceCache = [...createdRecords, ...fieldServiceCache.filter((record) => !createdIds.has(record.id))];
   notifyFieldServiceSubscribers();
+
+  return {
+    addedCount: createdRecords.length,
+    updatedCount: appliedUpdates.size,
+    rejected,
+  };
 }
 
 export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocument[]) => void) {

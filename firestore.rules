@@ -556,14 +556,15 @@ service cloud.firestore {
     }
     match /fieldServiceRecords/{recordId} {
       allow read: if hasModule('field_service');
-      allow create: if hasEditModule('field_service');
-      allow update: if hasEditModule('field_service') && (
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
-        ]) || isAdministrator()
-      );
-      // Sem exclusão física pelo portal. O Administrador arquiva pelo backend.
-      allow delete: if false;
+      // LOTE 35: todas as gravações passam pelo backend, que aplica a unicidade
+      // transacional de TAG do Cliente e Certificado. O Admin SDK ignora Rules.
+      allow create, update, delete: if false;
+    }
+
+    // Locks determinísticos usados exclusivamente pelo backend para impedir
+    // duplicidade concorrente de TAG/Certificado. Nunca ficam expostos ao navegador.
+    match /fieldServiceUniqueKeys/{document=**} {
+      allow read, write: if false;
     }
 
     // Financeiro: acesso somente para Financeiro e Administradores.

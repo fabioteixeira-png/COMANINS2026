@@ -3696,6 +3696,544 @@ app.post('/api/instruments/:id/archive', requireAuth, requireAdministratorAccoun
   }
 });
 
+// LOTE 35 — unicidade forte de TAG do Cliente e Certificado.
+// A interface continua validando para resposta rápida, mas a garantia definitiva
+// fica no backend. Locks determinísticos em Firestore impedem concorrência entre
+// abas, computadores e instâncias do servidor.
+type FieldServiceUniqueKind = 'tag' | 'certificate';
+type FieldServiceServerOperation = {
+  type: 'add' | 'update';
+  id: string;
+  data: Record<string, string>;
+  index: number;
+};
+type FieldServiceRejectedOperation = {
+  type: 'add' | 'update';
+  id?: string;
+  index: number;
+  reason: 'DUPLICATE_TAG' | 'DUPLICATE_CERTIFICATE' | 'RECORD_NOT_FOUND' | 'DUPLICATE_TARGET';
+  field?: 'tag' | 'certificate';
+  value?: string;
+  conflictRecordIds?: string[];
+};
+type FieldServiceAppliedOperation = {
+  type: 'add' | 'update';
+  id: string;
+  index: number;
+  updatedAt: string;
+  before?: Record<string, any>;
+  after: Record<string, any>;
+};
+
+const FIELD_SERVICE_UNIQUE_LOCK_COLLECTION = 'fieldServiceUniqueKeys';
+const FIELD_SERVICE_UNIQUENESS_SCAN_PAGE_SIZE = 1000;
+const FIELD_SERVICE_MUTATION_CHUNK_SIZE = 50;
+
+const normalizeFieldServiceTagKey = (value: unknown): string =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+
+const normalizeFieldServiceCertificateKey = (value: unknown): string =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toUpperCase();
+
+const normalizeFieldServiceStoredTag = (value: unknown): string =>
+  String(value || '').trim().replace(/\s+/g, ' ');
+
+const normalizeFieldServiceStoredCertificate = (value: unknown): string =>
+  String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+
+const fieldServiceUniqueLockId = (kind: FieldServiceUniqueKind, normalizedValue: string): string =>
+  `${kind}_${createHash('sha256').update(normalizedValue, 'utf8').digest('hex')}`;
+
+const fieldServiceUniqueLockRef = (kind: FieldServiceUniqueKind, normalizedValue: string) =>
+  firestoreDb!.collection(FIELD_SERVICE_UNIQUE_LOCK_COLLECTION).doc(fieldServiceUniqueLockId(kind, normalizedValue));
+
+const sanitizeFieldServiceMutationData = (raw: any): Record<string, string> => {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const allowed: Array<[string, number]> = [
+    ['clientId', 240], ['cliente', 500], ['tag', 500], ['equipamento', 1000],
+    ['localizacao', 1000], ['certificate', 500], ['dataCalibracao', 120],
+    ['interventionDate', 120], ['technician', 500], ['area', 500], ['range', 500],
+    ['operacao', 500], ['unidadeMedida', 250], ['categoria', 500], ['emissaoPdf', 250],
+    ['ordemServico', 500], ['tipoServico', 500], ['observacao', 5000], ['unidade', 500],
+  ];
+  const clean: Record<string, string> = {};
+  for (const [field, limitValue] of allowed) {
+    if (!Object.prototype.hasOwnProperty.call(source, field)) continue;
+    clean[field] = asLimitedString(source[field], limitValue);
+  }
+  if (Object.prototype.hasOwnProperty.call(clean, 'tag')) {
+    clean.tag = normalizeFieldServiceStoredTag(clean.tag);
+  }
+  if (Object.prototype.hasOwnProperty.call(clean, 'certificate')) {
+    clean.certificate = normalizeFieldServiceStoredCertificate(clean.certificate);
+  }
+  return clean;
+};
+
+type FieldServiceUniquenessSnapshot = {
+  tags: Map<string, Set<string>>;
+  certificates: Map<string, Set<string>>;
+};
+
+let fieldServiceUniquenessSnapshot: FieldServiceUniquenessSnapshot | null = null;
+let fieldServiceUniquenessSnapshotPromise: Promise<FieldServiceUniquenessSnapshot> | null = null;
+
+const addSnapshotOwner = (map: Map<string, Set<string>>, key: string, recordId: string) => {
+  if (!key) return;
+  const owners = map.get(key) || new Set<string>();
+  owners.add(recordId);
+  map.set(key, owners);
+};
+
+const removeSnapshotOwner = (map: Map<string, Set<string>>, key: string, recordId: string) => {
+  if (!key) return;
+  const owners = map.get(key);
+  if (!owners) return;
+  owners.delete(recordId);
+  if (owners.size === 0) map.delete(key);
+};
+
+const loadFieldServiceUniquenessSnapshot = async (force = false): Promise<FieldServiceUniquenessSnapshot> => {
+  if (!firestoreDb) return { tags: new Map(), certificates: new Map() };
+  if (fieldServiceUniquenessSnapshot && !force) return fieldServiceUniquenessSnapshot;
+  if (fieldServiceUniquenessSnapshotPromise && !force) return fieldServiceUniquenessSnapshotPromise;
+
+  const task = (async () => {
+    const snapshot: FieldServiceUniquenessSnapshot = {
+      tags: new Map<string, Set<string>>(),
+      certificates: new Map<string, Set<string>>(),
+    };
+    let cursor: QueryDocumentSnapshot | null = null;
+    while (true) {
+      let pageQuery: Query = firestoreDb
+        .collection('fieldServiceRecords')
+        .orderBy(FieldPath.documentId())
+        .limit(FIELD_SERVICE_UNIQUENESS_SCAN_PAGE_SIZE);
+      if (cursor) pageQuery = pageQuery.startAfter(cursor);
+      const page = await pageQuery.get();
+      if (page.empty) break;
+      for (const recordDoc of page.docs) {
+        const record = recordDoc.data() || {};
+        if (record.isDeleted === true) continue;
+        addSnapshotOwner(snapshot.tags, normalizeFieldServiceTagKey(record.tag), recordDoc.id);
+        addSnapshotOwner(snapshot.certificates, normalizeFieldServiceCertificateKey(record.certificate), recordDoc.id);
+      }
+      cursor = page.docs[page.docs.length - 1] || null;
+      if (page.size < FIELD_SERVICE_UNIQUENESS_SCAN_PAGE_SIZE || !cursor) break;
+    }
+    fieldServiceUniquenessSnapshot = snapshot;
+    return snapshot;
+  })();
+
+  fieldServiceUniquenessSnapshotPromise = task;
+  try {
+    return await task;
+  } finally {
+    if (fieldServiceUniquenessSnapshotPromise === task) fieldServiceUniquenessSnapshotPromise = null;
+  }
+};
+
+const snapshotOwnersFor = (
+  snapshot: FieldServiceUniquenessSnapshot,
+  kind: FieldServiceUniqueKind,
+  key: string,
+): Set<string> => kind === 'tag'
+  ? (snapshot.tags.get(key) || new Set<string>())
+  : (snapshot.certificates.get(key) || new Set<string>());
+
+const updateFieldServiceUniquenessSnapshotAfterMutation = (
+  applied: FieldServiceAppliedOperation[],
+) => {
+  if (!fieldServiceUniquenessSnapshot) return;
+  for (const item of applied) {
+    const before = item.before || {};
+    const after = item.after || {};
+    const oldTag = normalizeFieldServiceTagKey(before.tag);
+    const newTag = normalizeFieldServiceTagKey(after.tag);
+    const oldCert = normalizeFieldServiceCertificateKey(before.certificate);
+    const newCert = normalizeFieldServiceCertificateKey(after.certificate);
+    if (oldTag !== newTag) removeSnapshotOwner(fieldServiceUniquenessSnapshot.tags, oldTag, item.id);
+    if (oldCert !== newCert) removeSnapshotOwner(fieldServiceUniquenessSnapshot.certificates, oldCert, item.id);
+    addSnapshotOwner(fieldServiceUniquenessSnapshot.tags, newTag, item.id);
+    addSnapshotOwner(fieldServiceUniquenessSnapshot.certificates, newCert, item.id);
+  }
+};
+
+const makeFieldServiceDuplicateRejection = (
+  operation: FieldServiceServerOperation,
+  kind: FieldServiceUniqueKind,
+  displayValue: string,
+  conflictRecordIds: string[],
+): FieldServiceRejectedOperation => ({
+  type: operation.type,
+  id: operation.type === 'update' ? operation.id : undefined,
+  index: operation.index,
+  reason: kind === 'tag' ? 'DUPLICATE_TAG' : 'DUPLICATE_CERTIFICATE',
+  field: kind,
+  value: displayValue,
+  conflictRecordIds: Array.from(new Set(conflictRecordIds)).slice(0, 20),
+});
+
+const applyFieldServiceMutationChunk = async (
+  operations: FieldServiceServerOperation[],
+  legacySnapshot: FieldServiceUniquenessSnapshot,
+): Promise<{ applied: FieldServiceAppliedOperation[]; rejected: FieldServiceRejectedOperation[] }> => {
+  if (!firestoreDb || operations.length === 0) return { applied: [], rejected: [] };
+
+  return firestoreDb.runTransaction(async (transaction) => {
+    const rejected: FieldServiceRejectedOperation[] = [];
+    const rejectedIndexes = new Set<number>();
+    const updateOperations = operations.filter((operation) => operation.type === 'update');
+    const updateSnaps = await Promise.all(
+      updateOperations.map((operation) => transaction.get(firestoreDb.collection('fieldServiceRecords').doc(operation.id))),
+    );
+    const beforeById = new Map<string, Record<string, any>>();
+    updateOperations.forEach((operation, idx) => {
+      const snap = updateSnaps[idx];
+      if (!snap.exists || snap.data()?.isDeleted === true) {
+        rejected.push({
+          type: 'update', id: operation.id, index: operation.index, reason: 'RECORD_NOT_FOUND',
+        });
+        rejectedIndexes.add(operation.index);
+      } else {
+        beforeById.set(operation.id, snap.data() || {});
+      }
+    });
+
+    const seenTargetIds = new Set<string>();
+    for (const operation of operations) {
+      if (rejectedIndexes.has(operation.index)) continue;
+      if (seenTargetIds.has(operation.id)) {
+        rejected.push({ type: operation.type, id: operation.id, index: operation.index, reason: 'DUPLICATE_TARGET' });
+        rejectedIndexes.add(operation.index);
+        continue;
+      }
+      seenTargetIds.add(operation.id);
+    }
+
+    const planned = operations
+      .filter((operation) => !rejectedIndexes.has(operation.index))
+      .map((operation) => {
+        const before = operation.type === 'update' ? (beforeById.get(operation.id) || {}) : {};
+        const after = { ...before, ...operation.data };
+        const oldTagKey = normalizeFieldServiceTagKey(before.tag);
+        const newTagKey = normalizeFieldServiceTagKey(after.tag);
+        const oldCertificateKey = normalizeFieldServiceCertificateKey(before.certificate);
+        const newCertificateKey = normalizeFieldServiceCertificateKey(after.certificate);
+        return {
+          operation, before, after,
+          oldTagKey, newTagKey,
+          oldCertificateKey, newCertificateKey,
+          tagChanged: oldTagKey !== newTagKey,
+          certificateChanged: oldCertificateKey !== newCertificateKey,
+        };
+      });
+
+    const lockRefs = new Map<string, DocumentReference>();
+    const registerLock = (kind: FieldServiceUniqueKind, key: string) => {
+      if (!key) return;
+      const ref = fieldServiceUniqueLockRef(kind, key);
+      lockRefs.set(ref.path, ref);
+    };
+    for (const item of planned) {
+      registerLock('tag', item.oldTagKey);
+      registerLock('tag', item.newTagKey);
+      registerLock('certificate', item.oldCertificateKey);
+      registerLock('certificate', item.newCertificateKey);
+    }
+    const lockEntries = Array.from(lockRefs.entries());
+    const lockSnaps = await Promise.all(lockEntries.map(([, ref]) => transaction.get(ref)));
+    const lockSnapByPath = new Map(lockEntries.map(([pathValue], idx) => [pathValue, lockSnaps[idx]]));
+
+    // Confirma owners legados encontrados no snapshot e owners de locks existentes.
+    // Isso elimina falso positivo se outra instância já moveu/arquivou o registro.
+    const ownerIds = new Set<string>();
+    for (const item of planned) {
+      const keys: Array<[FieldServiceUniqueKind, string]> = [
+        ['tag', item.newTagKey],
+        ['certificate', item.newCertificateKey],
+      ];
+      for (const [kind, key] of keys) {
+        if (!key) continue;
+        snapshotOwnersFor(legacySnapshot, kind, key).forEach((id) => {
+          if (id !== item.operation.id) ownerIds.add(id);
+        });
+        const lockRef = fieldServiceUniqueLockRef(kind, key);
+        const lockSnap: any = lockSnapByPath.get(lockRef.path);
+        const lockOwner = String(lockSnap?.data()?.recordId || '');
+        if (lockOwner && lockOwner !== item.operation.id) ownerIds.add(lockOwner);
+      }
+    }
+    const ownerEntries = Array.from(ownerIds).map((id) => [id, firestoreDb.collection('fieldServiceRecords').doc(id)] as const);
+    const ownerSnaps = await Promise.all(ownerEntries.map(([, ref]) => transaction.get(ref)));
+    const ownerDataById = new Map<string, Record<string, any>>();
+    ownerEntries.forEach(([id], idx) => {
+      const snap = ownerSnaps[idx];
+      if (snap.exists && snap.data()?.isDeleted !== true) ownerDataById.set(id, snap.data() || {});
+    });
+
+    const claimedTagKeys = new Map<string, string>();
+    const claimedCertificateKeys = new Map<string, string>();
+    const accepted: Array<typeof planned[number] & { skipTagLock?: boolean; skipCertificateLock?: boolean }> = [];
+
+    const currentOwners = (kind: FieldServiceUniqueKind, key: string, targetId: string): string[] => {
+      if (!key) return [];
+      const candidates = new Set<string>();
+      snapshotOwnersFor(legacySnapshot, kind, key).forEach((id) => {
+        if (id !== targetId) candidates.add(id);
+      });
+      const lockRef = fieldServiceUniqueLockRef(kind, key);
+      const lockSnap: any = lockSnapByPath.get(lockRef.path);
+      const lockOwner = String(lockSnap?.data()?.recordId || '');
+      if (lockOwner && lockOwner !== targetId) candidates.add(lockOwner);
+      return Array.from(candidates).filter((ownerId) => {
+        const owner = ownerDataById.get(ownerId);
+        if (!owner) return false;
+        return kind === 'tag'
+          ? normalizeFieldServiceTagKey(owner.tag) === key
+          : normalizeFieldServiceCertificateKey(owner.certificate) === key;
+      });
+    };
+
+    for (const item of planned) {
+      if (rejectedIndexes.has(item.operation.index)) continue;
+      let skipTagLock = false;
+      let skipCertificateLock = false;
+
+      if (item.newTagKey) {
+        const owners = currentOwners('tag', item.newTagKey, item.operation.id);
+        const localOwner = claimedTagKeys.get(item.newTagKey);
+        if ((item.operation.type === 'add' || item.tagChanged) && (owners.length > 0 || (localOwner && localOwner !== item.operation.id))) {
+          rejected.push(makeFieldServiceDuplicateRejection(
+            item.operation, 'tag', String(item.after.tag || ''), [...owners, ...(localOwner ? [localOwner] : [])],
+          ));
+          rejectedIndexes.add(item.operation.index);
+          continue;
+        }
+        // Duplicidade legada já existente e não alterada: permite corrigir outros
+        // campos, mas não cria lock que escolheria arbitrariamente um dos donos.
+        if (!item.tagChanged && owners.length > 0) skipTagLock = true;
+      }
+
+      if (item.newCertificateKey) {
+        const owners = currentOwners('certificate', item.newCertificateKey, item.operation.id);
+        const localOwner = claimedCertificateKeys.get(item.newCertificateKey);
+        if ((item.operation.type === 'add' || item.certificateChanged) && (owners.length > 0 || (localOwner && localOwner !== item.operation.id))) {
+          rejected.push(makeFieldServiceDuplicateRejection(
+            item.operation, 'certificate', String(item.after.certificate || ''), [...owners, ...(localOwner ? [localOwner] : [])],
+          ));
+          rejectedIndexes.add(item.operation.index);
+          continue;
+        }
+        if (!item.certificateChanged && owners.length > 0) skipCertificateLock = true;
+      }
+
+      if (item.newTagKey && !skipTagLock) claimedTagKeys.set(item.newTagKey, item.operation.id);
+      if (item.newCertificateKey && !skipCertificateLock) claimedCertificateKeys.set(item.newCertificateKey, item.operation.id);
+      accepted.push({ ...item, skipTagLock, skipCertificateLock });
+    }
+
+    const applied: FieldServiceAppliedOperation[] = [];
+    for (const item of accepted) {
+      const nowIso = new Date().toISOString();
+      const persisted = {
+        ...item.operation.data,
+        normalizedTag: item.newTagKey,
+        normalizedCertificate: item.newCertificateKey,
+        updatedAt: nowIso,
+      };
+      const recordRef = firestoreDb.collection('fieldServiceRecords').doc(item.operation.id);
+
+      // Libera locks antigos somente se pertencem ao próprio registro.
+      const releaseOldLock = (kind: FieldServiceUniqueKind, oldKey: string, newKey: string) => {
+        if (!oldKey || oldKey === newKey) return;
+        const ref = fieldServiceUniqueLockRef(kind, oldKey);
+        const snap: any = lockSnapByPath.get(ref.path);
+        if (String(snap?.data()?.recordId || '') === item.operation.id) transaction.delete(ref);
+      };
+      releaseOldLock('tag', item.oldTagKey, item.newTagKey);
+      releaseOldLock('certificate', item.oldCertificateKey, item.newCertificateKey);
+
+      const claimLock = (kind: FieldServiceUniqueKind, key: string, skip: boolean) => {
+        if (!key || skip) return;
+        const ref = fieldServiceUniqueLockRef(kind, key);
+        transaction.set(ref, {
+          kind,
+          normalizedValue: key,
+          recordId: item.operation.id,
+          updatedAt: nowIso,
+        });
+      };
+      claimLock('tag', item.newTagKey, Boolean(item.skipTagLock));
+      claimLock('certificate', item.newCertificateKey, Boolean(item.skipCertificateLock));
+
+      if (item.operation.type === 'add') transaction.set(recordRef, persisted);
+      else transaction.update(recordRef, persisted);
+
+      applied.push({
+        type: item.operation.type,
+        id: item.operation.id,
+        index: item.operation.index,
+        updatedAt: nowIso,
+        before: item.operation.type === 'update' ? item.before : undefined,
+        after: { ...item.after, ...persisted },
+      });
+    }
+
+    return { applied, rejected };
+  });
+};
+
+const applyFieldServiceOperations = async (
+  operations: FieldServiceServerOperation[],
+): Promise<{ applied: FieldServiceAppliedOperation[]; rejected: FieldServiceRejectedOperation[] }> => {
+  const legacySnapshot = await loadFieldServiceUniquenessSnapshot();
+  const applied: FieldServiceAppliedOperation[] = [];
+  const rejected: FieldServiceRejectedOperation[] = [];
+  const seenTargets = new Set<string>();
+  const pendingOperations: FieldServiceServerOperation[] = [];
+  for (const operation of operations) {
+    if (seenTargets.has(operation.id)) {
+      rejected.push({
+        type: operation.type,
+        id: operation.type === 'update' ? operation.id : undefined,
+        index: operation.index,
+        reason: 'DUPLICATE_TARGET',
+      });
+      continue;
+    }
+    seenTargets.add(operation.id);
+    pendingOperations.push(operation);
+  }
+  for (let i = 0; i < pendingOperations.length; i += FIELD_SERVICE_MUTATION_CHUNK_SIZE) {
+    const result = await applyFieldServiceMutationChunk(
+      pendingOperations.slice(i, i + FIELD_SERVICE_MUTATION_CHUNK_SIZE),
+      legacySnapshot,
+    );
+    applied.push(...result.applied);
+    rejected.push(...result.rejected);
+    updateFieldServiceUniquenessSnapshotAfterMutation(result.applied);
+  }
+  return { applied, rejected };
+};
+
+app.post(
+  '/api/field-service/upsert',
+  requireAuth,
+  requireInternalAccount,
+  requireEditModule('field_service'),
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    const requestedId = asLimitedString(req.body?.id, 160);
+    const data = sanitizeFieldServiceMutationData(req.body?.data);
+    const type: 'add' | 'update' = requestedId ? 'update' : 'add';
+    const id = requestedId || firestoreDb.collection('fieldServiceRecords').doc().id;
+
+    try {
+      const result = await applyFieldServiceOperations([{ type, id, data, index: 0 }]);
+      if (result.rejected.length > 0) {
+        const rejection = result.rejected[0];
+        if (rejection.reason === 'RECORD_NOT_FOUND') return res.status(404).json({ error: 'FIELD_SERVICE_RECORD_NOT_FOUND' });
+        if (rejection.reason === 'DUPLICATE_TAG' || rejection.reason === 'DUPLICATE_CERTIFICATE') {
+          return res.status(409).json({ error: 'FIELD_SERVICE_DUPLICATE', ...rejection });
+        }
+        return res.status(409).json({ error: 'FIELD_SERVICE_CONFLICT', ...rejection });
+      }
+      const applied = result.applied[0];
+      return res.json({ success: true, record: { id: applied.id, ...applied.after } });
+    } catch (error) {
+      console.error('Field service upsert failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.post(
+  '/api/field-service/bulk-upsert',
+  requireAuth,
+  requireInternalAccount,
+  requireEditModule('field_service'),
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    const rawUpdates = Array.isArray(req.body?.updates) ? req.body.updates : [];
+    const rawAdds = Array.isArray(req.body?.adds) ? req.body.adds : [];
+    if (rawUpdates.length + rawAdds.length > 25000) {
+      return res.status(413).json({ error: 'FIELD_SERVICE_IMPORT_TOO_LARGE' });
+    }
+
+    const operations: FieldServiceServerOperation[] = [];
+    rawUpdates.forEach((raw: any, index: number) => {
+      const id = asLimitedString(raw?.id, 160);
+      if (!id) return;
+      operations.push({ type: 'update', id, data: sanitizeFieldServiceMutationData(raw?.data), index });
+    });
+    const addIndexOffset = rawUpdates.length;
+    rawAdds.forEach((raw: any, index: number) => {
+      const id = firestoreDb.collection('fieldServiceRecords').doc().id;
+      operations.push({ type: 'add', id, data: sanitizeFieldServiceMutationData(raw), index: addIndexOffset + index });
+    });
+
+    try {
+      const result = await applyFieldServiceOperations(operations);
+      const updated = result.applied
+        .filter((item) => item.type === 'update')
+        .map((item) => ({ index: item.index, id: item.id, updatedAt: item.updatedAt }));
+      const added = result.applied
+        .filter((item) => item.type === 'add')
+        .map((item) => ({ index: item.index - addIndexOffset, id: item.id, updatedAt: item.updatedAt }));
+      const rejected = result.rejected.map((item) => ({
+        ...item,
+        index: item.type === 'add' ? item.index - addIndexOffset : item.index,
+      }));
+      return res.json({ success: true, updated, added, rejected });
+    } catch (error) {
+      console.error('Field service bulk upsert failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.get(
+  '/api/field-service/duplicates-audit',
+  requireAuth,
+  requireInternalAccount,
+  requireAccessModule('field_service'),
+  async (_req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    try {
+      const snapshot = await loadFieldServiceUniquenessSnapshot(true);
+      const serialize = (map: Map<string, Set<string>>) => Array.from(map.entries())
+        .filter(([, owners]) => owners.size > 1)
+        .map(([value, owners]) => ({ value, recordIds: Array.from(owners) }));
+      const duplicateTags = serialize(snapshot.tags);
+      const duplicateCertificates = serialize(snapshot.certificates);
+      return res.json({
+        success: true,
+        duplicateTags,
+        duplicateCertificates,
+        duplicateTagGroups: duplicateTags.length,
+        duplicateCertificateGroups: duplicateCertificates.length,
+      });
+    } catch (error) {
+      console.error('Field service duplicate audit failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+
 app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
   const recordId = asLimitedString(req.params.id, 160);
@@ -3705,6 +4243,7 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
     const recordRef = firestoreDb.collection('fieldServiceRecords').doc(recordId);
     const auditRef = firestoreDb.collection('systemAuditLogs').doc();
     const nowIso = new Date().toISOString();
+    let archivedBefore: Record<string, any> | null = null;
     const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador';
     const actorUid = asLimitedString(req.user?.uid, 160);
     const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
@@ -3716,6 +4255,15 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
       }
       const before: any = recordSnap.data() || {};
       if (before.isDeleted === true) return;
+      archivedBefore = before;
+
+      const tagKey = normalizeFieldServiceTagKey(before.tag);
+      const certificateKey = normalizeFieldServiceCertificateKey(before.certificate);
+      const tagLockRef = tagKey ? fieldServiceUniqueLockRef('tag', tagKey) : null;
+      const certificateLockRef = certificateKey ? fieldServiceUniqueLockRef('certificate', certificateKey) : null;
+      const tagLockSnap = tagLockRef ? await transaction.get(tagLockRef) : null;
+      const certificateLockSnap = certificateLockRef ? await transaction.get(certificateLockRef) : null;
+
       transaction.update(recordRef, {
         isDeleted: true,
         deletedAt: nowIso,
@@ -3723,6 +4271,9 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
         deletedByUid: actorUid,
         updatedAt: nowIso,
       });
+      if (tagLockRef && String(tagLockSnap?.data()?.recordId || '') === recordId) transaction.delete(tagLockRef);
+      if (certificateLockRef && String(certificateLockSnap?.data()?.recordId || '') === recordId) transaction.delete(certificateLockRef);
+
       transaction.set(auditRef, {
         action: 'FIELD_SERVICE_RECORD_ARCHIVED',
         entityType: 'fieldServiceRecord',
@@ -3736,6 +4287,10 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
         },
       });
     });
+    if (archivedBefore && fieldServiceUniquenessSnapshot) {
+      removeSnapshotOwner(fieldServiceUniquenessSnapshot.tags, normalizeFieldServiceTagKey(archivedBefore.tag), recordId);
+      removeSnapshotOwner(fieldServiceUniquenessSnapshot.certificates, normalizeFieldServiceCertificateKey(archivedBefore.certificate), recordId);
+    }
     return res.json({ success: true });
   } catch (error: any) {
     const code = String(error?.code || error?.message || '');
@@ -3909,6 +4464,26 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
       cursor = page.docs[page.docs.length - 1] || null;
       if (page.size < pageSize || !cursor) break;
     }
+
+    // Como todos os registros ativos foram arquivados, os locks de unicidade
+    // podem ser descartados. Isso permite reutilizar TAG/Certificado no futuro
+    // sem deixar chaves órfãs após uma limpeza administrativa total.
+    let lockCursor: QueryDocumentSnapshot | null = null;
+    while (true) {
+      let lockQuery: Query = firestoreDb
+        .collection(FIELD_SERVICE_UNIQUE_LOCK_COLLECTION)
+        .orderBy(FieldPath.documentId())
+        .limit(pageSize);
+      if (lockCursor) lockQuery = lockQuery.startAfter(lockCursor);
+      const lockPage = await lockQuery.get();
+      if (lockPage.empty) break;
+      const lockBatch = firestoreDb.batch();
+      lockPage.docs.forEach((lockDoc) => lockBatch.delete(lockDoc.ref));
+      await lockBatch.commit();
+      lockCursor = lockPage.docs[lockPage.docs.length - 1] || null;
+      if (lockPage.size < pageSize || !lockCursor) break;
+    }
+    fieldServiceUniquenessSnapshot = { tags: new Map(), certificates: new Map() };
 
     await firestoreDb.collection('systemAuditLogs').add({
       action: 'FIELD_SERVICE_ALL_RECORDS_ARCHIVED',

@@ -8,7 +8,6 @@ import {
   syncFieldServiceRecords,
   addFieldServiceRecord,
   updateFieldServiceRecord,
-  bulkAddFieldServiceRecords,
   bulkUpsertFieldServiceRecords,
   deleteFieldServiceRecord, clearAllFieldServiceRecords, syncInstruments, refreshFieldServiceRecords
 } from '../lib/firebase';
@@ -122,9 +121,9 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     }
 
     if (colId === 'certificate' && newVal.trim() !== '') {
-      const normalizedCertificate = newVal.trim().toUpperCase();
+      const normalizedCertificate = normalizeCertificateIdentity(newVal);
       const isDup = records.some(
-        (r) => String(r.certificate || '').trim().toUpperCase() === normalizedCertificate && r.id !== record.id,
+        (r) => normalizeCertificateIdentity(r.certificate) === normalizedCertificate && r.id !== record.id,
       );
       if (isDup) {
         alert("Erro: Este Certificado já está registrado na planilha!");
@@ -133,9 +132,9 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     }
 
     if (colId === 'tag' && newVal.trim() !== '') {
-      const normalizedTag = newVal.trim().toUpperCase();
+      const normalizedTag = normalizeIdentityValue(newVal);
       const isDup = records.some(
-        (r) => String(r.tag || '').trim().toUpperCase() === normalizedTag && r.id !== record.id,
+        (r) => normalizeIdentityValue(r.tag) === normalizedTag && r.id !== record.id,
       );
       if (isDup) {
         alert("Erro: Esta TAG já está registrada na planilha!");
@@ -176,7 +175,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             } as FieldServiceRecord
           : item
       )));
-      alert("Erro ao salvar célula. O valor anterior foi restaurado.");
+      alert(`${e instanceof Error ? e.message : "Erro ao salvar célula."} O valor anterior foi restaurado.`);
     }
   };
 
@@ -361,14 +360,14 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     candidateRecords: FieldServiceRecord[] = records,
   ): { record?: FieldServiceRecord; ambiguous?: boolean; reason?: string } => {
     const incomingTag = normalizeImportTag(incoming.tag);
-    const incomingCertificate = normalizeCertificate(incoming.certificate);
+    const incomingCertificate = normalizeCertificateIdentity(incoming.certificate);
 
     const tagMatches = incomingTag
       ? candidateRecords.filter((record) => normalizeImportTag(record.tag) === incomingTag)
       : [];
     const certificateMatches = incomingCertificate
       ? candidateRecords.filter(
-          (record) => normalizeCertificate(record.certificate) === incomingCertificate,
+          (record) => normalizeCertificateIdentity(record.certificate) === incomingCertificate,
         )
       : [];
 
@@ -431,21 +430,27 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       }
     }
     merged.tag = normalizeImportTag(merged.tag);
-    merged.certificate = normalizeCertificate(merged.certificate);
+    merged.certificate = normalizeCertificateIdentity(merged.certificate);
     return merged;
   };
 
 
-  const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
-  const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
+  const normalizeCertificateIdentity = (value: unknown): string =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .replace(/\s+/g, '')
+      .toUpperCase();
+  const certificateDigits = (value: unknown) => normalizeCertificateIdentity(value).replace(/\D/g, '');
 
   const findInstrumentByCertificate = (certificate: unknown): Instrument | undefined => {
-    const normalized = normalizeCertificate(certificate);
+    const normalized = normalizeCertificateIdentity(certificate);
     if (!normalized) return undefined;
     const numeric = certificateDigits(normalized);
     return instruments.find((instrument) => {
-      const certificateNumber = normalizeCertificate(instrument.certificateNumber);
-      const coma = normalizeCertificate(instrument.coma);
+      const certificateNumber = normalizeCertificateIdentity(instrument.certificateNumber);
+      const coma = normalizeCertificateIdentity(instrument.coma);
       if (certificateNumber === normalized || coma === normalized) return true;
       if (!numeric) return false;
       return certificateDigits(certificateNumber) === numeric || certificateDigits(coma) === numeric;
@@ -487,7 +492,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   };
 
   const resolveClientId = (record: Partial<FieldServiceRecord>): string => {
-    const cert = normalizeCertificate(record.certificate);
+    const cert = normalizeCertificateIdentity(record.certificate);
     const tag = String(record.tag || '').trim().toUpperCase();
 
     if (cert) {
@@ -701,7 +706,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           }, {} as Record<string, any>);
 
           const parsedRecord = emptyParsedRecord();
-          parsedRecord.certificate = normalizeCertificate(getImportValue(normalizedRow, [
+          parsedRecord.certificate = normalizeCertificateIdentity(getImportValue(normalizedRow, [
             'certificado', 'cert', 'certintervencao', 'cert intervenção', 'cert intervencao',
           ]));
           parsedRecord.dataCalibracao = normalizeImportDate(getImportValue(normalizedRow, [
@@ -746,7 +751,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           parsedRecord.cliente = String(getImportValue(normalizedRow, ['cliente', 'client']) ?? '').trim();
 
           const normalizedTag = normalizeImportTag(parsedRecord.tag);
-          const normalizedCert = normalizeCertificate(parsedRecord.certificate);
+          const normalizedCert = normalizeCertificateIdentity(parsedRecord.certificate);
           const contentFingerprint = buildFieldServiceContentFingerprint(parsedRecord);
 
           if (!normalizedTag && !normalizedCert && !contentFingerprint) {
@@ -832,7 +837,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
             const mergedRecord = mergeImportedFieldServiceRecord(existingMatch, parsedRecord);
             const finalTag = normalizeImportTag(mergedRecord.tag);
-            const finalCertificate = normalizeCertificate(mergedRecord.certificate);
+            const finalCertificate = normalizeCertificateIdentity(mergedRecord.certificate);
 
             const duplicateTagRecord = finalTag
               ? workingRecords.find(
@@ -841,7 +846,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
               : undefined;
             const duplicateCertificateRecord = finalCertificate
               ? workingRecords.find(
-                  (record) => record.id !== existingMatch.id && normalizeCertificate(record.certificate) === finalCertificate,
+                  (record) => record.id !== existingMatch.id && normalizeCertificateIdentity(record.certificate) === finalCertificate,
                 )
               : undefined;
 
@@ -894,7 +899,30 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
         if (newRecordsToImport.length > 0 || recordsToUpdate.length > 0) {
           try {
-            await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
+            const persistResult = await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
+            addedCount = persistResult.addedCount;
+            updatedCount = persistResult.updatedCount;
+            conflictCount += persistResult.rejected.length;
+            const rejectionLabel = (reason: string) => {
+              if (reason === "DUPLICATE_TAG") return "TAG do Cliente já existente";
+              if (reason === "DUPLICATE_CERTIFICATE") return "Certificado já existente";
+              if (reason === "RECORD_NOT_FOUND") return "Registro a atualizar não foi encontrado";
+              if (reason === "DUPLICATE_TARGET") return "Mais de uma operação tentou alterar o mesmo registro";
+              return "Conflito de unicidade";
+            };
+            persistResult.rejected.forEach((rejection: any) => {
+              const source = rejection.type === "add"
+                ? newRecordsToImport[rejection.index]
+                : recordsToUpdate[rejection.index]?.data;
+              if (!source) return;
+              issues.push({
+                sourceRow: 0,
+                status: "NÃO INSERIDO - REJEITADO PELO BANCO",
+                reason: rejectionLabel(rejection.reason),
+                suggestedAction: "Verifique se não há duplicidade gerada por outros usuários.",
+                record: source as any,
+              });
+            });
           } catch (persistError: any) {
             console.error('Erro ao gravar importação de Serviço de Campo:', persistError);
             const genericRecord = emptyParsedRecord();
@@ -1116,8 +1144,14 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       setShowAddModal(false);
       return;
     }
-    const duplicateCert = formData.certificate && formData.certificate.trim() !== '' && records.some(r => r.certificate === formData.certificate && r.id !== formData.id);
-    const duplicateTag = formData.tag && formData.tag.trim() !== '' && records.some(r => r.tag === formData.tag && r.id !== formData.id);
+    const normalizedFormCertificate = normalizeCertificateIdentity(formData.certificate);
+    const normalizedFormTag = normalizeIdentityValue(formData.tag);
+    const duplicateCert = Boolean(normalizedFormCertificate) && records.some(
+      (r) => normalizeCertificateIdentity(r.certificate) === normalizedFormCertificate && r.id !== formData.id,
+    );
+    const duplicateTag = Boolean(normalizedFormTag) && records.some(
+      (r) => normalizeIdentityValue(r.tag) === normalizedFormTag && r.id !== formData.id,
+    );
     if (duplicateCert) {
       alert("Erro: Este Certificado já está registrado na planilha!");
       return;
@@ -1131,7 +1165,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       const linkedInstrument = findInstrumentByCertificate(formData.certificate);
       const recordToSave: Partial<FieldServiceRecord> = {
         ...formData,
-        certificate: normalizeCertificate(formData.certificate),
+        certificate: normalizeCertificateIdentity(formData.certificate),
         dataCalibracao: linkedInstrument?.lastCalibrationDate || formData.dataCalibracao || '',
         clientId: resolveClientId(formData),
       };
@@ -1144,7 +1178,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       setFormData({});
     } catch (e) {
       console.error(e);
-      alert("Erro ao salvar registro.");
+      alert(e instanceof Error ? e.message : "Erro ao salvar registro.");
     }
   };
 
@@ -1190,6 +1224,98 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
     return filtered;
   }, [records, filters, sortConfig, instruments]);
+
+  const duplicateAudit = useMemo(() => {
+    const tagGroups = new Map<string, FieldServiceRecord[]>();
+    const certificateGroups = new Map<string, FieldServiceRecord[]>();
+
+    for (const record of records) {
+      const tagKey = normalizeIdentityValue(record.tag);
+      const certificateKey = normalizeCertificateIdentity(record.certificate);
+      if (tagKey) {
+        const group = tagGroups.get(tagKey) || [];
+        group.push(record);
+        tagGroups.set(tagKey, group);
+      }
+      if (certificateKey) {
+        const group = certificateGroups.get(certificateKey) || [];
+        group.push(record);
+        certificateGroups.set(certificateKey, group);
+      }
+    }
+
+    const rows: Record<string, any>[] = [];
+    let tagGroupCount = 0;
+    let certificateGroupCount = 0;
+    const affectedRecordIds = new Set<string>();
+
+    for (const [value, group] of tagGroups) {
+      if (group.length < 2) continue;
+      tagGroupCount++;
+      group.forEach((record) => {
+        affectedRecordIds.add(record.id);
+        rows.push({
+          'Tipo de Duplicidade': 'TAG do Cliente',
+          'Valor Normalizado': value,
+          'Quantidade no Grupo': group.length,
+          'ID do Registro': record.id,
+          'TAG do Cliente': record.tag || '',
+          'Certificado': record.certificate || '',
+          'Cliente': record.cliente || '',
+          'Unidade': record.unidade || '',
+          'Equipamento': record.equipamento || '',
+          'Localização': record.localizacao || '',
+          'Data de Intervenção': record.interventionDate || '',
+        });
+      });
+    }
+
+    for (const [value, group] of certificateGroups) {
+      if (group.length < 2) continue;
+      certificateGroupCount++;
+      group.forEach((record) => {
+        affectedRecordIds.add(record.id);
+        rows.push({
+          'Tipo de Duplicidade': 'Certificado',
+          'Valor Normalizado': value,
+          'Quantidade no Grupo': group.length,
+          'ID do Registro': record.id,
+          'TAG do Cliente': record.tag || '',
+          'Certificado': record.certificate || '',
+          'Cliente': record.cliente || '',
+          'Unidade': record.unidade || '',
+          'Equipamento': record.equipamento || '',
+          'Localização': record.localizacao || '',
+          'Data de Intervenção': record.interventionDate || '',
+        });
+      });
+    }
+
+    return {
+      rows,
+      tagGroupCount,
+      certificateGroupCount,
+      affectedRecordCount: affectedRecordIds.size,
+    };
+  }, [records]);
+
+  const handleExportDuplicateAudit = () => {
+    if (duplicateAudit.rows.length === 0) {
+      alert('Nenhuma TAG do Cliente ou Certificado duplicado foi encontrado na base carregada.');
+      return;
+    }
+    const worksheet = XLSX.utils.json_to_sheet(duplicateAudit.rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Duplicidades');
+    const summary = XLSX.utils.json_to_sheet([{
+      'Grupos de TAG duplicada': duplicateAudit.tagGroupCount,
+      'Grupos de Certificado duplicado': duplicateAudit.certificateGroupCount,
+      'Registros afetados': duplicateAudit.affectedRecordCount,
+    }]);
+    XLSX.utils.book_append_sheet(workbook, summary, 'Resumo');
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `CONFERENCIA_DUPLICIDADES_SERVICO_CAMPO_${stamp}.xlsx`);
+  };
 
   const selectedFilteredRecords = useMemo(
     () => sortedRecords.filter((record) => selectedRecordIds.has(record.id)),
@@ -1358,6 +1484,25 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           )}
         </div>
       </div>
+
+      {duplicateAudit.rows.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-bold text-amber-900">Duplicidades legadas encontradas em Serviço de Campo</p>
+            <p className="text-xs text-amber-800 mt-1">
+              {duplicateAudit.tagGroupCount} grupo(s) de TAG duplicada, {duplicateAudit.certificateGroupCount} grupo(s) de Certificado duplicado e {duplicateAudit.affectedRecordCount} registro(s) afetado(s). Novas gravações não poderão criar outra duplicidade.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleExportDuplicateAudit}
+            className="shrink-0 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-amber-900 text-white text-xs font-bold hover:bg-amber-800"
+          >
+            <FileDown className="h-4 w-4" />
+            Exportar conferência
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-visible relative">
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-4">
