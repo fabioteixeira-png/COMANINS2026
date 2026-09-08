@@ -254,14 +254,14 @@
             </>
           )}
 
-          {(canAccessModule("audit") || isUserAdmin || canAccessModule("firebase_usage")) && (
+          {(isUserAdmin || canAccessModule("firebase_usage")) && (
             <>
               <div className="pt-4 pb-1">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3">
                   Admin
                 </span>
               </div>
-              {canAccessModule("audit") && <button
+              {isUserAdmin && <button
                 onClick={() => setActiveTab("auditoria")}
                 className={`w-full text-left px-3 py-2 rounded font-medium flex items-center space-x-2 transition-colors ${
                   activeTab === "auditoria"

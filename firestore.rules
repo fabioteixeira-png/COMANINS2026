@@ -719,7 +719,9 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /calibrationAuditLogs/{document=**} {
-      allow read: if hasModule('calibration') || hasModule('audit');
+      // LOTE 37: técnicos registram o tempo silenciosamente, mas somente
+      // administradores podem consultar os dados de Auditoria e Metrologia.
+      allow read: if isAdministrator();
       allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
       // Registros de tempo são append-only no navegador. O backend pode
       // arquivá-los com Admin SDK após autorização administrativa.

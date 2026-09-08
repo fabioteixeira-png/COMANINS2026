@@ -86,6 +86,8 @@ import {
   syncAccessAuditLogs,
   addAccessAuditLog,
   addCalibrationAuditLogDoc,
+  startCalibrationTimingSession,
+  cancelCalibrationTimingSession,
   deleteCalibrationAuditLogDoc,
   syncRncReports,
   saveRncReportDoc,
@@ -1991,17 +1993,6 @@ export default function InternalPortal({
             setCalibrationStartTimes((previous) => {
               const updated = { ...previous };
               delete updated[instrumentId];
-              try {
-                localStorage.setItem(
-                  "comanins_calibration_start_times",
-                  JSON.stringify(updated),
-                );
-              } catch (error) {
-                console.warn(
-                  "Não foi possível limpar o cronômetro local da calibração:",
-                  error,
-                );
-              }
               return updated;
             });
             if (selectedInstId === instrumentId) setSelectedInstId("");
@@ -2205,14 +2196,7 @@ export default function InternalPortal({
   const [auditLogs, setAuditLogs] = useState<CalibrationAuditLog[]>([]);
   const [calibrationStartTimes, setCalibrationStartTimes] = useState<
     Record<string, { startTime: string; technicianName: string; previousStatus?: string }>
-  >(() => {
-    try {
-      const saved = localStorage.getItem("comanins_calibration_start_times");
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
-  });
+  >({});
 
   const [auditSearchTerm, setAuditSearchTerm] = useState("");
   const [auditFilterTech, setAuditFilterTech] = useState("");
@@ -2243,58 +2227,62 @@ export default function InternalPortal({
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const recordCalibrationStart = (instId: string, customPrevStatus?: string) => {
-    if (!instId) return;
-    const nowIso = new Date().toISOString();
+  const recordCalibrationStart = async (instId: string, customPrevStatus?: string) => {
+    if (!instId) return null;
+    const existing = calibrationStartTimes[instId];
+    if (existing) return existing;
+
     const techName =
       benchTechnician || currentUser?.name || currentUser?.username || "Técnico Responsável";
     const inst = instruments.find((i) => i.id === instId);
-    const prevStatus =
+    const prevStatus = (
       customPrevStatus ||
       (inst && inst.status && inst.status !== "Em Calibração"
         ? inst.status
-        : "Aguardando Calibração");
+        : inst?.calibrationPreviousStatus || "Aguardando Calibração")
+    ) as Instrument["status"];
+
+    // O início autoritativo é persistido no próprio instrumento. O técnico não vê
+    // cronômetro; a informação é usada silenciosamente pela Auditoria administrativa.
+    const persisted = await startCalibrationTimingSession(instId, techName, prevStatus);
+    const session = {
+      startTime: persisted.startTime,
+      technicianName: persisted.technicianName,
+      previousStatus: persisted.previousStatus,
+    };
+
+    setCalibrationStartTimes((prev) => ({ ...prev, [instId]: session }));
+    return session;
+  };
+
+  // Hidrata sessões de tempo a partir dos campos do Firestore. Não há contador
+  // visível na ficha; estes dados servem apenas à Auditoria administrativa.
+  useEffect(() => {
+    if (!Array.isArray(instruments) || instruments.length === 0) return;
+    const remoteSessions: Record<string, { startTime: string; technicianName: string; previousStatus?: string }> = {};
+    instruments.forEach((inst) => {
+      if (inst.status !== "Em Calibração" || !inst.calibrationStartedAt) return;
+      remoteSessions[inst.id] = {
+        startTime: inst.calibrationStartedAt,
+        technicianName:
+          inst.calibrationTechnicianName || currentUser?.name || "Técnico Responsável",
+        previousStatus: inst.calibrationPreviousStatus || "Aguardando Calibração",
+      };
+    });
 
     setCalibrationStartTimes((prev) => {
-      const existing = prev[instId];
-      if (existing) {
-        const updated = {
-          ...prev,
-          [instId]: {
-            ...existing,
-            technicianName:
-              (existing.technicianName === "Técnico Responsável" || !existing.technicianName) &&
-              techName !== "Técnico Responsável"
-                ? techName
-                : existing.technicianName,
-            previousStatus: existing.previousStatus || prevStatus,
-          },
-        };
-        try {
-          localStorage.setItem(
-            "comanins_calibration_start_times",
-            JSON.stringify(updated),
-          );
-        } catch (e) {}
-        return updated;
+      const next = { ...remoteSessions };
+      // Preserve a sessão recém-iniciada durante o curto intervalo até o
+      // snapshot do Firestore atualizar a lista de instrumentos.
+      if (selectedInstId && prev[selectedInstId] && !next[selectedInstId]) {
+        const selected = instruments.find((inst) => inst.id === selectedInstId);
+        if (selected?.status === "Em Calibração") {
+          next[selectedInstId] = prev[selectedInstId];
+        }
       }
-      const updated = {
-        ...prev,
-        [instId]: {
-          startTime: nowIso,
-          technicianName: techName,
-          previousStatus: prevStatus,
-        },
-      };
-      try {
-        localStorage.setItem(
-          "comanins_calibration_start_times",
-          JSON.stringify(updated),
-        );
-      } catch (e) {}
-      return updated;
+      return next;
     });
-  };
+  }, [instruments, selectedInstId, currentUser?.name]);
 
   const cancelActiveCalibration = async (instIdToCancel?: string) => {
     const targetId = instIdToCancel || selectedInstId;
@@ -2308,29 +2296,21 @@ export default function InternalPortal({
         ? targetInst.status
         : "Aguardando Calibração");
 
-    // 1. Reverter o status do instrumento no Firestore e estado local se estiver 'Em Calibração'
-    if (
-      onUpdateInstrumentStatus &&
-      targetInst &&
-      (targetInst.status === "Em Calibração" || !targetInst.status)
-    ) {
+    // 1. Reverter o status E limpar os metadados do cronômetro de forma
+    // transacional no Firestore. Isso encerra o timer em todos os computadores.
+    if (targetInst) {
       try {
-        await onUpdateInstrumentStatus(targetId, prevStatus as any);
+        await cancelCalibrationTimingSession(targetId, prevStatus as Instrument["status"]);
       } catch (err) {
         console.error("Erro ao reverter status do instrumento na saída da tela:", err);
+        throw err;
       }
     }
 
-    // 2. Limpar o cronômetro do estado e do localStorage
+    // 2. Limpar a sessão de tempo do estado local. A fonte de verdade é o Firestore.
     setCalibrationStartTimes((prev) => {
       const next = { ...prev };
       delete next[targetId];
-      try {
-        localStorage.setItem(
-          "comanins_calibration_start_times",
-          JSON.stringify(next),
-        );
-      } catch (e) {}
       return next;
     });
 
@@ -2378,7 +2358,6 @@ export default function InternalPortal({
     unsubs.push(
       syncInventoryTransactions((list) => setInventoryTransactions(list)),
     );
-    unsubs.push(syncCalibrationAuditLogs((list) => setAuditLogs(list)));
     unsubs.push(syncAccessAuditLogs((list) => setAccessAuditLogs(list)));
     unsubs.push(syncRncReports((list) => setRncReports(list)));
     unsubs.push(
@@ -2477,6 +2456,23 @@ export default function InternalPortal({
 
     return unsubscribeAll;
   }, []);
+
+  // Auditoria de calibração é conteúdo administrativo. Técnicos continuam
+  // gerando os registros silenciosamente durante a calibração, mas somente
+  // administradores assinam/leem a coleção de auditoria no frontend.
+  useEffect(() => {
+    if (!isUserAdmin) {
+      setAuditLogs([]);
+      return;
+    }
+    let unsubscribe: any;
+    syncCalibrationAuditLogs((list) => setAuditLogs(list)).then(unsub => {
+       unsubscribe = unsub;
+    });
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
+  }, [isUserAdmin]);
 
   // 30-Day Expiration Notification Check for Reference Standards
   useEffect(() => {
@@ -2921,7 +2917,9 @@ Status atual: ${e.status}.`,
       (activeTab === "bench" || activeTab === "registro_calibracao")
     ) {
       if (!calibrationStartTimes[selectedInstId]) {
-        recordCalibrationStart(selectedInstId);
+        void recordCalibrationStart(selectedInstId).catch((error) => {
+          console.error("Não foi possível registrar o início da calibração:", error);
+        });
       }
       const inst = instruments.find((i) => i.id === selectedInstId);
       if (inst) {
@@ -5738,7 +5736,10 @@ Status atual: ${e.status}.`,
           return;
         }
 
-        const calibrationResult = await onSaveCalibration({
+        const startInfo =
+          calibrationStartTimes[selectedInstId] ||
+          (await recordCalibrationStart(selectedInstId));
+        await onSaveCalibration({
           instrumentId: selectedInstId,
           technicianName: benchTechnician,
           technicianId: techUser.id,
@@ -5773,6 +5774,10 @@ Status atual: ${e.status}.`,
           calibrationDate: activeInst?.manualCalibrationDateAllowed
             ? benchCalibrationDate
             : undefined,
+          auditStartTime: startInfo?.startTime || activeInst?.calibrationStartedAt,
+          auditTechnicianName:
+            startInfo?.technicianName || benchTechnician || currentUser?.name,
+          auditReferenceNumber: generatedCertNumber,
         });
 
         // Update certificate sequence if a new one was generated
@@ -5783,72 +5788,12 @@ Status atual: ${e.status}.`,
           });
         }
 
-        // Record Calibration Audit Log (Timing)
-        const endTimeIso = new Date().toISOString();
-        const startInfo = calibrationStartTimes[selectedInstId];
-        const startTimeIso =
-          startInfo?.startTime ||
-          new Date(Date.now() - 15 * 60 * 1000).toISOString();
-
-        const startDate = new Date(startTimeIso);
-        const endDate = new Date(endTimeIso);
-        const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
-        const diffSeconds = Math.floor(diffMs / 1000);
-
-        const hours = Math.floor(diffSeconds / 3600);
-        const minutes = Math.floor((diffSeconds % 3600) / 60);
-        const seconds = diffSeconds % 60;
-
-        let durationFormatted = "";
-        if (hours > 0) {
-          durationFormatted = `${hours}h ${minutes}min ${seconds}seg`;
-        } else if (minutes > 0) {
-          durationFormatted = `${minutes} min ${seconds} seg`;
-        } else {
-          durationFormatted = `${seconds} seg`;
-        }
-
-        const techName =
-          benchTechnician ||
-          startInfo?.technicianName ||
-          currentUser?.name ||
-          "Técnico Responsável";
-
-        try {
-          await addCalibrationAuditLogDoc({
-            certNumber: generatedCertNumber,
-            coma: activeInst?.coma || "",
-            instrumentId: selectedInstId,
-            instrumentTag: activeInst?.tag || "S/TAG",
-            instrumentDescription: activeInst?.description || "Instrumento",
-            technicianName: techName,
-            startTime: startTimeIso,
-            endTime: endTimeIso,
-            durationSeconds: diffSeconds,
-            durationFormatted,
-            date:
-              calibrationResult?.report?.date ||
-              (activeInst?.manualCalibrationDateAllowed
-                ? benchCalibrationDate
-                : currentCalibrationDate()),
-          });
-        } catch (auditErr) {
-          console.error(
-            "Erro ao registrar log de auditoria de calibração:",
-            auditErr,
-          );
-        }
+        // The audit log is now committed atomically inside saveCalibrationDoc.
 
         // Clean up calibration start time for this instrument
         setCalibrationStartTimes((prev) => {
           const next = { ...prev };
           delete next[selectedInstId];
-          try {
-            localStorage.setItem(
-              "comanins_calibration_start_times",
-              JSON.stringify(next),
-            );
-          } catch (e) {}
           return next;
         });
 
@@ -6074,12 +6019,6 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       setCalibrationStartTimes((prev) => {
         const next = { ...prev };
         delete next[selectedInstId];
-        try {
-          localStorage.setItem(
-            "comanins_calibration_start_times",
-            JSON.stringify(next),
-          );
-        } catch (e) {}
         return next;
       });
 

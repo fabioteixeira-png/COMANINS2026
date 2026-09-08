@@ -86,6 +86,9 @@ export interface Instrument {
   humidity?: number;
   manualCalibrationDateAllowed?: boolean;
   reissueSuggestedCalibrationDate?: string;
+  calibrationStartedAt?: string;
+  calibrationTechnicianName?: string;
+  calibrationPreviousStatus?: CalibrationStatus;
   registrationSnapshot?: InstrumentRegistrationSnapshot;
 }
 
@@ -220,6 +223,8 @@ export interface CalibrationAuditLog {
   durationSeconds: number;
   durationFormatted: string;
   date: string; // YYYY-MM-DD
+  reportId?: string;
+  timingSource?: 'live' | 'recovered';
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;

@@ -1117,6 +1117,111 @@ export async function updateInstrumentDoc(id: string, updates: Partial<Instrumen
   }
 }
 
+export interface CalibrationTimingSession {
+  startTime: string;
+  technicianName: string;
+  previousStatus: Instrument['status'];
+}
+
+export async function startCalibrationTimingSession(
+  instrumentId: string,
+  technicianName: string,
+  previousStatus?: Instrument['status'],
+): Promise<CalibrationTimingSession> {
+  const instrumentRef = doc(db, 'instruments', instrumentId);
+  const nowIso = new Date().toISOString();
+  const normalizedTechnician = String(technicianName || 'Técnico Responsável').trim() || 'Técnico Responsável';
+
+  const session = await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(instrumentRef);
+    if (!snapshot.exists()) throw new Error('INSTRUMENT_NOT_FOUND');
+    const current = snapshot.data() as Instrument;
+
+    const existingStart = String(current.calibrationStartedAt || '').trim();
+    if (current.status === 'Em Calibração' && existingStart) {
+      return {
+        startTime: existingStart,
+        technicianName: String(current.calibrationTechnicianName || normalizedTechnician),
+        previousStatus: (current.calibrationPreviousStatus || previousStatus || 'Aguardando Calibração') as Instrument['status'],
+      };
+    }
+
+    const resolvedPreviousStatus = (
+      current.status && current.status !== 'Em Calibração'
+        ? current.status
+        : current.calibrationPreviousStatus || previousStatus || 'Aguardando Calibração'
+    ) as Instrument['status'];
+
+    transaction.update(instrumentRef, {
+      status: 'Em Calibração',
+      calibrationStartedAt: nowIso,
+      calibrationTechnicianName: normalizedTechnician,
+      calibrationPreviousStatus: resolvedPreviousStatus,
+      updatedAt: nowIso,
+    });
+
+    return {
+      startTime: nowIso,
+      technicianName: normalizedTechnician,
+      previousStatus: resolvedPreviousStatus,
+    };
+  });
+
+  const cached = instrumentCache.get(instrumentId);
+  if (cached) {
+    mergeInstrumentIntoCache({
+      ...cached,
+      id: instrumentId,
+      status: 'Em Calibração',
+      calibrationStartedAt: session.startTime,
+      calibrationTechnicianName: session.technicianName,
+      calibrationPreviousStatus: session.previousStatus,
+      updatedAt: nowIso,
+    } as Instrument);
+    notifyInstrumentSubscribers();
+  }
+
+  return session;
+}
+
+export async function cancelCalibrationTimingSession(
+  instrumentId: string,
+  fallbackPreviousStatus?: Instrument['status'],
+): Promise<Instrument['status']> {
+  const instrumentRef = doc(db, 'instruments', instrumentId);
+  const nowIso = new Date().toISOString();
+
+  const restoredStatus = await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(instrumentRef);
+    if (!snapshot.exists()) throw new Error('INSTRUMENT_NOT_FOUND');
+    const current = snapshot.data() as Instrument;
+    const resolvedPreviousStatus = (
+      current.calibrationPreviousStatus || fallbackPreviousStatus || 'Aguardando Calibração'
+    ) as Instrument['status'];
+
+    transaction.update(instrumentRef, {
+      status: current.status === 'Em Calibração' ? resolvedPreviousStatus : current.status,
+      calibrationStartedAt: deleteField(),
+      calibrationTechnicianName: deleteField(),
+      calibrationPreviousStatus: deleteField(),
+      updatedAt: nowIso,
+    });
+    return current.status === 'Em Calibração' ? resolvedPreviousStatus : current.status;
+  });
+
+  const cached = instrumentCache.get(instrumentId);
+  if (cached) {
+    const next = { ...cached, status: restoredStatus, updatedAt: nowIso } as Instrument;
+    delete next.calibrationStartedAt;
+    delete next.calibrationTechnicianName;
+    delete next.calibrationPreviousStatus;
+    mergeInstrumentIntoCache(next);
+    notifyInstrumentSubscribers();
+  }
+
+  return restoredStatus;
+}
+
 export async function deleteInstrumentDoc(id: string): Promise<void> {
   const user = auth.currentUser;
   if (!user) throw new Error('Sessão expirada. Faça login novamente.');
@@ -1179,6 +1284,9 @@ export async function saveCalibrationDoc(data: {
   approved?: boolean;
   calibrationDate?: string;
   materialsUsed?: string[];
+  auditStartTime?: string;
+  auditTechnicianName?: string;
+  auditReferenceNumber?: string;
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
@@ -1341,12 +1449,70 @@ export async function saveCalibrationDoc(data: {
   const cacheableInstrumentUpdates = { ...instrumentUpdates };
   instrumentUpdates.manualCalibrationDateAllowed = deleteField();
   instrumentUpdates.reissueSuggestedCalibrationDate = deleteField();
+  instrumentUpdates.calibrationStartedAt = deleteField();
+  instrumentUpdates.calibrationTechnicianName = deleteField();
+  instrumentUpdates.calibrationPreviousStatus = deleteField();
   const cleanReport = stripUndefinedDeep(report) as CalibrationReport;
 
-  // Report + instrument status are committed atomically. The UI only receives
-  // success after both writes have been accepted by Firestore.
+  // The timing audit must be committed in the SAME batch as the calibration.
+  // Previously it was a best-effort write performed afterwards; a permission,
+  // network or tab-close failure could save the calibration but lose its audit.
+  const auditEndTime = new Date().toISOString();
+  const rawAuditStartTime = String(
+    data.auditStartTime || activeInst.calibrationStartedAt || '',
+  ).trim();
+  const endMs = new Date(auditEndTime).getTime();
+  const candidateStartMs = new Date(rawAuditStartTime).getTime();
+  const hasValidLiveStart =
+    !!rawAuditStartTime &&
+    Number.isFinite(candidateStartMs) &&
+    candidateStartMs <= endMs;
+  const auditStartTime = hasValidLiveStart ? rawAuditStartTime : auditEndTime;
+  const durationSeconds = hasValidLiveStart
+    ? Math.max(0, Math.floor((endMs - candidateStartMs) / 1000))
+    : 0;
+  const auditHours = Math.floor(durationSeconds / 3600);
+  const auditMinutes = Math.floor((durationSeconds % 3600) / 60);
+  const auditSeconds = durationSeconds % 60;
+  const durationFormatted = auditHours > 0
+    ? `${auditHours}h ${auditMinutes}min ${auditSeconds}seg`
+    : auditMinutes > 0
+      ? `${auditMinutes} min ${auditSeconds} seg`
+      : `${auditSeconds} seg`;
+  const auditId = `audit_${reportId}`;
+  const auditLog: CalibrationAuditLog = {
+    id: auditId,
+    reportId,
+    certNumber: String(
+      data.auditReferenceNumber ||
+      cleanReport.certNumber ||
+      activeInst.certificateNumber ||
+      activeInst.coma ||
+      reportId,
+    ),
+    coma: activeInst.coma || activeInst.certificateNumber || '',
+    instrumentId: data.instrumentId,
+    instrumentTag: activeInst.tag || 'S/TAG',
+    instrumentDescription: activeInst.description || 'Instrumento',
+    technicianName: String(
+      data.auditTechnicianName ||
+      data.technicianName ||
+      activeInst.calibrationTechnicianName ||
+      'Técnico Responsável',
+    ),
+    startTime: auditStartTime,
+    endTime: auditEndTime,
+    durationSeconds,
+    durationFormatted,
+    date: cleanReport.date,
+    timingSource: hasValidLiveStart ? 'live' : 'recovered',
+  };
+
+  // Report + instrument + audit are committed atomically. If the audit cannot
+  // be written, the calibration itself is not reported as successfully saved.
   const batch = writeBatch(db);
   batch.set(doc(db, 'calibrationReports', reportId), cleanReport);
+  batch.set(doc(db, 'calibrationAuditLogs', auditId), stripUndefinedDeep(auditLog));
   batch.update(doc(db, 'instruments', activeInst.id), instrumentUpdates);
   await batch.commit();
 
@@ -1357,6 +1523,9 @@ export async function saveCalibrationDoc(data: {
   } as Instrument;
   delete resolvedInstrument.manualCalibrationDateAllowed;
   delete resolvedInstrument.reissueSuggestedCalibrationDate;
+  delete resolvedInstrument.calibrationStartedAt;
+  delete resolvedInstrument.calibrationTechnicianName;
+  delete resolvedInstrument.calibrationPreviousStatus;
   if (cachedInstrument) {
     mergeInstrumentIntoCache({ ...cachedInstrument, ...resolvedInstrument, id: activeInst.id } as Instrument);
     notifyInstrumentSubscribers();
@@ -2735,19 +2904,28 @@ export async function deletePayslipDoc(id: string): Promise<void> {
 // 9. Calibration Audit Logs (Auditoria de Tempo de Calibração)
 export async function syncCalibrationAuditLogs(callback: (logs: CalibrationAuditLog[]) => void) {
   const cached = getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', [])
-    .filter(log => log.isDeleted !== true);
+    .filter(log => log.isDeleted !== true)
+    .sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
   if (cached.length > 0) callback(cached);
-  const q = query(collection(db, 'calibrationAuditLogs'), limit(25));
+
+  // IMPORTANT: do not combine an unordered limit with timestamp-based document ids.
+  // The old query used limit(25) without orderBy, which could keep returning the
+  // oldest document ids forever and made the audit dashboard appear frozen.
+  // The audit screen needs the complete active history for totals, filters and stats.
+  const q = query(collection(db, 'calibrationAuditLogs'), orderBy('endTime', 'desc'));
   return onSnapshot(q, (snapshot) => {
     const list = snapshot.docs
       .map(d => ({ ...d.data(), id: d.id } as CalibrationAuditLog))
       .filter(log => log.isDeleted !== true);
-    list.sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime());
     setLocalCache('calibrationAuditLogs', list);
     callback(list);
   }, (err) => {
     handleQuotaOrError(err);
-    callback(getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []).filter(log => log.isDeleted !== true));
+    callback(
+      getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', [])
+        .filter(log => log.isDeleted !== true)
+        .sort((a, b) => new Date(b.endTime || b.startTime).getTime() - new Date(a.endTime || a.startTime).getTime()),
+    );
   });
 }
 
