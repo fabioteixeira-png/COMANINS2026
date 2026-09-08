@@ -250,13 +250,42 @@ export default function EmployeeManagement({
     }
   };
 
+  const confirmAdministratorPassword = async (actionDescription: string): Promise<boolean> => {
+    if (!isUserAdmin) {
+      alert('Apenas administradores podem realizar esta exclusão/arquivamento.');
+      return false;
+    }
+
+    const pwd = window.prompt(`Digite sua senha de administrador para confirmar ${actionDescription}:`);
+    if (pwd === null) return false;
+    if (!pwd) {
+      alert('Informe a senha de administrador para continuar.');
+      return false;
+    }
+
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || '', pwd);
+      if (!valid) {
+        alert('Credencial administrativa inválida.');
+        return false;
+      }
+      return true;
+    } catch (error: any) {
+      alert(error?.message || 'Não foi possível validar a autorização administrativa.');
+      return false;
+    }
+  };
+
   const handleRemoveNrTraining = async (id: string) => {
-    if (!confirm('Deseja arquivar este registro de treinamento de NR? O histórico será preservado.')) return;
+    const authorized = await confirmAdministratorPassword('o arquivamento deste treinamento/NR');
+    if (!authorized) return;
+
     try {
       await deleteEmployeeTrainingDoc(id);
-    } catch (err) {
+      alert('Treinamento/NR arquivado com sucesso.');
+    } catch (err: any) {
       console.error('Erro ao arquivar treinamento:', err);
-      alert('Erro ao arquivar o treinamento.');
+      alert(err?.message || 'Erro ao arquivar o treinamento/NR.');
     }
   };
 
@@ -432,23 +461,8 @@ export default function EmployeeManagement({
   };
 
     const handleRemoveAsoContract = async (asoId: string) => {
-    if (currentUser?.role !== 'Administrador' && currentUser?.role !== 'Admin' && currentUser?.role !== 'admin' && currentUser?.role !== 'master' && currentUser?.role !== 'Diretor') {
-      alert("Apenas administradores podem arquivar ASOs.");
-      return;
-    }
-    const pwd = window.prompt("Digite sua senha de administrador para confirmar o arquivamento deste ASO:");
-    if (pwd === null) return;
-
-    try {
-      const valid = await verifyAdminCredentials(currentUser?.username || '', pwd);
-      if (!valid) {
-        alert("Credencial administrativa inválida.");
-        return;
-      }
-    } catch (error: any) {
-      alert(error?.message || "Não foi possível validar a autorização administrativa.");
-      return;
-    }
+    const authorized = await confirmAdministratorPassword('o arquivamento deste ASO');
+    if (!authorized) return;
 
     try {
       const now = new Date().toISOString();
@@ -2104,14 +2118,16 @@ export default function EmployeeManagement({
                                           </button>
                                         </div>
                                       )}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveAsoContract(asoItem.id)}
-                                        className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                                        title="Arquivar ASO"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
+                                      {isUserAdmin && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveAsoContract(asoItem.id)}
+                                          className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                                          title="Arquivar ASO"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
 
