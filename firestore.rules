@@ -435,6 +435,52 @@ service cloud.firestore {
       );
     }
 
+
+    // LOTE 38 — depois que a calibração foi concluída, campos cadastrais que
+    // poderiam reescrever a identificação histórica não podem ser alterados
+    // diretamente pelo navegador. Correções passam exclusivamente pelo backend
+    // administrativo com nova validação de senha e trilha de auditoria.
+    function isInstrumentCalibrationFinalized() {
+      return resource.data.status in [
+        'Calibrado',
+        'Aguardando Emissão de Certificado',
+        'Disponível para Retirada',
+        'Disponível na Prateleira',
+        'Entregue',
+        'Não Conforme',
+        'RNC'
+      ] || resource.data.get('hasRnc', false) == true;
+    }
+
+    function finalizedInstrumentIdentityUntouched() {
+      return !isInstrumentCalibrationFinalized() ||
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'tag', 'description', 'brand', 'model', 'serialNumber', 'clientId',
+          'category', 'typeSpec', 'metrologicalNorm', 'sensorType', 'outputSignal',
+          'setPoint', 'contactType', 'thermalMedium', 'hasteLength',
+          'rangeMin', 'rangeMax', 'unit', 'unitNegative', 'rangeMin2', 'rangeMax2', 'unit2',
+          'accuracyClass', 'escala', 'escala2', 'unidade2', 'mpe',
+          'material', 'conexao', 'diametro', 'numeroDaEntrada', 'dataEntrada',
+          'condicaoDeEntrada', 'observacoes', 'materialDeRetorno', 'dataDeRetorno'
+        ]);
+    }
+
+    function finalizedInstrumentPhotoReplacementSafe() {
+      return !isInstrumentCalibrationFinalized() || (
+        // Foto de cadastro já existente é imutável no cliente após conclusão.
+        (resource.data.get('photoRegistration', '') == '' ||
+          request.resource.data.get('photoRegistration', '') == resource.data.get('photoRegistration', '')) &&
+        (resource.data.get('photoRegistrationPath', '') == '' ||
+          request.resource.data.get('photoRegistrationPath', '') == resource.data.get('photoRegistrationPath', '')) &&
+        // A primeira foto após laboratório pode integrar o fluxo normal. Depois
+        // de gravada, substituição/exclusão é somente via backend administrativo.
+        (resource.data.get('photoCalibrated', '') == '' ||
+          request.resource.data.get('photoCalibrated', '') == resource.data.get('photoCalibrated', '')) &&
+        (resource.data.get('photoCalibratedPath', '') == '' ||
+          request.resource.data.get('photoCalibratedPath', '') == resource.data.get('photoCalibratedPath', ''))
+      );
+    }
+
     // Dados operacionais exibidos no Portal do Cliente.
     // Clientes não consultam estas coleções diretamente: os dados passam por
     // /api/client-portal/data, que usa o UID autenticado para localizar o cliente
@@ -451,6 +497,8 @@ service cloud.firestore {
         // A ficha de registro representa o estado histórico de entrada do
         // instrumento e não pode ser alterada pelo navegador após a criação.
         && request.resource.data.get('registrationSnapshot', null) == resource.data.get('registrationSnapshot', null)
+        && finalizedInstrumentIdentityUntouched()
+        && finalizedInstrumentPhotoReplacementSafe()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
         ]);

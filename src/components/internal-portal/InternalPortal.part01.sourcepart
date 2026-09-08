@@ -1745,6 +1745,156 @@ export default function InternalPortal({
   >(null);
   const [showEditInstrumentModal, setShowEditInstrumentModal] =
     useState<boolean>(false);
+
+  // LOTE 38 — sessão de correção administrativa. A senha fica apenas em memória
+  // enquanto o modal está aberto e é validada novamente pelo backend no salvamento.
+  const [adminCorrectionTarget, setAdminCorrectionTarget] = useState<any | null>(null);
+  const [adminCorrectionForm, setAdminCorrectionForm] = useState<any | null>(null);
+  const [showAdminCorrectionAuthModal, setShowAdminCorrectionAuthModal] = useState(false);
+  const [showAdminCorrectionModal, setShowAdminCorrectionModal] = useState(false);
+  const [adminCorrectionPassword, setAdminCorrectionPassword] = useState("");
+  const [adminCorrectionReason, setAdminCorrectionReason] = useState("");
+  const [adminCorrectionError, setAdminCorrectionError] = useState("");
+  const [adminCorrectionSaving, setAdminCorrectionSaving] = useState(false);
+  const [adminCorrectionPhotoUploading, setAdminCorrectionPhotoUploading] = useState<"registration" | "calibrated" | "">("");
+
+  const closeAdminInstrumentCorrection = () => {
+    setShowAdminCorrectionAuthModal(false);
+    setShowAdminCorrectionModal(false);
+    setAdminCorrectionTarget(null);
+    setAdminCorrectionForm(null);
+    setAdminCorrectionPassword("");
+    setAdminCorrectionReason("");
+    setAdminCorrectionError("");
+    setAdminCorrectionPhotoUploading("");
+  };
+
+  const openAdminInstrumentCorrection = (instrument: any) => {
+    if (!isUserAdmin) {
+      alert("Somente o Administrador pode realizar correções após a calibração.");
+      return;
+    }
+    setAdminCorrectionTarget(instrument);
+    setAdminCorrectionForm({
+      tag: instrument.tag || "",
+      description: instrument.description || "",
+      brand: instrument.brand || "",
+      model: instrument.model || "",
+      serialNumber: instrument.serialNumber || "",
+      material: instrument.material || "",
+      conexao: instrument.conexao || "",
+      diametro: instrument.diametro || "",
+      observacoes: instrument.observacoes || "",
+      photoRegistration: instrument.photoRegistration || "",
+      photoRegistrationPath: instrument.photoRegistrationPath || "",
+      photoCalibrated: instrument.photoCalibrated || "",
+      photoCalibratedPath: instrument.photoCalibratedPath || "",
+    });
+    setAdminCorrectionPassword("");
+    setAdminCorrectionReason("");
+    setAdminCorrectionError("");
+    setShowAdminCorrectionAuthModal(true);
+  };
+
+  const handleUnlockAdminInstrumentCorrection = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAdminCorrectionError("");
+    if (!adminCorrectionReason.trim() || adminCorrectionReason.trim().length < 5) {
+      setAdminCorrectionError("Informe o motivo da correção administrativa.");
+      return;
+    }
+    try {
+      const valid = await verifyAdminCredentials(currentUser?.username || "", adminCorrectionPassword);
+      if (!valid) {
+        setAdminCorrectionError("Senha administrativa inválida.");
+        return;
+      }
+      setShowAdminCorrectionAuthModal(false);
+      setShowAdminCorrectionModal(true);
+    } catch (error: any) {
+      setAdminCorrectionError(error?.message || "Não foi possível validar a senha administrativa.");
+    }
+  };
+
+  const handleAdminCorrectionPhotoSelect = async (
+    type: "registration" | "calibrated",
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const fileList = event.target.files;
+    if (!fileList?.length || !adminCorrectionTarget || !adminCorrectionForm) return;
+    try {
+      setAdminCorrectionPhotoUploading(type);
+      const compressed = await compressMultipleImages(fileList);
+      const dataUrl = compressed[0];
+      if (!dataUrl) throw new Error("Nenhuma imagem válida foi processada.");
+      const uploaded = await uploadInstrumentPhotoToStorage(adminCorrectionTarget.id, type, dataUrl);
+      if (type === "registration") {
+        setAdminCorrectionForm((prev: any) => prev ? {
+          ...prev,
+          photoRegistration: uploaded.url,
+          photoRegistrationPath: uploaded.path,
+        } : prev);
+      } else {
+        setAdminCorrectionForm((prev: any) => prev ? {
+          ...prev,
+          photoCalibrated: uploaded.url,
+          photoCalibratedPath: uploaded.path,
+        } : prev);
+      }
+    } catch (error: any) {
+      alert(error?.message || "Não foi possível preparar a nova foto.");
+    } finally {
+      setAdminCorrectionPhotoUploading("");
+      event.target.value = "";
+    }
+  };
+
+  const handleSaveAdminInstrumentCorrection = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!adminCorrectionTarget || !adminCorrectionForm || adminCorrectionSaving) return;
+    setAdminCorrectionSaving(true);
+    setAdminCorrectionError("");
+    try {
+      const changes = {
+        tag: String(adminCorrectionForm.tag || ""),
+        description: String(adminCorrectionForm.description || ""),
+        brand: String(adminCorrectionForm.brand || ""),
+        model: String(adminCorrectionForm.model || ""),
+        serialNumber: String(adminCorrectionForm.serialNumber || ""),
+        material: String(adminCorrectionForm.material || ""),
+        conexao: String(adminCorrectionForm.conexao || ""),
+        diametro: String(adminCorrectionForm.diametro || ""),
+        observacoes: String(adminCorrectionForm.observacoes || ""),
+        photoRegistration: String(adminCorrectionForm.photoRegistration || ""),
+        photoRegistrationPath: String(adminCorrectionForm.photoRegistrationPath || ""),
+        photoCalibrated: String(adminCorrectionForm.photoCalibrated || ""),
+        photoCalibratedPath: String(adminCorrectionForm.photoCalibratedPath || ""),
+      };
+      const response = await authJsonFetch(
+        `/api/internal/instruments/${encodeURIComponent(adminCorrectionTarget.id)}/admin-correction`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            username: currentUser?.username || "",
+            password: adminCorrectionPassword,
+            reason: adminCorrectionReason.trim(),
+            changes,
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.success !== true) {
+        throw new Error(payload?.message || payload?.error || "Não foi possível salvar a correção administrativa.");
+      }
+      alert("Correção administrativa salva. Os dados metrológicos e a ficha de calibração permaneceram inalterados.");
+      closeAdminInstrumentCorrection();
+    } catch (error: any) {
+      setAdminCorrectionError(error?.message || "Não foi possível salvar a correção administrativa.");
+    } finally {
+      setAdminCorrectionSaving(false);
+    }
+  };
+
   const [instrumentSheetInstrument, setInstrumentSheetInstrument] = useState<Instrument | null>(null);
 
   // RNC State (Relatórios de Não Conformidade)
@@ -4830,7 +4980,9 @@ Status atual: ${e.status}.`,
 
     const currentStatus = photoModalInstrument.status as string;
     if (currentStatus === "Entregue") {
-      alert("Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
+      alert(isUserAdmin
+        ? "Instrumento entregue. Para corrigir fotos, use o botão Correção Admin e confirme a senha administrativa."
+        : "Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
       e.target.value = "";
       return;
     }
@@ -4844,20 +4996,20 @@ Status atual: ${e.status}.`,
       currentStatus === "Entregue" ||
       currentStatus === "Não Conforme";
     const isRegPhoto = photoModalType === "registration";
-    if (isConcluded && isRegPhoto && !isUserAdmin) {
-      alert(
-        "Após a conclusão da calibração, a foto de cadastro só pode ser alterada por um administrador.",
-      );
+    if (isConcluded && isRegPhoto) {
+      alert(isUserAdmin
+        ? "Para substituir a foto de cadastro após a calibração, use Correção Admin e confirme a senha administrativa."
+        : "Após a conclusão da calibração, a foto de cadastro não pode ser alterada por este perfil.");
       return;
     }
 
     // Constraint: once inserted, laboratory photo can only be changed by admin
     const isCalPhoto = photoModalType === "calibrated";
     const alreadyHasCalPhoto = !!photoModalInstrument.photoCalibrated;
-    if (isCalPhoto && alreadyHasCalPhoto && !isUserAdmin) {
-      alert(
-        "Uma vez inserida, a foto após laboratório só pode ser alterada por um administrador.",
-      );
+    if (isCalPhoto && alreadyHasCalPhoto) {
+      alert(isUserAdmin
+        ? "Para substituir a foto após laboratório, use Correção Admin e confirme a senha administrativa."
+        : "Uma vez inserida, a foto após laboratório não pode ser alterada por este perfil.");
       return;
     }
 
@@ -4929,7 +5081,9 @@ Status atual: ${e.status}.`,
 
     const currentStatus = photoModalInstrument.status as string;
     if (currentStatus === "Entregue") {
-      alert("Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
+      alert(isUserAdmin
+        ? "Instrumento entregue. Para corrigir fotos, use o botão Correção Admin e confirme a senha administrativa."
+        : "Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
       return;
     }
 
@@ -4942,20 +5096,20 @@ Status atual: ${e.status}.`,
       currentStatus === "Entregue" ||
       currentStatus === "Não Conforme";
     const isRegPhoto = photoModalType === "registration";
-    if (isConcluded && isRegPhoto && !isUserAdmin) {
-      alert(
-        "Após a conclusão da calibração, a foto de cadastro só pode ser excluída por um administrador.",
-      );
+    if (isConcluded && isRegPhoto) {
+      alert(isUserAdmin
+        ? "Para excluir/corrigir a foto de cadastro após a calibração, use Correção Admin e confirme a senha administrativa."
+        : "Após a conclusão da calibração, a foto de cadastro não pode ser excluída por este perfil.");
       return;
     }
 
     // Constraint: once inserted, laboratory photo can only be deleted by admin
     const isCalPhoto = photoModalType === "calibrated";
     const alreadyHasCalPhoto = !!photoModalInstrument.photoCalibrated;
-    if (isCalPhoto && alreadyHasCalPhoto && !isUserAdmin) {
-      alert(
-        "Uma vez inserida, a foto após laboratório só pode ser excluída por um administrador.",
-      );
+    if (isCalPhoto && alreadyHasCalPhoto) {
+      alert(isUserAdmin
+        ? "Para excluir/corrigir a foto após laboratório, use Correção Admin e confirme a senha administrativa."
+        : "Uma vez inserida, a foto após laboratório não pode ser excluída por este perfil.");
       return;
     }
 

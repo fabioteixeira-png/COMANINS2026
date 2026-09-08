@@ -2402,6 +2402,18 @@
                               <span>Editar</span>
                             </button>
 
+                            {isUserAdmin && (isCalibrationSaved || isRncIssued) && (
+                              <button
+                                type="button"
+                                onClick={() => openAdminInstrumentCorrection(inst)}
+                                className="px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 cursor-pointer transition-colors"
+                                title="Correção administrativa de dados cadastrais e fotos. Exige senha e não altera a ficha de calibração."
+                              >
+                                <ShieldCheck className="h-3 w-3" />
+                                <span>Correção Admin</span>
+                              </button>
+                            )}
+
                             {/* Certificado Button (Liberado apenas após a foto pós-laboratório) */}
                             <button
                               disabled={

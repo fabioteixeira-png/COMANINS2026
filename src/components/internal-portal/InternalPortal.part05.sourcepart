@@ -2231,8 +2231,8 @@
                 // Laboratory: once inserted, can only be changed/deleted by admin
                 const isDeliveredLocked = photoModalInstrument.status === "Entregue";
                 const cannotModify = isDeliveredLocked || (isRegPhoto
-                  ? isConcluded && !isUserAdmin
-                  : !!currentPhoto && !isUserAdmin);
+                  ? isConcluded
+                  : !!currentPhoto);
 
                 if (currentPhoto) {
                   return (
@@ -2266,7 +2266,7 @@
                             <span>
                               {isDeliveredLocked
                                 ? "Registro Bloqueado após Entrega"
-                                : "Alteração Restrita (Somente Administrador)"}
+                                : "Correção Administrativa Obrigatória"}
                             </span>
                           </div>
                           {isDeliveredLocked ? (
@@ -2284,10 +2284,7 @@
                             </p>
                           ) : (
                             <p>
-                              Como a foto após laboratório já foi inserida, ela
-                              só pode ser alterada ou excluída por um
-                              administrador para garantir a integridade dos
-                              dados.
+                              Como a foto após laboratório já foi inserida, ela só pode ser substituída ou removida pelo botão Correção Admin, com nova validação da senha administrativa.
                             </p>
                           )}
                         </div>
@@ -2391,6 +2388,136 @@
                 Fechar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOTE 38 — autenticação para Correção Administrativa */}
+      {showAdminCorrectionAuthModal && adminCorrectionTarget && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-[70] print:hidden">
+          <div className="bg-white w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="h-6 w-6 text-amber-400" />
+                <div>
+                  <h3 className="font-extrabold">Correção Administrativa</h3>
+                  <p className="text-[11px] text-slate-300">Exclusivo para Administrador</p>
+                </div>
+              </div>
+              <button type="button" onClick={closeAdminInstrumentCorrection} className="p-1 text-slate-300 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={handleUnlockAdminInstrumentCorrection} className="p-6 space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+                Este modo corrige apenas <strong>dados cadastrais e fotos</strong>. Pontos, resultados, MPE, faixa, unidade, incerteza, padrões, técnico, datas, status e demais condições metrológicas permanecem bloqueados.
+              </div>
+              <div className="text-xs bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <div><strong>Certificado:</strong> {adminCorrectionTarget.certificateNumber || adminCorrectionTarget.coma || "—"}</div>
+                <div><strong>TAG:</strong> {adminCorrectionTarget.tag || "—"}</div>
+                <div><strong>Status:</strong> {adminCorrectionTarget.status || "—"}</div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Motivo da correção *</label>
+                <textarea value={adminCorrectionReason} onChange={(e) => setAdminCorrectionReason(e.target.value)} rows={3} required className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" placeholder="Ex.: número de série digitado incorretamente e foto trocada no cadastro." />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Senha do Administrador *</label>
+                <input type="password" value={adminCorrectionPassword} onChange={(e) => setAdminCorrectionPassword(e.target.value)} required autoComplete="current-password" className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" />
+              </div>
+              {adminCorrectionError && <div className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">{adminCorrectionError}</div>}
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeAdminInstrumentCorrection} className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold">Cancelar</button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-2"><KeyRound className="h-4 w-4" /> Validar e Entrar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* LOTE 38 — edição restrita de cadastro/fotos; não contém campos metrológicos */}
+      {showAdminCorrectionModal && adminCorrectionTarget && adminCorrectionForm && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-[70] overflow-y-auto print:hidden">
+          <div className="bg-white w-full max-w-4xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-6">
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="h-6 w-6 text-amber-400" />
+                <div>
+                  <h3 className="font-extrabold">Modo de Correção Administrativa</h3>
+                  <p className="text-[11px] text-slate-300">{adminCorrectionTarget.certificateNumber || adminCorrectionTarget.coma || "Instrumento"} • calibração preservada</p>
+                </div>
+              </div>
+              <button type="button" onClick={closeAdminInstrumentCorrection} className="p-1 text-slate-300 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={handleSaveAdminInstrumentCorrection} className="p-6 space-y-6 max-h-[82vh] overflow-y-auto">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900">
+                <strong>Proteção ativa:</strong> esta tela não modifica a ficha de calibração, relatório, pontos, cálculos, faixa, unidade, MPE, classe, incerteza, padrões, técnico, data, status ou número do certificado. Cada alteração é registrada na auditoria com motivo, usuário e data/hora.
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  ["tag", "TAG do Cliente"],
+                  ["description", "Descrição"],
+                  ["brand", "Fabricante / Marca"],
+                  ["model", "Modelo"],
+                  ["serialNumber", "Nº de Série"],
+                  ["material", "Material"],
+                  ["conexao", "Conexão"],
+                  ["diametro", "Diâmetro"],
+                ].map(([field, label]) => (
+                  <div key={field}>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{label}</label>
+                    <input
+                      type="text"
+                      value={adminCorrectionForm[field] || ""}
+                      onChange={(e) => setAdminCorrectionForm((prev: any) => ({ ...prev, [field]: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Observações cadastrais</label>
+                <textarea rows={3} value={adminCorrectionForm.observacoes || ""} onChange={(e) => setAdminCorrectionForm((prev: any) => ({ ...prev, observacoes: e.target.value }))} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {([
+                  ["registration", "Foto de Cadastro", "photoRegistration", "photoRegistrationPath"],
+                  ["calibrated", "Foto Após Laboratório", "photoCalibrated", "photoCalibratedPath"],
+                ] as const).map(([type, label, photoField, pathField]) => {
+                  const photo = adminCorrectionForm[photoField];
+                  return (
+                    <div key={type} className="border border-slate-200 rounded-2xl p-4 space-y-3">
+                      <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-2"><Camera className="h-4 w-4 text-blue-600" /> {label}</h4>
+                      {photo ? (
+                        <img src={photo} alt={label} className="w-full h-48 object-contain bg-slate-50 border border-slate-200 rounded-xl" />
+                      ) : (
+                        <div className="h-48 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-xs text-slate-500">Sem foto</div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <label className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5">
+                          <Upload className="h-4 w-4" />
+                          {adminCorrectionPhotoUploading === type ? "Enviando..." : photo ? "Substituir foto" : "Adicionar foto"}
+                          <input type="file" accept="image/*,.heic,.heif" className="hidden" disabled={!!adminCorrectionPhotoUploading} onChange={(e) => handleAdminCorrectionPhotoSelect(type, e)} />
+                        </label>
+                        {photo && (
+                          <button type="button" onClick={() => setAdminCorrectionForm((prev: any) => ({ ...prev, [photoField]: "", [pathField]: "" }))} className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5"><Trash2 className="h-4 w-4" /> Remover</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700">
+                <strong>Motivo registrado:</strong> {adminCorrectionReason}
+              </div>
+              {adminCorrectionError && <div className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">{adminCorrectionError}</div>}
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                <button type="button" onClick={closeAdminInstrumentCorrection} disabled={adminCorrectionSaving} className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold">Cancelar</button>
+                <button type="submit" disabled={adminCorrectionSaving || !!adminCorrectionPhotoUploading} className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2"><Save className="h-4 w-4" /> {adminCorrectionSaving ? "Salvando..." : "Salvar Correção"}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

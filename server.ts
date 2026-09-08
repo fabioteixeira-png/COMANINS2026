@@ -358,6 +358,42 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   return { id: match.id, ...data };
 };
 
+
+const verifyCurrentAdministratorPassword = async (
+  decodedSession: any,
+  usernameValue: unknown,
+  passwordValue: unknown,
+): Promise<any | null> => {
+  if (!adminAuth || !firestoreDb) return null;
+  const username = String(usernameValue || '').trim().toLowerCase();
+  const password = String(passwordValue || '');
+  if (!username || !password) return null;
+
+  const email = username.includes('@') ? username : `${username}@comanins.internal`;
+  if (!email.endsWith('@comanins.internal')) return null;
+
+  const sessionEmail = String(decodedSession?.email || '').trim().toLowerCase();
+  if (!sessionEmail || sessionEmail !== email) return null;
+
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    },
+  );
+  if (!response.ok) return null;
+
+  const data: any = await response.json();
+  if (!data?.idToken) return null;
+  const confirmedToken = await adminAuth.verifyIdToken(data.idToken);
+  if (String(confirmedToken.email || '').trim().toLowerCase() !== sessionEmail) return null;
+
+  const profile = await findPortalUserForAuth(confirmedToken);
+  return profile && isAdministratorProfile(profile) ? profile : null;
+};
+
 const cloneDefaultAccessProfile = (profile: AccessProfileDefinition): AccessProfileDefinition => ({
   ...profile,
   modules: [...profile.modules],
@@ -3695,6 +3731,183 @@ app.post('/api/instruments/:id/archive', requireAuth, requireAdministratorAccoun
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });
+
+
+// LOTE 38 — correção administrativa de cadastro/fotos sem reabrir nem alterar a calibração.
+// Toda mutação passa pelo Admin SDK, exige perfil Administrador + reconfirmação da senha
+// e aceita somente uma lista fechada de campos não metrológicos.
+const ADMIN_INSTRUMENT_CORRECTION_FIELDS = new Set([
+  'tag',
+  'description',
+  'brand',
+  'model',
+  'serialNumber',
+  'material',
+  'conexao',
+  'diametro',
+  'observacoes',
+  'photoRegistration',
+  'photoRegistrationPath',
+  'photoCalibrated',
+  'photoCalibratedPath',
+]);
+
+const ADMIN_INSTRUMENT_CORRECTION_LABELS: Record<string, string> = {
+  tag: 'TAG do Cliente',
+  description: 'Descrição',
+  brand: 'Fabricante / Marca',
+  model: 'Modelo',
+  serialNumber: 'Nº de Série',
+  material: 'Material',
+  conexao: 'Conexão',
+  diametro: 'Diâmetro',
+  observacoes: 'Observações cadastrais',
+  photoRegistration: 'Foto de cadastro',
+  photoRegistrationPath: 'Arquivo da foto de cadastro',
+  photoCalibrated: 'Foto após laboratório',
+  photoCalibratedPath: 'Arquivo da foto após laboratório',
+};
+
+const isFinalizedCalibrationInstrument = (instrument: any): boolean => {
+  const status = String(instrument?.status || '').trim();
+  return [
+    'Calibrado',
+    'Aguardando Emissão de Certificado',
+    'Disponível para Retirada',
+    'Disponível na Prateleira',
+    'Entregue',
+    'Não Conforme',
+    'RNC',
+  ].includes(status) || instrument?.hasRnc === true;
+};
+
+app.post(
+  '/api/internal/instruments/:instrumentId/admin-correction',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb || !adminAuth) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+
+    const instrumentId = asLimitedString(req.params.instrumentId, 180);
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const reason = asLimitedString(req.body?.reason, 500);
+    const rawChanges = req.body?.changes;
+
+    if (!instrumentId) return res.status(400).json({ error: 'INVALID_INSTRUMENT_ID' });
+    if (!reason || reason.length < 5) {
+      return res.status(400).json({ error: 'CORRECTION_REASON_REQUIRED', message: 'Informe o motivo da correção administrativa.' });
+    }
+    if (!rawChanges || typeof rawChanges !== 'object' || Array.isArray(rawChanges)) {
+      return res.status(400).json({ error: 'INVALID_CHANGES' });
+    }
+
+    try {
+      const confirmedProfile = await verifyCurrentAdministratorPassword(req.user, username, password);
+      if (!confirmedProfile) {
+        return res.status(403).json({ error: 'ADMIN_REAUTH_REQUIRED', message: 'Senha administrativa inválida.' });
+      }
+
+      const rejectedFields = Object.keys(rawChanges).filter((key) => !ADMIN_INSTRUMENT_CORRECTION_FIELDS.has(key));
+      if (rejectedFields.length > 0) {
+        return res.status(400).json({
+          error: 'PROTECTED_CALIBRATION_FIELD',
+          message: 'A correção administrativa não pode alterar campos metrológicos ou condições da calibração.',
+          fields: rejectedFields,
+        });
+      }
+
+      const normalizedChanges: Record<string, any> = {};
+      for (const [key, value] of Object.entries(rawChanges)) {
+        if (!ADMIN_INSTRUMENT_CORRECTION_FIELDS.has(key)) continue;
+        let nextValue = value == null ? '' : String(value);
+        if (key === 'tag' || key === 'model' || key === 'serialNumber') nextValue = nextValue.trim().toUpperCase();
+        else nextValue = nextValue.trim();
+        normalizedChanges[key] = nextValue.slice(0, key.toLowerCase().includes('photo') ? 3000 : 1000);
+      }
+
+      const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+      const nowIso = new Date().toISOString();
+      const actorName = asLimitedString(
+        (confirmedProfile as any)?.name || req.user?.name || req.user?.email || username,
+        160,
+      ) || 'Administrador';
+      const actorUid = asLimitedString(req.user?.uid, 160);
+      const actorRole = asLimitedString((confirmedProfile as any)?.permissionLevel || (confirmedProfile as any)?.role, 100) || 'Administrador';
+      let updatedInstrument: any = null;
+
+      await firestoreDb.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(instrumentRef);
+        if (!snapshot.exists) {
+          const error: any = new Error('INSTRUMENT_NOT_FOUND');
+          error.code = 'INSTRUMENT_NOT_FOUND';
+          throw error;
+        }
+        const before: any = snapshot.data() || {};
+        if (!isFinalizedCalibrationInstrument(before)) {
+          const error: any = new Error('CALIBRATION_NOT_FINALIZED');
+          error.code = 'CALIBRATION_NOT_FINALIZED';
+          throw error;
+        }
+
+        const effectiveChanges: Record<string, any> = {};
+        const auditChanges: Array<{ field: string; label: string; before: string; after: string }> = [];
+        for (const [key, value] of Object.entries(normalizedChanges)) {
+          const previous = before?.[key] == null ? '' : String(before[key]);
+          const next = value == null ? '' : String(value);
+          if (previous === next) continue;
+          effectiveChanges[key] = value;
+          auditChanges.push({
+            field: key,
+            label: ADMIN_INSTRUMENT_CORRECTION_LABELS[key] || key,
+            before: key.toLowerCase().includes('photo') && previous ? '[arquivo existente]' : previous.slice(0, 700),
+            after: key.toLowerCase().includes('photo') && next ? '[arquivo atualizado]' : next.slice(0, 700),
+          });
+        }
+
+        if (auditChanges.length === 0) {
+          updatedInstrument = { id: snapshot.id, ...before };
+          return;
+        }
+
+        transaction.update(instrumentRef, { ...effectiveChanges, updatedAt: nowIso });
+        transaction.set(auditRef, {
+          action: 'INSTRUMENT_ADMIN_CORRECTION',
+          entityType: 'instrument',
+          entityId: instrumentId,
+          actorUid,
+          actorName,
+          actorRole,
+          createdAt: nowIso,
+          immutable: true,
+          summary: `Correção administrativa no instrumento ${asLimitedString(before.certificateNumber || before.coma || before.tag || instrumentId, 160)}`,
+          metadata: {
+            reason,
+            certificateNumber: asLimitedString(before.certificateNumber || before.coma, 180),
+            instrumentStatus: asLimitedString(before.status, 120),
+            calibrationPreserved: true,
+            calibrationReportsModified: false,
+            registrationSnapshotModified: false,
+            changedFields: auditChanges,
+          },
+        });
+        updatedInstrument = { id: snapshot.id, ...before, ...effectiveChanges, updatedAt: nowIso };
+      });
+
+      return res.json({ success: true, instrument: updatedInstrument });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('INSTRUMENT_NOT_FOUND')) return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+      if (code.includes('CALIBRATION_NOT_FINALIZED')) {
+        return res.status(409).json({ error: 'CALIBRATION_NOT_FINALIZED', message: 'Use a edição normal antes da conclusão da calibração.' });
+      }
+      console.error('Instrument admin correction failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
 
 // LOTE 35 — unicidade forte de TAG do Cliente e Certificado.
 // A interface continua validando para resposta rápida, mas a garantia definitiva
