@@ -1138,7 +1138,8 @@ export async function startCalibrationTimingSession(
     const current = snapshot.data() as Instrument;
 
     const existingStart = String(current.calibrationStartedAt || '').trim();
-    if (current.status === 'Em Calibração' && existingStart) {
+    const administrativeReplacement = current.adminCalibrationReplacementPending === true;
+    if ((current.status === 'Em Calibração' || administrativeReplacement) && existingStart) {
       return {
         startTime: existingStart,
         technicianName: String(current.calibrationTechnicianName || normalizedTechnician),
@@ -1153,7 +1154,7 @@ export async function startCalibrationTimingSession(
     ) as Instrument['status'];
 
     transaction.update(instrumentRef, {
-      status: 'Em Calibração',
+      status: administrativeReplacement ? current.status : 'Em Calibração',
       calibrationStartedAt: nowIso,
       calibrationTechnicianName: normalizedTechnician,
       calibrationPreviousStatus: resolvedPreviousStatus,
@@ -1172,7 +1173,7 @@ export async function startCalibrationTimingSession(
     mergeInstrumentIntoCache({
       ...cached,
       id: instrumentId,
-      status: 'Em Calibração',
+      status: cached.adminCalibrationReplacementPending === true ? cached.status : 'Em Calibração',
       calibrationStartedAt: session.startTime,
       calibrationTechnicianName: session.technicianName,
       calibrationPreviousStatus: session.previousStatus,
@@ -1199,14 +1200,15 @@ export async function cancelCalibrationTimingSession(
       current.calibrationPreviousStatus || fallbackPreviousStatus || 'Aguardando Calibração'
     ) as Instrument['status'];
 
+    const administrativeReplacement = current.adminCalibrationReplacementPending === true;
     transaction.update(instrumentRef, {
-      status: current.status === 'Em Calibração' ? resolvedPreviousStatus : current.status,
+      status: administrativeReplacement ? current.status : (current.status === 'Em Calibração' ? resolvedPreviousStatus : current.status),
       calibrationStartedAt: deleteField(),
       calibrationTechnicianName: deleteField(),
       calibrationPreviousStatus: deleteField(),
       updatedAt: nowIso,
     });
-    return current.status === 'Em Calibração' ? resolvedPreviousStatus : current.status;
+    return administrativeReplacement ? current.status : (current.status === 'Em Calibração' ? resolvedPreviousStatus : current.status);
   });
 
   const cached = instrumentCache.get(instrumentId);
@@ -1409,6 +1411,11 @@ export async function saveCalibrationDoc(data: {
     approved: data.approved !== undefined ? data.approved : approved,
     observations: data.observations || '',
     materialsUsed: Array.from(new Set((data.materialsUsed || []).map((item) => String(item || '').trim()).filter(Boolean))).slice(0, 50),
+    administrativeReplacement: activeInst.adminCalibrationReplacementPending === true ? true : undefined,
+    replacedReportIds: activeInst.adminCalibrationReplacementPending === true ? (activeInst.adminCalibrationReplacementReportIds || []) : undefined,
+    replacementReason: activeInst.adminCalibrationReplacementPending === true ? activeInst.adminCalibrationReplacementReason : undefined,
+    replacementRequestedAt: activeInst.adminCalibrationReplacementPending === true ? activeInst.adminCalibrationReplacementRequestedAt : undefined,
+    replacementRequestedByName: activeInst.adminCalibrationReplacementPending === true ? activeInst.adminCalibrationReplacementRequestedByName : undefined,
     temperature: data.temperature !== undefined ? data.temperature : undefined,
     humidity: data.humidity !== undefined ? data.humidity : undefined,
     instrumentType: data.instrumentType,
@@ -1427,9 +1434,14 @@ export async function saveCalibrationDoc(data: {
   const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);
   nextCal.setUTCFullYear(nextCal.getUTCFullYear() + 1);
 
+  const administrativeReplacement = activeInst.adminCalibrationReplacementPending === true;
+  const preservedOperationalStatus = administrativeReplacement
+    ? (activeInst.adminCalibrationReplacementOriginalStatus || activeInst.status)
+    : 'Aguardando Emissão de Certificado';
+
   const updatedInst: Instrument = {
     ...activeInst,
-    status: 'Aguardando Emissão de Certificado',
+    status: preservedOperationalStatus as Instrument['status'],
     lastCalibrationDate: report.date,
     nextCalibrationDate: nextCal.toISOString().split('T')[0],
     ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
@@ -1437,7 +1449,7 @@ export async function saveCalibrationDoc(data: {
   };
 
   const instrumentUpdates = stripUndefinedDeep({
-    status: 'Aguardando Emissão de Certificado',
+    status: preservedOperationalStatus,
     lastCalibrationDate: report.date,
     nextCalibrationDate: updatedInst.nextCalibrationDate,
     accuracyClass: data.accuracyClass,
@@ -1452,6 +1464,15 @@ export async function saveCalibrationDoc(data: {
   instrumentUpdates.calibrationStartedAt = deleteField();
   instrumentUpdates.calibrationTechnicianName = deleteField();
   instrumentUpdates.calibrationPreviousStatus = deleteField();
+  if (administrativeReplacement) {
+    instrumentUpdates.adminCalibrationReplacementPending = deleteField();
+    instrumentUpdates.adminCalibrationReplacementOriginalStatus = deleteField();
+    instrumentUpdates.adminCalibrationReplacementReason = deleteField();
+    instrumentUpdates.adminCalibrationReplacementRequestedAt = deleteField();
+    instrumentUpdates.adminCalibrationReplacementRequestedByUid = deleteField();
+    instrumentUpdates.adminCalibrationReplacementRequestedByName = deleteField();
+    instrumentUpdates.adminCalibrationReplacementReportIds = deleteField();
+  }
   const cleanReport = stripUndefinedDeep(report) as CalibrationReport;
 
   // The timing audit must be committed in the SAME batch as the calibration.
@@ -1526,6 +1547,15 @@ export async function saveCalibrationDoc(data: {
   delete resolvedInstrument.calibrationStartedAt;
   delete resolvedInstrument.calibrationTechnicianName;
   delete resolvedInstrument.calibrationPreviousStatus;
+  if (administrativeReplacement) {
+    delete resolvedInstrument.adminCalibrationReplacementPending;
+    delete resolvedInstrument.adminCalibrationReplacementOriginalStatus;
+    delete resolvedInstrument.adminCalibrationReplacementReason;
+    delete resolvedInstrument.adminCalibrationReplacementRequestedAt;
+    delete resolvedInstrument.adminCalibrationReplacementRequestedByUid;
+    delete resolvedInstrument.adminCalibrationReplacementRequestedByName;
+    delete resolvedInstrument.adminCalibrationReplacementReportIds;
+  }
   if (cachedInstrument) {
     mergeInstrumentIntoCache({ ...cachedInstrument, ...resolvedInstrument, id: activeInst.id } as Instrument);
     notifyInstrumentSubscribers();
@@ -1578,6 +1608,46 @@ export async function deleteReportDoc(
     },
   );
   const result = await parseCalibrationReopenResponse(response);
+  if (result.instrument) {
+    mergeInstrumentIntoCache(result.instrument);
+    notifyInstrumentSubscribers();
+  }
+  return result;
+}
+
+export interface AdminCalibrationReplacementResult {
+  success: true;
+  archivedReportIds: string[];
+  instrument: Instrument;
+}
+
+export async function prepareAdminCalibrationReplacementDoc(
+  instrumentId: string,
+  credentials: { username: string; password: string; reason: string },
+): Promise<AdminCalibrationReplacementResult> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(
+    `/api/internal/instruments/${encodeURIComponent(instrumentId)}/admin-replace-calibration`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(credentials),
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success !== true) {
+    if (payload?.error === 'ADMIN_REAUTH_REQUIRED') throw new Error('Senha administrativa inválida.');
+    if (payload?.error === 'ADMIN_REPLACEMENT_ALREADY_PENDING') throw new Error(payload?.message || 'A substituição administrativa já está liberada.');
+    if (payload?.error === 'RNC_REPLACEMENT_NOT_ALLOWED') throw new Error(payload?.message || 'Instrumentos com RNC devem seguir o fluxo específico.');
+    if (payload?.error === 'ACTIVE_CALIBRATION_REPORT_NOT_FOUND') throw new Error(payload?.message || 'Não foi encontrada ficha ativa para substituir.');
+    throw new Error(payload?.message || payload?.error || 'Não foi possível liberar a substituição da ficha de calibração.');
+  }
+  const result = payload as AdminCalibrationReplacementResult;
   if (result.instrument) {
     mergeInstrumentIntoCache(result.instrument);
     notifyInstrumentSubscribers();

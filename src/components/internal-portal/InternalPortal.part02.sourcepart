@@ -2075,6 +2075,17 @@
                       const comaninsStandardPeriodicity = resolveComaninsStandardPeriodicity(
                         inst.tag,
                       );
+                      const isCalibrationSaved =
+                        inst.status === "Calibrado" ||
+                        inst.status === "Aguardando Emissão de Certificado" ||
+                        inst.status === "Disponível para Retirada" ||
+                        inst.status === "Disponível na Prateleira" ||
+                        inst.status === "Entregue" ||
+                        inst.status === "Não Conforme";
+                      const isAdminCalibrationReplacementPending =
+                        inst.adminCalibrationReplacementPending === true;
+                      const canAdminReplaceCalibration =
+                        isUserAdmin && isAdminCalibrationReplacementPending;
                       const isCalibrated =
                         (inst.status === "Calibrado" ||
                           inst.status === "Aguardando Emissão de Certificado" ||
@@ -2087,16 +2098,15 @@
                         isCalibrated &&
                         !isRncIssued &&
                         (!!issuedCertificates[inst.id] || hasApprovedReport);
-                      const isCalibLocked = hasCertIssued || isRncIssued;
+                      // Um status finalizado permanece bloqueado mesmo se a ficha
+                      // ativa tiver sido arquivada. A única exceção é a liberação
+                      // administrativa criada pelo LOTE 39.
+                      const isCalibLocked =
+                        isRncIssued ||
+                        hasCertIssued ||
+                        (isCalibrationSaved && !canAdminReplaceCalibration);
                       const isCertEmitted =
                         isCalibrated && !!issuedCertificates[inst.id];
-                      const isCalibrationSaved =
-                        inst.status === "Calibrado" ||
-                        inst.status === "Aguardando Emissão de Certificado" ||
-                        inst.status === "Disponível para Retirada" ||
-                        inst.status === "Disponível na Prateleira" ||
-                        inst.status === "Entregue" ||
-                        inst.status === "Não Conforme";
                       const displayStatus =
                         inst.status === "Aguardando Triagem"
                           ? "Aguardando Calibração"
@@ -2263,6 +2273,7 @@
 
                                   if (
                                     isUserAdmin &&
+                                    !isAdminCalibrationReplacementPending &&
                                     !hasActiveCalibrationReport &&
                                     onPrepareCalibration
                                   ) {
@@ -2299,6 +2310,7 @@
                                   );
 
                                   if (
+                                    !isAdminCalibrationReplacementPending &&
                                     onUpdateInstrumentStatus &&
                                     instrumentReady.status !== "Em Calibração"
                                   ) {
@@ -2337,15 +2349,17 @@
                                   : "bg-royal-blue hover:bg-blue-600 text-white cursor-pointer"
                               }`}
                               title={
-                                hasCertIssued
-                                  ? "Certificado já emitido. O registro de calibração não pode mais ser alterado."
-                                  : isRncIssued
-                                    ? "Relatório de Não Conformidade (RNC) emitido. O processo de calibração para este instrumento está finalizado e inativo."
-                                    : !canAccessCalibrarRole
-                                      ? "Acesso permitido apenas para Técnicos de Calibração/Instrumentistas ou Administrador."
-                                      : !hasRegPhoto
-                                        ? "Atenção: Anexe a foto do cadastro do instrumento para liberar o botão de calibração."
-                                        : "Lançar Calibração"
+                                canAdminReplaceCalibration
+                                  ? `Substituição administrativa liberada. O status '${inst.status}' será preservado.`
+                                  : hasCertIssued
+                                    ? "Certificado já emitido. O registro de calibração não pode mais ser alterado."
+                                    : isRncIssued
+                                      ? "Relatório de Não Conformidade (RNC) emitido. O processo de calibração para este instrumento está finalizado e inativo."
+                                      : !canAccessCalibrarRole
+                                        ? "Acesso permitido apenas para Técnicos de Calibração/Instrumentistas ou Administrador."
+                                        : !hasRegPhoto
+                                          ? "Atenção: Anexe a foto do cadastro do instrumento para liberar o botão de calibração."
+                                          : "Lançar Calibração"
                               }
                             >
                               <Activity className="h-3 w-3" />
@@ -2354,15 +2368,17 @@
                                   ? "RNC Emitido"
                                   : openingCalibrationInstrumentId === inst.id
                                     ? "Abrindo..."
-                                    : "Calibrar"}
+                                    : canAdminReplaceCalibration
+                                      ? "Nova Ficha Admin"
+                                      : "Calibrar"}
                               </span>
                             </button>
 
                             {/* Editar Button */}
                             <button
-                              disabled={isCalibrated || isRncIssued}
+                              disabled={isCalibrationSaved || isRncIssued}
                               onClick={() => {
-                                if (isCalibrated || isRncIssued) return;
+                                if (isCalibrationSaved || isRncIssued) return;
                                 setEditingInstrumentData({
                                   ...inst,
                                   condicaoDeEntrada: Array.isArray(
@@ -2386,15 +2402,15 @@
                                 setShowEditInstrumentModal(true);
                               }}
                               className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors ${
-                                isCalibrated || isRncIssued
+                                isCalibrationSaved || isRncIssued
                                   ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60 shadow-none"
                                   : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer"
                               }`}
                               title={
                                 isRncIssued
                                   ? "RNC emitido para este instrumento. Não é possível editar dados do instrumento."
-                                  : isCalibrated
-                                    ? "Instrumento já calibrado. Não é possível editar dados do instrumento."
+                                  : isCalibrationSaved
+                                    ? "Instrumento finalizado. Utilize Correção Admin; a edição normal permanece bloqueada."
                                     : "Editar dados do Instrumento"
                               }
                             >

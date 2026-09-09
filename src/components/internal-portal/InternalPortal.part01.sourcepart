@@ -363,6 +363,7 @@ const getCertificateClientAddress = (client?: Client): string =>
   ).trim();
 
 const ARCHIVE_ACTION_TYPES = new Set([
+  "report",
   "instrument",
   "standard",
   "birthday",
@@ -944,6 +945,7 @@ export default function InternalPortal({
   onSaveCalibration,
   onDeleteReport,
   onPrepareCalibration,
+  onAdminReplaceCalibration,
   onUpdateMessageStatus,
 }: InternalPortalProps) {
   const [showSignatureAlert, setShowSignatureAlert] = React.useState(false);
@@ -1756,6 +1758,7 @@ export default function InternalPortal({
   const [adminCorrectionReason, setAdminCorrectionReason] = useState("");
   const [adminCorrectionError, setAdminCorrectionError] = useState("");
   const [adminCorrectionSaving, setAdminCorrectionSaving] = useState(false);
+  const [adminCalibrationReplacementSaving, setAdminCalibrationReplacementSaving] = useState(false);
   const [adminCorrectionPhotoUploading, setAdminCorrectionPhotoUploading] = useState<"registration" | "calibrated" | "">("");
 
   const closeAdminInstrumentCorrection = () => {
@@ -1766,6 +1769,7 @@ export default function InternalPortal({
     setAdminCorrectionPassword("");
     setAdminCorrectionReason("");
     setAdminCorrectionError("");
+    setAdminCalibrationReplacementSaving(false);
     setAdminCorrectionPhotoUploading("");
   };
 
@@ -1784,6 +1788,7 @@ export default function InternalPortal({
       material: instrument.material || "",
       conexao: instrument.conexao || "",
       diametro: instrument.diametro || "",
+      unit: instrument.unit || "",
       observacoes: instrument.observacoes || "",
       photoRegistration: instrument.photoRegistration || "",
       photoRegistrationPath: instrument.photoRegistrationPath || "",
@@ -1813,6 +1818,44 @@ export default function InternalPortal({
       setShowAdminCorrectionModal(true);
     } catch (error: any) {
       setAdminCorrectionError(error?.message || "Não foi possível validar a senha administrativa.");
+    }
+  };
+
+  const handleAdminCalibrationReplacement = async () => {
+    if (!adminCorrectionTarget || adminCalibrationReplacementSaving) return;
+    if (!isUserAdmin) {
+      setAdminCorrectionError("Somente o Administrador pode substituir uma ficha de calibração finalizada.");
+      return;
+    }
+    if (adminCorrectionTarget.adminCalibrationReplacementPending === true) {
+      setAdminCorrectionError("A ficha anterior já foi arquivada. Feche esta tela e use 'Nova Ficha Admin'.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `A ficha de calibração atual será retirada da visualização e arquivada para auditoria. O status '${adminCorrectionTarget.status || "atual"}' será preservado e somente o Administrador poderá cadastrar a ficha substituta. Deseja continuar?`,
+    );
+    if (!confirmed) return;
+
+    setAdminCalibrationReplacementSaving(true);
+    setAdminCorrectionError("");
+    try {
+      if (typeof onAdminReplaceCalibration !== "function") {
+        throw new Error("Rotina administrativa de substituição não está disponível nesta versão.");
+      }
+      const result = await onAdminReplaceCalibration(adminCorrectionTarget.id, {
+        username: currentUser?.username || "",
+        password: adminCorrectionPassword,
+        reason: adminCorrectionReason.trim(),
+      });
+      const preservedStatus = result?.instrument?.status || adminCorrectionTarget.status || "status atual";
+      closeAdminInstrumentCorrection();
+      alert(
+        `Ficha anterior arquivada com sucesso. O status '${preservedStatus}' foi preservado. Agora, como Administrador, clique em 'Nova Ficha Admin' para cadastrar a ficha substituta.`,
+      );
+    } catch (error: any) {
+      setAdminCorrectionError(error?.message || "Não foi possível liberar a substituição da ficha de calibração.");
+    } finally {
+      setAdminCalibrationReplacementSaving(false);
     }
   };
 
@@ -1864,6 +1907,7 @@ export default function InternalPortal({
         material: String(adminCorrectionForm.material || ""),
         conexao: String(adminCorrectionForm.conexao || ""),
         diametro: String(adminCorrectionForm.diametro || ""),
+        unit: String(adminCorrectionForm.unit || ""),
         observacoes: String(adminCorrectionForm.observacoes || ""),
         photoRegistration: String(adminCorrectionForm.photoRegistration || ""),
         photoRegistrationPath: String(adminCorrectionForm.photoRegistrationPath || ""),
@@ -2136,17 +2180,27 @@ export default function InternalPortal({
           const reportToDelete = reports.find(
             (report: any) => report.id === deleteTarget.id,
           );
-          if (onDeleteReport) await onDeleteReport(deleteTarget.id);
-          if (reportToDelete?.instrumentId) {
-            const instrumentId = String(reportToDelete.instrumentId);
-            clearIssuedCertificateFlag(instrumentId);
-            setCalibrationStartTimes((previous) => {
-              const updated = { ...previous };
-              delete updated[instrumentId];
-              return updated;
-            });
-            if (selectedInstId === instrumentId) setSelectedInstId("");
+          if (!reportToDelete?.instrumentId) {
+            throw new Error("Não foi possível identificar o instrumento desta ficha de calibração.");
           }
+          if (typeof onAdminReplaceCalibration !== "function") {
+            throw new Error("A rotina administrativa de substituição da ficha não está disponível.");
+          }
+          const instrumentId = String(reportToDelete.instrumentId);
+          await onAdminReplaceCalibration(instrumentId, {
+            username: currentUser?.username || "",
+            password: typedPassword,
+            reason: `Substituição administrativa da ficha ${deleteTarget.name || deleteTarget.id}`,
+          });
+          // Não limpar status operacional nem transformar Entregue em Aguardando.
+          // A ficha antiga é arquivada e somente o Administrador recebe a
+          // liberação temporária para cadastrar a nova ficha.
+          setCalibrationStartTimes((previous) => {
+            const updated = { ...previous };
+            delete updated[instrumentId];
+            return updated;
+          });
+          if (selectedInstId === instrumentId) setSelectedInstId("");
           closeCertificateView();
         } else if (deleteTarget.type === "client") {
           if (onDeleteClient) await onDeleteClient(deleteTarget.id);
@@ -2411,7 +2465,8 @@ export default function InternalPortal({
     if (!Array.isArray(instruments) || instruments.length === 0) return;
     const remoteSessions: Record<string, { startTime: string; technicianName: string; previousStatus?: string }> = {};
     instruments.forEach((inst) => {
-      if (inst.status !== "Em Calibração" || !inst.calibrationStartedAt) return;
+      if (!inst.calibrationStartedAt) return;
+      if (inst.status !== "Em Calibração" && inst.adminCalibrationReplacementPending !== true) return;
       remoteSessions[inst.id] = {
         startTime: inst.calibrationStartedAt,
         technicianName:
@@ -2426,7 +2481,7 @@ export default function InternalPortal({
       // snapshot do Firestore atualizar a lista de instrumentos.
       if (selectedInstId && prev[selectedInstId] && !next[selectedInstId]) {
         const selected = instruments.find((inst) => inst.id === selectedInstId);
-        if (selected?.status === "Em Calibração") {
+        if (selected?.status === "Em Calibração" || selected?.adminCalibrationReplacementPending === true) {
           next[selectedInstId] = prev[selectedInstId];
         }
       }

@@ -89,6 +89,13 @@ export interface Instrument {
   calibrationStartedAt?: string;
   calibrationTechnicianName?: string;
   calibrationPreviousStatus?: CalibrationStatus;
+  adminCalibrationReplacementPending?: boolean;
+  adminCalibrationReplacementOriginalStatus?: CalibrationStatus;
+  adminCalibrationReplacementReason?: string;
+  adminCalibrationReplacementRequestedAt?: string;
+  adminCalibrationReplacementRequestedByUid?: string;
+  adminCalibrationReplacementRequestedByName?: string;
+  adminCalibrationReplacementReportIds?: string[];
   registrationSnapshot?: InstrumentRegistrationSnapshot;
 }
 
@@ -203,6 +210,11 @@ export interface CalibrationReport {
   rncNumber?: string;
   rncData?: RncReport;
   materialsUsed?: string[];
+  administrativeReplacement?: boolean;
+  replacedReportIds?: string[];
+  replacementReason?: string;
+  replacementRequestedAt?: string;
+  replacementRequestedByName?: string;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;

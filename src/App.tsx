@@ -34,6 +34,7 @@ import {
   saveCalibrationDoc,
   deleteReportDoc,
   recoverArchivedCalibrationDoc,
+  prepareAdminCalibrationReplacementDoc,
   updateMessageDoc,
   addPortalUserDoc,
   updatePortalUserDoc,
@@ -450,6 +451,26 @@ export default function App() {
     }
   };
 
+  const handleAdminReplaceCalibration = async (
+    instrumentId: string,
+    credentials: { username: string; password: string; reason: string },
+  ) => {
+    try {
+      const result = await prepareAdminCalibrationReplacementDoc(instrumentId, credentials);
+      const archived = new Set(result.archivedReportIds || []);
+      setReports(prev => prev.filter(report => !archived.has(report.id)));
+      if (result.instrument) {
+        setInstruments(prev => prev.map(instrument =>
+          instrument.id === instrumentId ? result.instrument : instrument,
+        ));
+      }
+      return result;
+    } catch (err) {
+      console.error('Error preparing administrative calibration replacement:', err);
+      throw err;
+    }
+  };
+
   // INBOX LEADS ACTIONS (Firestore)
   const handleUpdateMessageStatus = async (id: string, status: ContactMessage['status']) => {
     try {
@@ -756,6 +777,7 @@ export default function App() {
             onSaveCalibration={handleSaveCalibration}
             onDeleteReport={handleDeleteReport}
             onPrepareCalibration={handlePrepareCalibration}
+            onAdminReplaceCalibration={handleAdminReplaceCalibration}
             onUpdateMessageStatus={handleUpdateMessageStatus}
           />
         )}

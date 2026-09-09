@@ -2693,22 +2693,23 @@
                               <span>{isDownloadingCertificatePdf ? "Baixando..." : "Baixar PDF"}</span>
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              requestAdminDelete(
-                                "report",
-                                report?.id || inst.id,
-                                `Certificado Nº ${certNumber}`,
-                              )
-                            }
-                            className="p-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-md cursor-pointer"
-                            title="Excluir Certificado de Calibração (Requer Senha do Administrador)"
-
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            <span>Excluir Calibração</span>
-                          </button>
+                          {isUserAdmin && report?.id && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                requestAdminDelete(
+                                  "report",
+                                  report.id,
+                                  `Ficha de Calibração Nº ${certNumber}`,
+                                )
+                              }
+                              className="p-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-md cursor-pointer"
+                              title="Arquivar a ficha atual e liberar uma nova ficha somente para Administrador, preservando o status operacional"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span>Substituir Ficha</span>
+                            </button>
+                          )}
                           <button
                             onClick={() => closeCertificateView()}
                             className="p-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-all flex items-center text-xs font-bold shadow-sm cursor-pointer"

@@ -481,6 +481,54 @@ service cloud.firestore {
       );
     }
 
+    // LOTE 39 — a liberação para substituir uma ficha finalizada nasce somente
+    // no backend após reautenticação do Administrador. Enquanto a liberação
+    // estiver ativa, apenas o Administrador pode gravar os campos estritamente
+    // necessários à nova ficha, sem mudar o status operacional preservado.
+    function adminCalibrationReplacementFieldsUntouched() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'adminCalibrationReplacementPending',
+        'adminCalibrationReplacementOriginalStatus',
+        'adminCalibrationReplacementReason',
+        'adminCalibrationReplacementRequestedAt',
+        'adminCalibrationReplacementRequestedByUid',
+        'adminCalibrationReplacementRequestedByName',
+        'adminCalibrationReplacementReportIds'
+      ]);
+    }
+
+    function adminCalibrationReplacementUpdateSafe() {
+      return isAdministrator()
+        && resource.data.get('adminCalibrationReplacementPending', false) == true
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.get('registrationSnapshot', null) == resource.data.get('registrationSnapshot', null)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'lastCalibrationDate', 'nextCalibrationDate',
+          'accuracyClass', 'mpe', 'temperature', 'humidity',
+          'manualCalibrationDateAllowed', 'reissueSuggestedCalibrationDate',
+          'calibrationStartedAt', 'calibrationTechnicianName', 'calibrationPreviousStatus',
+          'adminCalibrationReplacementPending',
+          'adminCalibrationReplacementOriginalStatus',
+          'adminCalibrationReplacementReason',
+          'adminCalibrationReplacementRequestedAt',
+          'adminCalibrationReplacementRequestedByUid',
+          'adminCalibrationReplacementRequestedByName',
+          'adminCalibrationReplacementReportIds',
+          'updatedAt'
+        ])
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
+        ]);
+    }
+
+    function calibrationWriteTargetsAdministrativeReplacement() {
+      let instrumentId = request.resource.data.get('instrumentId', null);
+      return instrumentId != null
+        && exists(/databases/$(database)/documents/instruments/$(instrumentId))
+        && get(/databases/$(database)/documents/instruments/$(instrumentId)).data.get('adminCalibrationReplacementPending', false) == true;
+    }
+
     // Dados operacionais exibidos no Portal do Cliente.
     // Clientes não consultam estas coleções diretamente: os dados passam por
     // /api/client-portal/data, que usa o UID autenticado para localizar o cliente
@@ -492,22 +540,28 @@ service cloud.firestore {
       // A transição para Entregue é permitida; depois disso o cadastro se torna
       // imutável para preservar a rastreabilidade da devolução. Campos de
       // arquivamento só podem ser escritos pelo backend (Admin SDK).
-      allow update: if hasEditModule('calibration')
+      allow update: if (
+        hasEditModule('calibration')
+        && resource.data.get('adminCalibrationReplacementPending', false) != true
         && resource.data.status != 'Entregue'
         // A ficha de registro representa o estado histórico de entrada do
         // instrumento e não pode ser alterada pelo navegador após a criação.
         && request.resource.data.get('registrationSnapshot', null) == resource.data.get('registrationSnapshot', null)
         && finalizedInstrumentIdentityUntouched()
         && finalizedInstrumentPhotoReplacementSafe()
+        && adminCalibrationReplacementFieldsUntouched()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid'
-        ]);
+        ])
+      ) || adminCalibrationReplacementUpdateSafe();
       // Exclusão física foi substituída por arquivamento administrativo.
       allow delete: if false;
     }
     match /calibrationReports/{reportId} {
       allow read: if hasModule('calibration');
-      allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow create: if hasEditModule('calibration')
+        && archiveFieldsAbsentOnCreate()
+        && (!calibrationWriteTargetsAdministrativeReplacement() || isAdministrator());
       // Certificados associados a instrumento já entregue não podem ser
       // regravados. Campos de arquivamento são exclusivos do backend.
       allow update: if hasEditModule('calibration')
@@ -770,7 +824,9 @@ service cloud.firestore {
       // LOTE 37: técnicos registram o tempo silenciosamente, mas somente
       // administradores podem consultar os dados de Auditoria e Metrologia.
       allow read: if isAdministrator();
-      allow create: if hasEditModule('calibration') && archiveFieldsAbsentOnCreate();
+      allow create: if hasEditModule('calibration')
+        && archiveFieldsAbsentOnCreate()
+        && (!calibrationWriteTargetsAdministrativeReplacement() || isAdministrator());
       // Registros de tempo são append-only no navegador. O backend pode
       // arquivá-los com Admin SDK após autorização administrativa.
       allow update, delete: if false;

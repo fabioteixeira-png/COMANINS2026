@@ -3745,6 +3745,7 @@ const ADMIN_INSTRUMENT_CORRECTION_FIELDS = new Set([
   'material',
   'conexao',
   'diametro',
+  'unit',
   'observacoes',
   'photoRegistration',
   'photoRegistrationPath',
@@ -3761,6 +3762,7 @@ const ADMIN_INSTRUMENT_CORRECTION_LABELS: Record<string, string> = {
   material: 'Material',
   conexao: 'Conexão',
   diametro: 'Diâmetro',
+  unit: 'Unidade',
   observacoes: 'Observações cadastrais',
   photoRegistration: 'Foto de cadastro',
   photoRegistrationPath: 'Arquivo da foto de cadastro',
@@ -3904,6 +3906,201 @@ app.post(
         return res.status(409).json({ error: 'CALIBRATION_NOT_FINALIZED', message: 'Use a edição normal antes da conclusão da calibração.' });
       }
       console.error('Instrument admin correction failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+
+// LOTE 39 — substituição administrativa de ficha de calibração sem alterar o
+// status operacional do instrumento. A ficha anterior é arquivada (soft-delete)
+// para manter rastreabilidade e somente o Administrador, após reconfirmar a
+// própria senha, pode liberar a criação de uma nova ficha.
+app.post(
+  '/api/internal/instruments/:instrumentId/admin-replace-calibration',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb || !adminAuth) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+
+    const instrumentId = asLimitedString(req.params.instrumentId, 180);
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const reason = asLimitedString(req.body?.reason, 500);
+
+    if (!instrumentId) return res.status(400).json({ error: 'INVALID_INSTRUMENT_ID' });
+    if (!reason || reason.length < 5) {
+      return res.status(400).json({
+        error: 'REPLACEMENT_REASON_REQUIRED',
+        message: 'Informe o motivo da substituição da ficha de calibração.',
+      });
+    }
+
+    try {
+      const confirmedProfile = await verifyCurrentAdministratorPassword(req.user, username, password);
+      if (!confirmedProfile) {
+        return res.status(403).json({ error: 'ADMIN_REAUTH_REQUIRED', message: 'Senha administrativa inválida.' });
+      }
+
+      const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+      const reportQuery = firestoreDb.collection('calibrationReports').where('instrumentId', '==', instrumentId);
+      const auditQuery = firestoreDb.collection('calibrationAuditLogs').where('instrumentId', '==', instrumentId);
+      const systemAuditRef = firestoreDb.collection('systemAuditLogs').doc();
+      const nowIso = new Date().toISOString();
+      const actorName = asLimitedString(
+        (confirmedProfile as any)?.name || req.user?.name || req.user?.email || username,
+        160,
+      ) || 'Administrador';
+      const actorUid = asLimitedString(req.user?.uid, 160);
+      const actorRole = asLimitedString((confirmedProfile as any)?.permissionLevel || (confirmedProfile as any)?.role, 100) || 'Administrador';
+
+      const result = await firestoreDb.runTransaction(async (transaction) => {
+        const [instrumentSnapshot, reportsSnapshot, auditSnapshot] = await Promise.all([
+          transaction.get(instrumentRef),
+          transaction.get(reportQuery),
+          transaction.get(auditQuery),
+        ]);
+
+        if (!instrumentSnapshot.exists) {
+          const error: any = new Error('INSTRUMENT_NOT_FOUND');
+          error.code = 'INSTRUMENT_NOT_FOUND';
+          throw error;
+        }
+
+        const instrument: any = instrumentSnapshot.data() || {};
+        if (instrument.adminCalibrationReplacementPending === true) {
+          const error: any = new Error('ADMIN_REPLACEMENT_ALREADY_PENDING');
+          error.code = 'ADMIN_REPLACEMENT_ALREADY_PENDING';
+          throw error;
+        }
+        if (instrument.hasRnc === true || ['Não Conforme', 'RNC'].includes(String(instrument.status || ''))) {
+          const error: any = new Error('RNC_REPLACEMENT_NOT_ALLOWED');
+          error.code = 'RNC_REPLACEMENT_NOT_ALLOWED';
+          throw error;
+        }
+        if (!isFinalizedCalibrationInstrument(instrument)) {
+          const error: any = new Error('CALIBRATION_NOT_FINALIZED');
+          error.code = 'CALIBRATION_NOT_FINALIZED';
+          throw error;
+        }
+
+        const activeReports = reportsSnapshot.docs.filter((docSnapshot) => docSnapshot.data()?.isDeleted !== true);
+        if (activeReports.length === 0) {
+          const error: any = new Error('ACTIVE_CALIBRATION_REPORT_NOT_FOUND');
+          error.code = 'ACTIVE_CALIBRATION_REPORT_NOT_FOUND';
+          throw error;
+        }
+
+        const activeReportIds = activeReports.map((docSnapshot) => docSnapshot.id);
+        const activeReportIdSet = new Set(activeReportIds);
+        const sortedDates = activeReports
+          .map((docSnapshot) => normalizeCalibrationDate(docSnapshot.data()?.date))
+          .filter((value): value is string => !!value)
+          .sort();
+        const suggestedCalibrationDate = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : null;
+
+        activeReports.forEach((docSnapshot) => {
+          transaction.update(docSnapshot.ref, {
+            isDeleted: true,
+            deletedAt: nowIso,
+            deletedBy: actorName,
+            deletedByUid: actorUid,
+            updatedAt: nowIso,
+            archiveReason: 'ADMIN_CALIBRATION_REPLACEMENT',
+          });
+        });
+
+        auditSnapshot.docs.forEach((docSnapshot) => {
+          const audit = docSnapshot.data() || {};
+          if (audit.isDeleted === true || !activeReportIdSet.has(String(audit.reportId || ''))) return;
+          transaction.update(docSnapshot.ref, {
+            isDeleted: true,
+            deletedAt: nowIso,
+            deletedBy: actorName,
+            deletedByUid: actorUid,
+            updatedAt: nowIso,
+            archiveReason: 'ADMIN_CALIBRATION_REPLACEMENT',
+          });
+        });
+
+        // Não alterar status, datas operacionais, fotos, cadastro ou qualquer
+        // outro bloqueio já consolidado. Somente sinaliza que uma nova ficha
+        // administrativa está autorizada.
+        const replacementUpdates = {
+          adminCalibrationReplacementPending: true,
+          adminCalibrationReplacementOriginalStatus: instrument.status,
+          adminCalibrationReplacementReason: reason,
+          adminCalibrationReplacementRequestedAt: nowIso,
+          adminCalibrationReplacementRequestedByUid: actorUid,
+          adminCalibrationReplacementRequestedByName: actorName,
+          adminCalibrationReplacementReportIds: activeReportIds,
+          manualCalibrationDateAllowed: true,
+          reissueSuggestedCalibrationDate: suggestedCalibrationDate || FieldValue.delete(),
+          updatedAt: nowIso,
+        };
+        transaction.update(instrumentRef, replacementUpdates);
+
+        transaction.set(systemAuditRef, {
+          action: 'CALIBRATION_ADMIN_REPLACEMENT_REQUESTED',
+          entityType: 'instrument',
+          entityId: instrumentId,
+          actorUid,
+          actorName,
+          actorRole,
+          createdAt: nowIso,
+          immutable: true,
+          summary: `Ficha de calibração arquivada para substituição administrativa: ${asLimitedString(instrument.certificateNumber || instrument.coma || instrument.tag || instrumentId, 160)}`,
+          metadata: {
+            reason,
+            archivedReportIds: activeReportIds,
+            previousInstrumentStatus: asLimitedString(instrument.status, 120),
+            operationalStatusPreserved: true,
+            lastCalibrationDatePreserved: true,
+            nextCalibrationDatePreserved: true,
+            administratorOnlyReplacement: true,
+          },
+        });
+
+        const responseInstrument = {
+          ...instrument,
+          id: instrumentId,
+          adminCalibrationReplacementPending: true,
+          adminCalibrationReplacementOriginalStatus: instrument.status,
+          adminCalibrationReplacementReason: reason,
+          adminCalibrationReplacementRequestedAt: nowIso,
+          adminCalibrationReplacementRequestedByUid: actorUid,
+          adminCalibrationReplacementRequestedByName: actorName,
+          adminCalibrationReplacementReportIds: activeReportIds,
+          manualCalibrationDateAllowed: true,
+          ...(suggestedCalibrationDate ? { reissueSuggestedCalibrationDate: suggestedCalibrationDate } : {}),
+          updatedAt: nowIso,
+        };
+        if (!suggestedCalibrationDate) delete (responseInstrument as any).reissueSuggestedCalibrationDate;
+
+        return {
+          archivedReportIds: activeReportIds,
+          instrument: responseInstrument,
+        };
+      });
+
+      return res.json({ success: true, ...result });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('INSTRUMENT_NOT_FOUND')) return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+      if (code.includes('ADMIN_REPLACEMENT_ALREADY_PENDING')) {
+        return res.status(409).json({ error: 'ADMIN_REPLACEMENT_ALREADY_PENDING', message: 'Este instrumento já está liberado para substituição administrativa da ficha.' });
+      }
+      if (code.includes('RNC_REPLACEMENT_NOT_ALLOWED')) {
+        return res.status(409).json({ error: 'RNC_REPLACEMENT_NOT_ALLOWED', message: 'Instrumentos com RNC devem seguir o fluxo específico de Não Conformidade.' });
+      }
+      if (code.includes('CALIBRATION_NOT_FINALIZED')) {
+        return res.status(409).json({ error: 'CALIBRATION_NOT_FINALIZED', message: 'A ficha ainda não está finalizada; utilize o fluxo normal de calibração.' });
+      }
+      if (code.includes('ACTIVE_CALIBRATION_REPORT_NOT_FOUND')) {
+        return res.status(404).json({ error: 'ACTIVE_CALIBRATION_REPORT_NOT_FOUND', message: 'Não foi encontrada ficha de calibração ativa para substituir.' });
+      }
+      console.error('Admin calibration replacement failed:', error);
       return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
     }
   },
@@ -4722,98 +4919,21 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
   }
 });
 
+// LOTE 39 — rota legada desativada. Ela removia fisicamente a ficha e
+// alterava o status do instrumento para Aguardando Calibração, o que podia
+// desfazer um status operacional já consolidado como Entregue. Toda
+// substituição passa agora por /admin-replace-calibration, com senha e
+// preservação do status.
 app.post(
   '/api/internal/calibration-reports/:reportId/delete-and-reopen',
   requireAuth,
   requireInternalAccount,
   writeApiRateLimit,
-  async (req: AuthRequest, res) => {
-    if (!firestoreDb || !req.user) {
-      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
-    }
-
-    const reportId = asLimitedString(req.params.reportId, 180);
-    if (!reportId) return res.status(400).json({ error: 'INVALID_REPORT_ID' });
-
-    try {
-      const administrator = await getFreshAdministrator(req);
-      if (!administrator) return res.status(403).json({ error: 'FORBIDDEN' });
-
-      const reportRef = firestoreDb.collection('calibrationReports').doc(reportId);
-      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
-      const updatedAt = new Date().toISOString();
-
-      const result = await firestoreDb.runTransaction(async (transaction) => {
-        const reportSnapshot = await transaction.get(reportRef);
-        if (!reportSnapshot.exists) throw new Error('REPORT_NOT_FOUND');
-
-        const report: any = reportSnapshot.data() || {};
-        const instrumentId = asLimitedString(report.instrumentId, 180);
-        if (!instrumentId) throw new Error('REPORT_WITHOUT_INSTRUMENT');
-
-        const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
-        const instrumentSnapshot = await transaction.get(instrumentRef);
-        if (!instrumentSnapshot.exists) throw new Error('INSTRUMENT_NOT_FOUND');
-
-        const instrument: any = instrumentSnapshot.data() || {};
-        const suggestedCalibrationDate = normalizeCalibrationDate(report.date);
-        transaction.delete(reportRef);
-        transaction.update(
-          instrumentRef,
-          calibrationReopenUpdates(updatedAt, suggestedCalibrationDate),
-        );
-        transaction.set(auditRef, {
-          action: 'CALIBRATION_REPORT_DELETED_FOR_REISSUE',
-          entityType: 'calibrationReport',
-          entityId: reportId,
-          actorUid: asLimitedString(req.user?.uid, 160),
-          actorName: asLimitedString(
-            administrator.name || administrator.username || req.user?.email,
-            160,
-          ) || 'Administrador',
-          actorRole: asLimitedString(
-            administrator.permissionLevel || administrator.role,
-            100,
-          ),
-          createdAt: updatedAt,
-          immutable: true,
-          summary: 'Certificado removido definitivamente e calibração reaberta',
-          metadata: {
-            instrumentId,
-            certNumber: asLimitedString(report.certNumber, 160),
-            suggestedCalibrationDate,
-            previousInstrumentStatus: asLimitedString(instrument.status, 100),
-            reason: 'CERTIFICATE_CORRECTION_AND_REISSUE',
-          },
-        });
-
-        return {
-          reportId,
-          instrumentId,
-          instrument: reopenedInstrumentPayload(
-            instrumentId,
-            instrument,
-            updatedAt,
-            suggestedCalibrationDate,
-          ),
-        };
-      });
-
-      return res.json({ success: true, ...result });
-    } catch (error: any) {
-      const code = String(error?.message || error?.code || '');
-      if (code.includes('REPORT_NOT_FOUND')) {
-        return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
-      }
-      if (code.includes('REPORT_WITHOUT_INSTRUMENT')) {
-        return res.status(409).json({ error: 'REPORT_WITHOUT_INSTRUMENT' });
-      }
-      if (code.includes('INSTRUMENT_NOT_FOUND')) {
-        return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
-      }
-      console.error('Calibration report delete-and-reopen failed:', error);
-      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
-    }
+  async (_req: AuthRequest, res) => {
+    return res.status(409).json({
+      error: 'LEGACY_CALIBRATION_REOPEN_DISABLED',
+      message: 'Use a Substituição Administrativa da ficha. O fluxo antigo foi desativado para preservar o status operacional do instrumento.',
+    });
   },
 );
 
