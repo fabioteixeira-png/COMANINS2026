@@ -308,61 +308,11 @@ export default function CalibrationLabelPrintModal({
       }, 250);
     };
 
-    if (isComaninsStandard) {
-      // O padrão COMANINS usa uma impressão totalmente isolada: somente o SVG
-      // da etiqueta é enviado ao contexto de impressão. Isso impede que o
-      // navegador herde qualquer elemento do Portal Interno.
-      const svg = printContent.querySelector("svg");
-      if (!svg) return;
-
-      iframe.onload = () => {
-        const printWindow = iframe.contentWindow;
-        if (!printWindow) {
-          cleanup();
-          return;
-        }
-        printWindow.addEventListener("afterprint", cleanup, { once: true });
-        window.setTimeout(() => {
-          printWindow.focus();
-          printWindow.print();
-          window.setTimeout(cleanup, 2000);
-        }, 120);
-      };
-
-      iframe.srcdoc = `
-        <!doctype html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Etiqueta Padrão COMANINS</title>
-            <style>
-              @page { size: 36mm 36mm; margin: 0; }
-              html, body {
-                margin: 0 !important;
-                padding: 0 !important;
-                width: 36mm !important;
-                height: 36mm !important;
-                overflow: hidden !important;
-                background: transparent !important;
-              }
-              body { display: block !important; }
-              svg {
-                display: block !important;
-                width: 36mm !important;
-                height: 36mm !important;
-                margin: 0 !important;
-                padding: 0 !important;
-              }
-              .tze661-tape-background { fill: transparent !important; }
-            </style>
-          </head>
-          <body>${svg.outerHTML}</body>
-        </html>
-      `;
-      document.body.appendChild(iframe);
-      return;
-    }
-
+    // LOTE 40: a etiqueta do padrão COMANINS/BPC usa exatamente o mesmo
+    // mecanismo de impressão da etiqueta de calibração normal. A única
+    // diferença física é o comprimento: 36 mm em vez de 15,98 mm.
+    // Isso evita divergências de escala entre iframe.srcdoc e o fluxo
+    // comprovadamente funcional baseado em document.write().
     // Mantém intacto o fluxo que já funciona para as etiquetas dos demais instrumentos.
     document.body.appendChild(iframe);
     const doc = iframe.contentWindow?.document;
