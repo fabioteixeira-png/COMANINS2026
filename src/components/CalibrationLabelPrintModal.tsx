@@ -285,12 +285,146 @@ export default function CalibrationLabelPrintModal({
   calibrationLogo,
   onClose,
 }: CalibrationLabelPrintModalProps) {
-  const labelHeightMm = isComaninsStandard ? 36 : 15.98;
-
   const handlePrint = () => {
     const printContent = document.getElementById("calibration-label-print");
     if (!printContent) return;
 
+    // LOTE 43: a etiqueta de padrão COMANINS/BPC precisa ser impressa em uma
+    // página física de 36 x 36 mm. O fluxo por iframe funciona para a etiqueta
+    // normal (36 x 15,98 mm), mas o Chrome/driver pode conservar o tamanho de
+    // mídia anterior ao imprimir um subframe. Para a BPC usamos um documento
+    // de impressão de nível superior, com @page e conteúdo fixos em 36 x 36 mm.
+    if (isComaninsStandard) {
+      const printWindow = window.open(
+        "",
+        "_blank",
+        "popup=yes,width=720,height=760,resizable=yes,scrollbars=yes",
+      );
+
+      if (!printWindow) {
+        window.alert(
+          "O navegador bloqueou a janela de impressão. Libere pop-ups para este sistema e tente novamente.",
+        );
+        return;
+      }
+
+      const clonedContent = printContent.cloneNode(true) as HTMLElement;
+      clonedContent.removeAttribute("class");
+      clonedContent.setAttribute(
+        "style",
+        "display:block;width:36mm;height:36mm;min-width:36mm;min-height:36mm;max-width:36mm;max-height:36mm;margin:0;padding:0;overflow:hidden;box-sizing:border-box;",
+      );
+
+      const clonedSvg = clonedContent.querySelector("svg");
+      if (clonedSvg) {
+        clonedSvg.removeAttribute("class");
+        clonedSvg.setAttribute("width", "36mm");
+        clonedSvg.setAttribute("height", "36mm");
+        clonedSvg.setAttribute(
+          "style",
+          "display:block;width:36mm;height:36mm;min-width:36mm;min-height:36mm;max-width:36mm;max-height:36mm;margin:0;padding:0;",
+        );
+      }
+
+      const doc = printWindow.document;
+      doc.open();
+      doc.write(`
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Etiqueta BPC 36x36</title>
+            <style>
+              @page {
+                size: 36mm 36mm;
+                margin: 0;
+              }
+              * {
+                box-sizing: border-box;
+              }
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 36mm !important;
+                height: 36mm !important;
+                min-width: 36mm !important;
+                min-height: 36mm !important;
+                max-width: 36mm !important;
+                max-height: 36mm !important;
+                overflow: hidden !important;
+                background: transparent !important;
+              }
+              #calibration-label-print {
+                display: block !important;
+                width: 36mm !important;
+                height: 36mm !important;
+                min-width: 36mm !important;
+                min-height: 36mm !important;
+                max-width: 36mm !important;
+                max-height: 36mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+                aspect-ratio: auto !important;
+              }
+              #calibration-label-print svg {
+                display: block !important;
+                width: 36mm !important;
+                height: 36mm !important;
+                min-width: 36mm !important;
+                min-height: 36mm !important;
+                max-width: 36mm !important;
+                max-height: 36mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              .tze661-tape-background {
+                fill: transparent !important;
+              }
+              @media print {
+                @page {
+                  size: 36mm 36mm;
+                  margin: 0;
+                }
+                html, body, #calibration-label-print, #calibration-label-print svg {
+                  width: 36mm !important;
+                  height: 36mm !important;
+                }
+              }
+            </style>
+          </head>
+          <body>${clonedContent.outerHTML}</body>
+        </html>
+      `);
+      doc.close();
+
+      let printTriggered = false;
+      const triggerPrint = () => {
+        if (printTriggered || printWindow.closed) return;
+        printTriggered = true;
+        printWindow.focus();
+        window.setTimeout(() => printWindow.print(), 180);
+      };
+
+      printWindow.addEventListener("afterprint", () => {
+        window.setTimeout(() => {
+          if (!printWindow.closed) printWindow.close();
+        }, 250);
+      }, { once: true });
+
+      if (doc.readyState === "complete") {
+        triggerPrint();
+      } else {
+        printWindow.addEventListener("load", triggerPrint, { once: true });
+        window.setTimeout(triggerPrint, 700);
+      }
+      return;
+    }
+
+    // A etiqueta normal já está homologada no fluxo de 36 x 15,98 mm.
+    // Não alterar esse caminho.
+    const labelHeightMm = 15.98;
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.position = "fixed";
@@ -308,12 +442,7 @@ export default function CalibrationLabelPrintModal({
       }, 250);
     };
 
-    // LOTE 40: a etiqueta do padrão COMANINS/BPC usa exatamente o mesmo
-    // mecanismo de impressão da etiqueta de calibração normal. A única
-    // diferença física é o comprimento: 36 mm em vez de 15,98 mm.
-    // Isso evita divergências de escala entre iframe.srcdoc e o fluxo
-    // comprovadamente funcional baseado em document.write().
-    // Mantém intacto o fluxo que já funciona para as etiquetas dos demais instrumentos.
+    // Fluxo homologado da etiqueta normal (36 x 15,98 mm).
     document.body.appendChild(iframe);
     const doc = iframe.contentWindow?.document;
     if (!doc) {
@@ -365,13 +494,13 @@ export default function CalibrationLabelPrintModal({
 
   return (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[99999] flex items-start justify-center overflow-y-auto bg-slate-950/85 p-2 backdrop-blur-sm sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="calibration-label-title"
     >
-      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
+      <div className="my-auto flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)]">
+        <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div>
             <h2 id="calibration-label-title" className="text-base font-extrabold text-slate-900">
               {isComaninsStandard
@@ -392,7 +521,7 @@ export default function CalibrationLabelPrintModal({
           </button>
         </div>
 
-        <div className="space-y-5 p-5 sm:p-7">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:space-y-5 sm:p-6">
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -403,7 +532,7 @@ export default function CalibrationLabelPrintModal({
             </div>
           </div>
 
-          <div className="flex justify-center overflow-x-auto rounded-xl bg-slate-200 p-5">
+          <div className="flex justify-center overflow-auto rounded-xl bg-slate-200 p-3 sm:p-5">
             <CalibrationLabelArtwork
               certificateNumber={certificateNumber}
               calibrationDate={calibrationDate}
@@ -413,10 +542,14 @@ export default function CalibrationLabelPrintModal({
               periodicityMonths={periodicityMonths}
               calibrationLogo={calibrationLogo}
               printable
-              className={isComaninsStandard ? "w-full max-w-[520px] shadow-lg" : "w-full max-w-[720px] shadow-lg"}
+              className={isComaninsStandard
+                ? "w-[min(520px,46dvh)] max-w-full shadow-lg"
+                : "w-full max-w-[720px] shadow-lg"}
             />
           </div>
+        </div>
 
+        <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
