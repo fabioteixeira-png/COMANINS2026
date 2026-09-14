@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import fs from "fs";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth } from './src/middleware/auth.ts';
 import type { AuthRequest } from './src/middleware/auth.ts';
@@ -4537,6 +4538,113 @@ const applyFieldServiceOperations = async (
   return { applied, rejected };
 };
 
+
+// LOTE 41 — snapshot otimizado para Serviço de Campo.
+// O navegador deixa de percorrer milhares de documentos do Firestore em vários
+// round-trips na abertura da aba. O servidor monta um snapshot compacto, mantém
+// cache curto em memória e envia a resposta comprimida. As gravações invalidam
+// o cache imediatamente; o feed incremental continua responsável por alterações
+// em tempo real após a carga inicial.
+const FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS = 45_000;
+type FieldServiceSnapshotCache = {
+  expiresAt: number;
+  body: Buffer;
+  etag: string;
+  total: number;
+  generatedAt: string;
+};
+let fieldServiceSnapshotCache: FieldServiceSnapshotCache | null = null;
+let fieldServiceSnapshotPromise: Promise<FieldServiceSnapshotCache> | null = null;
+
+const invalidateFieldServiceSnapshotCache = () => {
+  fieldServiceSnapshotCache = null;
+};
+
+const parseFieldServiceInterventionDateForSort = (value: unknown): number => {
+  const raw = String(value || '').trim();
+  if (!raw) return 0;
+  const br = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildFieldServiceSnapshot = async (): Promise<FieldServiceSnapshotCache> => {
+  if (!firestoreDb) throw new Error('AUTH_SERVICE_UNAVAILABLE');
+  if (fieldServiceSnapshotCache && fieldServiceSnapshotCache.expiresAt > Date.now()) {
+    return fieldServiceSnapshotCache;
+  }
+  if (fieldServiceSnapshotPromise) return fieldServiceSnapshotPromise;
+
+  const task = (async () => {
+    const snapshot = await firestoreDb
+      .collection('fieldServiceRecords')
+      .select(
+        'clientId', 'cliente', 'tag', 'equipamento', 'localizacao', 'certificate',
+        'dataCalibracao', 'interventionDate', 'technician', 'area', 'range', 'operacao',
+        'unidadeMedida', 'categoria', 'emissaoPdf', 'ordemServico', 'tipoServico',
+        'observacao', 'unidade', 'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid',
+        'updatedAt', 'normalizedTag', 'normalizedCertificate',
+      )
+      .get();
+
+    const records = snapshot.docs
+      .map((recordDoc) => ({ id: recordDoc.id, ...recordDoc.data() }))
+      .filter((record: any) => record.isDeleted !== true)
+      .sort((a: any, b: any) => {
+        const dateDiff = parseFieldServiceInterventionDateForSort(b.interventionDate)
+          - parseFieldServiceInterventionDateForSort(a.interventionDate);
+        if (dateDiff !== 0) return dateDiff;
+        return String(b.id || '').localeCompare(String(a.id || ''), undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        });
+      });
+
+    const generatedAt = new Date().toISOString();
+    const json = JSON.stringify({ success: true, records, total: records.length, generatedAt });
+    const etag = `"${createHash('sha1').update(json).digest('hex')}"`;
+    const cached: FieldServiceSnapshotCache = {
+      expiresAt: Date.now() + FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS,
+      body: gzipSync(Buffer.from(json, 'utf8'), { level: 6 }),
+      etag,
+      total: records.length,
+      generatedAt,
+    };
+    fieldServiceSnapshotCache = cached;
+    return cached;
+  })().finally(() => {
+    if (fieldServiceSnapshotPromise === task) fieldServiceSnapshotPromise = null;
+  });
+
+  fieldServiceSnapshotPromise = task;
+  return task;
+};
+
+app.get(
+  '/api/field-service/snapshot',
+  requireAuth,
+  requireInternalAccount,
+  requireAccessModule('field_service'),
+  async (_req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    try {
+      const snapshot = await buildFieldServiceSnapshot();
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+      res.setHeader('ETag', snapshot.etag);
+      res.setHeader('X-Field-Service-Total', String(snapshot.total));
+      return res.status(200).end(snapshot.body);
+    } catch (error) {
+      console.error('Field service snapshot failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
 app.post(
   '/api/field-service/upsert',
   requireAuth,
@@ -4561,6 +4669,7 @@ app.post(
         return res.status(409).json({ error: 'FIELD_SERVICE_CONFLICT', ...rejection });
       }
       const applied = result.applied[0];
+      if (applied) invalidateFieldServiceSnapshotCache();
       return res.json({ success: true, record: { id: applied.id, ...applied.after } });
     } catch (error) {
       console.error('Field service upsert failed:', error);
@@ -4607,6 +4716,7 @@ app.post(
         ...item,
         index: item.type === 'add' ? item.index - addIndexOffset : item.index,
       }));
+      if (result.applied.length > 0) invalidateFieldServiceSnapshotCache();
       return res.json({ success: true, updated, added, rejected });
     } catch (error) {
       console.error('Field service bulk upsert failed:', error);
@@ -4701,6 +4811,7 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
       removeSnapshotOwner(fieldServiceUniquenessSnapshot.tags, normalizeFieldServiceTagKey(archivedBefore.tag), recordId);
       removeSnapshotOwner(fieldServiceUniquenessSnapshot.certificates, normalizeFieldServiceCertificateKey(archivedBefore.certificate), recordId);
     }
+    if (archivedBefore) invalidateFieldServiceSnapshotCache();
     return res.json({ success: true });
   } catch (error: any) {
     const code = String(error?.code || error?.message || '');
@@ -4894,6 +5005,8 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
       if (lockPage.size < pageSize || !lockCursor) break;
     }
     fieldServiceUniquenessSnapshot = { tags: new Map(), certificates: new Map() };
+
+    invalidateFieldServiceSnapshotCache();
 
     await firestoreDb.collection('systemAuditLogs').add({
       action: 'FIELD_SERVICE_ALL_RECORDS_ARCHIVED',

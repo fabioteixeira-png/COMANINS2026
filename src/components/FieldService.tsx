@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -235,14 +235,26 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   }, [canEdit, canClearData]);
 
   useEffect(() => {
-    const unsubscribeInst = syncInstruments((data) => setInstruments(data));
+    let disposed = false;
+    let unsubscribeInst: Promise<() => void> | null = null;
     const unsubscribe = syncFieldServiceRecords((data) => {
+      if (disposed) return;
       setRecords(data);
       setIsLoading(false);
+
+      // Serviço de Campo é prioridade. A carga pesada de instrumentos começa
+      // somente depois de o snapshot do serviço já estar disponível, evitando
+      // disputar rede/CPU durante a abertura da aba.
+      if (!unsubscribeInst) {
+        unsubscribeInst = syncInstruments((instrumentData) => {
+          if (!disposed) setInstruments(instrumentData);
+        });
+      }
     });
     return () => {
+      disposed = true;
       unsubscribe.then(unsub => unsub());
-      unsubscribeInst.then(u => u());
+      unsubscribeInst?.then(unsub => unsub());
     };
   }, []);
 
@@ -444,17 +456,42 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       .toUpperCase();
   const certificateDigits = (value: unknown) => normalizeCertificateIdentity(value).replace(/\D/g, '');
 
+  // LOTE 41 — índice em memória O(1). Antes, cada linha/filtro fazia
+  // instruments.find(...), multiplicando milhares de registros por milhares de
+  // instrumentos. Com ~17 mil serviços isso era o principal gargalo de CPU.
+  const instrumentLookup = useMemo(() => {
+    const byCertificate = new Map<string, Instrument>();
+    const byNumericCertificate = new Map<string, Instrument>();
+    const clientIdsByTag = new Map<string, Set<string>>();
+
+    for (const instrument of instruments) {
+      const candidates = [instrument.certificateNumber, instrument.coma];
+      for (const candidate of candidates) {
+        const normalized = normalizeCertificateIdentity(candidate);
+        if (normalized && !byCertificate.has(normalized)) byCertificate.set(normalized, instrument);
+        const numeric = certificateDigits(candidate);
+        if (numeric && !byNumericCertificate.has(numeric)) byNumericCertificate.set(numeric, instrument);
+      }
+
+      const tagKey = String(instrument.tag || '').trim().toUpperCase();
+      const clientId = String(instrument.clientId || '').trim();
+      if (tagKey && clientId) {
+        const ids = clientIdsByTag.get(tagKey) || new Set<string>();
+        ids.add(clientId);
+        clientIdsByTag.set(tagKey, ids);
+      }
+    }
+
+    return { byCertificate, byNumericCertificate, clientIdsByTag };
+  }, [instruments]);
+
   const findInstrumentByCertificate = (certificate: unknown): Instrument | undefined => {
     const normalized = normalizeCertificateIdentity(certificate);
     if (!normalized) return undefined;
+    const exact = instrumentLookup.byCertificate.get(normalized);
+    if (exact) return exact;
     const numeric = certificateDigits(normalized);
-    return instruments.find((instrument) => {
-      const certificateNumber = normalizeCertificateIdentity(instrument.certificateNumber);
-      const coma = normalizeCertificateIdentity(instrument.coma);
-      if (certificateNumber === normalized || coma === normalized) return true;
-      if (!numeric) return false;
-      return certificateDigits(certificateNumber) === numeric || certificateDigits(coma) === numeric;
-    });
+    return numeric ? instrumentLookup.byNumericCertificate.get(numeric) : undefined;
   };
 
   const formatCalibrationDate = (value: unknown): string => {
@@ -501,10 +538,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     }
 
     if (tag) {
-      const tagMatches = instruments.filter(
-        (instrument) => String(instrument.tag || '').trim().toUpperCase() === tag,
-      );
-      const clientIds = Array.from(new Set(tagMatches.map((instrument) => String(instrument.clientId || '').trim()).filter(Boolean)));
+      const clientIds = Array.from(instrumentLookup.clientIdsByTag.get(tag) || []);
       if (clientIds.length === 1) return String(clientIds[0] || '');
     }
 
@@ -1191,39 +1225,60 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     setVisibleColumns(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  // Mantém digitação responsiva enquanto a busca percorre a base completa.
+  const deferredFilters = useDeferredValue(filters);
+
+  // A Data de Intervenção é a ordenação padrão. Converter a data uma vez por
+  // registro evita recriar Date centenas de milhares de vezes no Array.sort().
+  const interventionSortValues = useMemo(() => {
+    const values = new Map<string, number>();
+    records.forEach((record) => values.set(record.id, parseDateForSort(record.interventionDate)));
+    return values;
+  }, [records]);
+
+  const needsCalibrationLookupForList = Boolean(deferredFilters.dataCalibracao)
+    || sortConfig?.key === 'dataCalibracao';
+  const calibrationLookupDependency = needsCalibrationLookupForList ? instrumentLookup : null;
+
   const sortedRecords = useMemo(() => {
-    let filtered = records.filter(r => {
-      return Object.entries(filters).every(([k, v]) => {
-        if (!v) return true;
-        const rawValue = k === 'dataCalibracao' ? resolveCalibrationDate(r) : (r as any)[k];
-        const recordVal = String(rawValue || '').toLowerCase();
-        return recordVal.includes(String(v).toLowerCase());
-      });
-    });
+    const activeFilters = Object.entries(deferredFilters)
+      .filter(([, value]) => String(value || '').trim() !== '')
+      .map(([key, value]) => [key, String(value).toLocaleLowerCase('pt-BR')] as const);
+
+    let filtered = activeFilters.length === 0
+      ? [...records]
+      : records.filter((record) => activeFilters.every(([key, search]) => {
+          const rawValue = key === 'dataCalibracao'
+            ? resolveCalibrationDate(record)
+            : (record as any)[key];
+          return String(rawValue || '').toLocaleLowerCase('pt-BR').includes(search);
+        }));
 
     if (sortConfig !== null) {
       filtered.sort((a, b) => {
-        if (sortConfig.key === 'interventionDate' || sortConfig.key === 'dataCalibracao') {
-          const dateA = parseDateForSort(sortConfig.key === 'dataCalibracao' ? resolveCalibrationDate(a) : a.interventionDate);
-          const dateB = parseDateForSort(sortConfig.key === 'dataCalibracao' ? resolveCalibrationDate(b) : b.interventionDate);
-          if (dateA < dateB) return sortConfig.direction === 'asc' ? -1 : 1;
-          if (dateA > dateB) return sortConfig.direction === 'asc' ? 1 : -1;
-          return 0;
+        if (sortConfig.key === 'interventionDate') {
+          const dateA = interventionSortValues.get(a.id) || 0;
+          const dateB = interventionSortValues.get(b.id) || 0;
+          return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
+        }
+        if (sortConfig.key === 'dataCalibracao') {
+          const dateA = parseDateForSort(resolveCalibrationDate(a));
+          const dateB = parseDateForSort(resolveCalibrationDate(b));
+          return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
         }
 
-        const valA = String((a as any)[sortConfig.key] || '').toLowerCase();
-        const valB = String((b as any)[sortConfig.key] || '').toLowerCase();
-        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
+        const valA = String((a as any)[sortConfig.key] || '').toLocaleLowerCase('pt-BR');
+        const valB = String((b as any)[sortConfig.key] || '').toLocaleLowerCase('pt-BR');
+        const comparison = valA.localeCompare(valB, 'pt-BR', { numeric: true, sensitivity: 'base' });
+        return sortConfig.direction === 'asc' ? comparison : -comparison;
       });
     } else {
-      // Default Sort (date descending)
-      filtered.sort((a, b) => parseDateForSort(b.interventionDate) - parseDateForSort(a.interventionDate));
+      filtered.sort((a, b) => (interventionSortValues.get(b.id) || 0) - (interventionSortValues.get(a.id) || 0));
     }
 
     return filtered;
-  }, [records, filters, sortConfig, instruments]);
+  }, [records, deferredFilters, sortConfig, interventionSortValues, calibrationLookupDependency]);
+
 
   const duplicateAudit = useMemo(() => {
     const tagGroups = new Map<string, FieldServiceRecord[]>();

@@ -3783,7 +3783,7 @@ export interface FieldServiceRecord {
   normalizedCertificate?: string;
 }
 
-const FIELD_SERVICE_PAGE_SIZE = 1000;
+const FIELD_SERVICE_PAGE_SIZE = 5000; // fallback: reduz round-trips se o snapshot do servidor estiver indisponível
 const FIELD_SERVICE_CHANGE_FEED_SIZE = 1000;
 const FIELD_SERVICE_AUTO_REFRESH_MAX_AGE_MS = 5 * 60_000;
 let fieldServiceCache: FieldServiceRecord[] = [];
@@ -3792,6 +3792,27 @@ let fieldServiceInitialLoadComplete = false;
 let fieldServiceLastFullRefreshAt = 0;
 let fieldServiceLiveUnsubscribe: (() => void) | null = null;
 const fieldServiceSubscribers = new Set<(records: FieldServiceRecord[]) => void>();
+
+const fetchFieldServiceSnapshot = async (): Promise<FieldServiceRecord[] | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  const token = await user.getIdToken();
+  const response = await fetch('/api/field-service/snapshot', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`FIELD_SERVICE_SNAPSHOT_HTTP_${response.status}`);
+  }
+  const payload = await response.json().catch(() => null);
+  if (!payload?.success || !Array.isArray(payload.records)) {
+    throw new Error('FIELD_SERVICE_SNAPSHOT_INVALID');
+  }
+  return payload.records
+    .filter((record: any) => record && record.isDeleted !== true && record.id)
+    .map((record: any) => ({ ...record, id: String(record.id) } as FieldServiceRecord));
+};
 
 const notifyFieldServiceSubscribers = () => {
   const snapshot = [...fieldServiceCache];
@@ -3850,6 +3871,24 @@ const loadFieldServiceRecordsInPages = async (force = false, silent = false): Pr
 
   const hadVisibleCache = fieldServiceCache.length > 0;
   const task = (async () => {
+    // Caminho principal do LOTE 41: uma única requisição HTTP autenticada recebe
+    // o snapshot ativo já compactado pelo servidor. Evita 17+ round-trips do
+    // Firestore no navegador e não publica um lote parcial como se fosse a base inteira.
+    try {
+      const serverSnapshot = await fetchFieldServiceSnapshot();
+      if (serverSnapshot) {
+        fieldServiceCache = serverSnapshot;
+        fieldServiceInitialLoadComplete = true;
+        fieldServiceLastFullRefreshAt = Date.now();
+        notifyFieldServiceSubscribers();
+        return;
+      }
+    } catch (snapshotError) {
+      console.warn('Field Service snapshot API unavailable; using Firestore fallback:', snapshotError);
+    }
+
+    // Fallback de segurança. Continua funcional mesmo se a rota otimizada estiver
+    // temporariamente indisponível, mas usa lotes maiores para reduzir latência.
     const loaded: FieldServiceRecord[] = [];
     let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
     let isFirstPage = true;
@@ -3873,9 +3912,6 @@ const loadFieldServiceRecordsInPages = async (force = false, silent = false): Pr
         if (record.isDeleted !== true) loaded.push(record);
       });
 
-      // Na primeira entrada, mostra o primeiro lote rapidamente. Depois disso,
-      // evita publicar 17/50 estados intermediários, reduzindo ordenações e renders.
-      // Em refresh silencioso, mantém a base antiga visível até a nova estar completa.
       if (!silent && !hadVisibleCache && isFirstPage && loaded.length > 0) {
         fieldServiceCache = [...loaded];
         notifyFieldServiceSubscribers();
