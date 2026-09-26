@@ -1,0 +1,440 @@
+COMANINS — APLICAÇÃO E HOMOLOGAÇÃO DO LOTE 41 REV1
+IMPORTAÇÃO SERVIÇO DE CAMPO — PERFORMANCE, PROGRESSO VISUAL E RELATÓRIO PDF DE INCONSISTÊNCIAS
+
+IMPORTANTE — ESTE PROMPT SUBSTITUI O PROMPT/PATCH ORIGINAL DO LOTE 41 QUE FALHOU NO PRÉ-CHECK.
+
+Você está trabalhando em um sistema COMANINS já em produção.
+
+NÃO reconstrua o sistema.
+NÃO substitua arquitetura.
+NÃO refatore fora do escopo.
+NÃO faça adaptação manual do patch.
+NÃO altere as regras atuais de importação de Serviço de Campo.
+NÃO altere o endpoint seguro de bulk-upsert.
+NÃO faça deploy remoto.
+
+BASE OBRIGATÓRIA
+Use exclusivamente a base consolidada enviada após a interrupção do Lote 41 original, correspondente a:
+
+sistema-comanins (1)(20260926-220319).zip
+
+Esta base já contém lotes posteriores/ajustes homologados que NÃO podem ser removidos, incluindo estados e fluxos atuais de Serviço de Campo e a arquitetura segura de gravação via backend.
+
+PATCH CORRETO DESTE LOTE
+
+COMANINS_LOTE_41_REV1_IMPORTACAO_SERVICO_CAMPO_PERFORMANCE_PROGRESSO_RELATORIO_PDF.patch
+
+SHA-256 OBRIGATÓRIO DO PATCH
+
+20d7ea08ca79105992e371bc1e6fb0f79676136f04f1e08aa27a05d462bd2288
+
+NÃO UTILIZAR o patch antigo:
+
+COMANINS_LOTE_41_IMPORTACAO_SERVICO_CAMPO_PERFORMANCE_PROGRESSO_RELATORIO_PDF.patch
+
+O patch antigo foi produzido contra uma base anterior e apresentou conflito em FieldService.tsx e firebase.ts.
+
+OBJETIVOS DO LOTE 41 REV1
+
+A) Melhorar a performance da importação Excel do módulo Serviço de Campo sem alterar nenhuma regra existente de inclusão, atualização, duplicidade, conflito ou rejeição.
+
+B) Evitar a sensação de tela congelada durante a importação, exibindo progresso visual contínuo e mantendo a interface responsiva durante a leitura/análise pesada do Excel.
+
+C) Processar a interpretação do Excel em Web Worker para retirar o parsing pesado da thread principal da interface.
+
+D) Substituir buscas lineares repetitivas durante a comparação dos registros por índices em memória equivalentes, preservando exatamente os mesmos critérios de correspondência já existentes.
+
+E) Preservar integralmente a gravação atual através do backend seguro:
+
+/api/field-service/bulk-upsert
+
+A função bulkUpsertFieldServiceRecords em src/lib/firebase.ts NÃO deve ser alterada por este lote.
+
+F) Quando existirem inconsistências/não inseridos/conflitos, manter o relatório Excel já existente e gerar também um relatório PDF para tratamento operacional.
+
+G) O relatório PDF é exclusivamente diagnóstico. Ele NÃO cria nova regra de importação e NÃO transforma inconsistência em nova condição de rejeição.
+
+ARQUIVOS ESPERADOS NO PATCH
+
+O patch REV1 deve alterar/adicionar somente:
+
+1. src/components/FieldService.tsx
+2. src/workers/fieldServiceExcelWorker.ts
+
+src/lib/firebase.ts NÃO deve ser alterado.
+server.ts NÃO deve ser alterado.
+As regras Firestore NÃO devem ser alteradas.
+
+PASSO 0 — VERIFICAR INTEGRIDADE DO PATCH
+
+Execute:
+
+sha256sum COMANINS_LOTE_41_REV1_IMPORTACAO_SERVICO_CAMPO_PERFORMANCE_PROGRESSO_RELATORIO_PDF.patch
+
+O resultado DEVE ser exatamente:
+
+20d7ea08ca79105992e371bc1e6fb0f79676136f04f1e08aa27a05d462bd2288
+
+Se for diferente:
+PARE IMEDIATAMENTE.
+
+PASSO 1 — DETECTAR SE O PATCH JÁ ESTÁ APLICADO
+
+Execute:
+
+git apply --reverse --check COMANINS_LOTE_41_REV1_IMPORTACAO_SERVICO_CAMPO_PERFORMANCE_PROGRESSO_RELATORIO_PDF.patch
+
+Se passar integralmente, considere que o REV1 já está aplicado.
+Nesse caso:
+- NÃO aplique novamente;
+- siga para validações e testes;
+- registre isso no relatório.
+
+Se não estiver aplicado, continue.
+
+PASSO 2 — PRÉ-CHECK E APLICAÇÃO
+
+Execute:
+
+git apply --check COMANINS_LOTE_41_REV1_IMPORTACAO_SERVICO_CAMPO_PERFORMANCE_PROGRESSO_RELATORIO_PDF.patch
+
+Se houver qualquer erro, conflito, hunk rejeitado ou divergência:
+
+PARE IMEDIATAMENTE.
+
+NÃO use:
+- git apply --reject
+- aplicação parcial
+- edição manual aproximada
+- reconstrução da função
+- substituição de arquivos inteiros
+- scripts alternativos de aplicação
+- apply-lote41.mjs
+- adaptação automática do patch
+
+Informe exatamente:
+- arquivo;
+- trecho;
+- erro retornado;
+- divergência encontrada.
+
+Se o pré-check passar:
+
+git apply COMANINS_LOTE_41_REV1_IMPORTACAO_SERVICO_CAMPO_PERFORMANCE_PROGRESSO_RELATORIO_PDF.patch
+
+git diff --check
+
+PASSO 3 — CONFERÊNCIA ESTRUTURAL OBRIGATÓRIA
+
+Execute:
+
+git status --short
+
+git diff -- src/components/FieldService.tsx src/workers/fieldServiceExcelWorker.ts
+
+Confirme que somente os dois arquivos esperados foram alterados/adicionados pelo REV1.
+
+Execute também:
+
+git diff -- src/lib/firebase.ts
+
+Resultado esperado:
+NENHUMA ALTERAÇÃO em src/lib/firebase.ts.
+
+Confirme no código atual que bulkUpsertFieldServiceRecords continua retornando Promise<FieldServiceBulkUpsertResult> e continua chamando:
+
+fieldServiceApiRequest('/api/field-service/bulk-upsert', { updates, adds })
+
+É PROIBIDO substituir esse fluxo por writeBatch(db) no cliente.
+
+PASSO 4 — VALIDAÇÃO TÉCNICA OBRIGATÓRIA
+
+Execute exatamente:
+
+npm ci
+npm run internal-portal:verify
+npm run lint
+npm run build
+git diff --check
+
+O internal-portal:verify deve permanecer exatamente:
+
+da8f5e5c162d40401ff4de7034c9cdfff434604dd1e2625683479495cde2f59b
+
+com 1160083 bytes.
+
+Se o hash mudar, PARE e marque como NÃO APTO.
+
+Não esconda warnings ou erros.
+Para cada comando informe:
+- PASSOU
+- FALHOU
+- NÃO DISPONÍVEL
+
+PASSO 5 — AUDITORIA DE PRESERVAÇÃO DAS REGRAS DE IMPORTAÇÃO
+
+Antes dos testes funcionais, compare o fluxo alterado com a base anterior e confirme que foram preservados:
+
+1. aliases/nomes de colunas aceitos;
+2. normalização de TAG;
+3. placeholders de TAG já existentes;
+4. normalização de Certificado;
+5. normalização de datas;
+6. fingerprint dos registros sem TAG e sem Certificado;
+7. regra de conflito quando TAG e Certificado apontam para registros diferentes;
+8. regra de duplicidade de TAG dentro do arquivo;
+9. regra de duplicidade de Certificado dentro do arquivo;
+10. regra de duplicidade de conteúdo quando TAG e Certificado estão vazios;
+11. merge que mantém valor existente quando a célula importada está vazia;
+12. verificação de identificador já utilizado;
+13. tratamento de registro já existente sem diferenças;
+14. resolução de data de calibração pelo instrumento vinculado;
+15. resolução de clientId já existente;
+16. tratamento de rejeições retornadas pelo backend;
+17. tratamento de DUPLICATE_TAG;
+18. tratamento de DUPLICATE_CERTIFICATE;
+19. tratamento de RECORD_NOT_FOUND;
+20. tratamento de DUPLICATE_TARGET.
+
+A mudança de listas para Map/índices em memória é permitida SOMENTE como otimização de acesso, nunca como mudança de regra.
+
+PASSO 6 — TESTES DE PERFORMANCE E RESPONSIVIDADE
+
+TESTE IMP41R1-01 — abertura do fluxo
+- Abrir Serviço de Campo.
+- Clicar Importar Planilha.
+- Selecionar arquivo Excel válido.
+- Confirmar que aparece imediatamente modal de progresso.
+- Confirmar spinner animado.
+- Confirmar barra percentual.
+- Confirmar texto da etapa atual.
+
+TESTE IMP41R1-02 — interface não congelada
+- Importar arquivo representativo/grande.
+- Durante leitura e análise, confirmar que spinner continua animando.
+- Confirmar que percentual/progresso muda ao longo do processamento.
+- A aplicação não deve aparentar travamento prolongado sem feedback.
+
+TESTE IMP41R1-03 — Web Worker
+- Confirmar no código e no build que src/workers/fieldServiceExcelWorker.ts está sendo utilizado para XLSX.read/sheet_to_json.
+- Confirmar que a linha original do Excel (__rowNum__) continua sendo preservada para relatórios de inconsistência.
+
+TESTE IMP41R1-04 — arquivos suportados
+Testar ao menos:
+- .xlsx
+- .xls, se houver arquivo de homologação disponível
+- .csv, se houver arquivo de homologação disponível
+
+Não declarar PASSOU para formatos não testados.
+
+PASSO 7 — TESTES DE NÃO REGRESSÃO DAS REGRAS
+
+TESTE IMP41R1-05 — inclusão normal
+- Importar linha válida inexistente.
+- Confirmar inclusão igual ao comportamento anterior.
+
+TESTE IMP41R1-06 — atualização normal
+- Importar linha que corresponda de forma inequívoca a registro existente e possua alteração válida.
+- Confirmar atualização igual ao comportamento anterior.
+
+TESTE IMP41R1-07 — registro idêntico
+- Importar registro já existente sem diferenças.
+- Confirmar que continua não gerando gravação desnecessária.
+- Confirmar registro no relatório de não inseridos conforme comportamento atual.
+
+TESTE IMP41R1-08 — TAG duplicada no mesmo Excel
+- Criar duas linhas com mesma TAG segundo a normalização atual.
+- Confirmar que a regra anterior permanece.
+- Confirmar inconsistência no relatório.
+
+TESTE IMP41R1-09 — Certificado duplicado no mesmo Excel
+- Criar duas linhas com mesmo Certificado segundo a normalização atual.
+- Confirmar regra anterior.
+- Confirmar inconsistência no relatório.
+
+TESTE IMP41R1-10 — TAG/Certificado apontando para registros distintos
+- Simular situação já tratada pelo sistema.
+- Confirmar conflito e ausência de atualização indevida.
+
+TESTE IMP41R1-11 — TAG e Certificado vazios
+- Confirmar que continua sendo utilizado o fingerprint dos demais campos.
+- Um único equivalente pode ser correlacionado conforme regra atual.
+- Mais de um equivalente permanece conflito.
+
+TESTE IMP41R1-12 — células vazias em atualização
+- Confirmar que célula vazia importada não apaga valor existente quando a regra atual determina preservação.
+
+PASSO 8 — BACKEND SEGURO / BULK UPSERT
+
+TESTE IMP41R1-13 — arquitetura de gravação
+- Confirmar que a importação chama bulkUpsertFieldServiceRecords uma única vez para persistência do conjunto preparado, como já ocorre na base atual.
+- Confirmar que essa função segue usando /api/field-service/bulk-upsert.
+- Confirmar que nenhum writeBatch(db) novo foi criado no cliente.
+
+TESTE IMP41R1-14 — rejeições do backend
+Se possível em homologação, provocar ou simular retorno com rejected e confirmar:
+- itens rejeitados entram no relatório;
+- addedCount/updatedCount são os retornados pelo backend;
+- conflitos são somados sem permitir inserção indevida.
+
+PASSO 9 — RELATÓRIO DE INCONSISTÊNCIAS
+
+TESTE IMP41R1-15 — sem inconsistências
+- Importar conjunto totalmente válido.
+- Confirmar que não é gerado PDF de inconsistências vazio.
+
+TESTE IMP41R1-16 — com inconsistências
+- Importar arquivo contendo pelo menos duas inconsistências já previstas pelas regras existentes.
+- Confirmar geração automática de:
+  a) relatório Excel já existente;
+  b) novo relatório PDF.
+
+TESTE IMP41R1-17 — conteúdo do PDF
+Confirmar que o PDF contém, para cada item quando disponível:
+- Linha de origem;
+- Status;
+- Certificado;
+- TAG;
+- Cliente;
+- Unidade;
+- Motivo;
+- Ação sugerida.
+
+Confirmar também que o documento informa expressamente que é diagnóstico e que não altera regras de importação.
+
+TESTE IMP41R1-18 — múltiplas páginas
+- Com quantidade suficiente de inconsistências, confirmar paginação do PDF sem sobreposição/corte ilegível.
+
+TESTE IMP41R1-19 — falha de geração do PDF
+- Validar por revisão de código que falha no PDF NÃO deve refazer a importação, duplicar gravações ou alterar regras.
+- O Excel existente deve continuar sendo tentativa de fallback operacional.
+
+PASSO 10 — REGRESSÃO DO MÓDULO SERVIÇO DE CAMPO
+
+Validar:
+- abertura da aba;
+- carga automática;
+- Atualizar Dados;
+- Modelo Planilha;
+- Exportar Excel;
+- Gerar Planilha A4;
+- seleção de linhas;
+- paginação;
+- filtros;
+- ordenação;
+- edição inline;
+- edição por formulário;
+- Novo Registro;
+- exclusão individual;
+- Limpar Dados e seus estados/modal já existentes;
+- Foto → Planilha IA;
+- visualização/impressão de certificado;
+- vinculação de Cliente/clientId;
+- Data Calibração.
+
+PASSO 11 — SEGURANÇA / PRESERVAÇÃO
+
+CONFIRMAR EXPLICITAMENTE:
+
+- src/lib/firebase.ts não foi alterado pelo REV1;
+- /api/field-service/bulk-upsert foi preservado;
+- autenticação/autorização do backend foi preservada;
+- nenhuma regra Firestore foi alterada;
+- nenhum Firebase novo foi criado;
+- nenhuma collection foi apagada;
+- nenhum UID foi alterado;
+- nenhum login/senha foi alterado;
+- nenhum registro existente foi apagado pela instalação do patch;
+- nenhuma regra de importação foi intencionalmente alterada;
+- nenhum deploy remoto foi executado.
+
+PASSO 12 — NÃO FAZER DEPLOY
+
+NÃO executar:
+- firebase deploy
+- git push
+- deploy GitHub
+- deploy Hostinger
+- deploy GCloud
+- publicação de frontend
+- publicação de rules
+- qualquer alteração remota em produção
+
+PASSO 13 — GERAR BASE CONSOLIDADA PARA AUDITORIA
+
+Se todas as validações locais possíveis forem concluídas, gerar:
+
+sistema-comanins_LOTE41_REV1_PATCHED.zip
+
+Não incluir:
+- node_modules
+- .git
+- caches
+- arquivos temporários
+- credenciais adicionais
+
+Gerar SHA-256 de:
+1. PATCH REV1 utilizado;
+2. ZIP consolidado.
+
+RELATÓRIO FINAL OBRIGATÓRIO
+
+Entregue:
+
+1. Base exata utilizada.
+2. SHA-256 do patch obtido.
+3. Resultado git apply --reverse --check.
+4. Resultado git apply --check.
+5. Se o patch foi aplicado agora ou já estava aplicado.
+6. Lista exata dos arquivos modificados/adicionados.
+7. Confirmação de que src/lib/firebase.ts não possui diff.
+8. Confirmação de que /api/field-service/bulk-upsert permanece ativo.
+9. Resultado npm ci.
+10. Resultado internal-portal:verify.
+11. SHA-256 do internal portal obtido.
+12. Resultado lint.
+13. Resultado build.
+14. Resultado git diff --check.
+15. Auditoria dos 20 itens de preservação das regras de importação.
+16. IMP41R1-01.
+17. IMP41R1-02.
+18. IMP41R1-03.
+19. IMP41R1-04.
+20. IMP41R1-05.
+21. IMP41R1-06.
+22. IMP41R1-07.
+23. IMP41R1-08.
+24. IMP41R1-09.
+25. IMP41R1-10.
+26. IMP41R1-11.
+27. IMP41R1-12.
+28. IMP41R1-13.
+29. IMP41R1-14.
+30. IMP41R1-15.
+31. IMP41R1-16.
+32. IMP41R1-17.
+33. IMP41R1-18.
+34. IMP41R1-19.
+35. Resultado das regressões do Passo 10.
+36. Qualquer problema encontrado.
+37. Qualquer alteração adicional fora do patch — esperado: NENHUMA.
+38. Nome do ZIP consolidado.
+39. SHA-256 do ZIP consolidado.
+40. Confirmação explícita: NENHUM DEPLOY REMOTO REALIZADO.
+
+Não declare sucesso para teste não executado.
+Para dependência de ambiente/dado/login não disponível, escreva:
+
+NÃO TESTADO — DEPENDE DE HOMOLOGAÇÃO MANUAL
+
+Classifique ao final apenas como:
+
+APTO PARA REVISÃO DO CHECKPOINT
+
+ou
+
+NÃO APTO PARA REVISÃO DO CHECKPOINT
+
+Finalize literalmente com:
+
+flagCheckpoint

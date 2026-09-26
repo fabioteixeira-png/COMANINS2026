@@ -47,6 +47,37 @@ const COLUMNS = [
   { id: 'cliente', label: 'Cliente', minW: '150px' },
 ] as const;
 
+type FieldServiceImportProgress = {
+  percent: number;
+  stage: string;
+  processed: number;
+  total: number;
+};
+
+const yieldToBrowser = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+const parseFieldServiceExcelInWorker = (buffer: ArrayBuffer): Promise<Record<string, any>[]> =>
+  new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/fieldServiceExcelWorker.ts', import.meta.url), { type: 'module' });
+    const finish = () => worker.terminate();
+
+    worker.onmessage = (event: MessageEvent<{ type: 'parsed' | 'error'; rows?: Record<string, any>[]; message?: string }>) => {
+      if (event.data.type === 'parsed') {
+        finish();
+        resolve(event.data.rows || []);
+        return;
+      }
+      finish();
+      reject(new Error(event.data.message || 'Erro ao interpretar a planilha Excel.'));
+    };
+
+    worker.onerror = (event) => {
+      finish();
+      reject(new Error(event.message || 'Erro no processamento da planilha Excel.'));
+    };
+
+    worker.postMessage({ buffer }, [buffer]);
+  });
 
 export interface FieldServiceCertificateContext {
   fieldServiceRecordId: string;
@@ -216,6 +247,12 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<FieldServiceImportProgress>({
+    percent: 0,
+    stage: '',
+    processed: 0,
+    total: 0,
+  });
   const [isRefreshingRecords, setIsRefreshingRecords] = useState(false);
   const [showClearDataModal, setShowClearDataModal] = useState(false);
   const [clearDataPassword, setClearDataPassword] = useState('');
@@ -378,21 +415,74 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     return normalizedValues.some(Boolean) ? normalizedValues.join('|') : '';
   };
 
+  type FieldServiceImportIndex = {
+    byTag: Map<string, FieldServiceRecord[]>;
+    byCertificate: Map<string, FieldServiceRecord[]>;
+    byFingerprint: Map<string, FieldServiceRecord[]>;
+  };
+
+  const addFieldServiceRecordToImportIndex = (
+    index: FieldServiceImportIndex,
+    record: FieldServiceRecord,
+  ) => {
+    const append = (map: Map<string, FieldServiceRecord[]>, key: string) => {
+      if (!key) return;
+      const bucket = map.get(key);
+      if (bucket) bucket.push(record);
+      else map.set(key, [record]);
+    };
+
+    append(index.byTag, normalizeImportTag(record.tag));
+    append(index.byCertificate, normalizeCertificateIdentity(record.certificate));
+    append(index.byFingerprint, buildFieldServiceContentFingerprint(record));
+  };
+
+  const removeFieldServiceRecordFromImportIndex = (
+    index: FieldServiceImportIndex,
+    record: FieldServiceRecord,
+  ) => {
+    const remove = (map: Map<string, FieldServiceRecord[]>, key: string) => {
+      if (!key) return;
+      const bucket = map.get(key);
+      if (!bucket) return;
+      const remaining = bucket.filter((candidate) => candidate.id !== record.id);
+      if (remaining.length > 0) map.set(key, remaining);
+      else map.delete(key);
+    };
+
+    remove(index.byTag, normalizeImportTag(record.tag));
+    remove(index.byCertificate, normalizeCertificateIdentity(record.certificate));
+    remove(index.byFingerprint, buildFieldServiceContentFingerprint(record));
+  };
+
+  const createFieldServiceImportIndex = (candidateRecords: FieldServiceRecord[]): FieldServiceImportIndex => {
+    const index: FieldServiceImportIndex = {
+      byTag: new Map(),
+      byCertificate: new Map(),
+      byFingerprint: new Map(),
+    };
+    candidateRecords.forEach((record) => addFieldServiceRecordToImportIndex(index, record));
+    return index;
+  };
+
+  const replaceFieldServiceRecordInImportIndex = (
+    index: FieldServiceImportIndex,
+    previousRecord: FieldServiceRecord,
+    nextRecord: FieldServiceRecord,
+  ) => {
+    removeFieldServiceRecordFromImportIndex(index, previousRecord);
+    addFieldServiceRecordToImportIndex(index, nextRecord);
+  };
+
   const findUniqueFieldServiceImportMatch = (
     incoming: Partial<FieldServiceRecord>,
-    candidateRecords: FieldServiceRecord[] = records,
+    index: FieldServiceImportIndex,
   ): { record?: FieldServiceRecord; ambiguous?: boolean; reason?: string } => {
     const incomingTag = normalizeImportTag(incoming.tag);
     const incomingCertificate = normalizeCertificateIdentity(incoming.certificate);
 
-    const tagMatches = incomingTag
-      ? candidateRecords.filter((record) => normalizeImportTag(record.tag) === incomingTag)
-      : [];
-    const certificateMatches = incomingCertificate
-      ? candidateRecords.filter(
-          (record) => normalizeCertificateIdentity(record.certificate) === incomingCertificate,
-        )
-      : [];
+    const tagMatches = incomingTag ? (index.byTag.get(incomingTag) || []) : [];
+    const certificateMatches = incomingCertificate ? (index.byCertificate.get(incomingCertificate) || []) : [];
 
     if (tagMatches.length > 1) {
       return {
@@ -419,16 +509,13 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     const identifierMatch = tagMatch || certificateMatch;
     if (identifierMatch) return { record: identifierMatch };
 
-    // TAG e Certificado podem vir em branco. Nessa situação, a importação
-    // compara todos os demais campos normalizados. Só faz atualização
-    // automática quando existir exatamente um registro equivalente.
+    // Regra existente preservada: quando TAG e Certificado estão vazios,
+    // o desempate continua usando exatamente o mesmo fingerprint dos demais campos.
     if (!incomingTag && !incomingCertificate) {
       const contentFingerprint = buildFieldServiceContentFingerprint(incoming);
       if (!contentFingerprint) return {};
 
-      const contentMatches = candidateRecords.filter(
-        (record) => buildFieldServiceContentFingerprint(record) === contentFingerprint,
-      );
+      const contentMatches = index.byFingerprint.get(contentFingerprint) || [];
       if (contentMatches.length === 1) return { record: contentMatches[0] };
       if (contentMatches.length > 1) {
         return {
@@ -659,44 +746,136 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       return hasDefined ? firstDefined : '';
     };
 
-    const makeIssueReport = (issues: ImportIssue[]) => {
-      if (issues.length === 0) return;
-      const rows = issues.map((issue) => ({
-        'Linha de Origem': issue.sourceRow,
-        'Status': issue.status,
-        'Motivo': issue.reason,
-        'Ação Sugerida': issue.suggestedAction,
-        'Certificado': issue.record.certificate || '',
-        'Data Calibração': issue.record.dataCalibracao || '',
-        'Data de Intervenção': issue.record.interventionDate || '',
-        'TAG do Cliente': issue.record.tag || '',
-        'Equipamento': issue.record.equipamento || '',
-        'Localização': issue.record.localizacao || '',
-        'Técnico': issue.record.technician || '',
-        'Área': issue.record.area || '',
-        'Range': issue.record.range || '',
-        'Operação': issue.record.operacao || '',
-        'Unidade de Medida': issue.record.unidadeMedida || '',
-        'Categoria': issue.record.categoria || '',
-        'Emissão PDF': issue.record.emissaoPdf || '',
-        'Ordem de Serviço': issue.record.ordemServico || '',
-        'Tipo de Serviço': issue.record.tipoServico || '',
-        'Observação': issue.record.observacao || '',
-        'Unidade': issue.record.unidade || '',
-        'Cliente': issue.record.cliente || '',
-      }));
-      const worksheet = XLSX.utils.json_to_sheet(rows);
-      worksheet['!cols'] = [
-        { wch: 14 }, { wch: 22 }, { wch: 58 }, { wch: 42 },
-        { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 30 },
-        { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
-        { wch: 16 }, { wch: 20 }, { wch: 22 }, { wch: 42 }, { wch: 18 }, { wch: 24 },
-      ];
-      worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:V1' };
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Nao_Inseridos');
+    const makeIssueReports = async (issues: ImportIssue[]): Promise<{ excelGenerated: boolean; pdfGenerated: boolean }> => {
+      if (issues.length === 0) return { excelGenerated: false, pdfGenerated: false };
+
       const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-      XLSX.writeFile(workbook, `RELATORIO_IMPORTACAO_SERVICO_CAMPO_NAO_INSERIDOS_${stamp}.xlsx`);
+      let excelGenerated = false;
+      let pdfGenerated = false;
+
+      // Mantém o relatório Excel já existente para não remover funcionalidade homologada.
+      try {
+        const rows = issues.map((issue) => ({
+          'Linha de Origem': issue.sourceRow,
+          'Status': issue.status,
+          'Motivo': issue.reason,
+          'Ação Sugerida': issue.suggestedAction,
+          'Certificado': issue.record.certificate || '',
+          'Data Calibração': issue.record.dataCalibracao || '',
+          'Data de Intervenção': issue.record.interventionDate || '',
+          'TAG do Cliente': issue.record.tag || '',
+          'Equipamento': issue.record.equipamento || '',
+          'Localização': issue.record.localizacao || '',
+          'Técnico': issue.record.technician || '',
+          'Área': issue.record.area || '',
+          'Range': issue.record.range || '',
+          'Operação': issue.record.operacao || '',
+          'Unidade de Medida': issue.record.unidadeMedida || '',
+          'Categoria': issue.record.categoria || '',
+          'Emissão PDF': issue.record.emissaoPdf || '',
+          'Ordem de Serviço': issue.record.ordemServico || '',
+          'Tipo de Serviço': issue.record.tipoServico || '',
+          'Observação': issue.record.observacao || '',
+          'Unidade': issue.record.unidade || '',
+          'Cliente': issue.record.cliente || '',
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        worksheet['!cols'] = [
+          { wch: 14 }, { wch: 22 }, { wch: 58 }, { wch: 42 },
+          { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 30 },
+          { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
+          { wch: 16 }, { wch: 20 }, { wch: 22 }, { wch: 42 }, { wch: 18 }, { wch: 24 },
+        ];
+        worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:V1' };
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Nao_Inseridos');
+        XLSX.writeFile(workbook, `RELATORIO_IMPORTACAO_SERVICO_CAMPO_NAO_INSERIDOS_${stamp}.xlsx`);
+        excelGenerated = true;
+      } catch (reportError) {
+        console.error('Erro ao gerar relatório Excel de inconsistências:', reportError);
+      }
+
+      try {
+        setImportProgress({
+          percent: 96,
+          stage: 'Gerando relatório PDF de inconsistências...',
+          processed: issues.length,
+          total: issues.length,
+        });
+        await yieldToBrowser();
+
+        const { jsPDF } = await import('jspdf');
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 12;
+        const contentWidth = pageWidth - (margin * 2);
+        let y = 14;
+
+        const drawHeader = () => {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('COMANINS - Relatório de Inconsistências da Importação', margin, y);
+          y += 6;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8.5);
+          doc.text(`Arquivo importado: ${file.name}`, margin, y);
+          y += 4;
+          doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Total de inconsistências: ${issues.length}`, margin, y);
+          y += 5;
+          const note = doc.splitTextToSize(
+            'Relatório exclusivamente diagnóstico. As regras existentes de importação, inclusão, atualização, duplicidade, conflito e rejeição permanecem inalteradas.',
+            contentWidth,
+          );
+          doc.text(note, margin, y);
+          y += (note.length * 3.5) + 4;
+        };
+
+        const ensureSpace = (needed: number) => {
+          if (y + needed <= pageHeight - 10) return;
+          doc.addPage();
+          y = 14;
+          drawHeader();
+        };
+
+        drawHeader();
+        for (let issueIndex = 0; issueIndex < issues.length; issueIndex++) {
+          const issue = issues[issueIndex];
+          const identification = [
+            `Linha: ${issue.sourceRow || '-'}`,
+            `Status: ${issue.status}`,
+            `Certificado: ${issue.record.certificate || '-'}`,
+            `TAG: ${issue.record.tag || '-'}`,
+            `Cliente: ${issue.record.cliente || '-'}`,
+            `Unidade: ${issue.record.unidade || '-'}`,
+          ].join(' | ');
+          const idLines = doc.splitTextToSize(identification, contentWidth);
+          const reasonLines = doc.splitTextToSize(`Motivo: ${issue.reason}`, contentWidth);
+          const actionLines = doc.splitTextToSize(`Ação sugerida: ${issue.suggestedAction}`, contentWidth);
+          const needed = ((idLines.length + reasonLines.length + actionLines.length) * 3.5) + 8;
+          ensureSpace(needed);
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8.5);
+          doc.text(idLines, margin, y);
+          y += idLines.length * 3.5 + 1;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.text(reasonLines, margin, y);
+          y += reasonLines.length * 3.5 + 1;
+          doc.text(actionLines, margin, y);
+          y += actionLines.length * 3.5 + 4;
+
+          if ((issueIndex + 1) % 50 === 0) await yieldToBrowser();
+        }
+
+        doc.save(`RELATORIO_IMPORTACAO_SERVICO_CAMPO_INCONSISTENCIAS_${stamp}.pdf`);
+        pdfGenerated = true;
+      } catch (reportError) {
+        console.error('Erro ao gerar relatório PDF de inconsistências:', reportError);
+      }
+
+      return { excelGenerated, pdfGenerated };
     };
 
     const emptyParsedRecord = (): Omit<FieldServiceRecord, 'id'> => ({
@@ -722,15 +901,39 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     });
 
     setIsImporting(true);
+    setImportProgress({ percent: 1, stage: 'Carregando arquivo Excel...', processed: 0, total: 0 });
+
     const reader = new FileReader();
+    reader.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      const percent = Math.max(1, Math.min(8, Math.round((event.loaded / event.total) * 8)));
+      setImportProgress({ percent, stage: 'Carregando arquivo Excel...', processed: 0, total: 0 });
+    };
+
     reader.onload = async (evt) => {
       const issues: ImportIssue[] = [];
+      let issueReportsGenerated = false;
+      let lastReportResult = { excelGenerated: false, pdfGenerated: false };
+      const ensureIssueReports = async () => {
+        if (issueReportsGenerated || issues.length === 0) return lastReportResult;
+        issueReportsGenerated = true;
+        lastReportResult = await makeIssueReports(issues);
+        return lastReportResult;
+      };
+
       try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { raw: false, defval: '' });
+        const buffer = evt.target?.result;
+        if (!(buffer instanceof ArrayBuffer)) {
+          throw new Error('Não foi possível carregar o arquivo Excel selecionado.');
+        }
+
+        setImportProgress({ percent: 10, stage: 'Interpretando a planilha em segundo plano...', processed: 0, total: 0 });
+        await yieldToBrowser();
+        const data = await parseFieldServiceExcelInWorker(buffer);
+        const totalRows = data.length;
+
+        setImportProgress({ percent: 18, stage: 'Preparando comparação com a base atual...', processed: 0, total: totalRows });
+        await yieldToBrowser();
 
         let addedCount = 0;
         let updatedCount = 0;
@@ -739,19 +942,19 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
         const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
         const recordsToUpdate: { id: string; data: Partial<FieldServiceRecord> }[] = [];
-        const workingRecords: FieldServiceRecord[] = records.map((record) => ({ ...record }));
+        const workingIndex = createFieldServiceImportIndex(records);
         const processedTags = new Map<string, number>();
         const processedCertificates = new Map<string, number>();
         const processedContentFingerprints = new Map<string, number>();
         const processedExistingRecordIds = new Map<string, number>();
 
-        for (let rowIndex = 0; rowIndex < (data as any[]).length; rowIndex++) {
-          const row = (data as any[])[rowIndex];
+        for (let rowIndex = 0; rowIndex < data.length; rowIndex++) {
+          const row = data[rowIndex];
           const sourceRow = Number.isFinite(Number((row as any)?.__rowNum__))
             ? Number((row as any).__rowNum__) + 1
             : rowIndex + 2;
           const normalizedRow = Object.keys(row).reduce((acc, key) => {
-            acc[normalizeKey(key)] = row[key];
+            if (key !== '__rowNum__') acc[normalizeKey(key)] = row[key];
             return acc;
           }, {} as Record<string, any>);
 
@@ -797,24 +1000,12 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           parsedRecord.observacao = String(getImportValue(normalizedRow, [
             'observacao', 'observação', 'obs', 'notas',
           ]) ?? '').trim();
-          parsedRecord.unidade = String(getImportValue(normalizedRow, ['unidade', 'und']) ?? '').trim();
+          parsedRecord.unidade = String(getImportValue(normalizedRow, ['unidade', 'unit']) ?? '').trim();
           parsedRecord.cliente = String(getImportValue(normalizedRow, ['cliente', 'client']) ?? '').trim();
 
           const normalizedTag = normalizeImportTag(parsedRecord.tag);
           const normalizedCert = normalizeCertificateIdentity(parsedRecord.certificate);
           const contentFingerprint = buildFieldServiceContentFingerprint(parsedRecord);
-
-          if (!normalizedTag && !normalizedCert && !contentFingerprint) {
-            skippedCount++;
-            issues.push({
-              sourceRow,
-              status: 'NÃO INSERIDO - LINHA VAZIA/SEM DADOS',
-              reason: 'TAG e Certificado estão em branco e nenhum dos demais campos contém dados suficientes para cadastrar o registro.',
-              suggestedAction: 'Preencha os dados do registro ou remova a linha da planilha.',
-              record: parsedRecord,
-            });
-            continue;
-          }
 
           if (normalizedTag && processedTags.has(normalizedTag)) {
             skippedCount++;
@@ -852,7 +1043,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             continue;
           }
 
-          const matchResult = findUniqueFieldServiceImportMatch(parsedRecord, workingRecords);
+          const matchResult = findUniqueFieldServiceImportMatch(parsedRecord, workingIndex);
           if (matchResult.ambiguous) {
             conflictCount++;
             issues.push({
@@ -890,14 +1081,10 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             const finalCertificate = normalizeCertificateIdentity(mergedRecord.certificate);
 
             const duplicateTagRecord = finalTag
-              ? workingRecords.find(
-                  (record) => record.id !== existingMatch.id && normalizeImportTag(record.tag) === finalTag,
-                )
+              ? (workingIndex.byTag.get(finalTag) || []).find((record) => record.id !== existingMatch.id)
               : undefined;
             const duplicateCertificateRecord = finalCertificate
-              ? workingRecords.find(
-                  (record) => record.id !== existingMatch.id && normalizeCertificateIdentity(record.certificate) === finalCertificate,
-                )
+              ? (workingIndex.byCertificate.get(finalCertificate) || []).find((record) => record.id !== existingMatch.id)
               : undefined;
 
             if (duplicateTagRecord || duplicateCertificateRecord) {
@@ -920,8 +1107,8 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
             if (hasDifferences) {
               recordsToUpdate.push({ id: existingMatch.id, data: mergedRecord });
-              const workingIndex = workingRecords.findIndex((record) => record.id === existingMatch.id);
-              if (workingIndex >= 0) workingRecords[workingIndex] = { ...existingMatch, ...mergedRecord };
+              const nextRecord = { ...existingMatch, ...mergedRecord } as FieldServiceRecord;
+              replaceFieldServiceRecordInImportIndex(workingIndex, existingMatch, nextRecord);
               updatedCount++;
             } else {
               skippedCount++;
@@ -935,7 +1122,11 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             }
           } else {
             newRecordsToImport.push(parsedRecord);
-            workingRecords.push({ id: `__IMPORT_${sourceRow}_${newRecordsToImport.length}`, ...parsedRecord });
+            const syntheticRecord = {
+              id: `__IMPORT_${sourceRow}_${newRecordsToImport.length}`,
+              ...parsedRecord,
+            } as FieldServiceRecord;
+            addFieldServiceRecordToImportIndex(workingIndex, syntheticRecord);
             addedCount++;
           }
 
@@ -945,10 +1136,32 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             processedContentFingerprints.set(contentFingerprint, sourceRow);
           }
           if (existingMatch) processedExistingRecordIds.set(existingMatch.id, sourceRow);
+
+          const processed = rowIndex + 1;
+          if (processed % 50 === 0 || processed === totalRows) {
+            const percent = totalRows > 0 ? 20 + Math.round((processed / totalRows) * 60) : 80;
+            setImportProgress({
+              percent: Math.min(80, percent),
+              stage: 'Analisando e comparando registros...',
+              processed,
+              total: totalRows,
+            });
+            await yieldToBrowser();
+          }
         }
 
         if (newRecordsToImport.length > 0 || recordsToUpdate.length > 0) {
           try {
+            setImportProgress({
+              percent: 84,
+              stage: `Gravando ${newRecordsToImport.length} inclusão(ões) e ${recordsToUpdate.length} atualização(ões) pelo backend seguro...`,
+              processed: totalRows,
+              total: totalRows,
+            });
+            await yieldToBrowser();
+
+            // Preserva a arquitetura atual: uma única chamada ao endpoint seguro
+            // /api/field-service/bulk-upsert, com as mesmas regras do backend.
             const persistResult = await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
             addedCount = persistResult.addedCount;
             updatedCount = persistResult.updatedCount;
@@ -983,32 +1196,57 @@ export default function FieldService({ canEdit = false, canClearData = false, on
               suggestedAction: 'Não repita a importação sem antes verificar se algum registro foi gravado. Atualize a tela, confira os dados e tente novamente somente com os itens pendentes.',
               record: genericRecord,
             });
-            makeIssueReport(issues);
+            await ensureIssueReports();
             throw persistError;
           }
         }
 
-        makeIssueReport(issues);
+        setImportProgress({ percent: 92, stage: 'Finalizando importação...', processed: totalRows, total: totalRows });
+        await yieldToBrowser();
+        const reportResult = await ensureIssueReports();
+
+        setImportProgress({ percent: 100, stage: 'Importação concluída.', processed: totalRows, total: totalRows });
+        await yieldToBrowser();
+
+        const reportMessage = issues.length > 0
+          ? reportResult.pdfGenerated && reportResult.excelGenerated
+            ? `\n\nForam gerados automaticamente um PDF e uma planilha Excel com ${issues.length} item(ns) para tratamento.`
+            : reportResult.pdfGenerated
+              ? `\n\nFoi gerado automaticamente um PDF com ${issues.length} item(ns) para tratamento.`
+              : reportResult.excelGenerated
+                ? `\n\nO PDF não pôde ser gerado; foi mantida a planilha Excel com ${issues.length} item(ns) para tratamento.`
+                : `\n\nForam encontradas ${issues.length} inconsistência(s), mas houve falha ao gerar os relatórios. Consulte o console antes de repetir a importação.`
+          : '\n\nNenhuma inconsistência foi encontrada.';
 
         alert(
           `Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} não inseridos/ignorados.\n${conflictCount} conflitos não alterados por segurança.` +
-          (issues.length > 0
-            ? `\n\nFoi gerada automaticamente uma planilha Excel com ${issues.length} item(ns) não inserido(s) e o respectivo motivo.`
-            : '\n\nNenhuma inconsistência foi encontrada.'),
+          reportMessage,
         );
       } catch (error) {
         console.error("Error reading/importing excel:", error);
+        const reportResult = await ensureIssueReports();
         if (issues.length === 0) {
           alert("Erro ao importar planilha. Verifique o formato do arquivo e tente novamente.");
+        } else if (reportResult.pdfGenerated) {
+          alert("A importação encontrou um erro. O relatório PDF de inconsistências foi gerado; confira os itens antes de tentar novamente.");
         } else {
-          alert("A importação encontrou um erro. O relatório de inconsistências foi gerado quando possível; confira a planilha antes de tentar novamente.");
+          alert("A importação encontrou um erro. O relatório PDF não pôde ser gerado; confira o relatório Excel e o console antes de tentar novamente.");
         }
       } finally {
         setIsImporting(false);
+        setImportProgress({ percent: 0, stage: '', processed: 0, total: 0 });
         if (excelInputRef.current) excelInputRef.current.value = '';
       }
     };
-    reader.readAsBinaryString(file);
+
+    reader.onerror = () => {
+      setIsImporting(false);
+      setImportProgress({ percent: 0, stage: '', processed: 0, total: 0 });
+      if (excelInputRef.current) excelInputRef.current.value = '';
+      alert('Erro ao carregar o arquivo Excel selecionado.');
+    };
+
+    reader.readAsArrayBuffer(file);
   };
 
   const handleExportExcel = () => {
@@ -1831,6 +2069,47 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           </table>
         </div>
       </div>
+
+      {isImporting && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-3">
+                <RefreshCw className="h-6 w-6 animate-spin text-royal-blue" />
+                <div>
+                  <h3 className="font-bold text-slate-800">Importando Serviço de Campo</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Aguarde a conclusão. A tela continuará atualizando o progresso.</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-sm font-semibold text-slate-700">{importProgress.stage || 'Processando...'}</p>
+                  <span className="text-sm font-bold text-royal-blue">{Math.max(0, Math.min(100, importProgress.percent))}%</span>
+                </div>
+                <div className="h-3 rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-royal-blue transition-[width] duration-300 ease-out"
+                    style={{ width: `${Math.max(2, Math.min(100, importProgress.percent))}%` }}
+                  />
+                </div>
+              </div>
+              {importProgress.total > 0 && (
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Linhas processadas</span>
+                  <span className="font-semibold text-slate-700">
+                    {Math.min(importProgress.processed, importProgress.total).toLocaleString('pt-BR')} / {importProgress.total.toLocaleString('pt-BR')}
+                  </span>
+                </div>
+              )}
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                A leitura pesada do Excel ocorre em segundo plano. As regras já existentes de importação não são modificadas por este processamento.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showClearDataModal && canClearData && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
