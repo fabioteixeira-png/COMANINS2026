@@ -1042,7 +1042,7 @@ const backfillClientLinks = async (): Promise<void> => {
   return migrationPromise;
 };
 
-const FIELD_SERVICE_LINK_MIGRATION_ID = 'fieldServiceClientLinksV1';
+const FIELD_SERVICE_LINK_MIGRATION_ID = 'fieldServiceClientLinksV2ClientField';
 let fieldServiceLinkMigrationReady = false;
 let fieldServiceLinkMigrationPromise: Promise<void> | null = null;
 
@@ -1072,30 +1072,23 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
       return;
     }
 
-    console.log('[MIGRATION] Starting/resuming clientId backfill for fieldServiceRecords...');
-    const instrumentSnap = await firestoreDb
-      .collection('instruments')
-      .select('clientId', 'certificateNumber', 'coma', 'tag')
-      .get();
+    console.log('[MIGRATION] Starting/resuming fieldServiceRecords clientId backfill from Cliente field...');
+    const clientsSnap = await firestoreDb.collection('clients').select('name').get();
+    const normalizeClientName = (value: unknown) =>
+      String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
 
-    const byCertificate = new Map<string, string>();
-    const byTag = new Map<string, string | null>();
-    const normalize = (value: unknown) => String(value || '').trim().toUpperCase();
-
-    for (const instrumentDoc of instrumentSnap.docs) {
-      const data: any = instrumentDoc.data();
-      const clientId = String(data?.clientId || '').trim();
-      if (!clientId) continue;
-      const certificate = normalize(data?.certificateNumber || data?.coma);
-      const coma = normalize(data?.coma);
-      const tag = normalize(data?.tag);
-      if (certificate) byCertificate.set(certificate, clientId);
-      if (coma) byCertificate.set(coma, clientId);
-      if (tag) {
-        const previous = byTag.get(tag);
-        if (previous === undefined) byTag.set(tag, clientId);
-        else if (previous !== clientId) byTag.set(tag, null);
-      }
+    const clientIdByName = new Map<string, string | null>();
+    for (const clientDoc of clientsSnap.docs) {
+      const data: any = clientDoc.data();
+      const normalizedName = normalizeClientName(data?.name);
+      if (!normalizedName) continue;
+      const previous = clientIdByName.get(normalizedName);
+      if (previous === undefined) clientIdByName.set(normalizedName, clientDoc.id);
+      else if (previous !== clientDoc.id) clientIdByName.set(normalizedName, null);
     }
 
     let updated = Number(markerData?.updated || 0);
@@ -1107,6 +1100,7 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
     await markerRef.set({
       completed: false,
       status: 'running',
+      source: 'fieldServiceRecords.cliente',
       startedAt: markerData?.startedAt || new Date().toISOString(),
       resumedAt: new Date().toISOString(),
       updated,
@@ -1122,10 +1116,10 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
         .limit(pageSize);
       if (lastDocumentId) pageQuery = pageQuery.startAfter(lastDocumentId);
 
-      const page = await pageQuery.select('clientId', 'certificate', 'tag').get();
+      const page = await pageQuery.select('clientId', 'cliente').get();
       if (page.empty) break;
 
-      let batch = firestoreDb.batch();
+      const batch = firestoreDb.batch();
       let pendingWrites = 0;
       let pageUpdated = 0;
       let pageOrphaned = 0;
@@ -1133,19 +1127,19 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
       for (const recordDoc of page.docs) {
         const data: any = recordDoc.data();
         const currentClientId = String(data?.clientId || '').trim();
-        if (!currentClientId) {
-          const certificate = normalize(data?.certificate);
-          const tag = normalize(data?.tag);
-          const resolvedClientId =
-            (certificate && byCertificate.get(certificate)) ||
-            (tag ? byTag.get(tag) : undefined);
-          if (resolvedClientId) {
+        const normalizedClient = normalizeClientName(data?.cliente);
+        const resolvedClientId = normalizedClient ? clientIdByName.get(normalizedClient) : undefined;
+
+        if (resolvedClientId) {
+          // O campo Cliente passa a ser autoritativo inclusive para corrigir vínculos
+          // antigos que tenham sido derivados por certificado/TAG/unidade.
+          if (currentClientId !== resolvedClientId) {
             batch.update(recordDoc.ref, { clientId: resolvedClientId });
             pendingWrites += 1;
             pageUpdated += 1;
-          } else {
-            pageOrphaned += 1;
           }
+        } else {
+          pageOrphaned += 1;
         }
         lastDocumentId = recordDoc.id;
       }
@@ -1158,6 +1152,7 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
       await markerRef.set({
         completed: false,
         status: 'running',
+        source: 'fieldServiceRecords.cliente',
         updated,
         orphaned,
         totalScanned,
@@ -1172,7 +1167,8 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
     await markerRef.set({
       completed: true,
       status: 'completed',
-      version: 2,
+      version: 3,
+      source: 'fieldServiceRecords.cliente',
       completedAt: new Date().toISOString(),
       updated,
       orphaned,
@@ -1181,16 +1177,17 @@ const backfillFieldServiceClientLinks = async (): Promise<void> => {
     }, { merge: true });
 
     fieldServiceLinkMigrationReady = true;
-    console.log(`[MIGRATION] fieldService clientId backfill complete. updated=${updated}, orphaned=${orphaned}, scanned=${totalScanned}`);
+    console.log(`[MIGRATION] fieldService clientId backfill from Cliente complete. updated=${updated}, orphaned=${orphaned}, scanned=${totalScanned}`);
   })()
     .catch(async (error) => {
       fieldServiceLinkMigrationReady = false;
-      console.error('[MIGRATION] fieldService clientId backfill failed; legacy filtering remains active:', error);
+      console.error('[MIGRATION] fieldService Cliente -> clientId backfill failed:', error);
       try {
         if (firestoreDb) {
           await firestoreDb.collection('securityMigrations').doc(FIELD_SERVICE_LINK_MIGRATION_ID).set({
             completed: false,
             status: 'failed',
+            source: 'fieldServiceRecords.cliente',
             lastError: error instanceof Error ? error.message : String(error),
             failedAt: new Date().toISOString(),
           }, { merge: true });
@@ -6972,33 +6969,53 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
 
     let fieldServiceRecords: any[] = [];
     if (profile?.isFieldService === true) {
-      const certificateKeys = new Set(
-        instruments
-          .map((item: any) => String(item?.certificateNumber || '').replace(/\D/g, ''))
-          .filter(Boolean),
+      const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
+      const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
+      const instrumentByCertificate = new Map<string, any>();
+      const instrumentByCertificateDigits = new Map<string, any>();
+
+      for (const instrument of instruments) {
+        const cert = normalizeCertificate((instrument as any)?.certificateNumber || (instrument as any)?.coma);
+        if (cert) instrumentByCertificate.set(cert, instrument);
+        const digits = certificateDigits(cert);
+        if (digits) instrumentByCertificateDigits.set(digits, instrument);
+      }
+
+      const reportInstrumentIds = new Set(
+        reports.map((report: any) => String(report?.instrumentId || '')).filter(Boolean),
       );
 
-      if (certificateKeys.size > 0) {
-        const fieldServiceIndexed = await isFieldServiceLinkMigrationComplete();
-        if (fieldServiceIndexed) {
-          const fieldServiceSnap = await firestoreDb
-            .collection('fieldServiceRecords')
-            .where('clientId', '==', clientId)
-            .get();
-          fieldServiceRecords = fieldServiceSnap.docs
-            .map((doc) => ({ id: doc.id, ...doc.data() }))
-            .filter((item: any) => item?.isDeleted !== true);
-        } else {
-          // Compatibilidade temporária enquanto o backfill histórico é concluído.
-          const fieldServiceSnap = await firestoreDb.collection('fieldServiceRecords').get();
-          fieldServiceRecords = fieldServiceSnap.docs
-            .map((doc) => ({ id: doc.id, ...doc.data() }))
-            .filter((item: any) => {
-              if (item?.isDeleted === true) return false;
-              const certificateKey = String(item?.certificate || '').replace(/\D/g, '');
-              return Boolean(certificateKey) && certificateKeys.has(certificateKey);
-            });
-        }
+      const parseFieldServiceDate = (value: unknown): number => {
+        const raw = String(value || '').trim();
+        if (!raw) return 0;
+        const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
+        const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+
+      const hasCorrelatedCertificate = (item: any): boolean => {
+        const cert = normalizeCertificate(item?.certificate);
+        if (!cert) return false;
+        const instrument = instrumentByCertificate.get(cert) || instrumentByCertificateDigits.get(certificateDigits(cert));
+        if (!instrument) return false;
+        return reportInstrumentIds.has(String(instrument.id));
+      };
+
+      const authenticatedClientName = String(profile?.name || '').trim();
+      if (authenticatedClientName) {
+        const fieldServiceSnap = await firestoreDb
+          .collection('fieldServiceRecords')
+          .where('cliente', '==', authenticatedClientName)
+          .get();
+
+        fieldServiceRecords = fieldServiceSnap.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((item: any) => item?.isDeleted !== true)
+          .filter(hasCorrelatedCertificate)
+          .sort((a: any, b: any) => parseFieldServiceDate(b?.dataCalibracao) - parseFieldServiceDate(a?.dataCalibracao));
       }
     }
 

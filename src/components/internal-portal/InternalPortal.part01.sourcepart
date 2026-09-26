@@ -276,74 +276,20 @@ const findClientByFieldServiceAliases = (
   return undefined;
 };
 
-const getFieldServiceMappedClientAliases = (
-  context?: FieldServiceCertificateContext | null,
-): string[] | null => {
-  const serviceClient = normalizeFieldServiceLookup(context?.cliente);
-  const unit = normalizeFieldServiceLookup(context?.unidade);
-
-  if (serviceClient.includes("ACELEN")) {
-    return ["Acelen"];
-  }
-
-  if (!serviceClient.includes("BRASKEM")) {
-    return null;
-  }
-
-  const braskemUnibUnits = new Set([
-    "IESE",
-    "SAIN1",
-    "SAIN2",
-    "SOIN1F",
-    "SOIN1Q",
-    "SOIN2F",
-    "SOIN2Q",
-    "TMP",
-  ]);
-
-  if (braskemUnibUnits.has(unit)) return ["Braskem Unib", "Braskem UNIB"];
-  if (unit === "PE1") return ["Braskem PE-1", "Braskem PE 1", "Braskem PE1"];
-  if (unit === "PE2") return ["Braskem PE-2", "Braskem PE 2", "Braskem PE2"];
-  if (unit === "PE3") return ["Braskem PE-3", "Braskem PE 3", "Braskem PE3"];
-  if (unit === "TEGAL") return ["Braskem Tegal"];
-  if (unit === "PVC") return ["Braskem PVC"];
-
-  return null;
-};
-
-const getFieldServiceClientMappingError = (
-  context?: FieldServiceCertificateContext | null,
-): string | null => {
-  const serviceClient = normalizeFieldServiceLookup(context?.cliente);
-  if (!serviceClient.includes("BRASKEM")) return null;
-
-  const mappedAliases = getFieldServiceMappedClientAliases(context);
-  if (mappedAliases) return null;
-
-  const unit = String(context?.unidade || "").trim() || "não informada";
-  return `A unidade ${unit} não possui regra de cliente configurada para Braskem. Corrija a Unidade no Serviço de Campo antes de imprimir o certificado.`;
-};
-
 const resolveFieldServiceCertificateClient = (
   clients: Client[],
   instrumentClientId: string | undefined,
   context?: FieldServiceCertificateContext | null,
-): { client?: Client; expectedAliases?: string[] } => {
-  const mappedAliases = getFieldServiceMappedClientAliases(context);
-  if (mappedAliases) {
-    return {
-      client: findClientByFieldServiceAliases(clients, mappedAliases),
-      expectedAliases: mappedAliases,
-    };
-  }
-
-  const contextClientId = String(context?.clientId || "").trim();
+): { client?: Client } => {
+  // O Cliente informado no Serviço de Campo é autoritativo.
+  // Não aplicar mais qualquer regra especial por unidade/Braskem.
+  const contextClientId = String(context?.clientId || '').trim();
   if (contextClientId) {
     const byContextId = clients.find((client) => client.id === contextClientId);
     if (byContextId) return { client: byContextId };
   }
 
-  const typedClient = String(context?.cliente || "").trim();
+  const typedClient = String(context?.cliente || '').trim();
   if (typedClient) {
     const byTypedName = findClientByFieldServiceAliases(clients, [typedClient]);
     if (byTypedName) return { client: byTypedName };

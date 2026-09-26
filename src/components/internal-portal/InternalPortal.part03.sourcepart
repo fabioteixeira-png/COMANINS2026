@@ -3298,12 +3298,6 @@
             canEdit={canEditFieldService}
             canClearData={isUserAdmin}
             onPrintCertificate={async (instId, tagData, equipmentData, context) => {
-              const mappingError = getFieldServiceClientMappingError(context);
-              if (mappingError) {
-                alert(mappingError);
-                return;
-              }
-
               const instrument = instruments.find((item) => item.id === instId);
               const resolvedClient = resolveFieldServiceCertificateClient(
                 clients,
@@ -3311,9 +3305,9 @@
                 context,
               );
 
-              if (resolvedClient.expectedAliases && !resolvedClient.client) {
+              if (context?.cliente && !resolvedClient.client) {
                 alert(
-                  `Não foi encontrado no Cadastro de Clientes o cliente necessário para este certificado: ${resolvedClient.expectedAliases[0]}. Cadastre/corrija o cliente antes de imprimir.`,
+                  `O cliente informado no Serviço de Campo (${context.cliente}) não foi encontrado no Cadastro de Clientes. Corrija o campo Cliente antes de imprimir o certificado.`,
                 );
                 return;
               }

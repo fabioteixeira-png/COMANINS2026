@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'r
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Instrument } from '../types';
+import { Client, Instrument } from '../types';
 import {
   FieldServiceRecord,
   syncFieldServiceRecords,
   addFieldServiceRecord,
   updateFieldServiceRecord,
   bulkUpsertFieldServiceRecords,
-  deleteFieldServiceRecord, clearAllFieldServiceRecords, syncInstruments, refreshFieldServiceRecords
+  deleteFieldServiceRecord, clearAllFieldServiceRecords, syncInstruments, syncClients, refreshFieldServiceRecords
 } from '../lib/firebase';
 import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
 import { buildFieldServiceA4Workbook } from '../utils/fieldServiceA4Workbook';
@@ -68,6 +68,7 @@ interface FieldServiceProps {
 export default function FieldService({ canEdit = false, canClearData = false, onPrintCertificate }: FieldServiceProps = {}) {
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Pagination
@@ -150,7 +151,13 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       const linkedInstrument = findInstrumentByCertificate(newVal);
       updatePayload.certificate = newVal.trim().toUpperCase();
       updatePayload.dataCalibracao = linkedInstrument?.lastCalibrationDate || '';
-      if (linkedInstrument?.clientId) updatePayload.clientId = linkedInstrument.clientId;
+      // O certificado não altera mais o cliente do registro.
+      updatePayload.clientId = resolveClientId(record);
+    }
+
+    if (colId === 'cliente') {
+      updatePayload.cliente = newVal;
+      updatePayload.clientId = resolveClientId({ ...record, cliente: newVal });
     }
 
     // Atualização otimista: a célula não volta para o certificado antigo enquanto
@@ -237,6 +244,9 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   useEffect(() => {
     let disposed = false;
     let unsubscribeInst: Promise<() => void> | null = null;
+    const unsubscribeClients = syncClients((data) => {
+      if (!disposed) setClients(data);
+    });
     const unsubscribe = syncFieldServiceRecords((data) => {
       if (disposed) return;
       setRecords(data);
@@ -255,6 +265,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       disposed = true;
       unsubscribe.then(unsub => unsub());
       unsubscribeInst?.then(unsub => unsub());
+      unsubscribeClients.then(unsub => unsub());
     };
   }, []);
 
@@ -528,20 +539,25 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     URL.revokeObjectURL(url);
   };
 
+  const normalizeClientName = (value: unknown): string =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+
   const resolveClientId = (record: Partial<FieldServiceRecord>): string => {
-    const cert = normalizeCertificateIdentity(record.certificate);
-    const tag = String(record.tag || '').trim().toUpperCase();
-
-    if (cert) {
-      const certificateMatch = findInstrumentByCertificate(cert);
-      if (certificateMatch?.clientId) return String(certificateMatch.clientId).trim();
+    // O campo Cliente do Serviço de Campo é a fonte autoritativa do vínculo.
+    // Não derivar cliente por certificado, TAG, unidade ou regra especial Braskem.
+    const normalizedClient = normalizeClientName(record.cliente);
+    if (normalizedClient) {
+      const matchedClient = clients.find(
+        (client) => normalizeClientName(client.name) === normalizedClient,
+      );
+      return matchedClient?.id ? String(matchedClient.id).trim() : '';
     }
 
-    if (tag) {
-      const clientIds = Array.from(instrumentLookup.clientIdsByTag.get(tag) || []);
-      if (clientIds.length === 1) return String(clientIds[0] || '');
-    }
-
+    // Mantém o vínculo existente apenas para registros legados sem Cliente preenchido.
     return String(record.clientId || '').trim();
   };
 
@@ -1723,6 +1739,29 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
                       const isEditing = canEdit && editingCell?.rowId === record.id && editingCell?.colId === col.id;
                       if (isEditing && col.id !== 'dataCalibracao') {
+                        if (col.id === 'cliente') {
+                          return (
+                            <td key={col.id} className="px-4 py-2">
+                              <select
+                                autoFocus
+                                defaultValue={value}
+                                onChange={e => { void handleInlineSave(record, col.id, e.target.value); }}
+                                onBlur={() => setEditingCell(null)}
+                                onKeyDown={e => { if (e.key === 'Escape') setEditingCell(null); }}
+                                className="w-full px-2 py-1 text-sm border border-royal-blue rounded outline-none shadow-sm bg-white"
+                              >
+                                <option value="">Selecione...</option>
+                                {clients
+                                  .slice()
+                                  .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+                                  .map(client => (
+                                    <option key={client.id} value={client.name}>{client.name}</option>
+                                  ))}
+                              </select>
+                            </td>
+                          );
+                        }
+
                         return (
                           <td key={col.id} className="px-4 py-2">
                             <input
@@ -1871,12 +1910,28 @@ export default function FieldService({ canEdit = false, canClearData = false, on
                 {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao').map(col => (
                   <div key={col.id}>
                     <label className="block text-xs font-bold text-slate-700 mb-1">{col.label}</label>
-                    <input
-                      type="text"
-                      value={(formData as any)[col.id] || ''}
-                      onChange={e => setFormData({...formData, [col.id]: e.target.value})}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none"
-                    />
+                    {col.id === 'cliente' ? (
+                      <select
+                        value={(formData as any)[col.id] || ''}
+                        onChange={e => setFormData({...formData, cliente: e.target.value})}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none bg-white"
+                      >
+                        <option value="">Selecione...</option>
+                        {clients
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+                          .map(client => (
+                            <option key={client.id} value={client.name}>{client.name}</option>
+                          ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={(formData as any)[col.id] || ''}
+                        onChange={e => setFormData({...formData, [col.id]: e.target.value})}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none"
+                      />
+                    )}
                   </div>
                 ))}
 

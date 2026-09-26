@@ -328,6 +328,7 @@ export default function ClientPortal({
                   <thead>
                     <tr className="bg-slate-50 text-slate-500 border-b border-slate-200">
                       <th className="p-4 font-semibold">Certificado</th>
+                      <th className="p-4 font-semibold">Data de Calibração</th>
                       <th className="p-4 font-semibold">TAG</th>
                       <th className="p-4 font-semibold">Equipamento</th>
                       <th className="p-4 font-semibold text-right">Ações</th>
@@ -336,6 +337,17 @@ export default function ClientPortal({
                   <tbody className="divide-y divide-slate-100">
                     {(() => {
                       const extractNum = (s: string) => String(s || '').replace(/\D/g, '');
+                      const parseCalibrationDate = (value: string | undefined): number => {
+                        const raw = String(value || '').trim();
+                        if (!raw) return 0;
+                        const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+                        if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
+                        const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                        if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+                        const parsed = Date.parse(raw);
+                        return Number.isFinite(parsed) ? parsed : 0;
+                      };
+
                       const correlatedRecords = fieldServiceRecords.map(fsRecord => {
                         const recNum = extractNum(fsRecord.certificate);
                         const inst = instruments.find(i => extractNum(i.certificateNumber) === recNum);
@@ -353,12 +365,14 @@ export default function ClientPortal({
                         const tag = (fsRecord.tag || inst.tag || "").toLowerCase();
                         const equip = (fsRecord.equipamento || "").toLowerCase();
                         return cert.includes(term) || tag.includes(term) || equip.includes(term);
-                      });
+                      }).sort((a: any, b: any) =>
+                        parseCalibrationDate(b.fsRecord?.dataCalibracao) - parseCalibrationDate(a.fsRecord?.dataCalibracao)
+                      );
 
                       if (correlatedRecords.length === 0) {
                         return (
                           <tr>
-                            <td colSpan={4} className="p-8 text-center text-slate-500">
+                            <td colSpan={5} className="p-8 text-center text-slate-500">
                               Nenhum certificado disponível no momento.
                             </td>
                           </tr>
@@ -366,10 +380,13 @@ export default function ClientPortal({
                       }
 
                       return correlatedRecords.map(({ fsRecord, inst }: any, idx: number) => {
-                        const report = reports.find(r => r.instrumentId === inst.id);
+                        const report = reports
+                          .filter(r => r.instrumentId === inst.id)
+                          .sort((a, b) => parseCalibrationDate(b.date) - parseCalibrationDate(a.date))[0];
                         return (
                           <tr key={idx} className="hover:bg-slate-50/50">
                             <td className="p-4 font-mono font-medium">{fsRecord.certificate || inst.certificateNumber}</td>
+                            <td className="p-4">{formatDateBR(fsRecord.dataCalibracao || report?.date)}</td>
                             <td className="p-4">{fsRecord.tag || inst.tag || '-'}</td>
                             <td className="p-4">{fsRecord.equipamento || '-'}</td>
                             <td className="p-4 text-right">
