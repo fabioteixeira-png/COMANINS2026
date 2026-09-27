@@ -1080,7 +1080,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           if (existingMatch) processedExistingRecordIds.set(existingMatch.id, sourceRow);
 
           const processed = rowIndex + 1;
-          if (processed % 50 === 0 || processed === totalRows) {
+          if (processed % 500 === 0 || processed === totalRows) {
             const percent = totalRows > 0 ? 20 + Math.round((processed / totalRows) * 60) : 80;
             setImportProgress({
               percent: Math.min(80, percent),
@@ -1102,9 +1102,25 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             });
             await yieldToBrowser();
 
-            // Preserva a arquitetura atual: uma única chamada ao endpoint seguro
-            // /api/field-service/bulk-upsert, com as mesmas regras do backend.
-            const persistResult = await bulkUpsertFieldServiceRecords(recordsToUpdate, newRecordsToImport);
+            // LOTE 46: o backend mantém as mesmas regras fortes de unicidade,
+            // porém grava vários chunks em paralelo e transmite progresso real.
+            // Isso evita centenas de transactions sequenciais e mantém a conexão
+            // ativa durante importações grandes.
+            const persistResult = await bulkUpsertFieldServiceRecords(
+              recordsToUpdate,
+              newRecordsToImport,
+              (progress) => {
+                const writePercent = 82 + Math.round((Math.max(0, Math.min(100, progress.percent)) / 100) * 14);
+                setImportProgress({
+                  percent: Math.min(96, writePercent),
+                  stage: progress.message || (progress.stage === 'preparing'
+                    ? 'Preparando gravação otimizada...'
+                    : `Gravando no banco: ${progress.percent}% (${progress.applied} concluído(s), ${progress.rejected} rejeitado(s))`),
+                  processed: progress.processed,
+                  total: progress.total,
+                });
+              },
+            );
             addedCount = persistResult.addedCount;
             updatedCount = persistResult.updatedCount;
             conflictCount += persistResult.rejected.length;
@@ -1113,6 +1129,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
               if (reason === "DUPLICATE_CERTIFICATE") return "Certificado já existente";
               if (reason === "RECORD_NOT_FOUND") return "Registro a atualizar não foi encontrado";
               if (reason === "DUPLICATE_TARGET") return "Mais de uma operação tentou alterar o mesmo registro";
+              if (reason === "WRITE_FAILED") return "Falha de gravação após tentativas automáticas";
               return "Conflito de unicidade";
             };
             persistResult.rejected.forEach((rejection: any) => {
@@ -1120,32 +1137,35 @@ export default function FieldService({ canEdit = false, canClearData = false, on
                 ? newRecordsToImport[rejection.index]
                 : recordsToUpdate[rejection.index]?.data;
               if (!source) return;
+              const isWriteFailure = rejection.reason === "WRITE_FAILED";
               issues.push({
                 sourceRow: rejection.type === "add"
                   ? (newRecordSourceRows[rejection.index] || 0)
                   : (updateSourceRows[rejection.index] || 0),
-                status: "NÃO INSERIDO - REJEITADO PELO BANCO",
+                status: isWriteFailure
+                  ? "NÃO IMPORTADO - ERRO DE GRAVAÇÃO"
+                  : "NÃO INSERIDO - REJEITADO PELO BANCO",
                 reason: rejectionLabel(rejection.reason),
-                suggestedAction: "Verifique se não há duplicidade gerada por outros usuários.",
+                suggestedAction: isWriteFailure
+                  ? "Tente importar novamente somente esta linha. O sistema já tentou a gravação automaticamente mais de uma vez."
+                  : "Verifique se não há duplicidade gerada por outros usuários.",
                 record: source as any,
               });
             });
           } catch (persistError: any) {
-            console.error('Erro ao gravar importação de Serviço de Campo:', persistError);
-            const genericRecord = emptyParsedRecord();
-            issues.push({
-              sourceRow: 0,
-              status: 'ERRO DE GRAVAÇÃO DO LOTE',
-              reason: persistError?.message || 'O sistema não conseguiu concluir a gravação do lote no banco de dados.',
-              suggestedAction: 'Não repita a importação sem antes verificar se algum registro foi gravado. Confira os dados já persistidos e tente novamente somente com os itens pendentes.',
-              record: genericRecord,
-            });
-            await ensureIssueReport();
-            throw persistError;
+            console.error('Erro de transporte ao gravar importação de Serviço de Campo:', persistError);
+            // Não cria uma linha fictícia "ERRO DE GRAVAÇÃO DO LOTE" no Excel.
+            // O relatório deve conter somente linhas reais e identificáveis que
+            // não foram importadas. Falha de conexão/stream é informada na tela.
+            const transportError: any = new Error(
+              persistError?.message || 'A conexão foi interrompida antes da confirmação final da importação.',
+            );
+            transportError.code = 'FIELD_SERVICE_IMPORT_TRANSPORT_ERROR';
+            throw transportError;
           }
         }
 
-        setImportProgress({ percent: 92, stage: 'Finalizando importação...', processed: totalRows, total: totalRows });
+        setImportProgress({ percent: 97, stage: 'Finalizando importação...', processed: totalRows, total: totalRows });
         await yieldToBrowser();
         const excelGenerated = await ensureIssueReport();
 
@@ -1162,15 +1182,23 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           `Importação concluída!\n\n${addedCount} novos registros adicionados.\n${updatedCount} registros atualizados.\n${skippedCount} não inseridos/ignorados.\n${conflictCount} conflitos não alterados por segurança.` +
           reportMessage,
         );
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error reading/importing excel:", error);
-        const excelGenerated = await ensureIssueReport();
-        if (issues.length === 0) {
-          alert("Erro ao importar planilha. Verifique o formato do arquivo e tente novamente.");
-        } else if (excelGenerated) {
-          alert("A importação encontrou um erro. A planilha Excel com os itens que não foram importados foi gerada para tratamento.");
+        if (error?.code === 'FIELD_SERVICE_IMPORT_TRANSPORT_ERROR') {
+          alert(
+            'A comunicação com o servidor foi interrompida antes da confirmação final. ' +
+            'O sistema não gerou uma linha fictícia no Excel porque não é seguro afirmar quais registros ficaram pendentes. ' +
+            'Reabra a aba Serviço de Campo para sincronizar o que já foi gravado e tente novamente; registros idênticos serão ignorados.'
+          );
         } else {
-          alert("A importação encontrou um erro e não foi possível gerar a planilha Excel de inconsistências. Consulte o console antes de tentar novamente.");
+          const excelGenerated = await ensureIssueReport();
+          if (issues.length === 0) {
+            alert("Erro ao importar planilha. Verifique o formato do arquivo e tente novamente.");
+          } else if (excelGenerated) {
+            alert("A importação encontrou um erro. A planilha Excel com os itens que não foram importados foi gerada para tratamento.");
+          } else {
+            alert("A importação encontrou um erro e não foi possível gerar a planilha Excel de inconsistências. Consulte o console antes de tentar novamente.");
+          }
         }
       } finally {
         setIsImporting(false);

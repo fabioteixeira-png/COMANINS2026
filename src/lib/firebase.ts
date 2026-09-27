@@ -4223,7 +4223,7 @@ export interface FieldServiceBulkRejectedOperation {
   type: 'add' | 'update';
   id?: string;
   index: number;
-  reason: 'DUPLICATE_TAG' | 'DUPLICATE_CERTIFICATE' | 'RECORD_NOT_FOUND' | 'DUPLICATE_TARGET';
+  reason: 'DUPLICATE_TAG' | 'DUPLICATE_CERTIFICATE' | 'RECORD_NOT_FOUND' | 'DUPLICATE_TARGET' | 'WRITE_FAILED';
   field?: 'tag' | 'certificate';
   value?: string;
   conflictRecordIds?: string[];
@@ -4233,6 +4233,16 @@ export interface FieldServiceBulkUpsertResult {
   addedCount: number;
   updatedCount: number;
   rejected: FieldServiceBulkRejectedOperation[];
+}
+
+export interface FieldServiceBulkUpsertProgress {
+  stage: 'preparing' | 'validating' | 'writing' | 'snapshot' | 'done';
+  processed: number;
+  total: number;
+  applied: number;
+  rejected: number;
+  percent: number;
+  message?: string;
 }
 
 const fieldServiceApiRequest = async (path: string, body: unknown): Promise<any> => {
@@ -4407,11 +4417,100 @@ export async function clearAllFieldServiceRecords(
 export async function bulkUpsertFieldServiceRecords(
   updates: { id: string; data: Partial<FieldServiceRecord> }[],
   adds: Omit<FieldServiceRecord, 'id'>[],
+  onProgress?: (progress: FieldServiceBulkUpsertProgress) => void,
 ): Promise<FieldServiceBulkUpsertResult> {
-  const payload = await fieldServiceApiRequest('/api/field-service/bulk-upsert', { updates, adds });
-  const acceptedUpdates = Array.isArray(payload?.updated) ? payload.updated : [];
-  const acceptedAdds = Array.isArray(payload?.added) ? payload.added : [];
-  const rejected = (Array.isArray(payload?.rejected) ? payload.rejected : []) as FieldServiceBulkRejectedOperation[];
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+
+  const requestImportStream = (path: string) => fetch(path, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/x-ndjson',
+    },
+    body: JSON.stringify({ updates, adds }),
+  });
+
+  // LOTE 47: quando a base acabou de ser limpa e a importação é uma carga
+  // integral (somente inclusões), tenta primeiro o caminho BulkWriter sem uma
+  // transação por registro/chunk. Se a base não estiver realmente vazia ou o
+  // usuário não for administrador, cai automaticamente no fluxo transacional
+  // seguro do LOTE 46.
+  const preferInitialFastLoad = updates.length === 0 && adds.length >= 500;
+  let response = await requestImportStream(
+    preferInitialFastLoad
+      ? '/api/field-service/bulk-initial-load-stream'
+      : '/api/field-service/bulk-upsert-stream',
+  );
+
+  if (!response.ok && preferInitialFastLoad) {
+    const fastError = await response.json().catch(() => ({}));
+    const canFallback = response.status === 409 || response.status === 403 ||
+      fastError?.error === 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE';
+    if (canFallback) {
+      response = await requestImportStream('/api/field-service/bulk-upsert-stream');
+    } else {
+      throw new Error(fastError?.message || fastError?.error || 'Não foi possível iniciar a carga acelerada de Serviço de Campo.');
+    }
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.message || payload?.error || 'Não foi possível gravar a importação de Serviço de Campo.');
+  }
+
+  let finalPayload: any = null;
+  const reader = response.body?.getReader();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let pending = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) pending += decoder.decode(value, { stream: !done });
+      const lines = pending.split('\n');
+      pending = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const event = JSON.parse(trimmed);
+        if (event.type === 'error') throw new Error(event.message || 'Falha durante a gravação da importação.');
+        if (event.type === 'progress') {
+          const rawStage = String(event.stage || 'writing');
+          const stage: FieldServiceBulkUpsertProgress['stage'] =
+            rawStage === 'preparing' ? 'preparing' :
+            rawStage === 'validating' ? 'validating' :
+            rawStage === 'snapshot' ? 'snapshot' : 'writing';
+          onProgress?.({
+            stage,
+            processed: Number(event.processed || 0),
+            total: Number(event.total || 0),
+            applied: Number(event.applied || 0),
+            rejected: Number(event.rejected || 0),
+            percent: Number(event.percent || 0),
+            message: String(event.message || ''),
+          });
+        }
+        if (event.type === 'done') finalPayload = event;
+      }
+      if (done) break;
+    }
+    const trimmed = pending.trim();
+    if (trimmed) {
+      const event = JSON.parse(trimmed);
+      if (event.type === 'error') throw new Error(event.message || 'Falha durante a gravação da importação.');
+      if (event.type === 'done') finalPayload = event;
+    }
+  } else {
+    finalPayload = await response.json().catch(() => null);
+  }
+
+  if (!finalPayload) throw new Error('A importação foi interrompida antes da confirmação final do servidor.');
+
+  const acceptedUpdates = Array.isArray(finalPayload?.updated) ? finalPayload.updated : [];
+  const acceptedAdds = Array.isArray(finalPayload?.added) ? finalPayload.added : [];
+  const rejected = (Array.isArray(finalPayload?.rejected) ? finalPayload.rejected : []) as FieldServiceBulkRejectedOperation[];
 
   const appliedUpdates = new Map<string, Partial<FieldServiceRecord>>();
   for (const item of acceptedUpdates) {
@@ -4442,8 +4541,20 @@ export async function bulkUpsertFieldServiceRecords(
   });
   const createdIds = new Set(createdRecords.map((created) => created.id));
   fieldServiceCache = [...createdRecords, ...fieldServiceCache.filter((record) => !createdIds.has(record.id))];
+  fieldServiceLastServerSyncAt = new Date().toISOString();
+  fieldServiceLastFullRefreshAt = Date.now();
   notifyFieldServiceSubscribers();
   schedulePersistFieldServiceCache();
+
+  onProgress?.({
+    stage: 'done',
+    processed: updates.length + adds.length,
+    total: updates.length + adds.length,
+    applied: createdRecords.length + appliedUpdates.size,
+    rejected: rejected.length,
+    percent: 100,
+    message: 'Gravação concluída.',
+  });
 
   return {
     addedCount: createdRecords.length,

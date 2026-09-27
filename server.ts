@@ -4119,7 +4119,7 @@ type FieldServiceRejectedOperation = {
   type: 'add' | 'update';
   id?: string;
   index: number;
-  reason: 'DUPLICATE_TAG' | 'DUPLICATE_CERTIFICATE' | 'RECORD_NOT_FOUND' | 'DUPLICATE_TARGET';
+  reason: 'DUPLICATE_TAG' | 'DUPLICATE_CERTIFICATE' | 'RECORD_NOT_FOUND' | 'DUPLICATE_TARGET' | 'WRITE_FAILED';
   field?: 'tag' | 'certificate';
   value?: string;
   conflictRecordIds?: string[];
@@ -4134,8 +4134,11 @@ type FieldServiceAppliedOperation = {
 };
 
 const FIELD_SERVICE_UNIQUE_LOCK_COLLECTION = 'fieldServiceUniqueKeys';
+const FIELD_SERVICE_RUNTIME_STATE_DOC = 'fieldServiceRuntime';
 const FIELD_SERVICE_UNIQUENESS_SCAN_PAGE_SIZE = 1000;
-const FIELD_SERVICE_MUTATION_CHUNK_SIZE = 50;
+const FIELD_SERVICE_MUTATION_CHUNK_SIZE = 90;
+const FIELD_SERVICE_MUTATION_CONCURRENCY = 8;
+const FIELD_SERVICE_MUTATION_MAX_RETRIES = 3;
 
 const normalizeFieldServiceTagKey = (value: unknown): string =>
   String(value || '')
@@ -4195,6 +4198,8 @@ type FieldServiceUniquenessSnapshot = {
 
 let fieldServiceUniquenessSnapshot: FieldServiceUniquenessSnapshot | null = null;
 let fieldServiceUniquenessSnapshotPromise: Promise<FieldServiceUniquenessSnapshot> | null = null;
+let fieldServiceUniquenessSnapshotGeneration = '';
+let fieldServiceUniquenessSnapshotPromiseGeneration = '';
 
 const addSnapshotOwner = (map: Map<string, Set<string>>, key: string, recordId: string) => {
   if (!key) return;
@@ -4213,8 +4218,26 @@ const removeSnapshotOwner = (map: Map<string, Set<string>>, key: string, recordI
 
 const loadFieldServiceUniquenessSnapshot = async (force = false): Promise<FieldServiceUniquenessSnapshot> => {
   if (!firestoreDb) return { tags: new Map(), certificates: new Map() };
-  if (fieldServiceUniquenessSnapshot && !force) return fieldServiceUniquenessSnapshot;
-  if (fieldServiceUniquenessSnapshotPromise && !force) return fieldServiceUniquenessSnapshotPromise;
+
+  // LOTE 47: a geração invalida snapshots de unicidade também entre instâncias
+  // diferentes do servidor. A carga inicial acelerada não precisa criar ~29 mil
+  // documentos de lock; qualquer instância que não participou da importação
+  // detecta a nova geração e reconstrói o índice antes da próxima mutação.
+  const runtimeSnap = await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).get();
+  const runtime = runtimeSnap.data() || {};
+  const currentGeneration = String(
+    runtime.fieldServiceGeneration || runtime.snapshotGeneratedAt || runtime.lastClearAt || 'legacy',
+  );
+
+  if (fieldServiceUniquenessSnapshot && !force && fieldServiceUniquenessSnapshotGeneration === currentGeneration) {
+    return fieldServiceUniquenessSnapshot;
+  }
+  if (
+    fieldServiceUniquenessSnapshotPromise && !force &&
+    fieldServiceUniquenessSnapshotPromiseGeneration === currentGeneration
+  ) {
+    return fieldServiceUniquenessSnapshotPromise;
+  }
 
   const task = (async () => {
     const snapshot: FieldServiceUniquenessSnapshot = {
@@ -4240,14 +4263,19 @@ const loadFieldServiceUniquenessSnapshot = async (force = false): Promise<FieldS
       if (page.size < FIELD_SERVICE_UNIQUENESS_SCAN_PAGE_SIZE || !cursor) break;
     }
     fieldServiceUniquenessSnapshot = snapshot;
+    fieldServiceUniquenessSnapshotGeneration = currentGeneration;
     return snapshot;
   })();
 
   fieldServiceUniquenessSnapshotPromise = task;
+  fieldServiceUniquenessSnapshotPromiseGeneration = currentGeneration;
   try {
     return await task;
   } finally {
-    if (fieldServiceUniquenessSnapshotPromise === task) fieldServiceUniquenessSnapshotPromise = null;
+    if (fieldServiceUniquenessSnapshotPromise === task) {
+      fieldServiceUniquenessSnapshotPromise = null;
+      fieldServiceUniquenessSnapshotPromiseGeneration = '';
+    }
   }
 };
 
@@ -4505,14 +4533,44 @@ const applyFieldServiceMutationChunk = async (
   });
 };
 
+type FieldServiceMutationProgress = {
+  processed: number;
+  total: number;
+  applied: number;
+  rejected: number;
+  percent: number;
+  completedChunks: number;
+  totalChunks: number;
+};
+
+const isRetryableFieldServiceWriteError = (error: any): boolean => {
+  const code = String(error?.code ?? '').toUpperCase();
+  return ['4', '8', '10', '14', 'ABORTED', 'DEADLINE_EXCEEDED', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE'].includes(code);
+};
+
+const waitFieldServiceRetry = async (attempt: number) => {
+  const delays = [180, 450, 1000];
+  await new Promise((resolve) => setTimeout(resolve, delays[Math.min(attempt, delays.length - 1)]));
+};
+
+// LOTE 46 — importação em alta vazão.
+// A garantia de unicidade continua sendo feita pelas transações/locks do LOTE 35,
+// porém vários chunks independentes são processados em paralelo. O fluxo antigo
+// aguardava um transaction de 50 linhas por vez; 17 mil linhas exigiam ~340
+// round-trips sequenciais e podia estourar o timeout HTTP após já ter gravado parte
+// dos dados. Agora usamos chunks maiores, concorrência limitada, retry de falhas
+// transitórias e rejeição precisa por linha quando um chunk realmente não puder
+// ser persistido.
 const applyFieldServiceOperations = async (
   operations: FieldServiceServerOperation[],
+  onProgress?: (progress: FieldServiceMutationProgress) => void,
 ): Promise<{ applied: FieldServiceAppliedOperation[]; rejected: FieldServiceRejectedOperation[] }> => {
   const legacySnapshot = await loadFieldServiceUniquenessSnapshot();
   const applied: FieldServiceAppliedOperation[] = [];
   const rejected: FieldServiceRejectedOperation[] = [];
   const seenTargets = new Set<string>();
   const pendingOperations: FieldServiceServerOperation[] = [];
+
   for (const operation of operations) {
     if (seenTargets.has(operation.id)) {
       rejected.push({
@@ -4526,15 +4584,93 @@ const applyFieldServiceOperations = async (
     seenTargets.add(operation.id);
     pendingOperations.push(operation);
   }
+
+  const chunks: FieldServiceServerOperation[][] = [];
   for (let i = 0; i < pendingOperations.length; i += FIELD_SERVICE_MUTATION_CHUNK_SIZE) {
-    const result = await applyFieldServiceMutationChunk(
-      pendingOperations.slice(i, i + FIELD_SERVICE_MUTATION_CHUNK_SIZE),
-      legacySnapshot,
-    );
-    applied.push(...result.applied);
-    rejected.push(...result.rejected);
-    updateFieldServiceUniquenessSnapshotAfterMutation(result.applied);
+    chunks.push(pendingOperations.slice(i, i + FIELD_SERVICE_MUTATION_CHUNK_SIZE));
   }
+
+  let nextChunkIndex = 0;
+  let completedChunks = 0;
+  let processed = 0;
+  let appliedCount = 0;
+  let rejectedCount = rejected.length;
+  const total = pendingOperations.length + rejected.length;
+
+  onProgress?.({
+    processed: rejected.length,
+    total,
+    applied: 0,
+    rejected: rejected.length,
+    percent: total > 0 ? Math.round((rejected.length / total) * 100) : 100,
+    completedChunks: 0,
+    totalChunks: chunks.length,
+  });
+
+  const worker = async () => {
+    while (true) {
+      const chunkIndex = nextChunkIndex++;
+      if (chunkIndex >= chunks.length) return;
+      const chunk = chunks[chunkIndex];
+      let result: { applied: FieldServiceAppliedOperation[]; rejected: FieldServiceRejectedOperation[] } | null = null;
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt <= FIELD_SERVICE_MUTATION_MAX_RETRIES; attempt++) {
+        try {
+          result = await applyFieldServiceMutationChunk(chunk, legacySnapshot);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt >= FIELD_SERVICE_MUTATION_MAX_RETRIES || !isRetryableFieldServiceWriteError(error)) break;
+          await waitFieldServiceRetry(attempt);
+        }
+      }
+
+      if (!result) {
+        console.error('Field service mutation chunk failed after retries:', {
+          chunkIndex,
+          chunkSize: chunk.length,
+          code: lastError?.code,
+          message: lastError?.message,
+        });
+        result = {
+          applied: [],
+          rejected: chunk.map((operation) => ({
+            type: operation.type,
+            id: operation.type === 'update' ? operation.id : undefined,
+            index: operation.index,
+            reason: 'WRITE_FAILED' as const,
+          })),
+        };
+      }
+
+      applied.push(...result.applied);
+      rejected.push(...result.rejected);
+      updateFieldServiceUniquenessSnapshotAfterMutation(result.applied);
+
+      processed += chunk.length;
+      appliedCount += result.applied.length;
+      rejectedCount += result.rejected.length;
+      completedChunks += 1;
+      onProgress?.({
+        processed: Math.min(total, processed + (total - pendingOperations.length)),
+        total,
+        applied: appliedCount,
+        rejected: rejectedCount,
+        percent: total > 0
+          ? Math.min(100, Math.round(((processed + (total - pendingOperations.length)) / total) * 100))
+          : 100,
+        completedChunks,
+        totalChunks: chunks.length,
+      });
+    }
+  };
+
+  const workerCount = Math.min(FIELD_SERVICE_MUTATION_CONCURRENCY, Math.max(1, chunks.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  applied.sort((a, b) => a.index - b.index);
+  rejected.sort((a, b) => a.index - b.index);
   return { applied, rejected };
 };
 
@@ -4546,7 +4682,6 @@ const applyFieldServiceOperations = async (
 // Assim, gravações/importações não derrubam o cache e não obrigam uma releitura
 // completa dos ~17 mil registros a cada abertura.
 const FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS = 24 * 60 * 60_000; // snapshot-base reutilizável; deltas mantêm a tela atualizada
-const FIELD_SERVICE_RUNTIME_STATE_DOC = 'fieldServiceRuntime';
 const FIELD_SERVICE_SNAPSHOT_STORAGE_PATH = 'system-cache/field-service/snapshot-v1.json.gz';
 type FieldServiceSnapshotCache = {
   expiresAt: number;
@@ -4735,6 +4870,317 @@ app.get(
   },
 );
 
+// LOTE 47 — carga inicial acelerada do Serviço de Campo.
+// Cenário alvo: após "Limpar Dados", importar novamente uma base completa (ex.: 17.420 linhas).
+// Nesse estado não existe motivo para executar milhares de transações de upsert: a planilha
+// é validada integralmente em memória e os registros são escritos com BulkWriter. As regras
+// de TAG/Certificado continuam obrigatórias e a geração de unicidade invalida caches em
+// outras instâncias do servidor antes da próxima mutação.
+const FIELD_SERVICE_FAST_IMPORT_MIN_ROWS = 500;
+const FIELD_SERVICE_FAST_IMPORT_MAX_ROWS = 25_000;
+
+const readFieldServiceRuntimeState = async (): Promise<Record<string, any>> => {
+  if (!firestoreDb) return {};
+  const snap = await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).get();
+  return snap.data() || {};
+};
+
+const isFieldServiceInitialImportRunning = async (): Promise<boolean> => {
+  const state = await readFieldServiceRuntimeState();
+  return state.initialImportInProgress === true;
+};
+
+app.post(
+  '/api/field-service/bulk-initial-load-stream',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    const rawAdds = Array.isArray(req.body?.adds) ? req.body.adds : [];
+    if (rawAdds.length < FIELD_SERVICE_FAST_IMPORT_MIN_ROWS || rawAdds.length > FIELD_SERVICE_FAST_IMPORT_MAX_ROWS) {
+      return res.status(409).json({ error: 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE' });
+    }
+
+    const runtimeRef = firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC);
+    const sessionId = `${Date.now().toString(36)}_${randomBytes(6).toString('hex')}`;
+    const startedAt = new Date().toISOString();
+    let lockAcquired = false;
+
+    try {
+      await firestoreDb.runTransaction(async (transaction) => {
+        const stateSnap = await transaction.get(runtimeRef);
+        const state = stateSnap.data() || {};
+        const readyAfterClear = state.fastImportReady === true || (
+          Boolean(state.lastClearAt) && Number(state.snapshotTotal || 0) === 0
+        );
+        if (!readyAfterClear || state.initialImportInProgress === true) {
+          const error: any = new Error('FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE');
+          error.code = 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE';
+          throw error;
+        }
+        transaction.set(runtimeRef, {
+          initialImportInProgress: true,
+          initialImportSessionId: sessionId,
+          initialImportStartedAt: startedAt,
+          initialImportExpectedRows: rawAdds.length,
+        }, { merge: true });
+      });
+      lockAcquired = true;
+
+      // Segurança adicional: a rota acelerada só existe para uma base ativa vazia.
+      const activeCheck = await firestoreDb
+        .collection('fieldServiceRecords')
+        .where('isDeleted', '==', false)
+        .limit(1)
+        .get();
+      if (!activeCheck.empty) {
+        await runtimeRef.set({
+          initialImportInProgress: false,
+          initialImportSessionId: '',
+          fastImportReady: false,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        lockAcquired = false;
+        return res.status(409).json({ error: 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE' });
+      }
+    } catch (error: any) {
+      if (error?.code === 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE' || error?.message === 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE') {
+        return res.status(409).json({ error: 'FIELD_SERVICE_FAST_IMPORT_NOT_AVAILABLE' });
+      }
+      console.error('Could not acquire Field Service fast import lock:', error);
+      return res.status(500).json({ error: 'FIELD_SERVICE_FAST_IMPORT_LOCK_FAILED' });
+    }
+
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('X-Field-Service-Import-Mode', 'INITIAL_BULK_WRITER');
+    res.flushHeaders?.();
+
+    const send = (event: Record<string, any>) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    };
+
+    type FastCandidate = {
+      index: number;
+      id: string;
+      tagKey: string;
+      certificateKey: string;
+      persisted: Record<string, any>;
+    };
+
+    try {
+      send({
+        type: 'progress', stage: 'validating', mode: 'initial-fast',
+        processed: 0, total: rawAdds.length, applied: 0, rejected: 0, percent: 1,
+        message: `Validando ${rawAdds.length.toLocaleString('pt-BR')} registros para carga inicial acelerada...`,
+      });
+
+      const seenTags = new Map<string, number>();
+      const seenCertificates = new Map<string, number>();
+      const candidates: FastCandidate[] = [];
+      const rejected: FieldServiceRejectedOperation[] = [];
+      const importTimestamp = new Date().toISOString();
+
+      rawAdds.forEach((raw: any, index: number) => {
+        const data = sanitizeFieldServiceMutationData(raw);
+        const tagKey = normalizeFieldServiceTagKey(data.tag);
+        const certificateKey = normalizeFieldServiceCertificateKey(data.certificate);
+        const previousTagIndex = tagKey ? seenTags.get(tagKey) : undefined;
+        const previousCertificateIndex = certificateKey ? seenCertificates.get(certificateKey) : undefined;
+
+        if (tagKey && previousTagIndex !== undefined) {
+          rejected.push({
+            type: 'add', index, reason: 'DUPLICATE_TAG', field: 'tag',
+            value: String(data.tag || ''), conflictRecordIds: [`IMPORT_ROW_${previousTagIndex + 1}`],
+          });
+          return;
+        }
+        if (certificateKey && previousCertificateIndex !== undefined) {
+          rejected.push({
+            type: 'add', index, reason: 'DUPLICATE_CERTIFICATE', field: 'certificate',
+            value: String(data.certificate || ''), conflictRecordIds: [`IMPORT_ROW_${previousCertificateIndex + 1}`],
+          });
+          return;
+        }
+
+        if (tagKey) seenTags.set(tagKey, index);
+        if (certificateKey) seenCertificates.set(certificateKey, index);
+        const id = firestoreDb.collection('fieldServiceRecords').doc().id;
+        candidates.push({
+          index,
+          id,
+          tagKey,
+          certificateKey,
+          persisted: {
+            ...data,
+            isDeleted: false,
+            normalizedTag: tagKey,
+            normalizedCertificate: certificateKey,
+            updatedAt: importTimestamp,
+            importSessionId: sessionId,
+          },
+        });
+      });
+
+      send({
+        type: 'progress', stage: 'writing', mode: 'initial-fast',
+        processed: rejected.length, total: rawAdds.length, applied: 0, rejected: rejected.length,
+        percent: 5,
+        message: `Carga inicial acelerada: gravando ${candidates.length.toLocaleString('pt-BR')} registros diretamente no banco...`,
+      });
+
+      const writer = firestoreDb.bulkWriter();
+      writer.onWriteError((error) => error.failedAttempts < 5);
+      const successful: FastCandidate[] = [];
+      let completed = 0;
+      let lastProgressAt = 0;
+
+      const writePromises = candidates.map((candidate) => {
+        const recordRef = firestoreDb!.collection('fieldServiceRecords').doc(candidate.id);
+        return writer.set(recordRef, candidate.persisted)
+          .then(() => {
+            successful.push(candidate);
+            completed += 1;
+            const now = Date.now();
+            if (completed === candidates.length || completed % 250 === 0 || now - lastProgressAt > 750) {
+              lastProgressAt = now;
+              const processed = completed + rejected.length;
+              const percent = 5 + Math.round((completed / Math.max(1, candidates.length)) * 87);
+              send({
+                type: 'progress', stage: 'writing', mode: 'initial-fast',
+                processed, total: rawAdds.length, applied: completed, rejected: rejected.length,
+                percent: Math.min(92, percent),
+                message: `Carga inicial acelerada: ${completed.toLocaleString('pt-BR')} de ${candidates.length.toLocaleString('pt-BR')} gravados...`,
+              });
+            }
+          })
+          .catch((error: any) => {
+            completed += 1;
+            rejected.push({ type: 'add', index: candidate.index, reason: 'WRITE_FAILED' });
+            console.error('Fast Field Service record write failed:', {
+              index: candidate.index, code: error?.code, message: error?.message,
+            });
+          });
+      });
+
+      await writer.close();
+      await Promise.all(writePromises);
+      successful.sort((a, b) => a.index - b.index);
+      rejected.sort((a, b) => a.index - b.index);
+
+      send({
+        type: 'progress', stage: 'snapshot', mode: 'initial-fast',
+        processed: rawAdds.length, total: rawAdds.length, applied: successful.length, rejected: rejected.length,
+        percent: 94,
+        message: 'Preparando cache instantâneo para abrir a aba sem nova leitura completa...',
+      });
+
+      // Instala o índice de unicidade diretamente em memória. Não há necessidade
+      // de criar dezenas de milhares de locks agora; locks antigos pertencentes a
+      // registros arquivados são ignorados e substituídos de forma lazy nas
+      // próximas mutações. A geração abaixo força outras instâncias a reconstruir
+      // o snapshot antes de permitir uma nova gravação.
+      const nextUniquenessSnapshot: FieldServiceUniquenessSnapshot = {
+        tags: new Map<string, Set<string>>(),
+        certificates: new Map<string, Set<string>>(),
+      };
+      const records = successful.map((candidate) => {
+        addSnapshotOwner(nextUniquenessSnapshot.tags, candidate.tagKey, candidate.id);
+        addSnapshotOwner(nextUniquenessSnapshot.certificates, candidate.certificateKey, candidate.id);
+        return { id: candidate.id, ...candidate.persisted };
+      });
+
+      const generatedAt = new Date().toISOString();
+      const json = JSON.stringify({ success: true, records, total: records.length, generatedAt });
+      const etag = `"${createHash('sha1').update(json).digest('hex')}"`;
+      const nextSnapshot: FieldServiceSnapshotCache = {
+        expiresAt: Date.now() + FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS,
+        body: gzipSync(Buffer.from(json, 'utf8'), { level: 1 }),
+        etag,
+        total: records.length,
+        generatedAt,
+      };
+      fieldServiceSnapshotCache = nextSnapshot;
+      try {
+        await persistFieldServiceSnapshotBase(nextSnapshot);
+      } catch (snapshotError) {
+        console.warn('Fast import snapshot persistence failed; in-memory snapshot remains valid:', snapshotError);
+      }
+
+      const generation = `initial_${sessionId}`;
+      fieldServiceUniquenessSnapshot = nextUniquenessSnapshot;
+      fieldServiceUniquenessSnapshotGeneration = generation;
+      fieldServiceUniquenessSnapshotPromise = null;
+      fieldServiceUniquenessSnapshotPromiseGeneration = '';
+
+      await runtimeRef.set({
+        fieldServiceGeneration: generation,
+        fastImportReady: successful.length === 0,
+        initialImportInProgress: false,
+        initialImportSessionId: '',
+        initialImportCompletedAt: generatedAt,
+        initialImportImportedRows: successful.length,
+        initialImportRejectedRows: rejected.length,
+        snapshotTotal: successful.length,
+        updatedAt: generatedAt,
+      }, { merge: true });
+      lockAcquired = false;
+
+      await firestoreDb.collection('systemAuditLogs').add({
+        action: 'FIELD_SERVICE_INITIAL_BULK_IMPORT',
+        entityType: 'fieldService',
+        entityId: sessionId,
+        actorUid: asLimitedString(req.user?.uid, 160),
+        actorName: asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador',
+        actorRole: asLimitedString(req.user?.permissionLevel || req.user?.role, 100),
+        createdAt: generatedAt,
+        immutable: true,
+        summary: `Carga inicial acelerada de Serviço de Campo: ${successful.length} importado(s), ${rejected.length} rejeitado(s)`,
+        metadata: {
+          receivedRows: rawAdds.length,
+          importedRows: successful.length,
+          rejectedRows: rejected.length,
+          executionMode: 'INITIAL_BULK_WRITER_NO_PER_ROW_TRANSACTION',
+          uniquenessMode: 'IN_MEMORY_PREVALIDATION_PLUS_GENERATION_INVALIDATION',
+        },
+      });
+
+      send({
+        type: 'done', stage: 'done', mode: 'initial-fast',
+        processed: rawAdds.length, total: rawAdds.length,
+        applied: successful.length, rejectedCount: rejected.length, percent: 100,
+        added: successful.map((candidate) => ({ index: candidate.index, id: candidate.id })),
+        updated: [], rejected,
+        message: `Carga inicial concluída: ${successful.length.toLocaleString('pt-BR')} registro(s) gravado(s).`,
+      });
+      return res.end();
+    } catch (error: any) {
+      console.error('Field Service fast initial import failed:', error);
+      if (lockAcquired) {
+        try {
+          await runtimeRef.set({
+            initialImportInProgress: false,
+            initialImportSessionId: '',
+            fastImportReady: true,
+            initialImportFailedAt: new Date().toISOString(),
+          }, { merge: true });
+        } catch (unlockError) {
+          console.error('Could not release Field Service fast import lock:', unlockError);
+        }
+      }
+      send({
+        type: 'error', stage: 'error', mode: 'initial-fast',
+        message: asLimitedString(error?.message, 1000) || 'Falha inesperada durante a carga inicial acelerada.',
+      });
+      return res.end();
+    }
+  },
+);
+
+
 app.post(
   '/api/field-service/upsert',
   requireAuth,
@@ -4743,6 +5189,9 @@ app.post(
   writeApiRateLimit,
   async (req: AuthRequest, res) => {
     if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    if (await isFieldServiceInitialImportRunning()) {
+      return res.status(409).json({ error: 'FIELD_SERVICE_INITIAL_IMPORT_IN_PROGRESS' });
+    }
     const requestedId = asLimitedString(req.body?.id, 160);
     const data = sanitizeFieldServiceMutationData(req.body?.data);
     const type: 'add' | 'update' = requestedId ? 'update' : 'add';
@@ -4769,6 +5218,103 @@ app.post(
 );
 
 app.post(
+  '/api/field-service/bulk-upsert-stream',
+  requireAuth,
+  requireInternalAccount,
+  requireEditModule('field_service'),
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    if (await isFieldServiceInitialImportRunning()) {
+      return res.status(409).json({ error: 'FIELD_SERVICE_INITIAL_IMPORT_IN_PROGRESS' });
+    }
+    const rawUpdates = Array.isArray(req.body?.updates) ? req.body.updates : [];
+    const rawAdds = Array.isArray(req.body?.adds) ? req.body.adds : [];
+    if (rawUpdates.length + rawAdds.length > 25000) {
+      return res.status(413).json({ error: 'FIELD_SERVICE_IMPORT_TOO_LARGE' });
+    }
+
+    const operations: FieldServiceServerOperation[] = [];
+    rawUpdates.forEach((raw: any, index: number) => {
+      const id = asLimitedString(raw?.id, 160);
+      if (!id) return;
+      operations.push({ type: 'update', id, data: sanitizeFieldServiceMutationData(raw?.data), index });
+    });
+    const addIndexOffset = rawUpdates.length;
+    rawAdds.forEach((raw: any, index: number) => {
+      const id = firestoreDb.collection('fieldServiceRecords').doc().id;
+      operations.push({ type: 'add', id, data: sanitizeFieldServiceMutationData(raw), index: addIndexOffset + index });
+    });
+
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const send = (event: Record<string, any>) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    };
+
+    try {
+      send({
+        type: 'progress',
+        stage: 'preparing',
+        processed: 0,
+        total: operations.length,
+        applied: 0,
+        rejected: 0,
+        percent: 0,
+        message: 'Preparando gravação otimizada...',
+      });
+
+      const result = await applyFieldServiceOperations(operations, (progress) => {
+        send({
+          type: 'progress',
+          stage: 'writing',
+          ...progress,
+          message: `Gravando no banco (${progress.percent}%)...`,
+        });
+      });
+
+      const updated = result.applied
+        .filter((item) => item.type === 'update')
+        .map((item) => ({ index: item.index, id: item.id, updatedAt: item.updatedAt }));
+      const added = result.applied
+        .filter((item) => item.type === 'add')
+        .map((item) => ({ index: item.index - addIndexOffset, id: item.id, updatedAt: item.updatedAt }));
+      const rejected = result.rejected.map((item) => ({
+        ...item,
+        index: item.type === 'add' ? item.index - addIndexOffset : item.index,
+      }));
+
+      send({
+        type: 'done',
+        stage: 'done',
+        processed: operations.length,
+        total: operations.length,
+        applied: result.applied.length,
+        rejectedCount: result.rejected.length,
+        percent: 100,
+        updated,
+        added,
+        rejected,
+        message: 'Gravação concluída.',
+      });
+      return res.end();
+    } catch (error: any) {
+      console.error('Field service streaming bulk upsert failed:', error);
+      send({
+        type: 'error',
+        stage: 'error',
+        message: asLimitedString(error?.message, 1000) || 'Falha inesperada durante a importação.',
+      });
+      return res.end();
+    }
+  },
+);
+
+app.post(
   '/api/field-service/bulk-upsert',
   requireAuth,
   requireInternalAccount,
@@ -4776,6 +5322,9 @@ app.post(
   writeApiRateLimit,
   async (req: AuthRequest, res) => {
     if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    if (await isFieldServiceInitialImportRunning()) {
+      return res.status(409).json({ error: 'FIELD_SERVICE_INITIAL_IMPORT_IN_PROGRESS' });
+    }
     const rawUpdates = Array.isArray(req.body?.updates) ? req.body.updates : [];
     const rawAdds = Array.isArray(req.body?.adds) ? req.body.adds : [];
     if (rawUpdates.length + rawAdds.length > 25000) {
@@ -4846,6 +5395,9 @@ app.get(
 
 app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  if (await isFieldServiceInitialImportRunning()) {
+    return res.status(409).json({ error: 'FIELD_SERVICE_INITIAL_IMPORT_IN_PROGRESS' });
+  }
   const recordId = asLimitedString(req.params.id, 160);
   if (!recordId) return res.status(400).json({ error: 'INVALID_RECORD_ID' });
 
@@ -4993,6 +5545,9 @@ const getFreshAdministrator = async (req: AuthRequest) => {
 
 app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   if (!firestoreDb || !adminAuth) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  if (await isFieldServiceInitialImportRunning()) {
+    return res.status(409).json({ error: 'FIELD_SERVICE_INITIAL_IMPORT_IN_PROGRESS' });
+  }
 
   const password = String(req.body?.password || '');
   if (!password) return res.status(400).json({ error: 'PASSWORD_REQUIRED' });
@@ -5126,6 +5681,10 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
     // valida se o owner do lock continua ativo e reutiliza automaticamente a
     // chave quando o owner está arquivado. Assim a limpeza fica muito mais rápida.
     fieldServiceUniquenessSnapshot = { tags: new Map(), certificates: new Map() };
+    const clearedGeneration = `clear_${Date.now().toString(36)}`;
+    fieldServiceUniquenessSnapshotGeneration = clearedGeneration;
+    fieldServiceUniquenessSnapshotPromise = null;
+    fieldServiceUniquenessSnapshotPromiseGeneration = '';
 
     // O estado visível após uma limpeza total é conhecido sem nova consulta:
     // substitui o snapshot-base por um snapshot vazio imediatamente.
@@ -5145,6 +5704,10 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
 
     await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).set({
       lastClearAt: nowIso,
+      fieldServiceGeneration: clearedGeneration,
+      fastImportReady: true,
+      initialImportInProgress: false,
+      initialImportSessionId: '',
       updatedAt: nowIso,
     }, { merge: true });
 
