@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import ComaninsLogo from './ComaninsLogo';
 import { 
@@ -140,6 +140,69 @@ export default function ClientPortal({
   }, []);
 
   
+  const fieldServiceAvailableRows = useMemo(() => {
+    if (!client.isFieldService) return [] as Array<{ fsRecord: FieldServiceRecord; inst: Instrument; report: CalibrationReport }>;
+
+    const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
+    const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
+    const parseCalibrationDate = (value: string | undefined): number => {
+      const raw = String(value || '').trim();
+      if (!raw) return 0;
+      const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
+      const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+      const parsed = Date.parse(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const instrumentByCertificate = new Map<string, Instrument>();
+    const instrumentByCertificateDigits = new Map<string, Instrument>();
+    for (const inst of instruments) {
+      const cert = normalizeCertificate(inst.certificateNumber || inst.coma);
+      if (cert) instrumentByCertificate.set(cert, inst);
+      const digits = certificateDigits(cert);
+      if (digits) instrumentByCertificateDigits.set(digits, inst);
+    }
+
+    const latestReportByInstrument = new Map<string, CalibrationReport>();
+    for (const report of reports) {
+      const instrumentId = String(report.instrumentId || '');
+      if (!instrumentId) continue;
+      const current = latestReportByInstrument.get(instrumentId);
+      if (!current || parseCalibrationDate(report.date) > parseCalibrationDate(current.date)) {
+        latestReportByInstrument.set(instrumentId, report);
+      }
+    }
+
+    return fieldServiceRecords
+      .map((fsRecord) => {
+        const cert = normalizeCertificate(fsRecord.certificate);
+        if (!cert) return null;
+        const inst = instrumentByCertificate.get(cert) || instrumentByCertificateDigits.get(certificateDigits(cert));
+        if (!inst) return null;
+        const report = latestReportByInstrument.get(inst.id);
+        if (!report) return null;
+        return { fsRecord, inst, report };
+      })
+      .filter((row): row is { fsRecord: FieldServiceRecord; inst: Instrument; report: CalibrationReport } => Boolean(row))
+      .sort((a, b) =>
+        parseCalibrationDate(b.fsRecord.dataCalibracao || b.report.date) -
+        parseCalibrationDate(a.fsRecord.dataCalibracao || a.report.date)
+      );
+  }, [client.isFieldService, fieldServiceRecords, instruments, reports]);
+
+  const filteredFieldServiceRows = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return fieldServiceAvailableRows;
+    return fieldServiceAvailableRows.filter(({ fsRecord, inst }) => {
+      const cert = String(fsRecord.certificate || inst.certificateNumber || '').toLowerCase();
+      const tag = String(fsRecord.tag || inst.tag || '').toLowerCase();
+      const equip = String(fsRecord.equipamento || '').toLowerCase();
+      return cert.includes(term) || tag.includes(term) || equip.includes(term);
+    });
+  }, [fieldServiceAvailableRows, searchTerm]);
+
   // Filter instruments belonging to this client
   const clientInstruments = instruments.filter(inst => inst.clientId === client.id);
 
@@ -308,7 +371,17 @@ export default function ClientPortal({
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
               
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <h3 className="font-bold text-slate-900">Certificados Disponíveis</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900">Certificados Disponíveis</h3>
+                  <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-bold font-mono">
+                    {fieldServiceAvailableRows.length.toLocaleString('pt-BR')} item(ns)
+                  </span>
+                  {searchTerm.trim() && (
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      exibindo {filteredFieldServiceRows.length.toLocaleString('pt-BR')}
+                    </span>
+                  )}
+                </div>
                 <div className="relative w-full sm:w-auto">
                   <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <Search className="h-3.5 w-3.5" />
@@ -335,82 +408,36 @@ export default function ClientPortal({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {(() => {
-                      const extractNum = (s: string) => String(s || '').replace(/\D/g, '');
-                      const parseCalibrationDate = (value: string | undefined): number => {
-                        const raw = String(value || '').trim();
-                        if (!raw) return 0;
-                        const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-                        if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
-                        const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-                        if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
-                        const parsed = Date.parse(raw);
-                        return Number.isFinite(parsed) ? parsed : 0;
-                      };
-
-                      const correlatedRecords = fieldServiceRecords.map(fsRecord => {
-                        const recNum = extractNum(fsRecord.certificate);
-                        const inst = instruments.find(i => extractNum(i.certificateNumber) === recNum);
-                        if (inst) {
-                           return {
-                             fsRecord,
-                             inst
-                           };
-                        }
-                        return null;
-                      }).filter(Boolean).filter(({ fsRecord, inst }: any) => {
-                        const term = searchTerm.trim().toLowerCase();
-                        if (!term) return true;
-                        const cert = (fsRecord.certificate || inst.certificateNumber || "").toLowerCase();
-                        const tag = (fsRecord.tag || inst.tag || "").toLowerCase();
-                        const equip = (fsRecord.equipamento || "").toLowerCase();
-                        return cert.includes(term) || tag.includes(term) || equip.includes(term);
-                      }).sort((a: any, b: any) =>
-                        parseCalibrationDate(b.fsRecord?.dataCalibracao) - parseCalibrationDate(a.fsRecord?.dataCalibracao)
-                      );
-
-                      if (correlatedRecords.length === 0) {
-                        return (
-                          <tr>
-                            <td colSpan={5} className="p-8 text-center text-slate-500">
-                              Nenhum certificado disponível no momento.
-                            </td>
-                          </tr>
-                        );
-                      }
-
-                      return correlatedRecords.map(({ fsRecord, inst }: any, idx: number) => {
-                        const report = reports
-                          .filter(r => r.instrumentId === inst.id)
-                          .sort((a, b) => parseCalibrationDate(b.date) - parseCalibrationDate(a.date))[0];
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50/50">
-                            <td className="p-4 font-mono font-medium">{fsRecord.certificate || inst.certificateNumber}</td>
-                            <td className="p-4">{formatDateBR(fsRecord.dataCalibracao || report?.date)}</td>
-                            <td className="p-4">{fsRecord.tag || inst.tag || '-'}</td>
-                            <td className="p-4">{fsRecord.equipamento || '-'}</td>
-                            <td className="p-4 text-right">
-                              <button 
-                                onClick={() => {
-                                  if (report) {
-                                    setSelectedReport(report);
-                                    setSelectedInstrument(inst);
-                                    setFsTag(fsRecord.tag || '');
-                                    setFsEquip(fsRecord.equipamento || '');
-                                  } else {
-                                    alert('Certificado oficial ainda não emitido para este instrumento.');
-                                  }
-                                }}
-                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 ml-auto"
-                              >
-                                <Printer className="w-4 h-4" />
-                                <span>Imprimir</span>
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
+                    {filteredFieldServiceRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-slate-500">
+                          Nenhum certificado disponível no momento.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredFieldServiceRows.map(({ fsRecord, inst, report }, idx) => (
+                        <tr key={`${fsRecord.id || fsRecord.certificate || idx}`} className="hover:bg-slate-50/50">
+                          <td className="p-4 font-mono font-medium">{fsRecord.certificate || inst.certificateNumber}</td>
+                          <td className="p-4">{formatDateBR(fsRecord.dataCalibracao || report.date)}</td>
+                          <td className="p-4">{fsRecord.tag || inst.tag || '-'}</td>
+                          <td className="p-4">{fsRecord.equipamento || '-'}</td>
+                          <td className="p-4 text-right">
+                            <button
+                              onClick={() => {
+                                setSelectedReport(report);
+                                setSelectedInstrument(inst);
+                                setFsTag(fsRecord.tag || '');
+                                setFsEquip(fsRecord.equipamento || '');
+                              }}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 ml-auto"
+                            >
+                              <Printer className="w-4 h-4" />
+                              <span>Imprimir</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
