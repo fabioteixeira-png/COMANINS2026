@@ -7945,6 +7945,7 @@ REGRAS DE QUALIDADE:
     // Aquecimento assíncrono: tenta carregar o snapshot persistido (ou gerar o
     // primeiro) logo que a instância sobe. Não bloqueia o servidor nem o login.
     setTimeout(() => {
+      if (!firestoreDb) return;
       void buildFieldServiceSnapshot(false).catch((error) => {
         console.warn('Field Service snapshot warm-up failed:', error);
       });
