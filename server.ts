@@ -4456,6 +4456,9 @@ const applyFieldServiceMutationChunk = async (
       const nowIso = new Date().toISOString();
       const persisted = {
         ...item.operation.data,
+        // Novos/atualizados ficam explicitamente ativos. Isso permite que
+        // futuras consultas usem isDeleted=false sem depender de campo ausente.
+        isDeleted: false,
         normalizedTag: item.newTagKey,
         normalizedCertificate: item.newCertificateKey,
         updatedAt: nowIso,
@@ -4538,11 +4541,13 @@ const applyFieldServiceOperations = async (
 
 // LOTE 41 — snapshot otimizado para Serviço de Campo.
 // O navegador deixa de percorrer milhares de documentos do Firestore em vários
-// round-trips na abertura da aba. O servidor monta um snapshot compacto, mantém
-// cache curto em memória e envia a resposta comprimida. As gravações invalidam
-// o cache imediatamente; o feed incremental continua responsável por alterações
-// em tempo real após a carga inicial.
-const FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS = 45_000;
+// round-trips na abertura da aba. O servidor mantém um snapshot-base comprimido
+// por horas; as alterações posteriores chegam pelo endpoint incremental /changes.
+// Assim, gravações/importações não derrubam o cache e não obrigam uma releitura
+// completa dos ~17 mil registros a cada abertura.
+const FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS = 24 * 60 * 60_000; // snapshot-base reutilizável; deltas mantêm a tela atualizada
+const FIELD_SERVICE_RUNTIME_STATE_DOC = 'fieldServiceRuntime';
+const FIELD_SERVICE_SNAPSHOT_STORAGE_PATH = 'system-cache/field-service/snapshot-v1.json.gz';
 type FieldServiceSnapshotCache = {
   expiresAt: number;
   body: Buffer;
@@ -4553,29 +4558,71 @@ type FieldServiceSnapshotCache = {
 let fieldServiceSnapshotCache: FieldServiceSnapshotCache | null = null;
 let fieldServiceSnapshotPromise: Promise<FieldServiceSnapshotCache> | null = null;
 
-const invalidateFieldServiceSnapshotCache = () => {
-  fieldServiceSnapshotCache = null;
+const persistFieldServiceSnapshotBase = async (snapshot: FieldServiceSnapshotCache): Promise<void> => {
+  if (!firestoreDb || !adminStorage || !adminStorageBucketName) return;
+  const bucket = adminStorage.bucket(adminStorageBucketName);
+  const file = bucket.file(FIELD_SERVICE_SNAPSHOT_STORAGE_PATH);
+  await file.save(snapshot.body, {
+    resumable: false,
+    contentType: 'application/gzip',
+    metadata: { cacheControl: 'private, no-store' },
+  });
+  await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).set({
+    snapshotGeneratedAt: snapshot.generatedAt,
+    snapshotTotal: snapshot.total,
+    snapshotEtag: snapshot.etag,
+    snapshotStoragePath: FIELD_SERVICE_SNAPSHOT_STORAGE_PATH,
+    snapshotUpdatedAt: new Date().toISOString(),
+  }, { merge: true });
 };
 
-const parseFieldServiceInterventionDateForSort = (value: unknown): number => {
-  const raw = String(value || '').trim();
-  if (!raw) return 0;
-  const br = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
+const loadPersistedFieldServiceSnapshotBase = async (): Promise<FieldServiceSnapshotCache | null> => {
+  if (!firestoreDb || !adminStorage || !adminStorageBucketName) return null;
+  try {
+    const stateSnap = await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).get();
+    const state = stateSnap.data() || {};
+    const generatedAt = String(state.snapshotGeneratedAt || '');
+    const etag = String(state.snapshotEtag || '');
+    const total = Number(state.snapshotTotal || 0);
+    const storagePath = String(state.snapshotStoragePath || FIELD_SERVICE_SNAPSHOT_STORAGE_PATH);
+    if (!generatedAt || !etag) return null;
+    const [body] = await adminStorage.bucket(adminStorageBucketName).file(storagePath).download();
+    if (!body?.length) return null;
+    return {
+      expiresAt: Date.now() + FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS,
+      body,
+      etag,
+      total,
+      generatedAt,
+    };
+  } catch (error) {
+    console.warn('Persisted Field Service snapshot unavailable:', error);
+    return null;
+  }
 };
 
-const buildFieldServiceSnapshot = async (): Promise<FieldServiceSnapshotCache> => {
+const buildFieldServiceSnapshot = async (forceFresh = false): Promise<FieldServiceSnapshotCache> => {
   if (!firestoreDb) throw new Error('AUTH_SERVICE_UNAVAILABLE');
-  if (fieldServiceSnapshotCache && fieldServiceSnapshotCache.expiresAt > Date.now()) {
+  if (!forceFresh && fieldServiceSnapshotCache && fieldServiceSnapshotCache.expiresAt > Date.now()) {
     return fieldServiceSnapshotCache;
   }
-  if (fieldServiceSnapshotPromise) return fieldServiceSnapshotPromise;
+  if (fieldServiceSnapshotPromise) {
+    if (!forceFresh) return fieldServiceSnapshotPromise;
+    try { await fieldServiceSnapshotPromise; } catch { /* força nova tentativa abaixo */ }
+  }
 
   const task = (async () => {
+    if (!forceFresh && !fieldServiceSnapshotCache) {
+      const persistedSnapshot = await loadPersistedFieldServiceSnapshotBase();
+      if (persistedSnapshot) {
+        fieldServiceSnapshotCache = persistedSnapshot;
+        return persistedSnapshot;
+      }
+    }
+    // Marca o início da janela antes da leitura. O cliente sempre solicita o
+    // delta posterior a este instante, eliminando a possibilidade de perder
+    // alterações concorrentes durante a geração do snapshot.
+    const generatedAt = new Date().toISOString();
     const snapshot = await firestoreDb
       .collection('fieldServiceRecords')
       .select(
@@ -4589,28 +4636,23 @@ const buildFieldServiceSnapshot = async (): Promise<FieldServiceSnapshotCache> =
 
     const records = snapshot.docs
       .map((recordDoc) => ({ id: recordDoc.id, ...recordDoc.data() }))
-      .filter((record: any) => record.isDeleted !== true)
-      .sort((a: any, b: any) => {
-        const dateDiff = parseFieldServiceInterventionDateForSort(b.interventionDate)
-          - parseFieldServiceInterventionDateForSort(a.interventionDate);
-        if (dateDiff !== 0) return dateDiff;
-        return String(b.id || '').localeCompare(String(a.id || ''), undefined, {
-          numeric: true,
-          sensitivity: 'base',
-        });
-      });
+      .filter((record: any) => record.isDeleted !== true);
 
-    const generatedAt = new Date().toISOString();
     const json = JSON.stringify({ success: true, records, total: records.length, generatedAt });
     const etag = `"${createHash('sha1').update(json).digest('hex')}"`;
     const cached: FieldServiceSnapshotCache = {
       expiresAt: Date.now() + FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS,
-      body: gzipSync(Buffer.from(json, 'utf8'), { level: 6 }),
+      body: gzipSync(Buffer.from(json, 'utf8'), { level: 1 }),
       etag,
       total: records.length,
       generatedAt,
     };
     fieldServiceSnapshotCache = cached;
+    try {
+      await persistFieldServiceSnapshotBase(cached);
+    } catch (persistError) {
+      console.warn('Could not persist Field Service snapshot base:', persistError);
+    }
     return cached;
   })().finally(() => {
     if (fieldServiceSnapshotPromise === task) fieldServiceSnapshotPromise = null;
@@ -4625,10 +4667,11 @@ app.get(
   requireAuth,
   requireInternalAccount,
   requireAccessModule('field_service'),
-  async (_req: AuthRequest, res) => {
+  async (req: AuthRequest, res) => {
     if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
     try {
-      const snapshot = await buildFieldServiceSnapshot();
+      const forceFresh = String(req.query?.fresh || '') === '1';
+      const snapshot = await buildFieldServiceSnapshot(forceFresh);
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.setHeader('Content-Encoding', 'gzip');
       res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
@@ -4637,6 +4680,56 @@ app.get(
       return res.status(200).end(snapshot.body);
     } catch (error) {
       console.error('Field service snapshot failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+
+// Sincronização incremental do Serviço de Campo. Após o primeiro snapshot, o
+// navegador busca somente os registros alterados desde a última sincronização.
+// Isso mantém ~17 mil registros disponíveis sem reler a coleção inteira a cada
+// retorno de foco ou abertura da aba.
+app.get(
+  '/api/field-service/changes',
+  requireAuth,
+  requireInternalAccount,
+  requireAccessModule('field_service'),
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    const sinceRaw = asLimitedString(req.query?.since, 80);
+    const sinceMs = Date.parse(sinceRaw);
+    if (!sinceRaw || !Number.isFinite(sinceMs)) {
+      return res.status(400).json({ error: 'INVALID_SINCE' });
+    }
+
+    // Limita a janela em um instante capturado antes da consulta. Alterações
+    // posteriores entram no próximo delta e não ficam perdidas entre requests.
+    const syncedAt = new Date().toISOString();
+    const DELTA_LIMIT = 10_001;
+    try {
+      const runtimeState = await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).get();
+      const lastClearAt = String(runtimeState.data()?.lastClearAt || '');
+      if (lastClearAt && Date.parse(lastClearAt) > sinceMs && Date.parse(lastClearAt) <= Date.parse(syncedAt)) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({ success: true, records: [], syncedAt, truncated: false, reset: true });
+      }
+
+      const snapshot = await firestoreDb
+        .collection('fieldServiceRecords')
+        .where('updatedAt', '>', sinceRaw)
+        .where('updatedAt', '<=', syncedAt)
+        .orderBy('updatedAt', 'asc')
+        .limit(DELTA_LIMIT)
+        .get();
+
+      const truncated = snapshot.size >= DELTA_LIMIT;
+      const docs = truncated ? snapshot.docs.slice(0, DELTA_LIMIT - 1) : snapshot.docs;
+      const records = docs.map((recordDoc) => ({ id: recordDoc.id, ...recordDoc.data() }));
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ success: true, records, syncedAt, truncated });
+    } catch (error) {
+      console.error('Field service incremental sync failed:', error);
       return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
     }
   },
@@ -4666,7 +4759,7 @@ app.post(
         return res.status(409).json({ error: 'FIELD_SERVICE_CONFLICT', ...rejection });
       }
       const applied = result.applied[0];
-      if (applied) invalidateFieldServiceSnapshotCache();
+      // Mantém o snapshot-base em memória. O cliente aplica /changes para chegar ao estado atual.
       return res.json({ success: true, record: { id: applied.id, ...applied.after } });
     } catch (error) {
       console.error('Field service upsert failed:', error);
@@ -4713,7 +4806,7 @@ app.post(
         ...item,
         index: item.type === 'add' ? item.index - addIndexOffset : item.index,
       }));
-      if (result.applied.length > 0) invalidateFieldServiceSnapshotCache();
+      // Não derruba o snapshot-base após importações; o delta carrega apenas o que mudou.
       return res.json({ success: true, updated, added, rejected });
     } catch (error) {
       console.error('Field service bulk upsert failed:', error);
@@ -4808,7 +4901,7 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
       removeSnapshotOwner(fieldServiceUniquenessSnapshot.tags, normalizeFieldServiceTagKey(archivedBefore.tag), recordId);
       removeSnapshotOwner(fieldServiceUniquenessSnapshot.certificates, normalizeFieldServiceCertificateKey(archivedBefore.certificate), recordId);
     }
-    if (archivedBefore) invalidateFieldServiceSnapshotCache();
+    // Arquivamento entra no delta; não força releitura completa de toda a coleção.
     return res.json({ success: true });
   } catch (error: any) {
     const code = String(error?.code || error?.message || '');
@@ -4911,8 +5004,8 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
   }
 
   try {
-    // Reautentica exatamente a conta que está logada. Uma senha de outro
-    // administrador não autoriza a limpeza em nome do usuário atual.
+    // Reautentica exatamente o administrador atualmente logado antes de abrir
+    // o stream. Erros de senha continuam retornando JSON HTTP convencional.
     const authResponse = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
       {
@@ -4941,69 +5034,119 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
       return res.status(403).json({ error: 'FORBIDDEN' });
     }
 
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const send = (payload: Record<string, any>) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(payload)}\n`);
+    };
+
     const nowIso = new Date().toISOString();
     const actorName = asLimitedString(
       req.user?.name || req.user?.username || req.user?.email,
       160,
     ) || 'Administrador';
     const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
-    const pageSize = 400;
+    const pageSize = 1000;
     let cursor: QueryDocumentSnapshot | null = null;
     let clearedCount = 0;
     let scannedCount = 0;
 
-    while (true) {
-      let pageQuery: Query = firestoreDb
-        .collection('fieldServiceRecords')
-        .orderBy(FieldPath.documentId())
-        .limit(pageSize);
-      if (cursor) pageQuery = pageQuery.startAfter(cursor);
+    send({
+      type: 'progress', stage: 'counting', processed: 0, total: 0,
+      clearedCount: 0, percent: 1, message: 'Contabilizando registros...',
+    });
 
-      const page = await pageQuery.get();
-      if (page.empty) break;
-      scannedCount += page.size;
+    const countSnapshot = await firestoreDb.collection('fieldServiceRecords').count().get();
+    const totalCount = Number(countSnapshot.data().count || 0);
+    send({
+      type: 'progress', stage: 'archiving', processed: 0, total: totalCount,
+      clearedCount: 0, percent: totalCount > 0 ? 3 : 95,
+      message: totalCount > 0 ? 'Arquivando registros em paralelo...' : 'Nenhum registro para limpar.',
+    });
 
-      const activeDocs = page.docs.filter((recordDoc) => recordDoc.data()?.isDeleted !== true);
-      if (activeDocs.length > 0) {
-        const batch = firestoreDb.batch();
-        for (const recordDoc of activeDocs) {
-          batch.update(recordDoc.ref, {
-            isDeleted: true,
-            deletedAt: nowIso,
-            deletedBy: actorName,
-            deletedByUid: currentUid,
-            updatedAt: nowIso,
-          });
+    // BulkWriter paraleliza as gravações e aplica controle de throughput/retry do
+    // SDK Admin. A rotina antiga fazia um batch por vez e aguardava cada commit,
+    // o que tornava 17 mil registros uma operação de mais de um minuto.
+    const bulkWriter = firestoreDb.bulkWriter();
+    bulkWriter.onWriteError((error) => error.failedAttempts < 4);
+
+    try {
+      while (true) {
+        let pageQuery: Query = firestoreDb
+          .collection('fieldServiceRecords')
+          .select('isDeleted')
+          .orderBy(FieldPath.documentId())
+          .limit(pageSize);
+        if (cursor) pageQuery = pageQuery.startAfter(cursor);
+
+        const page = await pageQuery.get();
+        if (page.empty) break;
+        scannedCount += page.size;
+
+        const activeDocs = page.docs.filter((recordDoc) => recordDoc.data()?.isDeleted !== true);
+        const writes = activeDocs.map((recordDoc) => bulkWriter.update(recordDoc.ref, {
+          isDeleted: true,
+          deletedAt: nowIso,
+          deletedBy: actorName,
+          deletedByUid: currentUid,
+          updatedAt: nowIso,
+        }));
+        if (writes.length > 0) {
+          await bulkWriter.flush();
+          await Promise.all(writes);
+          clearedCount += activeDocs.length;
         }
-        await batch.commit();
-        clearedCount += activeDocs.length;
+
+        const percent = totalCount > 0
+          ? Math.min(95, 3 + Math.round((Math.min(scannedCount, totalCount) / totalCount) * 92))
+          : 95;
+        send({
+          type: 'progress', stage: 'archiving', processed: scannedCount, total: totalCount,
+          clearedCount, percent,
+          message: `${clearedCount.toLocaleString('pt-BR')} registro(s) ativo(s) arquivado(s).`,
+        });
+
+        cursor = page.docs[page.docs.length - 1] || null;
+        if (page.size < pageSize || !cursor) break;
       }
-
-      cursor = page.docs[page.docs.length - 1] || null;
-      if (page.size < pageSize || !cursor) break;
+    } finally {
+      await bulkWriter.close();
     }
 
-    // Como todos os registros ativos foram arquivados, os locks de unicidade
-    // podem ser descartados. Isso permite reutilizar TAG/Certificado no futuro
-    // sem deixar chaves órfãs após uma limpeza administrativa total.
-    let lockCursor: QueryDocumentSnapshot | null = null;
-    while (true) {
-      let lockQuery: Query = firestoreDb
-        .collection(FIELD_SERVICE_UNIQUE_LOCK_COLLECTION)
-        .orderBy(FieldPath.documentId())
-        .limit(pageSize);
-      if (lockCursor) lockQuery = lockQuery.startAfter(lockCursor);
-      const lockPage = await lockQuery.get();
-      if (lockPage.empty) break;
-      const lockBatch = firestoreDb.batch();
-      lockPage.docs.forEach((lockDoc) => lockBatch.delete(lockDoc.ref));
-      await lockBatch.commit();
-      lockCursor = lockPage.docs[lockPage.docs.length - 1] || null;
-      if (lockPage.size < pageSize || !lockCursor) break;
-    }
+    send({
+      type: 'progress', stage: 'finalizing', processed: scannedCount, total: totalCount,
+      clearedCount, percent: 97, message: 'Finalizando índices e auditoria...',
+    });
+
+    // Não é necessário percorrer e apagar milhares de locks. O backend já
+    // valida se o owner do lock continua ativo e reutiliza automaticamente a
+    // chave quando o owner está arquivado. Assim a limpeza fica muito mais rápida.
     fieldServiceUniquenessSnapshot = { tags: new Map(), certificates: new Map() };
 
-    invalidateFieldServiceSnapshotCache();
+    // O estado visível após uma limpeza total é conhecido sem nova consulta:
+    // substitui o snapshot-base por um snapshot vazio imediatamente.
+    const emptyJson = JSON.stringify({ success: true, records: [], total: 0, generatedAt: nowIso });
+    fieldServiceSnapshotCache = {
+      expiresAt: Date.now() + FIELD_SERVICE_SNAPSHOT_CACHE_TTL_MS,
+      body: gzipSync(Buffer.from(emptyJson, 'utf8'), { level: 1 }),
+      etag: `"${createHash('sha1').update(emptyJson).digest('hex')}"`,
+      total: 0,
+      generatedAt: nowIso,
+    };
+    try {
+      await persistFieldServiceSnapshotBase(fieldServiceSnapshotCache);
+    } catch (persistError) {
+      console.warn('Could not persist empty Field Service snapshot after clear:', persistError);
+    }
+
+    await firestoreDb.collection('systemSettings').doc(FIELD_SERVICE_RUNTIME_STATE_DOC).set({
+      lastClearAt: nowIso,
+      updatedAt: nowIso,
+    }, { merge: true });
 
     await firestoreDb.collection('systemAuditLogs').add({
       action: 'FIELD_SERVICE_ALL_RECORDS_ARCHIVED',
@@ -5019,12 +5162,29 @@ app.post('/api/field-service/clear-all', requireAuth, requireAdministratorAccoun
         clearedCount,
         scannedCount,
         authentication: 'CURRENT_ADMIN_PASSWORD_REAUTH',
+        executionMode: 'BULK_WRITER_STREAM_PROGRESS',
+        uniquenessLocks: 'LAZY_RECLAIM',
       },
     });
 
-    return res.json({ success: true, clearedCount });
-  } catch (error) {
+    send({
+      type: 'done', stage: 'done', processed: scannedCount, total: totalCount,
+      clearedCount, percent: 100,
+      message: `${clearedCount.toLocaleString('pt-BR')} registro(s) removido(s) da base ativa.`,
+    });
+    return res.end();
+  } catch (error: any) {
     console.error('Field service clear-all failed:', error);
+    if (res.headersSent) {
+      if (!res.writableEnded) {
+        res.write(`${JSON.stringify({
+          type: 'error',
+          message: 'A limpeza foi interrompida por uma falha no servidor. Reabra a aba para conferir o estado atual antes de repetir.',
+        })}\n`);
+        res.end();
+      }
+      return;
+    }
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });
@@ -7782,6 +7942,13 @@ REGRAS DE QUALIDADE:
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor COMANINS rodando na porta ${PORT}`);
+    // Aquecimento assíncrono: tenta carregar o snapshot persistido (ou gerar o
+    // primeiro) logo que a instância sobe. Não bloqueia o servidor nem o login.
+    setTimeout(() => {
+      void buildFieldServiceSnapshot(false).catch((error) => {
+        console.warn('Field Service snapshot warm-up failed:', error);
+      });
+    }, 1500);
   });
 }
 

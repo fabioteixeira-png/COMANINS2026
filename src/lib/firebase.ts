@@ -3783,21 +3783,141 @@ export interface FieldServiceRecord {
   normalizedCertificate?: string;
 }
 
-const FIELD_SERVICE_PAGE_SIZE = 5000; // fallback: reduz round-trips se o snapshot do servidor estiver indisponível
+const FIELD_SERVICE_PAGE_SIZE = 5000; // fallback somente quando a API otimizada estiver indisponível
 const FIELD_SERVICE_CHANGE_FEED_SIZE = 1000;
-const FIELD_SERVICE_AUTO_REFRESH_MAX_AGE_MS = 5 * 60_000;
+const FIELD_SERVICE_AUTO_REFRESH_MAX_AGE_MS = 15_000;
+const FIELD_SERVICE_PERSIST_DB_NAME = 'comanins_field_service_cache_v1';
+const FIELD_SERVICE_PERSIST_STORE = 'snapshots';
+const FIELD_SERVICE_PERSIST_KEY = 'active_records';
+const FIELD_SERVICE_CACHE_SCHEMA_VERSION = 1;
+
 let fieldServiceCache: FieldServiceRecord[] = [];
 let fieldServiceLoadPromise: Promise<void> | null = null;
 let fieldServiceInitialLoadComplete = false;
 let fieldServiceLastFullRefreshAt = 0;
+let fieldServiceLastServerSyncAt = '';
 let fieldServiceLiveUnsubscribe: (() => void) | null = null;
+let fieldServicePersistTimer: ReturnType<typeof setTimeout> | null = null;
 const fieldServiceSubscribers = new Set<(records: FieldServiceRecord[]) => void>();
 
-const fetchFieldServiceSnapshot = async (): Promise<FieldServiceRecord[] | null> => {
+type PersistedFieldServiceCache = {
+  schemaVersion: number;
+  records: FieldServiceRecord[];
+  syncedAt: string;
+  savedAt: string;
+};
+
+type FieldServiceSnapshotPayload = {
+  records: FieldServiceRecord[];
+  generatedAt: string;
+};
+
+type FieldServiceDeltaPayload = {
+  records: FieldServiceRecord[];
+  syncedAt: string;
+  truncated: boolean;
+  reset: boolean;
+};
+
+const openFieldServiceCacheDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
+  if (typeof indexedDB === 'undefined') {
+    resolve(null);
+    return;
+  }
+  try {
+    const request = indexedDB.open(FIELD_SERVICE_PERSIST_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const dbHandle = request.result;
+      if (!dbHandle.objectStoreNames.contains(FIELD_SERVICE_PERSIST_STORE)) {
+        dbHandle.createObjectStore(FIELD_SERVICE_PERSIST_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  } catch {
+    resolve(null);
+  }
+});
+
+const readPersistedFieldServiceCache = async (): Promise<PersistedFieldServiceCache | null> => {
+  const dbHandle = await openFieldServiceCacheDb();
+  if (!dbHandle) return null;
+  try {
+    const value = await new Promise<any>((resolve) => {
+      const tx = dbHandle.transaction(FIELD_SERVICE_PERSIST_STORE, 'readonly');
+      const request = tx.objectStore(FIELD_SERVICE_PERSIST_STORE).get(FIELD_SERVICE_PERSIST_KEY);
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => resolve(null);
+    });
+    if (!value || value.schemaVersion !== FIELD_SERVICE_CACHE_SCHEMA_VERSION || !Array.isArray(value.records)) return null;
+    return {
+      schemaVersion: FIELD_SERVICE_CACHE_SCHEMA_VERSION,
+      records: value.records
+        .filter((record: any) => record && record.id && record.isDeleted !== true)
+        .map((record: any) => ({ ...record, id: String(record.id) } as FieldServiceRecord)),
+      syncedAt: String(value.syncedAt || ''),
+      savedAt: String(value.savedAt || ''),
+    };
+  } finally {
+    dbHandle.close();
+  }
+};
+
+const writePersistedFieldServiceCache = async (): Promise<void> => {
+  const dbHandle = await openFieldServiceCacheDb();
+  if (!dbHandle) return;
+  const payload: PersistedFieldServiceCache = {
+    schemaVersion: FIELD_SERVICE_CACHE_SCHEMA_VERSION,
+    records: fieldServiceCache.filter((record) => record.isDeleted !== true),
+    syncedAt: fieldServiceLastServerSyncAt,
+    savedAt: new Date().toISOString(),
+  };
+  try {
+    await new Promise<void>((resolve) => {
+      const tx = dbHandle.transaction(FIELD_SERVICE_PERSIST_STORE, 'readwrite');
+      tx.objectStore(FIELD_SERVICE_PERSIST_STORE).put(payload, FIELD_SERVICE_PERSIST_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } finally {
+    dbHandle.close();
+  }
+};
+
+const clearPersistedFieldServiceCache = async (): Promise<void> => {
+  const dbHandle = await openFieldServiceCacheDb();
+  if (!dbHandle) return;
+  try {
+    await new Promise<void>((resolve) => {
+      const tx = dbHandle.transaction(FIELD_SERVICE_PERSIST_STORE, 'readwrite');
+      tx.objectStore(FIELD_SERVICE_PERSIST_STORE).delete(FIELD_SERVICE_PERSIST_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } finally {
+    dbHandle.close();
+  }
+};
+
+const schedulePersistFieldServiceCache = () => {
+  if (fieldServicePersistTimer) clearTimeout(fieldServicePersistTimer);
+  fieldServicePersistTimer = setTimeout(() => {
+    fieldServicePersistTimer = null;
+    void writePersistedFieldServiceCache();
+  }, 1500);
+};
+
+const normalizeFieldServiceApiRecords = (records: any[]): FieldServiceRecord[] => records
+  .filter((record: any) => record && record.id && record.isDeleted !== true)
+  .map((record: any) => ({ ...record, id: String(record.id) } as FieldServiceRecord));
+
+const fetchFieldServiceSnapshot = async (forceFresh = false): Promise<FieldServiceSnapshotPayload | null> => {
   const user = auth.currentUser;
   if (!user) return null;
   const token = await user.getIdToken();
-  const response = await fetch('/api/field-service/snapshot', {
+  const response = await fetch(`/api/field-service/snapshot${forceFresh ? '?fresh=1' : ''}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
@@ -3809,9 +3929,35 @@ const fetchFieldServiceSnapshot = async (): Promise<FieldServiceRecord[] | null>
   if (!payload?.success || !Array.isArray(payload.records)) {
     throw new Error('FIELD_SERVICE_SNAPSHOT_INVALID');
   }
-  return payload.records
-    .filter((record: any) => record && record.isDeleted !== true && record.id)
-    .map((record: any) => ({ ...record, id: String(record.id) } as FieldServiceRecord));
+  return {
+    records: normalizeFieldServiceApiRecords(payload.records),
+    generatedAt: String(payload.generatedAt || new Date().toISOString()),
+  };
+};
+
+const fetchFieldServiceChanges = async (since: string): Promise<FieldServiceDeltaPayload | null> => {
+  const user = auth.currentUser;
+  if (!user || !since) return null;
+  const token = await user.getIdToken();
+  const params = new URLSearchParams({ since });
+  const response = await fetch(`/api/field-service/changes?${params.toString()}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`FIELD_SERVICE_CHANGES_HTTP_${response.status}`);
+  }
+  const payload = await response.json().catch(() => null);
+  if (!payload?.success || !Array.isArray(payload.records)) {
+    throw new Error('FIELD_SERVICE_CHANGES_INVALID');
+  }
+  return {
+    records: payload.records.map((record: any) => ({ ...record, id: String(record.id || '') } as FieldServiceRecord)),
+    syncedAt: String(payload.syncedAt || new Date().toISOString()),
+    truncated: payload.truncated === true,
+    reset: payload.reset === true,
+  };
 };
 
 const notifyFieldServiceSubscribers = () => {
@@ -3819,30 +3965,38 @@ const notifyFieldServiceSubscribers = () => {
   fieldServiceSubscribers.forEach((subscriber) => subscriber(snapshot));
 };
 
-const mergeFieldServiceChangeSnapshot = (snapshot: any) => {
-  if (!snapshot || snapshot.empty) return;
+const mergeFieldServiceRecords = (changes: FieldServiceRecord[]) => {
+  if (changes.length === 0) return false;
   const byId = new Map(fieldServiceCache.map((record) => [record.id, record]));
   let changed = false;
-
-  snapshot.docChanges().forEach((change: any) => {
-    const incoming = { id: change.doc.id, ...change.doc.data() } as FieldServiceRecord;
+  for (const incoming of changes) {
+    if (!incoming?.id) continue;
     if (incoming.isDeleted === true) {
       if (byId.delete(incoming.id)) changed = true;
-      return;
+      continue;
     }
-    // 'removed' pode significar apenas que o documento saiu da janela dos 1000
-    // mais recentemente alterados. Isso não significa exclusão do cadastro.
-    if (change.type === 'removed') return;
     const previous = byId.get(incoming.id);
-    if (!previous || previous.updatedAt !== incoming.updatedAt) {
+    if (!previous || previous.updatedAt !== incoming.updatedAt || JSON.stringify(previous) !== JSON.stringify(incoming)) {
       byId.set(incoming.id, incoming);
       changed = true;
     }
-  });
+  }
+  if (changed) fieldServiceCache = Array.from(byId.values());
+  return changed;
+};
 
-  if (changed) {
-    fieldServiceCache = Array.from(byId.values());
+const mergeFieldServiceChangeSnapshot = (snapshot: any) => {
+  if (!snapshot || snapshot.empty) return;
+  const changes: FieldServiceRecord[] = [];
+  snapshot.docChanges().forEach((change: any) => {
+    // 'removed' pode significar apenas saída da janela dos 1000 registros mais
+    // recentes; exclusão real é identificada por isDeleted=true.
+    if (change.type === 'removed') return;
+    changes.push({ id: change.doc.id, ...change.doc.data() } as FieldServiceRecord);
+  });
+  if (mergeFieldServiceRecords(changes)) {
     notifyFieldServiceSubscribers();
+    schedulePersistFieldServiceCache();
   }
 };
 
@@ -3858,40 +4012,118 @@ const startFieldServiceLiveFeed = () => {
     changesQuery,
     mergeFieldServiceChangeSnapshot,
     (err) => {
-      // Registros legados sem updatedAt continuam cobertos pela carga completa.
-      // O feed em tempo real é apenas o canal incremental para novos/alterados.
+      // Registros legados sem updatedAt continuam cobertos pelo snapshot/delta.
       console.warn('Field Service live change feed unavailable:', err);
     },
   );
+};
+
+const hydrateFieldServiceCacheFromIndexedDb = async (): Promise<boolean> => {
+  if (fieldServiceCache.length > 0) return true;
+  const persisted = await readPersistedFieldServiceCache();
+  if (!persisted || !persisted.syncedAt) return false;
+  fieldServiceCache = persisted.records;
+  fieldServiceLastServerSyncAt = persisted.syncedAt;
+  notifyFieldServiceSubscribers();
+  return true;
+};
+
+type FieldServiceDeltaSyncResult = 'synced' | 'truncated' | 'unavailable';
+
+const synchronizeFieldServiceDelta = async (): Promise<FieldServiceDeltaSyncResult> => {
+  if (!fieldServiceLastServerSyncAt) return 'unavailable';
+  const delta = await fetchFieldServiceChanges(fieldServiceLastServerSyncAt);
+  if (!delta) return 'unavailable';
+  if (delta.reset) {
+    fieldServiceCache = [];
+    fieldServiceLastServerSyncAt = delta.syncedAt;
+    fieldServiceLastFullRefreshAt = Date.now();
+    fieldServiceInitialLoadComplete = true;
+    notifyFieldServiceSubscribers();
+    await clearPersistedFieldServiceCache();
+    schedulePersistFieldServiceCache();
+    return 'synced';
+  }
+  if (delta.truncated) return 'truncated';
+  const changed = mergeFieldServiceRecords(delta.records);
+  fieldServiceLastServerSyncAt = delta.syncedAt;
+  fieldServiceLastFullRefreshAt = Date.now();
+  fieldServiceInitialLoadComplete = true;
+  if (changed) notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
+  return 'synced';
 };
 
 const loadFieldServiceRecordsInPages = async (force = false, silent = false): Promise<void> => {
   if (fieldServiceInitialLoadComplete && !force) return;
   if (fieldServiceLoadPromise) return fieldServiceLoadPromise;
 
-  const hadVisibleCache = fieldServiceCache.length > 0;
   const task = (async () => {
-    // Caminho principal do LOTE 41: uma única requisição HTTP autenticada recebe
-    // o snapshot ativo já compactado pelo servidor. Evita 17+ round-trips do
-    // Firestore no navegador e não publica um lote parcial como se fosse a base inteira.
+    let requireFreshSnapshot = force;
+    if (!force) {
+      await hydrateFieldServiceCacheFromIndexedDb();
+      if (fieldServiceLastServerSyncAt) {
+        try {
+          const deltaResult = await synchronizeFieldServiceDelta();
+          if (deltaResult === 'synced') return;
+          if (deltaResult === 'truncated') requireFreshSnapshot = true;
+        } catch (deltaError) {
+          console.warn('Field Service delta sync unavailable; falling back to full snapshot:', deltaError);
+        }
+      }
+    }
+
+    // Snapshot completo é usado apenas no primeiro acesso do navegador ou quando
+    // o delta ficou grande demais. Nas aberturas seguintes, IndexedDB + delta
+    // disponibilizam a base imediatamente sem reler 17 mil registros.
     try {
-      const serverSnapshot = await fetchFieldServiceSnapshot();
+      const serverSnapshot = await fetchFieldServiceSnapshot(requireFreshSnapshot);
       if (serverSnapshot) {
-        fieldServiceCache = serverSnapshot;
+        fieldServiceCache = serverSnapshot.records;
+        fieldServiceLastServerSyncAt = serverSnapshot.generatedAt;
         fieldServiceInitialLoadComplete = true;
         fieldServiceLastFullRefreshAt = Date.now();
         notifyFieldServiceSubscribers();
+        schedulePersistFieldServiceCache();
+
+        // Fecha a pequena janela entre o instante de geração do snapshot e a
+        // entrega ao navegador sem forçar outra leitura completa.
+        try {
+          const delta = await fetchFieldServiceChanges(fieldServiceLastServerSyncAt);
+          if (delta?.reset) {
+            fieldServiceCache = [];
+            fieldServiceLastServerSyncAt = delta.syncedAt;
+            notifyFieldServiceSubscribers();
+            await clearPersistedFieldServiceCache();
+            schedulePersistFieldServiceCache();
+          } else if (delta?.truncated && !requireFreshSnapshot) {
+            const freshSnapshot = await fetchFieldServiceSnapshot(true);
+            if (freshSnapshot) {
+              fieldServiceCache = freshSnapshot.records;
+              fieldServiceLastServerSyncAt = freshSnapshot.generatedAt;
+              notifyFieldServiceSubscribers();
+              schedulePersistFieldServiceCache();
+            }
+          } else if (delta && !delta.truncated) {
+            const changed = mergeFieldServiceRecords(delta.records);
+            fieldServiceLastServerSyncAt = delta.syncedAt;
+            if (changed) notifyFieldServiceSubscribers();
+            schedulePersistFieldServiceCache();
+          }
+        } catch (deltaError) {
+          console.warn('Post-snapshot Field Service delta sync failed:', deltaError);
+        }
         return;
       }
     } catch (snapshotError) {
       console.warn('Field Service snapshot API unavailable; using Firestore fallback:', snapshotError);
     }
 
-    // Fallback de segurança. Continua funcional mesmo se a rota otimizada estiver
-    // temporariamente indisponível, mas usa lotes maiores para reduzir latência.
+    // Fallback de segurança: continua funcional mesmo se a API estiver indisponível.
     const loaded: FieldServiceRecord[] = [];
     let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
     let isFirstPage = true;
+    const fallbackStartedAt = new Date().toISOString();
 
     while (true) {
       const pageQuery = cursor
@@ -3912,7 +4144,7 @@ const loadFieldServiceRecordsInPages = async (force = false, silent = false): Pr
         if (record.isDeleted !== true) loaded.push(record);
       });
 
-      if (!silent && !hadVisibleCache && isFirstPage && loaded.length > 0) {
+      if (!silent && fieldServiceCache.length === 0 && isFirstPage && loaded.length > 0) {
         fieldServiceCache = [...loaded];
         notifyFieldServiceSubscribers();
       }
@@ -3924,9 +4156,11 @@ const loadFieldServiceRecordsInPages = async (force = false, silent = false): Pr
     }
 
     fieldServiceCache = [...loaded];
+    fieldServiceLastServerSyncAt = fallbackStartedAt;
     fieldServiceInitialLoadComplete = true;
     fieldServiceLastFullRefreshAt = Date.now();
     notifyFieldServiceSubscribers();
+    schedulePersistFieldServiceCache();
   })().finally(() => {
     if (fieldServiceLoadPromise === task) fieldServiceLoadPromise = null;
   });
@@ -3942,12 +4176,11 @@ export async function syncFieldServiceRecords(callback: (records: FieldServiceRe
   loadFieldServiceRecordsInPages()
     .then(() => startFieldServiceLiveFeed())
     .catch((err) => {
-      console.error('Error loading field service records in pages:', err);
+      console.error('Error loading field service records:', err);
     });
 
   return () => {
-    // O feed incremental permanece ativo enquanto o portal estiver aberto, mesmo
-    // com Serviço de Campo fora da tela. Assim, o cache continua recebendo mudanças.
+    // Mantém o feed incremental enquanto o Portal Interno permanecer aberto.
     fieldServiceSubscribers.delete(callback);
   };
 }
@@ -3966,12 +4199,22 @@ export async function refreshFieldServiceRecords(options: RefreshFieldServiceOpt
     return false;
   }
 
-  fieldServiceInitialLoadComplete = false;
-  if (fieldServiceLiveUnsubscribe) {
-    fieldServiceLiveUnsubscribe();
-    fieldServiceLiveUnsubscribe = null;
+  // Atualização normal = delta pequeno, nunca uma releitura completa dos 17 mil.
+  if (!options.force && fieldServiceLastServerSyncAt) {
+    try {
+      const deltaResult = await synchronizeFieldServiceDelta();
+      if (deltaResult === 'synced') {
+        startFieldServiceLiveFeed();
+        return true;
+      }
+      if (deltaResult === 'truncated') options.force = true;
+    } catch (deltaError) {
+      console.warn('Field Service delta refresh failed:', deltaError);
+    }
   }
-  await loadFieldServiceRecordsInPages(true, options.silent !== false);
+
+  fieldServiceInitialLoadComplete = false;
+  await loadFieldServiceRecordsInPages(Boolean(options.force), options.silent !== false);
   startFieldServiceLiveFeed();
   return true;
 }
@@ -4028,6 +4271,7 @@ export async function addFieldServiceRecord(data: Omit<FieldServiceRecord, 'id'>
   if (!created?.id) throw new Error('O servidor não retornou o registro criado.');
   fieldServiceCache = [created, ...fieldServiceCache.filter((record) => record.id !== created.id)];
   notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
   return created;
 }
 
@@ -4039,6 +4283,7 @@ export async function updateFieldServiceRecord(id: string, data: Partial<FieldSe
     record.id === id ? { ...record, ...updated } : record,
   );
   notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
 }
 
 export async function deleteFieldServiceRecord(id: string): Promise<void> {
@@ -4053,13 +4298,26 @@ export async function deleteFieldServiceRecord(id: string): Promise<void> {
   if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o registro.');
   fieldServiceCache = fieldServiceCache.filter((record) => record.id !== id);
   notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
 }
 
 export async function bulkAddFieldServiceRecords(records: Omit<FieldServiceRecord, 'id'>[]): Promise<FieldServiceBulkUpsertResult> {
   return bulkUpsertFieldServiceRecords([], records);
 }
 
-export async function clearAllFieldServiceRecords(password: string): Promise<number> {
+export interface FieldServiceClearProgress {
+  stage: 'validating' | 'counting' | 'archiving' | 'finalizing' | 'done';
+  processed: number;
+  total: number;
+  clearedCount: number;
+  percent: number;
+  message?: string;
+}
+
+export async function clearAllFieldServiceRecords(
+  password: string,
+  onProgress?: (progress: FieldServiceClearProgress) => void,
+): Promise<number> {
   const user = auth.currentUser;
   if (!user) throw new Error('Sessão expirada. Faça login novamente.');
   if (!password) throw new Error('Digite a senha do administrador logado.');
@@ -4070,12 +4328,13 @@ export async function clearAllFieldServiceRecords(password: string): Promise<num
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'Accept': 'application/x-ndjson',
     },
     body: JSON.stringify({ password }),
   });
-  const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
     if (response.status === 401 && payload?.error === 'INVALID_CURRENT_ADMIN_PASSWORD') {
       throw new Error('Senha incorreta para o administrador atualmente logado.');
     }
@@ -4085,11 +4344,64 @@ export async function clearAllFieldServiceRecords(password: string): Promise<num
     throw new Error(payload?.message || payload?.error || 'Não foi possível limpar os dados de Serviço de Campo.');
   }
 
+  let clearedCount = 0;
+  const reader = response.body?.getReader();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let pending = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) pending += decoder.decode(value, { stream: !done });
+      const lines = pending.split('\n');
+      pending = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const event = JSON.parse(trimmed);
+        if (event.type === 'error') throw new Error(event.message || 'Falha durante a limpeza do Serviço de Campo.');
+        if (event.type === 'progress' || event.type === 'done') {
+          const progress: FieldServiceClearProgress = {
+            stage: event.stage || (event.type === 'done' ? 'done' : 'archiving'),
+            processed: Number(event.processed || 0),
+            total: Number(event.total || 0),
+            clearedCount: Number(event.clearedCount || 0),
+            percent: Number(event.percent || 0),
+            message: String(event.message || ''),
+          };
+          clearedCount = progress.clearedCount;
+          onProgress?.(progress);
+        }
+      }
+      if (done) break;
+    }
+    const trimmed = pending.trim();
+    if (trimmed) {
+      const event = JSON.parse(trimmed);
+      if (event.type === 'error') throw new Error(event.message || 'Falha durante a limpeza do Serviço de Campo.');
+      if (event.type === 'done') {
+        clearedCount = Number(event.clearedCount || 0);
+        onProgress?.({
+          stage: 'done',
+          processed: Number(event.processed || event.total || 0),
+          total: Number(event.total || 0),
+          clearedCount,
+          percent: 100,
+          message: String(event.message || ''),
+        });
+      }
+    }
+  } else {
+    const payload = await response.json().catch(() => ({}));
+    clearedCount = Number(payload?.clearedCount || 0);
+  }
+
   fieldServiceCache = [];
   fieldServiceInitialLoadComplete = true;
   fieldServiceLastFullRefreshAt = Date.now();
+  fieldServiceLastServerSyncAt = new Date().toISOString();
   notifyFieldServiceSubscribers();
-  return Number(payload?.clearedCount || 0);
+  await clearPersistedFieldServiceCache();
+  return clearedCount;
 }
 
 export async function bulkUpsertFieldServiceRecords(
@@ -4131,6 +4443,7 @@ export async function bulkUpsertFieldServiceRecords(
   const createdIds = new Set(createdRecords.map((created) => created.id));
   fieldServiceCache = [...createdRecords, ...fieldServiceCache.filter((record) => !createdIds.has(record.id))];
   notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
 
   return {
     addedCount: createdRecords.length,

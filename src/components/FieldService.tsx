@@ -253,11 +253,11 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     processed: 0,
     total: 0,
   });
-  const [isRefreshingRecords, setIsRefreshingRecords] = useState(false);
   const [showClearDataModal, setShowClearDataModal] = useState(false);
   const [clearDataPassword, setClearDataPassword] = useState('');
   const [clearDataError, setClearDataError] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
+  const [clearProgress, setClearProgress] = useState({ percent: 0, processed: 0, total: 0, clearedCount: 0, stage: '' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -648,17 +648,6 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     return String(record.clientId || '').trim();
   };
 
-  const handleRefreshRecords = async () => {
-    setIsRefreshingRecords(true);
-    try {
-      await refreshFieldServiceRecords({ force: true, silent: true });
-    } catch (error) {
-      console.error(error);
-      alert('Não foi possível atualizar os registros de Serviço de Campo.');
-    } finally {
-      setIsRefreshingRecords(false);
-    }
-  };
 
   const handleClearAllFieldServiceData = async () => {
     if (!canClearData) {
@@ -672,10 +661,29 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
     setIsClearingData(true);
     setClearDataError('');
+    setClearProgress({ percent: 1, processed: 0, total: records.length, clearedCount: 0, stage: 'Validando credenciais...' });
     try {
-      const clearedCount = await clearAllFieldServiceRecords(clearDataPassword);
+      const clearedCount = await clearAllFieldServiceRecords(clearDataPassword, (progress) => {
+        const stageLabel = progress.stage === 'counting'
+          ? 'Contabilizando registros...'
+          : progress.stage === 'archiving'
+            ? 'Arquivando registros em paralelo...'
+            : progress.stage === 'finalizing'
+              ? 'Finalizando limpeza e auditoria...'
+              : progress.stage === 'done'
+                ? 'Limpeza concluída.'
+                : 'Validando credenciais...';
+        setClearProgress({
+          percent: Math.max(0, Math.min(100, progress.percent)),
+          processed: progress.processed,
+          total: progress.total,
+          clearedCount: progress.clearedCount,
+          stage: progress.message || stageLabel,
+        });
+      });
       setSelectedRecordIds(new Set());
       setCurrentPage(1);
+      setClearProgress({ percent: 100, processed: clearedCount, total: clearedCount, clearedCount, stage: 'Limpeza concluída.' });
       setShowClearDataModal(false);
       setClearDataPassword('');
       alert(`${clearedCount} registro(s) de Serviço de Campo foram removidos da base ativa com sucesso.`);
@@ -746,18 +754,22 @@ export default function FieldService({ canEdit = false, canClearData = false, on
       return hasDefined ? firstDefined : '';
     };
 
-    const makeIssueReports = async (issues: ImportIssue[]): Promise<{ excelGenerated: boolean; pdfGenerated: boolean }> => {
-      if (issues.length === 0) return { excelGenerated: false, pdfGenerated: false };
+    const makeIssueReportExcel = async (issues: ImportIssue[]): Promise<boolean> => {
+      if (issues.length === 0) return false;
 
       const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-      let excelGenerated = false;
-      let pdfGenerated = false;
+      setImportProgress({
+        percent: 96,
+        stage: 'Gerando planilha Excel dos itens não importados...',
+        processed: issues.length,
+        total: issues.length,
+      });
+      await yieldToBrowser();
 
-      // Mantém o relatório Excel já existente para não remover funcionalidade homologada.
       try {
         const rows = issues.map((issue) => ({
-          'Linha de Origem': issue.sourceRow,
-          'Status': issue.status,
+          'Linha de Origem': issue.sourceRow || '',
+          'Status do Problema': issue.status,
           'Motivo': issue.reason,
           'Ação Sugerida': issue.suggestedAction,
           'Certificado': issue.record.certificate || '',
@@ -779,103 +791,34 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           'Unidade': issue.record.unidade || '',
           'Cliente': issue.record.cliente || '',
         }));
+
         const worksheet = XLSX.utils.json_to_sheet(rows);
         worksheet['!cols'] = [
-          { wch: 14 }, { wch: 22 }, { wch: 58 }, { wch: 42 },
-          { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 30 },
+          { wch: 14 }, { wch: 38 }, { wch: 58 }, { wch: 44 },
+          { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 30 },
           { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
           { wch: 16 }, { wch: 20 }, { wch: 22 }, { wch: 42 }, { wch: 18 }, { wch: 24 },
         ];
         worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:V1' };
+
+        const statusCounts = new Map<string, number>();
+        issues.forEach((issue) => statusCounts.set(issue.status, (statusCounts.get(issue.status) || 0) + 1));
+        const summaryRows = [
+          { Indicador: 'Total de itens com problema / não importados', Quantidade: issues.length },
+          ...Array.from(statusCounts.entries()).map(([status, count]) => ({ Indicador: status, Quantidade: count })),
+        ];
+        const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+        summarySheet['!cols'] = [{ wch: 62 }, { wch: 14 }];
+
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Nao_Inseridos');
-        XLSX.writeFile(workbook, `RELATORIO_IMPORTACAO_SERVICO_CAMPO_NAO_INSERIDOS_${stamp}.xlsx`);
-        excelGenerated = true;
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Nao_Importados');
+        XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumo');
+        XLSX.writeFile(workbook, `RELATORIO_IMPORTACAO_SERVICO_CAMPO_NAO_IMPORTADOS_${stamp}.xlsx`);
+        return true;
       } catch (reportError) {
         console.error('Erro ao gerar relatório Excel de inconsistências:', reportError);
+        return false;
       }
-
-      try {
-        setImportProgress({
-          percent: 96,
-          stage: 'Gerando relatório PDF de inconsistências...',
-          processed: issues.length,
-          total: issues.length,
-        });
-        await yieldToBrowser();
-
-        const { jsPDF } = await import('jspdf');
-        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 12;
-        const contentWidth = pageWidth - (margin * 2);
-        let y = 14;
-
-        const drawHeader = () => {
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(14);
-          doc.text('COMANINS - Relatório de Inconsistências da Importação', margin, y);
-          y += 6;
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8.5);
-          doc.text(`Arquivo importado: ${file.name}`, margin, y);
-          y += 4;
-          doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Total de inconsistências: ${issues.length}`, margin, y);
-          y += 5;
-          const note = doc.splitTextToSize(
-            'Relatório exclusivamente diagnóstico. As regras existentes de importação, inclusão, atualização, duplicidade, conflito e rejeição permanecem inalteradas.',
-            contentWidth,
-          );
-          doc.text(note, margin, y);
-          y += (note.length * 3.5) + 4;
-        };
-
-        const ensureSpace = (needed: number) => {
-          if (y + needed <= pageHeight - 10) return;
-          doc.addPage();
-          y = 14;
-          drawHeader();
-        };
-
-        drawHeader();
-        for (let issueIndex = 0; issueIndex < issues.length; issueIndex++) {
-          const issue = issues[issueIndex];
-          const identification = [
-            `Linha: ${issue.sourceRow || '-'}`,
-            `Status: ${issue.status}`,
-            `Certificado: ${issue.record.certificate || '-'}`,
-            `TAG: ${issue.record.tag || '-'}`,
-            `Cliente: ${issue.record.cliente || '-'}`,
-            `Unidade: ${issue.record.unidade || '-'}`,
-          ].join(' | ');
-          const idLines = doc.splitTextToSize(identification, contentWidth);
-          const reasonLines = doc.splitTextToSize(`Motivo: ${issue.reason}`, contentWidth);
-          const actionLines = doc.splitTextToSize(`Ação sugerida: ${issue.suggestedAction}`, contentWidth);
-          const needed = ((idLines.length + reasonLines.length + actionLines.length) * 3.5) + 8;
-          ensureSpace(needed);
-
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(8.5);
-          doc.text(idLines, margin, y);
-          y += idLines.length * 3.5 + 1;
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          doc.text(reasonLines, margin, y);
-          y += reasonLines.length * 3.5 + 1;
-          doc.text(actionLines, margin, y);
-          y += actionLines.length * 3.5 + 4;
-
-          if ((issueIndex + 1) % 50 === 0) await yieldToBrowser();
-        }
-
-        doc.save(`RELATORIO_IMPORTACAO_SERVICO_CAMPO_INCONSISTENCIAS_${stamp}.pdf`);
-        pdfGenerated = true;
-      } catch (reportError) {
-        console.error('Erro ao gerar relatório PDF de inconsistências:', reportError);
-      }
-
-      return { excelGenerated, pdfGenerated };
     };
 
     const emptyParsedRecord = (): Omit<FieldServiceRecord, 'id'> => ({
@@ -912,13 +855,13 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
     reader.onload = async (evt) => {
       const issues: ImportIssue[] = [];
-      let issueReportsGenerated = false;
-      let lastReportResult = { excelGenerated: false, pdfGenerated: false };
-      const ensureIssueReports = async () => {
-        if (issueReportsGenerated || issues.length === 0) return lastReportResult;
-        issueReportsGenerated = true;
-        lastReportResult = await makeIssueReports(issues);
-        return lastReportResult;
+      let issueReportGenerated = false;
+      let excelReportGenerated = false;
+      const ensureIssueReport = async () => {
+        if (issueReportGenerated || issues.length === 0) return excelReportGenerated;
+        issueReportGenerated = true;
+        excelReportGenerated = await makeIssueReportExcel(issues);
+        return excelReportGenerated;
       };
 
       try {
@@ -941,7 +884,9 @@ export default function FieldService({ canEdit = false, canClearData = false, on
         let conflictCount = 0;
 
         const newRecordsToImport: Omit<FieldServiceRecord, 'id'>[] = [];
+        const newRecordSourceRows: number[] = [];
         const recordsToUpdate: { id: string; data: Partial<FieldServiceRecord> }[] = [];
+        const updateSourceRows: number[] = [];
         const workingIndex = createFieldServiceImportIndex(records);
         const processedTags = new Map<string, number>();
         const processedCertificates = new Map<string, number>();
@@ -1107,21 +1052,18 @@ export default function FieldService({ canEdit = false, canClearData = false, on
 
             if (hasDifferences) {
               recordsToUpdate.push({ id: existingMatch.id, data: mergedRecord });
+              updateSourceRows.push(sourceRow);
               const nextRecord = { ...existingMatch, ...mergedRecord } as FieldServiceRecord;
               replaceFieldServiceRecordInImportIndex(workingIndex, existingMatch, nextRecord);
               updatedCount++;
             } else {
+              // Registro idêntico já existente não é inconsistência: nenhuma
+              // gravação é necessária e ele não entra na planilha de problemas.
               skippedCount++;
-              issues.push({
-                sourceRow,
-                status: 'NÃO INSERIDO - JÁ EXISTENTE',
-                reason: 'O registro já existe no sistema com os mesmos dados; nenhuma gravação adicional foi necessária.',
-                suggestedAction: 'Nenhuma ação é necessária, a menos que queira alterar algum campo.',
-                record: parsedRecord,
-              });
             }
           } else {
             newRecordsToImport.push(parsedRecord);
+            newRecordSourceRows.push(sourceRow);
             const syntheticRecord = {
               id: `__IMPORT_${sourceRow}_${newRecordsToImport.length}`,
               ...parsedRecord,
@@ -1179,7 +1121,9 @@ export default function FieldService({ canEdit = false, canClearData = false, on
                 : recordsToUpdate[rejection.index]?.data;
               if (!source) return;
               issues.push({
-                sourceRow: 0,
+                sourceRow: rejection.type === "add"
+                  ? (newRecordSourceRows[rejection.index] || 0)
+                  : (updateSourceRows[rejection.index] || 0),
                 status: "NÃO INSERIDO - REJEITADO PELO BANCO",
                 reason: rejectionLabel(rejection.reason),
                 suggestedAction: "Verifique se não há duplicidade gerada por outros usuários.",
@@ -1193,29 +1137,25 @@ export default function FieldService({ canEdit = false, canClearData = false, on
               sourceRow: 0,
               status: 'ERRO DE GRAVAÇÃO DO LOTE',
               reason: persistError?.message || 'O sistema não conseguiu concluir a gravação do lote no banco de dados.',
-              suggestedAction: 'Não repita a importação sem antes verificar se algum registro foi gravado. Atualize a tela, confira os dados e tente novamente somente com os itens pendentes.',
+              suggestedAction: 'Não repita a importação sem antes verificar se algum registro foi gravado. Confira os dados já persistidos e tente novamente somente com os itens pendentes.',
               record: genericRecord,
             });
-            await ensureIssueReports();
+            await ensureIssueReport();
             throw persistError;
           }
         }
 
         setImportProgress({ percent: 92, stage: 'Finalizando importação...', processed: totalRows, total: totalRows });
         await yieldToBrowser();
-        const reportResult = await ensureIssueReports();
+        const excelGenerated = await ensureIssueReport();
 
         setImportProgress({ percent: 100, stage: 'Importação concluída.', processed: totalRows, total: totalRows });
         await yieldToBrowser();
 
         const reportMessage = issues.length > 0
-          ? reportResult.pdfGenerated && reportResult.excelGenerated
-            ? `\n\nForam gerados automaticamente um PDF e uma planilha Excel com ${issues.length} item(ns) para tratamento.`
-            : reportResult.pdfGenerated
-              ? `\n\nFoi gerado automaticamente um PDF com ${issues.length} item(ns) para tratamento.`
-              : reportResult.excelGenerated
-                ? `\n\nO PDF não pôde ser gerado; foi mantida a planilha Excel com ${issues.length} item(ns) para tratamento.`
-                : `\n\nForam encontradas ${issues.length} inconsistência(s), mas houve falha ao gerar os relatórios. Consulte o console antes de repetir a importação.`
+          ? excelGenerated
+            ? `\n\nFoi gerada automaticamente uma planilha Excel com ${issues.length} item(ns) que tiveram problema e não foram importados.`
+            : `\n\nForam encontrados ${issues.length} item(ns) com problema, mas houve falha ao gerar a planilha Excel. Consulte o console antes de repetir a importação.`
           : '\n\nNenhuma inconsistência foi encontrada.';
 
         alert(
@@ -1224,13 +1164,13 @@ export default function FieldService({ canEdit = false, canClearData = false, on
         );
       } catch (error) {
         console.error("Error reading/importing excel:", error);
-        const reportResult = await ensureIssueReports();
+        const excelGenerated = await ensureIssueReport();
         if (issues.length === 0) {
           alert("Erro ao importar planilha. Verifique o formato do arquivo e tente novamente.");
-        } else if (reportResult.pdfGenerated) {
-          alert("A importação encontrou um erro. O relatório PDF de inconsistências foi gerado; confira os itens antes de tentar novamente.");
+        } else if (excelGenerated) {
+          alert("A importação encontrou um erro. A planilha Excel com os itens que não foram importados foi gerada para tratamento.");
         } else {
-          alert("A importação encontrou um erro. O relatório PDF não pôde ser gerado; confira o relatório Excel e o console antes de tentar novamente.");
+          alert("A importação encontrou um erro e não foi possível gerar a planilha Excel de inconsistências. Consulte o console antes de tentar novamente.");
         }
       } finally {
         setIsImporting(false);
@@ -1482,6 +1422,43 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   // Mantém digitação responsiva enquanto a busca percorre a base completa.
   const deferredFilters = useDeferredValue(filters);
 
+  const normalizeSearchValue = (value: unknown) => String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR')
+    .trim();
+
+  const hasActiveDeferredFilters = useMemo(
+    () => Object.values(deferredFilters).some((value) => String(value || '').trim() !== ''),
+    [deferredFilters],
+  );
+
+  // Índice textual pré-calculado. Antes, cada tecla digitada reconstruía strings
+  // de até 18 colunas para todos os ~17 mil registros. Agora esse custo ocorre
+  // apenas quando a base muda; a busca usa somente Map.get + includes.
+  const recordSearchIndex = useMemo(() => {
+    const index = new Map<string, Record<string, string>>();
+    if (!hasActiveDeferredFilters) return index;
+    for (const record of records) {
+      const values: Record<string, string> = {};
+      for (const column of COLUMNS) {
+        let rawValue: unknown = (record as any)[column.id];
+        if (column.id === 'dataCalibracao') {
+          const normalizedCertificate = normalizeCertificateIdentity(record.certificate);
+          const numericCertificate = certificateDigits(record.certificate);
+          const linkedInstrument = normalizedCertificate
+            ? instrumentLookup.byCertificate.get(normalizedCertificate)
+              || (numericCertificate ? instrumentLookup.byNumericCertificate.get(numericCertificate) : undefined)
+            : undefined;
+          rawValue = formatCalibrationDate(linkedInstrument?.lastCalibrationDate || record.dataCalibracao || '');
+        }
+        values[column.id] = normalizeSearchValue(rawValue);
+      }
+      index.set(record.id, values);
+    }
+    return index;
+  }, [records, instrumentLookup, hasActiveDeferredFilters]);
+
   // A Data de Intervenção é a ordenação padrão. Converter a data uma vez por
   // registro evita recriar Date centenas de milhares de vezes no Array.sort().
   const interventionSortValues = useMemo(() => {
@@ -1497,16 +1474,15 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   const sortedRecords = useMemo(() => {
     const activeFilters = Object.entries(deferredFilters)
       .filter(([, value]) => String(value || '').trim() !== '')
-      .map(([key, value]) => [key, String(value).toLocaleLowerCase('pt-BR')] as const);
+      .map(([key, value]) => [key, normalizeSearchValue(value)] as const);
 
     let filtered = activeFilters.length === 0
       ? [...records]
-      : records.filter((record) => activeFilters.every(([key, search]) => {
-          const rawValue = key === 'dataCalibracao'
-            ? resolveCalibrationDate(record)
-            : (record as any)[key];
-          return String(rawValue || '').toLocaleLowerCase('pt-BR').includes(search);
-        }));
+      : records.filter((record) => {
+          const indexed = recordSearchIndex.get(record.id);
+          if (!indexed) return false;
+          return activeFilters.every(([key, search]) => (indexed[key] || '').includes(search));
+        });
 
     if (sortConfig !== null) {
       filtered.sort((a, b) => {
@@ -1531,7 +1507,7 @@ export default function FieldService({ canEdit = false, canClearData = false, on
     }
 
     return filtered;
-  }, [records, deferredFilters, sortConfig, interventionSortValues, calibrationLookupDependency]);
+  }, [records, deferredFilters, sortConfig, interventionSortValues, calibrationLookupDependency, recordSearchIndex]);
 
 
   const duplicateAudit = useMemo(() => {
@@ -1745,22 +1721,13 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             <span>Gerar Planilha A4</span>
           </button>
 
-          <button
-            onClick={handleRefreshRecords}
-            disabled={isRefreshingRecords}
-            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
-            title="Atualização automática ativa. Use este botão apenas para forçar uma sincronização completa imediata."
-          >
-            <RefreshCw className={`h-4 w-4 ${isRefreshingRecords ? 'animate-spin' : ''}`} />
-            <span>Atualizar Dados</span>
-          </button>
-
           {canClearData && (
             <button
               type="button"
               onClick={() => {
                 setClearDataPassword('');
                 setClearDataError('');
+                setClearProgress({ percent: 0, processed: 0, total: records.length, clearedCount: 0, stage: '' });
                 setShowClearDataModal(true);
               }}
               className="flex items-center space-x-2 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg transition-colors text-sm"
@@ -2147,6 +2114,32 @@ export default function FieldService({ canEdit = false, canClearData = false, on
               </div>
               {clearDataError && (
                 <p className="text-sm font-semibold text-rose-600">{clearDataError}</p>
+              )}
+
+              {isClearingData && (
+                <div className="rounded-xl border border-rose-100 bg-rose-50/70 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-rose-900">{clearProgress.stage || 'Processando limpeza...'}</p>
+                    <span className="text-sm font-bold text-rose-700">{Math.round(clearProgress.percent)}%</span>
+                  </div>
+                  <div className="h-3 rounded-full bg-rose-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-rose-600 transition-[width] duration-300 ease-out"
+                      style={{ width: `${Math.max(2, Math.min(100, clearProgress.percent))}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-rose-800">
+                    <span>{clearProgress.clearedCount.toLocaleString('pt-BR')} arquivado(s)</span>
+                    <span>
+                      {clearProgress.total > 0
+                        ? `${Math.min(clearProgress.processed, clearProgress.total).toLocaleString('pt-BR')} / ${clearProgress.total.toLocaleString('pt-BR')} verificados`
+                        : 'Preparando operação...'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-rose-700">
+                    Não feche esta janela até a conclusão. A barra representa o avanço real informado pelo servidor.
+                  </p>
+                </div>
               )}
             </div>
             <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
