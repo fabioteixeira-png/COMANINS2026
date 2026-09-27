@@ -1156,8 +1156,12 @@ export default function ClientPortal({
                       <p className="font-bold text-sm uppercase mb-1">2. Instrumento Calibrado:</p>
                       <div className="pl-4 grid grid-cols-2 gap-1">
                         <p><span className="font-bold">Descrição:</span> {inst?.description}</p>
-                        <p><span className="font-bold">TAG do Cliente:</span> {fsTag || inst?.tag || '—'}</p>
-                        {fsEquip && <p><span className="font-bold">Equipamento:</span> {fsEquip}</p>}
+                        <p><span className="font-bold">TAG do Cliente:</span> {client.isFieldService ? fsTag : (inst?.tag || '—')}</p>
+                        {client.isFieldService ? (
+                          <p><span className="font-bold">Equipamento:</span> {fsEquip}</p>
+                        ) : (
+                          fsEquip && <p><span className="font-bold">Equipamento:</span> {fsEquip}</p>
+                        )}
                         <p><span className="font-bold">Marca:</span> {inst?.brand || 'Não Consta'}</p>
                         <p><span className="font-bold">Modelo:</span> {inst?.model || 'Não Consta'}</p>
                         <p><span className="font-bold">Nº Série:</span> {inst?.serialNumber || 'NAO CONSTA'}</p>

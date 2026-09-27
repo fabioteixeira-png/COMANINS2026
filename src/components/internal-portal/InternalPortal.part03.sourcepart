@@ -2807,11 +2807,18 @@
                                   ? certificateClientTag
                                   : certificateClientTag || "—"}
                               </p>
-                              {fieldServiceEquip && (
+                              {certificateReturnTab === "field_service" ? (
                                 <p>
                                   <span className="font-bold">Equipamento:</span>{" "}
                                   {fieldServiceEquip}
                                 </p>
+                              ) : (
+                                fieldServiceEquip && (
+                                  <p>
+                                    <span className="font-bold">Equipamento:</span>{" "}
+                                    {fieldServiceEquip}
+                                  </p>
+                                )
                               )}
                               <p>
                                 <span className="font-bold">Marca:</span>{" "}
