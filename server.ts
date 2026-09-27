@@ -7631,94 +7631,8 @@ const normalizeFieldServicePortalKey = (value: unknown): string =>
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '');
 
-const canonicalizeBraskemPortalKey = (value: unknown): string => {
-  const normalized = normalizeFieldServicePortalKey(value)
-    .replace(/^BRSKEM/, 'BRASKEM')
-    .replace(/^BRASKME/, 'BRASKEM');
-  return normalized;
-};
-
-const FIELD_SERVICE_BRASKEM_PORTALS = new Set([
-  'BRASKEMUNIB',
-  'BRASKEMPVC',
-  'BRASKEMPE1',
-  'BRASKEMPE2',
-  'BRASKEMPE3',
-  'BRASKEMTEGAL',
-]);
-
-const FIELD_SERVICE_BRASKEM_UNIT_PORTAL = new Map<string, string>([
-  ['PVC', 'BRASKEMPVC'],
-  ['PE1', 'BRASKEMPE1'],
-  ['PE2', 'BRASKEMPE2'],
-  ['PE3', 'BRASKEMPE3'],
-  ['TEGAL', 'BRASKEMTEGAL'],
-  ['UNIB', 'BRASKEMUNIB'],
-  ['SAIN1', 'BRASKEMUNIB'],
-  ['SAIN2', 'BRASKEMUNIB'],
-  ['SOIN1F', 'BRASKEMUNIB'],
-  ['SOIN1Q', 'BRASKEMUNIB'],
-  ['SOIN2F', 'BRASKEMUNIB'],
-  ['SOIN2Q', 'BRASKEMUNIB'],
-  ['IESE', 'BRASKEMUNIB'],
-]);
-
-const FIELD_SERVICE_PORTAL_CANONICAL_CLIENT_NAME = new Map<string, string>([
-  ['ACELEN', 'ACELEN'],
-  ['BRASKEMUNIB', 'BRASKEM UNIB'],
-  ['BRASKEMPVC', 'BRASKEM PVC'],
-  ['BRASKEMPE1', 'BRASKEM PE-1'],
-  ['BRASKEMPE2', 'BRASKEM PE-2'],
-  ['BRASKEMPE3', 'BRASKEM PE-3'],
-  ['BRASKEMTEGAL', 'BRASKEM TEGAL'],
-]);
-
-const getRestrictedFieldServicePortalKey = (profile: any): string => {
-  const normalized = canonicalizeBraskemPortalKey(profile?.name);
-  if (FIELD_SERVICE_BRASKEM_PORTALS.has(normalized)) return normalized;
-  return normalizeFieldServicePortalKey(profile?.name);
-};
-
-const getRestrictedFieldServiceRecordPortalKey = (record: any): string => {
-  const clientKey = canonicalizeBraskemPortalKey(record?.cliente);
-  const unitKey = normalizeFieldServicePortalKey(record?.unidade);
-
-  if (clientKey.startsWith('BRASKEM')) {
-    // A Unidade é a autoridade principal de separação entre as plantas Braskem.
-    // Se ela estiver mapeada, prevalece inclusive sobre um Cliente legado incorreto.
-    const unitPortal = FIELD_SERVICE_BRASKEM_UNIT_PORTAL.get(unitKey);
-    if (unitPortal) return unitPortal;
-
-    // Compatibilidade segura com subáreas não enumeradas (ex.: TMP/SEGURANÇA):
-    // só aceita o fallback quando o próprio campo Cliente já aponta de forma
-    // inequívoca para um dos portais Braskem dedicados. "BRASKEM" genérico
-    // sem Unidade reconhecida continua fora de todos os portais.
-    if (FIELD_SERVICE_BRASKEM_PORTALS.has(clientKey)) return clientKey;
-    return '';
-  }
-
-  return normalizeFieldServicePortalKey(record?.cliente);
-};
-
-const getFieldServiceLegacyClientAliases = (profile: any): string[] => {
-  const portalKey = getRestrictedFieldServicePortalKey(profile);
-  const canonical = FIELD_SERVICE_PORTAL_CANONICAL_CLIENT_NAME.get(portalKey);
-  const aliases = new Set<string>();
-  const rawName = String(profile?.name || '').trim();
-  if (rawName) {
-    aliases.add(rawName);
-    aliases.add(rawName.toUpperCase());
-  }
-  if (canonical) {
-    aliases.add(canonical);
-    aliases.add(canonical.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase()));
-  }
-  if (FIELD_SERVICE_BRASKEM_PORTALS.has(portalKey)) {
-    aliases.add('BRASKEM');
-    aliases.add('Braskem');
-  }
-  return [...aliases].filter(Boolean).slice(0, 10);
-};
+const getFieldServiceClientPortalKey = (value: unknown): string =>
+  normalizeFieldServicePortalKey(value);
 
 
 type RestrictedPortalCertificateLink = { instrument: any; report: any };
@@ -7883,19 +7797,9 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
     if (profile?.isFieldService === true) {
       const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
       const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
-      const instrumentByCertificate = new Map<string, any>();
-      const instrumentByCertificateDigits = new Map<string, any>();
-
-      for (const instrument of instruments) {
-        const cert = normalizeCertificate((instrument as any)?.certificateNumber || (instrument as any)?.coma);
-        if (cert) instrumentByCertificate.set(cert, instrument);
-        const digits = certificateDigits(cert);
-        if (digits) instrumentByCertificateDigits.set(digits, instrument);
-      }
-
       const parseFieldServiceDate = (value: unknown): number => {
         const raw = String(value || '').trim();
-        if (!raw) return 0;
+        if (!raw || raw === '-' || raw.toUpperCase() === 'N/A') return 0;
         const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
         if (br) return Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1]));
         const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -7903,6 +7807,65 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
         const parsed = Date.parse(raw);
         return Number.isFinite(parsed) ? parsed : 0;
       };
+      const hasCertificate = (value: unknown): boolean => {
+        const normalized = normalizeCertificate(value);
+        return Boolean(normalized && normalized !== '-' && normalized !== 'N/A' && normalized !== '0');
+      };
+
+      // Portal restrito de Serviço de Campo = visão somente leitura da própria
+      // coleção fieldServiceRecords. Unidade/Área não participam do vínculo.
+      // A leitura é feita diretamente no Firestore para refletir imediatamente
+      // certificados/data recém-vinculados, sem depender do snapshot-base de 24h.
+      const clientKey = getFieldServiceClientPortalKey(profile?.name);
+      const rawClientName = String(profile?.name || '').trim();
+      const legacyAliases = new Set<string>();
+      if (rawClientName) {
+        legacyAliases.add(rawClientName);
+        legacyAliases.add(rawClientName.toUpperCase());
+        const noPeHyphen = rawClientName.replace(/\bPE-(\d)\b/gi, 'PE$1');
+        const withPeHyphen = rawClientName.replace(/\bPE(\d)\b/gi, 'PE-$1');
+        legacyAliases.add(noPeHyphen);
+        legacyAliases.add(noPeHyphen.toUpperCase());
+        legacyAliases.add(withPeHyphen);
+        legacyAliases.add(withPeHyphen.toUpperCase());
+      }
+
+      const recordDocs = new Map<string, QueryDocumentSnapshot>();
+      const primarySnap = await firestoreDb.collection('fieldServiceRecords').where('clientId', '==', clientId).get();
+      primarySnap.docs.forEach((doc) => recordDocs.set(doc.id, doc));
+
+      const aliases = [...legacyAliases].filter(Boolean).slice(0, 10);
+      if (aliases.length > 0) {
+        const legacySnap = aliases.length === 1
+          ? await firestoreDb.collection('fieldServiceRecords').where('cliente', '==', aliases[0]).get()
+          : await firestoreDb.collection('fieldServiceRecords').where('cliente', 'in', aliases).get();
+        legacySnap.docs.forEach((doc) => recordDocs.set(doc.id, doc));
+      }
+
+      const authorizedRecords = [...recordDocs.values()]
+        .map((doc): any => ({ id: doc.id, ...doc.data() }))
+        .filter((item: any) => item?.isDeleted !== true)
+        .filter((item: any) => {
+          const sameClientId = String(item?.clientId || '').trim() === clientId;
+          const sameClientName = getFieldServiceClientPortalKey(item?.cliente) === clientKey;
+          return sameClientId || sameClientName;
+        })
+        // Regra funcional solicitada: só aparece no Portal do Cliente quando
+        // Serviço de Campo já possui Certificado E Data de Calibração.
+        .filter((item: any) => hasCertificate(item?.certificate))
+        .filter((item: any) => parseFieldServiceDate(item?.dataCalibracao) > 0)
+        .sort((a: any, b: any) => parseFieldServiceDate(b?.dataCalibracao) - parseFieldServiceDate(a?.dataCalibracao));
+
+      // Os dados da linha vêm sempre do Serviço de Campo. Instrumento/Relatório
+      // são resolvidos apenas para habilitar Visualizar/Imprimir/Baixar o PDF.
+      const instrumentByCertificate = new Map<string, any>();
+      const instrumentByCertificateDigits = new Map<string, any>();
+      for (const instrument of instruments) {
+        const cert = normalizeCertificate((instrument as any)?.certificateNumber || (instrument as any)?.coma);
+        if (cert) instrumentByCertificate.set(cert, instrument);
+        const digits = certificateDigits(cert);
+        if (digits) instrumentByCertificateDigits.set(digits, instrument);
+      }
 
       const latestReportByInstrument = new Map<string, any>();
       for (const report of reports) {
@@ -7914,54 +7877,20 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
         }
       }
 
-      const portalKey = getRestrictedFieldServicePortalKey(profile);
-      const recordDocs = new Map<string, any>();
-
-      // Regra principal: clientId é o vínculo autoritativo e não depende da
-      // capitalização/grafia de "Cliente". Isso corrige os acessos Braskem,
-      // onde o cadastro pode ser "Braskem PE-1" e a planilha "BRASKEM PE-1".
-      const primarySnap = await firestoreDb
-        .collection('fieldServiceRecords')
-        .where('clientId', '==', clientId)
-        .get();
-      primarySnap.docs.forEach((doc) => recordDocs.set(doc.id, doc));
-
-      // Compatibilidade com registros legados ainda sem clientId ou com vínculo
-      // antigo. Para Braskem, também traz "BRASKEM" genérico e a Unidade decide
-      // para qual portal o registro pode seguir.
-      const legacyAliases = getFieldServiceLegacyClientAliases(profile);
-      if (legacyAliases.length > 0) {
-        const legacySnap = legacyAliases.length === 1
-          ? await firestoreDb.collection('fieldServiceRecords').where('cliente', '==', legacyAliases[0]).get()
-          : await firestoreDb.collection('fieldServiceRecords').where('cliente', 'in', legacyAliases).get();
-        legacySnap.docs.forEach((doc) => recordDocs.set(doc.id, doc));
-      }
-
-      const authorizedRecords = [...recordDocs.values()]
-        .map((doc: any) => ({ id: doc.id, ...doc.data() }))
-        .filter((item: any) => item?.isDeleted !== true)
-        // Portal restrito exibe somente Serviço de Campo com certificado vinculado.
-        .filter((item: any) => normalizeCertificate(item?.certificate).length > 0)
-        // Para Braskem, a Unidade decide a planta autorizada. Para clientes não
-        // Braskem, o próprio Cliente continua sendo o escopo.
-        .filter((item: any) => getRestrictedFieldServiceRecordPortalKey(item) === portalKey);
-
-      const matchedRecords: any[] = [];
       const unresolvedRecords: any[] = [];
+      let linkedCertificateCount = 0;
       for (const item of authorizedRecords) {
         const cert = normalizeCertificate(item?.certificate);
         const instrument = instrumentByCertificate.get(cert) || instrumentByCertificateDigits.get(certificateDigits(cert));
         const report = instrument ? latestReportByInstrument.get(String(instrument.id)) : undefined;
-        if (instrument && report) matchedRecords.push(item);
+        if (instrument && report) linkedCertificateCount += 1;
         else unresolvedRecords.push(item);
       }
 
-      // Alguns históricos Braskem foram calibrados antes da separação dos
-      // cadastros por planta; nesses casos o Instrumento/Relatório pode ainda
-      // estar ligado ao clientId corporativo antigo. O acesso continua seguro,
-      // porque primeiro autorizamos o Serviço de Campo por Cliente+Unidade e só
-      // depois buscamos o certificado globalmente. Apenas os instrumentos e
-      // relatórios dos certificados já autorizados são devolvidos ao navegador.
+      // Compatibilidade com históricos em que o certificado existe, mas o
+      // Instrumento/Relatório ainda possui vínculo antigo de clientId. A linha já
+      // foi autorizada acima exclusivamente pelo Serviço de Campo do cliente;
+      // daqui em diante só resolvemos o certificado exato para permitir download.
       if (unresolvedRecords.length > 0) {
         const globalIndex = await buildRestrictedPortalCertificateIndex();
         const instrumentIds = new Set(instruments.map((item: any) => String(item?.id || '')).filter(Boolean));
@@ -7971,7 +7900,7 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
           const cert = normalizeCertificate(item?.certificate);
           const link = globalIndex.byExact.get(cert) || globalIndex.byDigits.get(certificateDigits(cert));
           if (!link) continue;
-          matchedRecords.push(item);
+          linkedCertificateCount += 1;
           if (!instrumentIds.has(String(link.instrument?.id || ''))) {
             instruments.push(link.instrument);
             instrumentIds.add(String(link.instrument?.id || ''));
@@ -7983,14 +7912,45 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
         }
       }
 
-      fieldServiceRecords = matchedRecords.sort(
-        (a: any, b: any) => parseFieldServiceDate(b?.dataCalibracao) - parseFieldServiceDate(a?.dataCalibracao),
-      );
+      // Minimize o payload do portal restrito: envie somente os Instrumentos e
+      // Fichas necessários para os certificados que aparecem nesta visão. Nenhum
+      // outro instrumento/RNC/Entrada do cliente precisa chegar ao navegador.
+      const finalInstrumentByCertificate = new Map<string, any>();
+      const finalInstrumentByCertificateDigits = new Map<string, any>();
+      for (const instrument of instruments) {
+        const cert = normalizeCertificate((instrument as any)?.certificateNumber || (instrument as any)?.coma);
+        if (cert) finalInstrumentByCertificate.set(cert, instrument);
+        const digits = certificateDigits(cert);
+        if (digits) finalInstrumentByCertificateDigits.set(digits, instrument);
+      }
+      const finalLatestReportByInstrument = new Map<string, any>();
+      for (const report of reports) {
+        const instrumentId = String((report as any)?.instrumentId || '');
+        if (!instrumentId) continue;
+        const current = finalLatestReportByInstrument.get(instrumentId);
+        if (!current || parseFieldServiceDate((report as any)?.date) >= parseFieldServiceDate(current?.date)) {
+          finalLatestReportByInstrument.set(instrumentId, report);
+        }
+      }
+      const allowedInstrumentIds = new Set<string>();
+      const allowedReportIds = new Set<string>();
+      for (const item of authorizedRecords) {
+        const cert = normalizeCertificate(item?.certificate);
+        const instrument = finalInstrumentByCertificate.get(cert) || finalInstrumentByCertificateDigits.get(certificateDigits(cert));
+        if (!instrument) continue;
+        const report = finalLatestReportByInstrument.get(String(instrument.id));
+        if (!report) continue;
+        allowedInstrumentIds.add(String(instrument.id));
+        allowedReportIds.add(String(report.id));
+      }
+      instruments = instruments.filter((item: any) => allowedInstrumentIds.has(String(item?.id || '')));
+      reports = reports.filter((item: any) => allowedReportIds.has(String(item?.id || '')));
+      fieldServiceRecords = authorizedRecords;
 
       console.info(
-        `[CLIENT_PORTAL][FIELD_SERVICE] portal=${portalKey} clientId=${clientId} ` +
-        `primary=${primarySnap.size} candidates=${recordDocs.size} authorized=${authorizedRecords.length} ` +
-        `available=${fieldServiceRecords.length}`,
+        `[CLIENT_PORTAL][FIELD_SERVICE] client=${clientKey} clientId=${clientId} ` +
+        `candidates=${recordDocs.size} authorized=${authorizedRecords.length} ` +
+        `certificatesLinked=${linkedCertificateCount}`,
       );
     }
 
@@ -8000,8 +7960,8 @@ app.get('/api/client-portal/data', requireAuth, async (req: AuthRequest, res) =>
       clientId,
       instruments,
       reports,
-      clientIntakes,
-      rncReports,
+      clientIntakes: profile?.isFieldService === true ? [] : clientIntakes,
+      rncReports: profile?.isFieldService === true ? [] : rncReports,
       fieldServiceRecords,
       dataMode: indexedClientLinks ? 'clientId-indexed' : 'legacy-fallback',
     });

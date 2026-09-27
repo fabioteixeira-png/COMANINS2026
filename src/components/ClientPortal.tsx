@@ -11,6 +11,7 @@ import {
   FileText, 
   Search, 
   Printer, 
+  Download,
   Award, 
   TrendingUp, 
   ShieldCheck,
@@ -35,7 +36,13 @@ import { Client, Instrument, CalibrationReport, RncReport } from '../types';
 import type { FieldServiceRecord, SavedIntake } from '../lib/firebase';
 import { PrivacyPolicyModal } from './LGPDPrivacy';
 import { getReportAuthKey } from '../utils/authKey';
+import { downloadCertificateDomAsPdf } from '../utils/certificateDomPdf';
 
+type FieldServicePortalRow = {
+  fsRecord: FieldServiceRecord;
+  inst?: Instrument;
+  report?: CalibrationReport;
+};
 
 const formatDateBR = (dateStr: string | undefined): string => {
   if (!dateStr) return '—';
@@ -129,6 +136,7 @@ export default function ClientPortal({
   const [showRncViewModal, setShowRncViewModal] = useState<boolean>(false);
 
   const [copiedKey, setCopiedKey] = useState(false);
+  const [isDownloadingCertificatePdf, setIsDownloadingCertificatePdf] = useState(false);
 
   // Read URL query string for ?chave=...
   useEffect(() => {
@@ -141,7 +149,7 @@ export default function ClientPortal({
 
   
   const fieldServiceAvailableRows = useMemo(() => {
-    if (!client.isFieldService) return [] as Array<{ fsRecord: FieldServiceRecord; inst: Instrument; report: CalibrationReport }>;
+    if (!client.isFieldService) return [] as FieldServicePortalRow[];
 
     const normalizeCertificate = (value: unknown) => String(value || '').trim().toUpperCase();
     const certificateDigits = (value: unknown) => normalizeCertificate(value).replace(/\D/g, '');
@@ -176,32 +184,51 @@ export default function ClientPortal({
     }
 
     return fieldServiceRecords
-      .map((fsRecord) => {
+      // Defesa adicional no navegador: Portal de Serviço de Campo só mostra
+      // registros com Certificado e Data de Calibração preenchidos.
+      .filter((fsRecord) => Boolean(String(fsRecord.certificate || '').trim()))
+      .filter((fsRecord) => parseCalibrationDate(fsRecord.dataCalibracao) > 0)
+      .map((fsRecord): FieldServicePortalRow => {
         const cert = normalizeCertificate(fsRecord.certificate);
-        if (!cert) return null;
         const inst = instrumentByCertificate.get(cert) || instrumentByCertificateDigits.get(certificateDigits(cert));
-        if (!inst) return null;
-        const report = latestReportByInstrument.get(inst.id);
-        if (!report) return null;
+        const report = inst ? latestReportByInstrument.get(inst.id) : undefined;
         return { fsRecord, inst, report };
       })
-      .filter((row): row is { fsRecord: FieldServiceRecord; inst: Instrument; report: CalibrationReport } => Boolean(row))
-      .sort((a, b) =>
-        parseCalibrationDate(b.fsRecord.dataCalibracao || b.report.date) -
-        parseCalibrationDate(a.fsRecord.dataCalibracao || a.report.date)
-      );
+      .sort((a, b) => parseCalibrationDate(b.fsRecord.dataCalibracao) - parseCalibrationDate(a.fsRecord.dataCalibracao));
   }, [client.isFieldService, fieldServiceRecords, instruments, reports]);
 
   const filteredFieldServiceRows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return fieldServiceAvailableRows;
-    return fieldServiceAvailableRows.filter(({ fsRecord, inst }) => {
-      const cert = String(fsRecord.certificate || inst.certificateNumber || '').toLowerCase();
-      const tag = String(fsRecord.tag || inst.tag || '').toLowerCase();
-      const equip = String(fsRecord.equipamento || '').toLowerCase();
-      return cert.includes(term) || tag.includes(term) || equip.includes(term);
+    return fieldServiceAvailableRows.filter(({ fsRecord }) => {
+      const searchable = [
+        fsRecord.certificate,
+        fsRecord.dataCalibracao,
+        fsRecord.tag,
+        fsRecord.equipamento,
+        fsRecord.localizacao,
+        fsRecord.area,
+        fsRecord.unidade,
+        fsRecord.cliente,
+      ]
+        .map((value) => String(value || '').toLowerCase())
+        .join(' ');
+      return searchable.includes(term);
     });
   }, [fieldServiceAvailableRows, searchTerm]);
+
+  const FIELD_SERVICE_PORTAL_PAGE_SIZE = 100;
+  const [fieldServicePage, setFieldServicePage] = useState(1);
+  useEffect(() => {
+    setFieldServicePage(1);
+  }, [searchTerm, fieldServiceAvailableRows.length]);
+
+  const fieldServiceTotalPages = Math.max(1, Math.ceil(filteredFieldServiceRows.length / FIELD_SERVICE_PORTAL_PAGE_SIZE));
+  const paginatedFieldServiceRows = useMemo(() => {
+    const safePage = Math.min(fieldServicePage, fieldServiceTotalPages);
+    const start = (safePage - 1) * FIELD_SERVICE_PORTAL_PAGE_SIZE;
+    return filteredFieldServiceRows.slice(start, start + FIELD_SERVICE_PORTAL_PAGE_SIZE);
+  }, [filteredFieldServiceRows, fieldServicePage, fieldServiceTotalPages]);
 
   // Filter instruments belonging to this client
   const clientInstruments = instruments.filter(inst => inst.clientId === client.id);
@@ -312,6 +339,31 @@ export default function ClientPortal({
     window.print();
   };
 
+  const handleDownloadCertificate = async () => {
+    if (isDownloadingCertificatePdf || !selectedReport || !selectedInstrument) return;
+    const printableArea = document.getElementById('client-certificate-printable-area') as HTMLElement | null;
+    if (!printableArea) {
+      alert('Não foi possível localizar o certificado para download.');
+      return;
+    }
+    const safeFilePart = (value: unknown, fallback: string) =>
+      String(value || fallback)
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, '-')
+        .replace(/\s+/g, ' ');
+    const certNumber = selectedReport.certNumber || selectedInstrument.certificateNumber || 'CERTIFICADO';
+    const fileName = `${safeFilePart(certNumber, 'CERTIFICADO')} - ${safeFilePart(fsTag, 'SEM TAG')}.pdf`;
+    setIsDownloadingCertificatePdf(true);
+    try {
+      await downloadCertificateDomAsPdf(printableArea, fileName);
+    } catch (error: any) {
+      console.error('Erro ao baixar certificado no Portal do Cliente:', error);
+      alert(`Não foi possível baixar o certificado.\n\n${error?.message || 'Falha ao gerar o PDF.'}`);
+    } finally {
+      setIsDownloadingCertificatePdf(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-12 print:min-h-0 print:h-auto print:block print:pb-0 print:bg-white">
       {/* Navbar */}
@@ -362,17 +414,16 @@ export default function ClientPortal({
                 <div>
                   <h1 className="text-2xl md:text-3xl font-display font-extrabold text-slate-900">{client.name}</h1>
                   <p className="text-slate-600 text-xs mt-1 max-w-2xl leading-relaxed">
-                    Bem-vindo ao portal de Serviço de Campo. Abaixo estão listados os certificados disponíveis vinculados aos serviços realizados.
+                    Esta é a visão de Serviço de Campo da sua empresa. São exibidos somente os registros do seu cliente que já possuem Certificado e Data de Calibração. O acesso é somente leitura; você pode visualizar, imprimir ou baixar os certificados disponíveis.
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-bold text-slate-900">Certificados Disponíveis</h3>
+                  <h3 className="font-bold text-slate-900">Serviço de Campo — Certificados Disponíveis</h3>
                   <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-bold font-mono">
                     {fieldServiceAvailableRows.length.toLocaleString('pt-BR')} item(ns)
                   </span>
@@ -381,59 +432,78 @@ export default function ClientPortal({
                       exibindo {filteredFieldServiceRows.length.toLocaleString('pt-BR')}
                     </span>
                   )}
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold uppercase tracking-wide">
+                    Somente leitura
+                  </span>
                 </div>
-                <div className="relative w-full sm:w-auto">
+                <div className="relative w-full lg:w-auto">
                   <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <Search className="h-3.5 w-3.5" />
                   </span>
                   <input
                     type="text"
-                    placeholder="Filtrar certificado, TAG..."
+                    placeholder="Buscar certificado, TAG, equipamento, localização..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-royal-blue focus:border-royal-blue w-full sm:w-64"
+                    className="bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-royal-blue focus:border-royal-blue w-full lg:w-96"
                   />
                 </div>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap">
+                <table className="w-full text-left text-xs whitespace-nowrap">
                   <thead>
-                    <tr className="bg-slate-50 text-slate-500 border-b border-slate-200">
-                      <th className="p-4 font-semibold">Certificado</th>
-                      <th className="p-4 font-semibold">Data de Calibração</th>
-                      <th className="p-4 font-semibold">TAG</th>
-                      <th className="p-4 font-semibold">Equipamento</th>
-                      <th className="p-4 font-semibold text-right">Ações</th>
+                    <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase tracking-wide text-[10px]">
+                      <th className="px-3 py-3 font-bold">Certificado</th>
+                      <th className="px-3 py-3 font-bold">Data Calibração</th>
+                      <th className="px-3 py-3 font-bold">TAG do Cliente</th>
+                      <th className="px-3 py-3 font-bold">Equipamento</th>
+                      <th className="px-3 py-3 font-bold">Localização</th>
+                      <th className="px-3 py-3 font-bold">Área</th>
+                      <th className="px-3 py-3 font-bold">Unidade</th>
+                      <th className="px-3 py-3 font-bold">Cliente</th>
+                      <th className="px-3 py-3 font-bold text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredFieldServiceRows.length === 0 ? (
+                    {paginatedFieldServiceRows.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-8 text-center text-slate-500">
-                          Nenhum certificado disponível no momento.
+                        <td colSpan={9} className="p-10 text-center text-slate-500">
+                          Nenhum registro com Certificado e Data de Calibração disponível para este cliente.
                         </td>
                       </tr>
                     ) : (
-                      filteredFieldServiceRows.map(({ fsRecord, inst, report }, idx) => (
-                        <tr key={`${fsRecord.id || fsRecord.certificate || idx}`} className="hover:bg-slate-50/50">
-                          <td className="p-4 font-mono font-medium">{fsRecord.certificate || inst.certificateNumber}</td>
-                          <td className="p-4">{formatDateBR(fsRecord.dataCalibracao || report.date)}</td>
-                          <td className="p-4">{fsRecord.tag || inst.tag || '-'}</td>
-                          <td className="p-4">{fsRecord.equipamento || '-'}</td>
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={() => {
-                                setSelectedReport(report);
-                                setSelectedInstrument(inst);
-                                setFsTag(fsRecord.tag || '');
-                                setFsEquip(fsRecord.equipamento || '');
-                              }}
-                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 ml-auto"
-                            >
-                              <Printer className="w-4 h-4" />
-                              <span>Imprimir</span>
-                            </button>
+                      paginatedFieldServiceRows.map(({ fsRecord, inst, report }, idx) => (
+                        <tr key={`${fsRecord.id || fsRecord.certificate || idx}`} className="hover:bg-slate-50/70">
+                          <td className="px-3 py-3 font-mono font-semibold text-slate-900">{fsRecord.certificate || '-'}</td>
+                          <td className="px-3 py-3">{formatDateBR(fsRecord.dataCalibracao)}</td>
+                          <td className="px-3 py-3 font-medium">{fsRecord.tag || '-'}</td>
+                          <td className="px-3 py-3">{fsRecord.equipamento || '-'}</td>
+                          <td className="px-3 py-3 max-w-[260px] truncate" title={fsRecord.localizacao || ''}>{fsRecord.localizacao || '-'}</td>
+                          <td className="px-3 py-3">{fsRecord.area || '-'}</td>
+                          <td className="px-3 py-3">{fsRecord.unidade || '-'}</td>
+                          <td className="px-3 py-3 font-medium">{fsRecord.cliente || client.name}</td>
+                          <td className="px-3 py-3 text-right">
+                            {inst && report ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedReport(report);
+                                  setSelectedInstrument(inst);
+                                  setFsTag(fsRecord.tag || '');
+                                  setFsEquip(fsRecord.equipamento || '');
+                                }}
+                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-sm transition-colors inline-flex items-center gap-1.5"
+                                title="Visualizar certificado para imprimir ou baixar em PDF"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>Certificado</span>
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded font-semibold">
+                                PDF indisponível
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -441,6 +511,32 @@ export default function ClientPortal({
                   </tbody>
                 </table>
               </div>
+
+              {filteredFieldServiceRows.length > FIELD_SERVICE_PORTAL_PAGE_SIZE && (
+                <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-500 font-mono">
+                    Página {Math.min(fieldServicePage, fieldServiceTotalPages)} de {fieldServiceTotalPages} · até {FIELD_SERVICE_PORTAL_PAGE_SIZE} itens por página
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFieldServicePage((page) => Math.max(1, page - 1))}
+                      disabled={fieldServicePage <= 1}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFieldServicePage((page) => Math.min(fieldServiceTotalPages, page + 1))}
+                      disabled={fieldServicePage >= fieldServiceTotalPages}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -860,11 +956,13 @@ export default function ClientPortal({
         >
           <div 
             onClick={(e) => e.stopPropagation()}
+            id="client-certificate-printable-area"
             className="printable-area bg-white text-slate-900 rounded-2xl max-w-4xl w-full my-4 p-6 sm:p-10 space-y-6 shadow-2xl relative border border-slate-200 print:rounded-none print:shadow-none print:border-none print:p-0 print:my-0"
           >
             
             {/* Modal actions - HIDDEN in printing */}
-            <div className="sticky -top-6 sm:-top-10 -mx-6 sm:-mx-10 -mt-6 sm:-mt-10 p-3 sm:p-4 px-6 bg-slate-900/90 text-white backdrop-blur-md flex items-center justify-between print:hidden z-30 mb-4 rounded-t-2xl">
+            <div data-certificate-pdf-ignore="true"
+              className="sticky -top-6 sm:-top-10 -mx-6 sm:-mx-10 -mt-6 sm:-mt-10 p-3 sm:p-4 px-6 bg-slate-900/90 text-white backdrop-blur-md flex items-center justify-between print:hidden z-30 mb-4 rounded-t-2xl">
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-bold font-mono tracking-wider text-slate-200 uppercase">Certificado de Calibração Nº {selectedReport.certNumber || selectedInstrument.certificateNumber || 'OFICIAL'}</span>
               </div>
@@ -876,6 +974,16 @@ export default function ClientPortal({
                 >
                   <Printer className="h-4 w-4" />
                   <span>Imprimir / PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadCertificate()}
+                  disabled={isDownloadingCertificatePdf}
+                  className="p-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-300 disabled:cursor-wait text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-sm cursor-pointer"
+                  title="Baixar Certificado de Calibração em PDF"
+                >
+                  <Download className={`h-4 w-4 ${isDownloadingCertificatePdf ? 'animate-pulse' : ''}`} />
+                  <span>{isDownloadingCertificatePdf ? 'Baixando...' : 'Baixar PDF'}</span>
                 </button>
                 <button
                   onClick={() => {
