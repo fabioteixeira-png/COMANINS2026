@@ -1713,6 +1713,22 @@ export default function FieldService({ canEdit = false, canClearData = false, on
           <input type="file" accept="image/*,.heic,.heif" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
 
           <button
+            type="button"
+            onClick={() => {
+              setIsLoading(true);
+              refreshFieldServiceRecords({ force: true })
+                .catch((err) => console.error('Erro ao atualizar Serviço de Campo:', err))
+                .finally(() => setIsLoading(false));
+            }}
+            disabled={isLoading}
+            className="flex items-center space-x-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm disabled:opacity-50"
+            title="Recarregar todos os registros de Serviço de Campo do banco de dados"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Atualizar</span>
+          </button>
+
+          <button
             onClick={handleDownloadTemplate}
             className="flex items-center space-x-2 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg transition-colors text-sm"
           >

@@ -4720,7 +4720,7 @@ const loadPersistedFieldServiceSnapshotBase = async (): Promise<FieldServiceSnap
     const etag = String(state.snapshotEtag || '');
     const total = Number(state.snapshotTotal || 0);
     const storagePath = String(state.snapshotStoragePath || FIELD_SERVICE_SNAPSHOT_STORAGE_PATH);
-    if (!generatedAt || !etag) return null;
+    if (!generatedAt || !etag || total < 5000) return null;
     const [body] = await adminStorage.bucket(adminStorageBucketName).file(storagePath).download();
     if (!body?.length) return null;
     return {
@@ -4738,7 +4738,7 @@ const loadPersistedFieldServiceSnapshotBase = async (): Promise<FieldServiceSnap
 
 const buildFieldServiceSnapshot = async (forceFresh = false): Promise<FieldServiceSnapshotCache> => {
   if (!firestoreDb) throw new Error('AUTH_SERVICE_UNAVAILABLE');
-  if (!forceFresh && fieldServiceSnapshotCache && fieldServiceSnapshotCache.expiresAt > Date.now()) {
+  if (!forceFresh && fieldServiceSnapshotCache && fieldServiceSnapshotCache.expiresAt > Date.now() && (fieldServiceSnapshotCache.total >= 5000 || fieldServiceSnapshotCache.total === 0)) {
     return fieldServiceSnapshotCache;
   }
   if (fieldServiceSnapshotPromise) {

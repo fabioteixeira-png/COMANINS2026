@@ -3783,13 +3783,13 @@ export interface FieldServiceRecord {
   normalizedCertificate?: string;
 }
 
-const FIELD_SERVICE_PAGE_SIZE = 5000; // fallback somente quando a API otimizada estiver indisponível
+const FIELD_SERVICE_PAGE_SIZE = 1000; // paginação em lotes de 1000 para sincronizar a base completa sem truncamento
 const FIELD_SERVICE_CHANGE_FEED_SIZE = 1000;
 const FIELD_SERVICE_AUTO_REFRESH_MAX_AGE_MS = 15_000;
 const FIELD_SERVICE_PERSIST_DB_NAME = 'comanins_field_service_cache_v1';
 const FIELD_SERVICE_PERSIST_STORE = 'snapshots';
 const FIELD_SERVICE_PERSIST_KEY = 'active_records';
-const FIELD_SERVICE_CACHE_SCHEMA_VERSION = 1;
+const FIELD_SERVICE_CACHE_SCHEMA_VERSION = 2;
 
 let fieldServiceCache: FieldServiceRecord[] = [];
 let fieldServiceLoadPromise: Promise<void> | null = null;
@@ -3850,6 +3850,7 @@ const readPersistedFieldServiceCache = async (): Promise<PersistedFieldServiceCa
       request.onerror = () => resolve(null);
     });
     if (!value || value.schemaVersion !== FIELD_SERVICE_CACHE_SCHEMA_VERSION || !Array.isArray(value.records)) return null;
+    if (value.records.length > 0 && value.records.length < 5000) return null; // descarta cache parcial/truncado para forçar carga completa
     return {
       schemaVersion: FIELD_SERVICE_CACHE_SCHEMA_VERSION,
       records: value.records
@@ -3929,6 +3930,11 @@ const fetchFieldServiceSnapshot = async (forceFresh = false): Promise<FieldServi
   if (!payload?.success || !Array.isArray(payload.records)) {
     throw new Error('FIELD_SERVICE_SNAPSHOT_INVALID');
   }
+  // Se o snapshot do servidor contiver menos de 5.000 registros (quando sabemos que existem > 17.000),
+  // rejeita o snapshot truncado para acionar a carga paginada completa do Firestore.
+  if (payload.records.length > 0 && payload.records.length < 5000 && !forceFresh) {
+    throw new Error('FIELD_SERVICE_SNAPSHOT_SUSPICIOUSLY_TRUNCATED');
+  }
   return {
     records: normalizeFieldServiceApiRecords(payload.records),
     generatedAt: String(payload.generatedAt || new Date().toISOString()),
@@ -3987,6 +3993,9 @@ const mergeFieldServiceRecords = (changes: FieldServiceRecord[]) => {
 
 const mergeFieldServiceChangeSnapshot = (snapshot: any) => {
   if (!snapshot || snapshot.empty) return;
+  // Não permite que o feed em tempo real (limitado a 1000 itens)
+  // popule precocemente o cache vazio antes da carga completa
+  if (!fieldServiceInitialLoadComplete && fieldServiceCache.length === 0) return;
   const changes: FieldServiceRecord[] = [];
   snapshot.docChanges().forEach((change: any) => {
     // 'removed' pode significar apenas saída da janela dos 1000 registros mais
@@ -4144,7 +4153,7 @@ const loadFieldServiceRecordsInPages = async (force = false, silent = false): Pr
         if (record.isDeleted !== true) loaded.push(record);
       });
 
-      if (!silent && fieldServiceCache.length === 0 && isFirstPage && loaded.length > 0) {
+      if (!silent && loaded.length > 0) {
         fieldServiceCache = [...loaded];
         notifyFieldServiceSubscribers();
       }
