@@ -4689,6 +4689,7 @@
 
       {selectedInstLabelToPrint && (
         <CalibrationLabelPrintModal
+          instrumentId={selectedInstLabelToPrint.instrumentId}
           certificateNumber={selectedInstLabelToPrint.certificateNumber}
           calibrationDate={selectedInstLabelToPrint.calibrationDate}
           isComaninsStandard={selectedInstLabelToPrint.isComaninsStandard}
@@ -4697,7 +4698,110 @@
           periodicityMonths={selectedInstLabelToPrint.periodicityMonths}
           calibrationLogo={calibrationLogo}
           onClose={() => setSelectedInstLabelToPrint(null)}
+          onPrinted={async () => {
+            if (selectedInstLabelToPrint.instrumentId) {
+              try {
+                await recordInstrumentLabelPrinted(
+                  selectedInstLabelToPrint.instrumentId,
+                  currentUser,
+                );
+              } catch (err) {
+                console.error("Falha ao registrar impressão da etiqueta:", err);
+              }
+            }
+          }}
         />
+      )}
+
+      {showAdminLabelReprintModal && adminLabelReprintTarget && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center space-x-3 mb-4 text-amber-600">
+              <ShieldAlert className="h-6 w-6 shrink-0" />
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Reimpressão de Etiqueta — Autorização de Administrador
+                </h3>
+                <p className="text-xs text-slate-500">
+                  A etiqueta deste instrumento já foi impressa.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 mb-4 text-xs text-amber-950 space-y-1">
+              <p><strong>TAG / Instrumento:</strong> {adminLabelReprintTarget.inst?.tag || 'S/N'}</p>
+              <p><strong>Certificado:</strong> {adminLabelReprintTarget.labelData?.certificateNumber}</p>
+              {adminLabelReprintTarget.inst?.calibrationLabelPrintedAt && (
+                <p><strong>Impressão anterior:</strong> {new Date(adminLabelReprintTarget.inst.calibrationLabelPrintedAt).toLocaleString('pt-BR')}{adminLabelReprintTarget.inst?.calibrationLabelPrintedBy ? ` por ${adminLabelReprintTarget.inst.calibrationLabelPrintedBy}` : ''}</p>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-600 mb-4">
+              Por regra do sistema, a etiqueta de calibração só pode ser impressa uma única vez pelo operador. Para imprimir novamente, é necessário login com perfil de Administrador do sistema. Um administrador pode autorizar a reimpressão informando usuário e senha abaixo:
+            </p>
+
+            <form onSubmit={handleConfirmAdminLabelReprint} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Usuário Administrador
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: admin"
+                  value={adminLabelReprintUsername}
+                  onChange={(e) => setAdminLabelReprintUsername(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Senha do Administrador
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={adminLabelReprintPassword}
+                  onChange={(e) => setAdminLabelReprintPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {adminLabelReprintError && (
+                <div className="flex items-center space-x-2 text-rose-600 text-xs font-semibold">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{adminLabelReprintError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdminLabelReprintModal(false);
+                    setAdminLabelReprintTarget(null);
+                    setAdminLabelReprintPassword("");
+                    setAdminLabelReprintUsername("");
+                    setAdminLabelReprintError("");
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isValidatingAdminLabelReprint}
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>{isValidatingAdminLabelReprint ? "Validando..." : "Autorizar Reimpressão"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

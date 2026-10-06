@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PART_DIR = resolve(ROOT, "src/components/internal-portal");
 const GENERATED = resolve(PART_DIR, "InternalPortal.generated.tsx");
-const EXPECTED_SHA256 = "35fa1c598290f05310ed2d1d2f9e9b0ee77d9e2b3ceff9d4333b0665c33a2e0d";
+const EXPECTED_SHA256 = "fed0a319f14d2505bb9ef6159f43a91ef2ace428f047728861b3d8df00e071b3";
 const MAX_PART_BYTES = 400 * 1024;
 const PARTS = [
   "InternalPortal.part01.sourcepart",

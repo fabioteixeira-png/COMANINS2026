@@ -1117,6 +1117,26 @@ export async function updateInstrumentDoc(id: string, updates: Partial<Instrumen
   }
 }
 
+export async function recordInstrumentLabelPrinted(
+  instrumentId: string,
+  user?: { name?: string; username?: string; authUid?: string; id?: string } | null,
+): Promise<void> {
+  const existing = instrumentCache.get(instrumentId);
+  const currentCount = typeof existing?.calibrationLabelPrintCount === 'number'
+    ? existing.calibrationLabelPrintCount
+    : 0;
+
+  const updates: Partial<Instrument> = {
+    calibrationLabelPrinted: true,
+    calibrationLabelPrintedAt: new Date().toISOString(),
+    calibrationLabelPrintedBy: String(user?.name || user?.username || 'Operador').trim(),
+    calibrationLabelPrintedByUid: String(user?.authUid || user?.id || '').trim(),
+    calibrationLabelPrintCount: currentCount + 1,
+  };
+
+  await updateInstrumentDoc(instrumentId, updates);
+}
+
 export interface CalibrationTimingSession {
   startTime: string;
   technicianName: string;

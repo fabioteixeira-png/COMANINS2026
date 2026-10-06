@@ -2,6 +2,7 @@ import React from "react";
 import { AlertCircle, Printer, X } from "lucide-react";
 
 export interface CalibrationLabelData {
+  instrumentId?: string;
   certificateNumber: string;
   calibrationDate: string;
   isComaninsStandard?: boolean;
@@ -21,6 +22,7 @@ interface CalibrationLabelArtworkProps extends CalibrationLabelData {
 
 interface CalibrationLabelPrintModalProps extends CalibrationLabelData {
   onClose: () => void;
+  onPrinted?: () => void;
   calibrationLogo?: string;
 }
 
@@ -284,10 +286,13 @@ export default function CalibrationLabelPrintModal({
   periodicityMonths,
   calibrationLogo,
   onClose,
+  onPrinted,
 }: CalibrationLabelPrintModalProps) {
   const handlePrint = () => {
     const printContent = document.getElementById("calibration-label-print");
     if (!printContent) return;
+
+    onPrinted?.();
 
     // LOTE 43: a etiqueta de padrão COMANINS/BPC precisa ser impressa em uma
     // página física de 36 x 36 mm. O fluxo por iframe funciona para a etiqueta

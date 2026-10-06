@@ -66,6 +66,7 @@ import {
   CertSequenceConfig,
   addInstrumentDoc,
   updateInstrumentDoc,
+  recordInstrumentLabelPrinted,
   countInstrumentsForIntake,
   instrumentCertificateExists,
   syncReferenceStandards,
@@ -171,6 +172,7 @@ import {
   ArrowLeft,
   Menu,
   PenTool,
+  Lock,
   KeyRound
 } from "lucide-react";
 import FirebaseUsagePanel from "./FirebaseUsagePanel";
@@ -767,7 +769,7 @@ const resolveCalibrationLabelData = (
 
   const isComaninsStandard = isComaninsBpcStandardInstrument(instrument, clients);
   if (!isComaninsStandard) {
-    return { certificateNumber, calibrationDate };
+    return { instrumentId: instrument.id, certificateNumber, calibrationDate };
   }
 
   const periodicityMonths = resolveComaninsStandardPeriodicity(instrument.tag);
@@ -780,6 +782,7 @@ const resolveCalibrationLabelData = (
   if (!validityDate) return null;
 
   return {
+    instrumentId: instrument.id,
     certificateNumber,
     calibrationDate,
     isComaninsStandard: true,
@@ -1407,6 +1410,47 @@ export default function InternalPortal({
   const [intakeCredentialError, setIntakeCredentialError] = useState("");
   const [selectedInstLabelToPrint, setSelectedInstLabelToPrint] =
     useState<CalibrationLabelData | null>(null);
+  const [showAdminLabelReprintModal, setShowAdminLabelReprintModal] = useState<boolean>(false);
+  const [adminLabelReprintTarget, setAdminLabelReprintTarget] = useState<{ inst: any; labelData: CalibrationLabelData } | null>(null);
+  const [adminLabelReprintPassword, setAdminLabelReprintPassword] = useState<string>("");
+  const [adminLabelReprintUsername, setAdminLabelReprintUsername] = useState<string>("");
+  const [adminLabelReprintError, setAdminLabelReprintError] = useState<string>("");
+  const [isValidatingAdminLabelReprint, setIsValidatingAdminLabelReprint] = useState<boolean>(false);
+
+  const handleConfirmAdminLabelReprint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLabelReprintError("");
+    setIsValidatingAdminLabelReprint(true);
+    try {
+      const valid = await verifyAdminCredentials(
+        adminLabelReprintUsername.trim(),
+        adminLabelReprintPassword.trim(),
+      );
+      if (!valid) {
+        setAdminLabelReprintError("Credencial de administrador inválida.");
+        return;
+      }
+      const target = adminLabelReprintTarget;
+      setShowAdminLabelReprintModal(false);
+      setAdminLabelReprintTarget(null);
+      setAdminLabelReprintPassword("");
+      setAdminLabelReprintUsername("");
+      setAdminLabelReprintError("");
+
+      if (target) {
+        setSelectedEtiquetaInstId(target.inst.id);
+        setLoadedEtiquetaInstId(target.inst.id);
+        setSelectedInstLabelToPrint({
+          ...target.labelData,
+          instrumentId: target.inst.id,
+        });
+      }
+    } catch (err: any) {
+      setAdminLabelReprintError(err?.message || "Erro ao validar autorização administrativa.");
+    } finally {
+      setIsValidatingAdminLabelReprint(false);
+    }
+  };
   const [selectedLabInstId, setSelectedLabInstId] = useState<any>("");
   const [selectedPsvInstId, setSelectedPsvInstId] = useState<any>("");
   const [seqSuccessMsg, setSeqSuccessMsg] = useState<any>("");

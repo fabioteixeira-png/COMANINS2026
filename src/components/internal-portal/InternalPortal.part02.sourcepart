@@ -2412,33 +2412,70 @@
                             </button>
 
                             {/* Etiqueta de calibração Brother TZe-661 */}
-                            <button
-                              disabled={!calibrationLabelData}
-                              onClick={() => {
-                                if (!calibrationLabelData) return;
-                                setSelectedEtiquetaInstId(inst.id);
-                                setLoadedEtiquetaInstId(inst.id);
-                                setActiveTab("etiquetas");
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                              className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap shadow-xs flex items-center space-x-1 border transition-colors ${
-                                calibrationLabelData
-                                  ? "bg-teal-600 hover:bg-teal-700 text-white border-teal-600 cursor-pointer"
-                                  : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60 shadow-none"
-                              }`}
-                              title={
-                                calibrationLabelData
-                                  ? calibrationLabelData.isComaninsStandard
+                            {(() => {
+                              const isLabelPrinted = Boolean(inst.calibrationLabelPrinted);
+                              const buttonClass = !calibrationLabelData
+                                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60 shadow-none"
+                                : isLabelPrinted
+                                  ? isUserAdmin
+                                    ? "bg-amber-600 hover:bg-amber-700 text-white border-amber-600 cursor-pointer shadow-xs"
+                                    : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-75 shadow-none"
+                                  : "bg-teal-600 hover:bg-teal-700 text-white border-teal-600 cursor-pointer shadow-xs";
+
+                              const buttonTitle = !calibrationLabelData
+                                ? isComaninsBpcStandard && !comaninsStandardPeriodicity
+                                  ? "Padrão COMANINS identificado pelo cliente + TAG BPC. O TAG deve terminar em -3, -6 ou -12 para definir a validade."
+                                  : "Etiqueta disponível somente após existir certificado aprovado e data de calibração."
+                                : isLabelPrinted
+                                  ? isUserAdmin
+                                    ? `Etiqueta já impressa${inst.calibrationLabelPrintedAt ? ` em ${new Date(inst.calibrationLabelPrintedAt).toLocaleString('pt-BR')}` : ''}${inst.calibrationLabelPrintedBy ? ` por ${inst.calibrationLabelPrintedBy}` : ''}. Reimpressão liberada para Administrador do sistema.`
+                                    : `Etiqueta já impressa${inst.calibrationLabelPrintedAt ? ` em ${new Date(inst.calibrationLabelPrintedAt).toLocaleString('pt-BR')}` : ''}${inst.calibrationLabelPrintedBy ? ` por ${inst.calibrationLabelPrintedBy}` : ''}. Reimpressão permitida apenas com login com perfil de Administrador do sistema.`
+                                  : calibrationLabelData.isComaninsStandard
                                     ? "Carregar etiqueta 36 × 36 mm do padrão COMANINS"
-                                    : "Carregar etiqueta de calibração Brother TZe-661"
-                                  : isComaninsBpcStandard && !comaninsStandardPeriodicity
-                                    ? "Padrão COMANINS identificado pelo cliente + TAG BPC. O TAG deve terminar em -3, -6 ou -12 para definir a validade."
-                                    : "Etiqueta disponível somente após existir certificado aprovado e data de calibração."
-                              }
-                            >
-                              <Printer className="h-3 w-3" />
-                              <span>Etiqueta Calibração</span>
-                            </button>
+                                    : "Carregar etiqueta de calibração Brother TZe-661";
+
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={!calibrationLabelData}
+                                  onClick={() => {
+                                    if (!calibrationLabelData) return;
+                                    if (isLabelPrinted && !isUserAdmin) {
+                                      setAdminLabelReprintTarget({ inst, labelData: calibrationLabelData });
+                                      setShowAdminLabelReprintModal(true);
+                                      return;
+                                    }
+                                    setSelectedEtiquetaInstId(inst.id);
+                                    setLoadedEtiquetaInstId(inst.id);
+                                    setSelectedInstLabelToPrint({
+                                      ...calibrationLabelData,
+                                      instrumentId: inst.id,
+                                    });
+                                  }}
+                                  className={`px-2 py-1 font-semibold rounded text-[10px] whitespace-nowrap flex items-center space-x-1 border transition-colors ${buttonClass}`}
+                                  title={buttonTitle}
+                                >
+                                  {isLabelPrinted ? (
+                                    isUserAdmin ? (
+                                      <>
+                                        <Printer className="h-3 w-3" />
+                                        <span>Reimprimir Etiqueta</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Lock className="h-3 w-3 text-slate-400" />
+                                        <span>Etiqueta Impressa</span>
+                                      </>
+                                    )
+                                  ) : (
+                                    <>
+                                      <Printer className="h-3 w-3" />
+                                      <span>Etiqueta Calibração</span>
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
 
 
 

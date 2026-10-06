@@ -96,6 +96,11 @@ export interface Instrument {
   adminCalibrationReplacementRequestedByUid?: string;
   adminCalibrationReplacementRequestedByName?: string;
   adminCalibrationReplacementReportIds?: string[];
+  calibrationLabelPrinted?: boolean;
+  calibrationLabelPrintedAt?: string;
+  calibrationLabelPrintedBy?: string;
+  calibrationLabelPrintedByUid?: string;
+  calibrationLabelPrintCount?: number;
   registrationSnapshot?: InstrumentRegistrationSnapshot;
 }
 

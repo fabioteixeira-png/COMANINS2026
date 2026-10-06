@@ -53,14 +53,44 @@
                           className={loadedLabelData.isComaninsStandard ? "mx-auto w-full max-w-[520px] shadow-lg" : "w-full shadow-lg"}
                         />
 
-                        <button
-                          type="button"
-                          onClick={() => setSelectedInstLabelToPrint(loadedLabelData)}
-                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 py-2.5 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-teal-700"
-                        >
-                          <Printer className="h-4 w-4" />
-                          Abrir impressão
-                        </button>
+                        {(() => {
+                          const isAlreadyPrinted = Boolean(loadedInstrument?.calibrationLabelPrinted);
+                          if (isAlreadyPrinted && !isUserAdmin) {
+                            return (
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900 font-medium">
+                                  <Lock className="h-4 w-4 shrink-0 text-amber-700" />
+                                  <span>
+                                    Esta etiqueta já foi impressa anteriormente{loadedInstrument?.calibrationLabelPrintedAt ? ` em ${new Date(loadedInstrument.calibrationLabelPrintedAt).toLocaleString('pt-BR')}` : ''}{loadedInstrument?.calibrationLabelPrintedBy ? ` por ${loadedInstrument.calibrationLabelPrintedBy}` : ''}. Para imprimir novamente, é necessário login com perfil de Administrador do sistema.
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAdminLabelReprintTarget({ inst: loadedInstrument, labelData: loadedLabelData });
+                                    setShowAdminLabelReprintModal(true);
+                                  }}
+                                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-200 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-300 transition-colors"
+                                >
+                                  <Lock className="h-4 w-4" />
+                                  Etiqueta já impressa (Requer Administrador)
+                                </button>
+                              </div>
+                            );
+                          }
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInstLabelToPrint({ ...loadedLabelData, instrumentId: loadedInstrument?.id })}
+                              className={`flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-extrabold text-white shadow-sm transition-colors ${
+                                isAlreadyPrinted ? "bg-amber-600 hover:bg-amber-700" : "bg-teal-600 hover:bg-teal-700"
+                              }`}
+                            >
+                              <Printer className="h-4 w-4" />
+                              {isAlreadyPrinted ? "Reimprimir etiqueta (Administrador)" : "Abrir impressão"}
+                            </button>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <div className="space-y-2 text-center text-xs text-slate-500">
