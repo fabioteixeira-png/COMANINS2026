@@ -8345,6 +8345,143 @@ app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLim
   }
 });
 
+app.post("/api/company-communications/broadcast-email", requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+  const recipientsRaw: unknown[] = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
+  const recipients = recipientsRaw
+    .map(r => String(r || '').trim().toLowerCase())
+    .filter(r => r && isValidEmailAddress(r));
+
+  const title = asLimitedString(req.body?.title, 250);
+  const content = String(req.body?.content || '');
+  const cardType = asLimitedString(req.body?.cardType, 60) || 'Informativo';
+  const priority = asLimitedString(req.body?.priority, 40) || 'normal';
+  const authorName = asLimitedString(req.body?.authorName, 120) || 'COMANINS Metrologia';
+  const attachmentsCount = Math.max(0, Math.min(20, Number(req.body?.attachmentsCount) || 0));
+
+  if (!title || !content || recipients.length === 0) {
+    return res.status(400).json({ error: "Dados insuficientes para disparo de e-mails." });
+  }
+
+  const uniqueRecipients = Array.from(new Set(recipients));
+  const priorityLabel = priority === 'urgente' ? 'URGENTE' : priority === 'alta' ? 'IMPORTANTE' : 'INFORMATIVO';
+  const priorityColor = priority === 'urgente' ? '#e11d48' : priority === 'alta' ? '#d97706' : '#2563eb';
+  const subject = `[COMANINS ${priorityLabel}] ${title}`;
+
+  const safeTitle = escapeHtml(title);
+  const safeContent = escapeHtml(content).replace(/\n/g, '<br/>');
+  const safeAuthor = escapeHtml(authorName);
+  const safeCardType = escapeHtml(cardType.toUpperCase());
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; background-color: #ffffff; color: #0f172a;">
+      <div style="background-color: #0f172a; padding: 24px; text-align: left; border-bottom: 4px solid ${priorityColor};">
+        <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: bold; letter-spacing: -0.5px;">
+          COMANINS Metrology Suite
+        </h1>
+        <p style="color: #94a3b8; font-size: 13px; margin: 4px 0 0 0;">
+          Comunicação Interna Oficial para Colaboradores
+        </p>
+      </div>
+
+      <div style="padding: 24px;">
+        <div style="margin-bottom: 16px;">
+          <span style="display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; text-transform: uppercase; background-color: #f1f5f9; color: ${priorityColor}; border: 1px solid ${priorityColor}40;">
+            ${priorityLabel} • ${safeCardType}
+          </span>
+        </div>
+
+        <h2 style="font-size: 18px; color: #0f172a; margin: 0 0 16px 0; line-height: 1.4;">
+          ${safeTitle}
+        </h2>
+
+        <div style="background-color: #f8fafc; border-left: 4px solid ${priorityColor}; padding: 16px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; line-height: 1.6; color: #334155;">
+          ${safeContent}
+        </div>
+
+        ${attachmentsCount > 0 ? `
+          <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; margin-bottom: 20px; font-size: 13px; color: #1e40af;">
+            📎 <b>Possui ${attachmentsCount} anexo(s) disponível(is) para download/visualização no Portal.</b>
+          </div>
+        ` : ''}
+
+        <div style="background-color: #f1f5f9; border-radius: 8px; padding: 14px; margin-bottom: 24px; font-size: 12px; color: #475569;">
+          Publicado por: <b>${safeAuthor}</b> em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+
+        <div style="text-align: center; margin: 28px 0 16px 0;">
+          <a href="${process.env.APP_URL || 'https://comanins.com.br'}" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-weight: bold; font-size: 14px; text-decoration: none; padding: 12px 24px; border-radius: 8px;">
+            Acessar o Portal COMANINS
+          </a>
+        </div>
+
+        <p style="font-size: 12px; color: #64748b; text-align: center; margin: 0;">
+          Você recebeu este aviso pois está cadastrado na equipe de colaboradores da COMANINS Metrologia.
+        </p>
+      </div>
+
+      <div style="background-color: #f8fafc; padding: 16px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8;">
+        COMANINS Serviços de Calibração e Manutenção Industrial Ltda.<br/>
+        Portal do Colaborador • Notificação Automática do Sistema
+      </div>
+    </div>
+  `;
+
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+
+  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: SMTP_USER,
+          pass: SMTP_PASS
+        }
+      });
+
+      const BATCH_SIZE = 10;
+      let sentSuccessCount = 0;
+      for (let i = 0; i < uniqueRecipients.length; i += BATCH_SIZE) {
+        const batch = uniqueRecipients.slice(i, i + BATCH_SIZE);
+        try {
+          await transporter.sendMail({
+            from: `"COMANINS Comunicação" <${SMTP_USER}>`,
+            to: SMTP_USER,
+            bcc: batch.join(','),
+            subject: subject,
+            html: html
+          });
+          sentSuccessCount += batch.length;
+        } catch (batchErr) {
+          console.error("[BROADCAST EMAIL] Erro no lote:", batch, batchErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        emailSent: true,
+        sentCount: sentSuccessCount,
+        totalRecipients: uniqueRecipients.length
+      });
+    } catch (err) {
+      console.error("[BROADCAST EMAIL] Falha no envio:", err);
+      return res.json({
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        totalRecipients: uniqueRecipients.length
+      });
+    }
+  } else {
+    console.log(`[BROADCAST EMAIL] SMTP não configurado. Disparo simulado para ${uniqueRecipients.length} colaboradores:`, uniqueRecipients);
+    return res.json({
+      success: true,
+      emailSent: false,
+      smtpNotConfigured: true,
+      sentCount: uniqueRecipients.length,
+      totalRecipients: uniqueRecipients.length
+    });
+  }
+});
+
 app.post("/api/send-contact-email", publicContactRateLimit, async (req: AuthRequest, res) => {
   const name = asLimitedString(req.body?.name, 120);
   const company = asLimitedString(req.body?.company, 160);

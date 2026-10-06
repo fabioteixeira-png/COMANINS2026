@@ -3370,7 +3370,18 @@
         {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}
         {activeTab === "locacao_instrumentos" && canAccessModule("rental") && <RentalManagement clients={clients} currentUser={currentUser} canEdit={canEditModule("rental")} companyData={companyData} />}
         {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
-        {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && <InternalCommunication currentUser={currentUser as any} />}
+        {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && (
+          <InternalCommunication
+            currentUser={currentUser as any}
+            internalUsers={internalUsers}
+            targetCommunicationId={typeof window !== "undefined" ? window.sessionStorage.getItem("target_communication_id") || undefined : undefined}
+            onClearTargetCommunicationId={() => {
+              if (typeof window !== "undefined") {
+                window.sessionStorage.removeItem("target_communication_id");
+              }
+            }}
+          />
+        )}
         {activeTab === "minha_assinatura" && canAccessModule("digital_signature") && <MySignature currentUser={currentUser as any} canEdit={canEditDigitalSignature} onUpdateUser={onUpdateInternalUser || (() => {})} />}
 
         {/* TAB: CONSUMO FIREBASE */}

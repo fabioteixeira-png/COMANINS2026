@@ -832,10 +832,17 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     match /internal_tickets/{document=**} {
-      allow read: if hasModule('internal_communication') || hasModule('internal_communication_management');
-      allow create: if hasEditModule('internal_communication') && archiveFieldsAbsentOnCreate();
-      allow update: if (hasEditModule('internal_communication') || hasEditModule('internal_communication_management'))
+      allow read: if hasModule('internal_communication') || hasModule('internal_communication_management') || isInternalAccount();
+      allow create: if (hasEditModule('internal_communication') || isInternalAccount()) && archiveFieldsAbsentOnCreate();
+      allow update: if (hasEditModule('internal_communication') || hasEditModule('internal_communication_management') || isInternalAccount())
         && archiveFieldsUntouched();
+      allow delete: if false;
+    }
+    match /company_communications/{document=**} {
+      allow read: if isInternalAccount();
+      allow create: if (hasEditModule('internal_communication') || hasModule('internal_communication_management') || isAdministrator())
+        && archiveFieldsAbsentOnCreate();
+      allow update: if isInternalAccount() && archiveFieldsUntouched();
       allow delete: if false;
     }
     match /accessAuditLogs/{document=**} {

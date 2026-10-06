@@ -1,33 +1,89 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Bell, 
+  Megaphone, 
   AlertTriangle, 
-  ShieldAlert, 
   CheckCircle2, 
   Info, 
   Check, 
-  Trash2, 
-  ChevronRight, 
-  Database 
+  ExternalLink, 
+  FileText, 
+  Sparkles, 
+  ShieldAlert, 
+  Briefcase,
+  Paperclip
 } from 'lucide-react';
 import { 
-  useFirebaseTelemetry, 
-  markNotificationAsRead, 
-  markAllNotificationsAsRead, 
-  clearAllNotifications 
-} from '../lib/firebaseTelemetry';
+  syncCompanyCommunications, 
+  markCompanyCommunicationAsRead, 
+  PortalUser 
+} from '../lib/firebase';
+import { CompanyCommunication } from '../types';
+
+export interface NotificationUser {
+  id?: string;
+  username?: string;
+  name?: string;
+  role?: string;
+  permissionLevel?: string;
+  [key: string]: any;
+}
 
 interface NotificationBellPopoverProps {
+  currentUser?: NotificationUser | null;
+  onNavigateToCommunication?: (communicationId?: string) => void;
   onOpenFirebaseUsage?: () => void;
 }
 
-export default function NotificationBellPopover({ onOpenFirebaseUsage }: NotificationBellPopoverProps) {
+export default function NotificationBellPopover({ 
+  currentUser, 
+  onNavigateToCommunication, 
+  onOpenFirebaseUsage 
+}: NotificationBellPopoverProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const telemetry = useFirebaseTelemetry();
+  const [communications, setCommunications] = useState<CompanyCommunication[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  const notifications = telemetry.notifications || [];
-  const unreadCount = notifications.filter(n => !n.read).length;
+  // Subscribe to company communications
+  useEffect(() => {
+    const unsub = syncCompanyCommunications((list) => {
+      setCommunications(list || []);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
+
+  // Filter communications relevant to this user
+  const relevantCommunications = useMemo(() => {
+    if (!currentUser) return communications;
+    const userKey = currentUser.id || currentUser.username || '';
+    const username = currentUser.username || '';
+
+    return communications.filter((c) => {
+      if (c.targetType === 'all') return true;
+      if (!c.targetUserIds || c.targetUserIds.length === 0) return true;
+      return (
+        (userKey && c.targetUserIds.includes(userKey)) ||
+        (username && c.targetUserIds.includes(username))
+      );
+    });
+  }, [communications, currentUser]);
+
+  // Check which are unread by the current user
+  const isUnreadByMe = (c: CompanyCommunication) => {
+    if (!currentUser) return false;
+    if (!c.readBy) return true;
+    const userKey = currentUser.username || currentUser.id || '';
+    const idKey = currentUser.id || '';
+    return !c.readBy[userKey] && !c.readBy[idKey];
+  };
+
+  const unreadList = useMemo(() => {
+    return relevantCommunications.filter(isUnreadByMe);
+  }, [relevantCommunications, currentUser]);
+
+  const unreadCount = unreadList.length;
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -40,33 +96,55 @@ export default function NotificationBellPopover({ onOpenFirebaseUsage }: Notific
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const getLevelIcon = (level: string) => {
-    switch (level) {
-      case 'attention':
-        return <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />;
-      case 'alert':
-        return <AlertTriangle className="w-4 h-4 text-orange-500 shrink-0" />;
-      case 'critical':
-        return <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 animate-bounce" />;
-      case 'limit':
-        return <ShieldAlert className="w-4 h-4 text-red-600 shrink-0 animate-pulse" />;
-      default:
-        return <Info className="w-4 h-4 text-royal-blue shrink-0" />;
+  const handleMarkAllAsRead = async () => {
+    if (!currentUser) return;
+    for (const c of unreadList) {
+      await markCompanyCommunicationAsRead(c.id, currentUser);
     }
   };
 
-  const getLevelBadgeClass = (level: string) => {
-    switch (level) {
-      case 'attention':
-        return 'bg-amber-50 text-amber-800 border-amber-200';
-      case 'alert':
-        return 'bg-orange-50 text-orange-800 border-orange-200';
-      case 'critical':
-        return 'bg-rose-50 text-rose-800 border-rose-200 font-bold';
-      case 'limit':
-        return 'bg-red-600 text-white border-red-700 font-bold animate-pulse';
+  const handleClickCommunication = async (c: CompanyCommunication) => {
+    if (currentUser && isUnreadByMe(c)) {
+      await markCompanyCommunicationAsRead(c.id, currentUser);
+    }
+    setIsOpen(false);
+    if (onNavigateToCommunication) {
+      onNavigateToCommunication(c.id);
+    }
+  };
+
+  const getCardIcon = (cardType?: string, priority?: string) => {
+    if (priority === 'urgente') {
+      return <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 animate-pulse" />;
+    }
+    if (priority === 'alta') {
+      return <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />;
+    }
+    switch (cardType) {
+      case 'rh_beneficios':
+        return <Briefcase className="w-4 h-4 text-emerald-600 shrink-0" />;
+      case 'treinamento':
+        return <FileText className="w-4 h-4 text-indigo-600 shrink-0" />;
+      case 'eventos':
+        return <Sparkles className="w-4 h-4 text-purple-600 shrink-0" />;
+      case 'seguranca':
+        return <ShieldAlert className="w-4 h-4 text-orange-600 shrink-0" />;
       default:
-        return 'bg-blue-50 text-blue-800 border-blue-200';
+        return <Megaphone className="w-4 h-4 text-blue-600 shrink-0" />;
+    }
+  };
+
+  const formatCommTime = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      if (isToday) {
+        return `Hoje às ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      }
+      return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    } catch {
+      return '';
     }
   };
 
@@ -76,28 +154,18 @@ export default function NotificationBellPopover({ onOpenFirebaseUsage }: Notific
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative p-2.5 rounded-xl border transition-all flex items-center justify-center ${
-          telemetry.quotaStatus === 'Risco de Cobrança'
-            ? 'bg-red-50 text-red-600 border-red-300 animate-pulse'
-            : telemetry.quotaStatus === 'Alerta Crítico'
-            ? 'bg-rose-50 text-rose-600 border-rose-300'
-            : telemetry.quotaStatus === 'Alerta'
-            ? 'bg-orange-50 text-orange-600 border-orange-300'
-            : telemetry.quotaStatus === 'Atenção'
-            ? 'bg-amber-50 text-amber-600 border-amber-300'
-            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+        className={`relative p-2.5 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+          unreadCount > 0
+            ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-xs'
+            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
         }`}
-        title="Notificações do Painel"
+        title={unreadCount > 0 ? `${unreadCount} nova(s) comunicação(ões) interna(s)` : "Notificações de Comunicação Interna"}
       >
-        <Bell className="w-5 h-5" />
+        <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-blue-600 animate-wiggle' : ''}`} />
 
         {unreadCount > 0 && (
-          <span className={`absolute -top-1 -right-1 px-1.5 py-0.5 text-[10px] font-extrabold rounded-full text-white shadow-xs ${
-            telemetry.quotaStatus === 'Risco de Cobrança' || telemetry.quotaStatus === 'Alerta Crítico'
-              ? 'bg-red-600 animate-ping'
-              : 'bg-royal-blue'
-          }`}>
-            {unreadCount}
+          <span className="absolute -top-1 -right-1 px-1.5 py-0.5 text-[10px] font-extrabold rounded-full text-white shadow-xs bg-rose-600 min-w-4.5 h-4.5 flex items-center justify-center animate-bounce">
+            {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
@@ -108,97 +176,124 @@ export default function NotificationBellPopover({ onOpenFirebaseUsage }: Notific
           {/* Popover Header */}
           <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
             <div className="flex items-center gap-2">
-              <Bell className="w-4 h-4 text-blue-400" />
-              <h3 className="font-bold text-sm text-white">Notificações do Sistema</h3>
-              {unreadCount > 0 && (
-                <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  {unreadCount} novas
-                </span>
-              )}
+              <Megaphone className="w-4 h-4 text-blue-400" />
+              <div>
+                <h3 className="font-bold text-sm text-white leading-tight">Comunicação Interna</h3>
+                <p className="text-[11px] text-slate-400">Notificações e Comunicados da Empresa</p>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1 text-xs">
-              {unreadCount > 0 && (
+            <div className="flex items-center gap-1.5 text-xs">
+              {unreadCount > 0 ? (
                 <button
-                  onClick={() => markAllNotificationsAsRead()}
-                  className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-md transition-colors"
-                  title="Marcar todas como lidas"
+                  type="button"
+                  onClick={handleMarkAllAsRead}
+                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-blue-300 hover:text-white flex items-center gap-1 transition-colors"
+                  title="Marcar todas as mensagens como lidas"
                 >
                   <Check className="w-3.5 h-3.5" />
+                  <span>Marcar lidas</span>
                 </button>
-              )}
-              {notifications.length > 0 && (
-                <button
-                  onClick={() => clearAllNotifications()}
-                  className="p-1 hover:bg-slate-800 text-slate-300 hover:text-red-300 rounded-md transition-colors"
-                  title="Limpar todas as notificações"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+              ) : (
+                <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">
+                  Em dia
+                </span>
               )}
             </div>
           </div>
 
-
-
           {/* Notifications List */}
-          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-            {notifications.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs">
-                <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-1.5" />
-                Nenhuma notificação no momento.
+          <div className="max-h-84 overflow-y-auto divide-y divide-slate-100">
+            {relevantCommunications.length === 0 ? (
+              <div className="py-10 px-4 text-center text-slate-400 text-xs">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+                <p className="font-semibold text-slate-600">Nenhum comunicado no momento</p>
+                <p className="mt-1 text-[11px] text-slate-400">Você está em dia com todas as comunicações da empresa.</p>
               </div>
             ) : (
-              notifications.map((notif) => (
-                <div
-                  key={notif.id}
-                  onClick={() => markNotificationAsRead(notif.id)}
-                  className={`p-3.5 transition-colors cursor-pointer flex items-start gap-3 ${
-                    notif.read ? 'bg-white hover:bg-slate-50/80 opacity-75' : 'bg-blue-50/40 hover:bg-blue-50/70'
-                  }`}
-                >
-                  <div className="mt-0.5">{getLevelIcon(notif.level)}</div>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-xs text-slate-900 leading-snug">
-                        {notif.title}
-                      </h4>
-                      <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-2">
-                        {notif.timestamp.split(' ')[1] || notif.timestamp}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      {notif.message}
-                    </p>
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <span className={`px-2 py-0.5 rounded text-[9px] border ${getLevelBadgeClass(notif.level)}`}>
-                        {notif.category === 'quota' ? 'Cota Firebase' : 'Sistema'}
-                      </span>
-                      {!notif.read && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-royal-blue" />
-                      )}
+              relevantCommunications.slice(0, 10).map((comm) => {
+                const unread = isUnreadByMe(comm);
+                const hasAttachments = comm.attachments && comm.attachments.length > 0;
+
+                return (
+                  <div
+                    key={comm.id}
+                    onClick={() => handleClickCommunication(comm)}
+                    className={`p-3.5 transition-colors cursor-pointer flex items-start gap-3 ${
+                      unread 
+                        ? 'bg-blue-50/70 hover:bg-blue-100/60 font-medium' 
+                        : 'bg-white hover:bg-slate-50/90 opacity-85'
+                    }`}
+                  >
+                    <div className="mt-0.5">{getCardIcon(comm.cardType, comm.priority)}</div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <h4 className="font-bold text-xs text-slate-900 leading-snug truncate">
+                          {comm.title}
+                        </h4>
+                        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-1 shrink-0">
+                          {formatCommTime(comm.createdAt)}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                        {comm.content}
+                      </p>
+
+                      <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                        {comm.targetType === 'all' ? (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            Geral (Todos)
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            Direcionado a você
+                          </span>
+                        )}
+
+                        {comm.priority === 'urgente' && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                            Urgente
+                          </span>
+                        )}
+
+                        {hasAttachments && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-0.5">
+                            <Paperclip className="w-2.5 h-2.5" />
+                            <span>Anexo</span>
+                          </span>
+                        )}
+
+                        {unread && (
+                          <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-blue-700">
+                            <span className="w-2 h-2 rounded-full bg-blue-600" />
+                            Nova
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
           {/* Popover Footer */}
-          {onOpenFirebaseUsage && (
-            <div className="p-3 bg-slate-50 border-t border-slate-200 text-center">
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  onOpenFirebaseUsage();
-                }}
-                className="w-full py-2 px-3 rounded-xl bg-royal-blue text-white text-xs font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Database className="w-3.5 h-3.5" />
-                Abrir Painel Consumo Firebase
-              </button>
-            </div>
-          )}
+          <div className="p-3 bg-slate-50 border-t border-slate-200 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                if (onNavigateToCommunication) {
+                  onNavigateToCommunication();
+                }
+              }}
+              className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Acessar Mural de Comunicação Interna
+            </button>
+          </div>
         </div>
       )}
     </div>

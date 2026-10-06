@@ -383,7 +383,7 @@ export interface AuditLogEntry {
   details?: string;
 }
 
-import { InternalTicket } from "../types";
+import { InternalTicket, CompanyCommunication } from "../types";
 export interface PortalUser {
   id: string;
   name: string;
@@ -3728,6 +3728,96 @@ export async function deleteInternalTicket(id: string): Promise<void> {
     await archiveCriticalRecord('internal_tickets', id);
   } catch (err) {
     console.error("Error archiving internal ticket:", err);
+    throw err;
+  }
+}
+
+export function syncCompanyCommunications(callback: (communications: CompanyCommunication[]) => void) {
+  try {
+    const cached = getLocalCache<CompanyCommunication[]>('company_communications', [])
+      .filter(c => c.isDeleted !== true);
+    if (cached.length > 0) callback(cached);
+    const q = query(collection(db, "company_communications"));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list = snapshot.docs
+          .map(d => ({ ...d.data(), id: d.id } as CompanyCommunication))
+          .filter(c => c.isDeleted !== true);
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setLocalCache('company_communications', list);
+        callback(list);
+      },
+      (error) => {
+        handleQuotaOrError(error);
+        callback(getLocalCache<CompanyCommunication[]>('company_communications', []).filter(c => c.isDeleted !== true));
+      }
+    );
+  } catch (err) {
+    console.error("Error setting up company communications sync:", err);
+    return () => {};
+  }
+}
+
+export async function saveCompanyCommunication(comm: CompanyCommunication): Promise<void> {
+  try {
+    const docRef = doc(db, "company_communications", comm.id);
+    await setDoc(docRef, comm);
+    const cached = getLocalCache<CompanyCommunication[]>('company_communications', []);
+    const existingIndex = cached.findIndex(c => c.id === comm.id);
+    if (existingIndex >= 0) {
+      cached[existingIndex] = comm;
+    } else {
+      cached.unshift(comm);
+    }
+    setLocalCache('company_communications', cached);
+  } catch (err) {
+    console.error("Error saving company communication:", err);
+    throw err;
+  }
+}
+
+export async function markCompanyCommunicationAsRead(
+  communicationId: string,
+  user: { id?: string; username?: string; name?: string }
+): Promise<void> {
+  try {
+    const userKey = user.username || user.id || "anonymous";
+    const userName = user.name || user.username || "Colaborador";
+    const docRef = doc(db, "company_communications", communicationId);
+    const readPayload = {
+      readAt: new Date().toISOString(),
+      userName,
+      userId: user.id || user.username
+    };
+
+    await updateDoc(docRef, {
+      [`readBy.${userKey}`]: readPayload
+    });
+
+    const cached = getLocalCache<CompanyCommunication[]>('company_communications', []);
+    const existing = cached.find(c => c.id === communicationId);
+    if (existing) {
+      existing.readBy = existing.readBy || {};
+      existing.readBy[userKey] = readPayload;
+      setLocalCache('company_communications', cached);
+    }
+  } catch (err) {
+    console.error("Error marking company communication as read:", err);
+  }
+}
+
+export async function deleteCompanyCommunication(id: string): Promise<void> {
+  try {
+    const docRef = doc(db, "company_communications", id);
+    await updateDoc(docRef, {
+      isDeleted: true,
+      deletedAt: new Date().toISOString()
+    });
+    const cached = getLocalCache<CompanyCommunication[]>('company_communications', []);
+    setLocalCache('company_communications', cached.filter(c => c.id !== id));
+  } catch (err) {
+    console.error("Error deleting company communication:", err);
     throw err;
   }
 }

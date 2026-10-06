@@ -813,6 +813,49 @@ export interface FinanceMeasurement {
 }
 
 
+export type CompanyCommunicationCardType =
+  | "informativo"
+  | "urgente"
+  | "institucional"
+  | "rh_beneficios"
+  | "treinamento"
+  | "operacional"
+  | "seguranca"
+  | "eventos"
+  | "geral";
+
+export type CompanyCommunicationPriority = "normal" | "alta" | "urgente";
+
+export interface CompanyCommunicationReadStatus {
+  readAt: string;
+  userName?: string;
+  userId?: string;
+}
+
+export interface CompanyCommunication {
+  id: string;
+  title: string;
+  content: string;
+  cardType: CompanyCommunicationCardType;
+  priority: CompanyCommunicationPriority;
+  targetType: "all" | "selected";
+  targetUserIds?: string[];
+  targetUserNames?: string[];
+  targetEmails?: string[];
+  attachments?: string[];
+  authorId: string;
+  authorName: string;
+  authorRole?: string;
+  createdAt: string;
+  updatedAt: string;
+  readBy?: Record<string, CompanyCommunicationReadStatus>;
+  emailsDispatchedCount?: number;
+  emailsDispatchedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+}
+
 export interface InternalTicket {
   id: string;
   creatorId: string;
