@@ -86,6 +86,121 @@ export interface FieldServiceCertificateContext {
   unidade?: string;
 }
 
+const FIELD_SERVICE_COLUMNS_STORAGE_KEY = 'comanins_field_service_visible_columns';
+const FIELD_SERVICE_FILTERS_STORAGE_KEY = 'comanins_field_service_filters';
+const FIELD_SERVICE_PAGE_STORAGE_KEY = 'comanins_field_service_current_page';
+const FIELD_SERVICE_SORT_STORAGE_KEY = 'comanins_field_service_sort_config';
+const FIELD_SERVICE_ITEMS_PER_PAGE_KEY = 'comanins_field_service_items_per_page';
+
+const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
+  certificate: true,
+  dataCalibracao: true,
+  cliente: true,
+  tag: true,
+  equipamento: true,
+  localizacao: false,
+  interventionDate: true,
+  technician: true,
+  area: false,
+  range: false,
+  operacao: false,
+  unidadeMedida: false,
+  categoria: false,
+  emissaoPdf: false,
+  ordemServico: true,
+  tipoServico: true,
+  observacao: false,
+  unidade: false,
+};
+
+const DEFAULT_FILTERS: Record<string, string> = {
+  certificate: '',
+  dataCalibracao: '',
+  cliente: '',
+  tag: '',
+  equipamento: '',
+  localizacao: '',
+  interventionDate: '',
+  technician: '',
+  area: '',
+  range: '',
+  operacao: '',
+  unidadeMedida: '',
+  categoria: '',
+  emissaoPdf: '',
+  ordemServico: '',
+  tipoServico: '',
+  observacao: '',
+  unidade: '',
+};
+
+const loadInitialVisibleColumns = (): Record<string, boolean> => {
+  if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMNS;
+  try {
+    const raw = window.localStorage.getItem(FIELD_SERVICE_COLUMNS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return { ...DEFAULT_VISIBLE_COLUMNS, ...parsed };
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao carregar colunas do localStorage:', err);
+  }
+  return DEFAULT_VISIBLE_COLUMNS;
+};
+
+const loadInitialSessionFilters = (): Record<string, string> => {
+  if (typeof window === 'undefined') return DEFAULT_FILTERS;
+  try {
+    const raw = window.sessionStorage.getItem(FIELD_SERVICE_FILTERS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return { ...DEFAULT_FILTERS, ...parsed };
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao carregar filtros da sessão:', err);
+  }
+  return DEFAULT_FILTERS;
+};
+
+const loadInitialSessionPage = (): number => {
+  if (typeof window === 'undefined') return 1;
+  try {
+    const raw = window.sessionStorage.getItem(FIELD_SERVICE_PAGE_STORAGE_KEY);
+    if (raw) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed >= 1) return parsed;
+    }
+  } catch {}
+  return 1;
+};
+
+const loadInitialSessionSort = (): { key: string; direction: 'asc' | 'desc' } | null => {
+  if (typeof window === 'undefined') return { key: 'interventionDate', direction: 'desc' };
+  try {
+    const raw = window.sessionStorage.getItem(FIELD_SERVICE_SORT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.key) {
+        return { key: parsed.key, direction: parsed.direction === 'asc' ? 'asc' : 'desc' };
+      }
+    }
+  } catch {}
+  return { key: 'interventionDate', direction: 'desc' };
+};
+
+const loadInitialItemsPerPage = (): number => {
+  if (typeof window === 'undefined') return 100;
+  try {
+    const raw = Number(window.sessionStorage.getItem(FIELD_SERVICE_ITEMS_PER_PAGE_KEY));
+    if ([50, 100, 500, 1000].includes(raw)) return raw;
+  } catch {}
+  return 100;
+};
+
 interface FieldServiceProps {
   canEdit?: boolean;
   canClearData?: boolean;
@@ -102,32 +217,78 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(100);
+  // Pagination (restored from session so screen switching preserves current position)
+  const [currentPage, setCurrentPage] = useState<number>(loadInitialSessionPage);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(loadInitialItemsPerPage);
 
-  // Filter states
-  const [filters, setFilters] = useState<Record<string, string>>({
-    certificate: '', dataCalibracao: '', cliente: '', tag: '', equipamento: '', localizacao: '',
-    interventionDate: '', technician: '', area: '', range: '',
-    operacao: '', unidadeMedida: '', categoria: '', emissaoPdf: '',
-    ordemServico: '', tipoServico: '', observacao: '', unidade: ''
-  });
+  // Filter states (persisted in sessionStorage: survives navigation, cleared on browser close)
+  const [filters, setFilters] = useState<Record<string, string>>(loadInitialSessionFilters);
 
-  // Column Visibility State
-  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-    certificate: true, dataCalibracao: true, cliente: true, tag: true, equipamento: true,
-    localizacao: false, interventionDate: true, technician: true, area: false,
-    range: false, operacao: false, unidadeMedida: false, categoria: false,
-    emissaoPdf: false, ordemServico: true, tipoServico: true, observacao: false, unidade: false
-  });
+  // Column Visibility State (persisted in localStorage: fixed permanently even if user closes app)
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(loadInitialVisibleColumns);
   const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(() => new Set());
 
+  // Sorting State (persisted in sessionStorage)
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(loadInitialSessionSort);
 
+  // Persist Column Visibility in localStorage whenever it changes
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FIELD_SERVICE_COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns));
+    } catch (err) {
+      console.warn('Erro ao salvar colunas no localStorage:', err);
+    }
+  }, [visibleColumns]);
 
-  // Sorting State
-  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>({ key: 'interventionDate', direction: 'desc' });
+  // Persist Filters in sessionStorage whenever they change
+  useEffect(() => {
+    try {
+      const hasAny = Object.values(filters).some(val => String(val || '').trim() !== '');
+      if (hasAny) {
+        window.sessionStorage.setItem(FIELD_SERVICE_FILTERS_STORAGE_KEY, JSON.stringify(filters));
+      } else {
+        window.sessionStorage.removeItem(FIELD_SERVICE_FILTERS_STORAGE_KEY);
+      }
+    } catch (err) {
+      console.warn('Erro ao salvar filtros no sessionStorage:', err);
+    }
+  }, [filters]);
+
+  // Persist Pagination and Sorting in sessionStorage
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(FIELD_SERVICE_PAGE_STORAGE_KEY, String(currentPage));
+    } catch {}
+  }, [currentPage]);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(FIELD_SERVICE_ITEMS_PER_PAGE_KEY, String(itemsPerPage));
+    } catch {}
+  }, [itemsPerPage]);
+
+  useEffect(() => {
+    try {
+      if (sortConfig) {
+        window.sessionStorage.setItem(FIELD_SERVICE_SORT_STORAGE_KEY, JSON.stringify(sortConfig));
+      } else {
+        window.sessionStorage.removeItem(FIELD_SERVICE_SORT_STORAGE_KEY);
+      }
+    } catch {}
+  }, [sortConfig]);
+
+  // Close column dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (columnMenuRef.current && !columnMenuRef.current.contains(event.target as Node)) {
+        setShowColumnMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -1439,13 +1600,61 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   };
 
   const handleFilterChange = (field: string, val: string) => {
-    setFilters(prev => ({...prev, [field]: val}));
+    setFilters(prev => {
+      const next = { ...prev, [field]: val };
+      try {
+        const hasAny = Object.values(next).some(v => String(v || '').trim() !== '');
+        if (hasAny) {
+          window.sessionStorage.setItem(FIELD_SERVICE_FILTERS_STORAGE_KEY, JSON.stringify(next));
+        } else {
+          window.sessionStorage.removeItem(FIELD_SERVICE_FILTERS_STORAGE_KEY);
+        }
+      } catch {}
+      return next;
+    });
     setCurrentPage(1); // reset to page 1 on filter
   };
 
-  const toggleColumn = (id: string) => {
-    setVisibleColumns(prev => ({ ...prev, [id]: !prev[id] }));
+  const handleClearAllFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setCurrentPage(1);
+    try {
+      window.sessionStorage.removeItem(FIELD_SERVICE_FILTERS_STORAGE_KEY);
+      window.sessionStorage.setItem(FIELD_SERVICE_PAGE_STORAGE_KEY, '1');
+    } catch {}
   };
+
+  const toggleColumn = (id: string) => {
+    setVisibleColumns(prev => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        window.localStorage.setItem(FIELD_SERVICE_COLUMNS_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const setAllColumnsVisibility = (visible: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const col of COLUMNS) {
+      next[col.id] = visible;
+    }
+    setVisibleColumns(next);
+    try {
+      window.localStorage.setItem(FIELD_SERVICE_COLUMNS_STORAGE_KEY, JSON.stringify(next));
+    } catch {}
+  };
+
+  const resetDefaultColumns = () => {
+    setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+    try {
+      window.localStorage.setItem(FIELD_SERVICE_COLUMNS_STORAGE_KEY, JSON.stringify(DEFAULT_VISIBLE_COLUMNS));
+    } catch {}
+  };
+
+  const activeFiltersCount = useMemo(() => {
+    return Object.values(filters).filter(v => String(v || '').trim() !== '').length;
+  }, [filters]);
 
   // Mantém digitação responsiva enquanto a busca percorre a base completa.
   const deferredFilters = useDeferredValue(filters);
@@ -1844,34 +2053,72 @@ export default function FieldService({ canEdit = false, canClearData = false, on
             </div>
 
             {/* Column Visibility Menu */}
-            <div className="relative">
+            <div className="relative" ref={columnMenuRef}>
               <button
+                type="button"
                 onClick={() => setShowColumnMenu(!showColumnMenu)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 <Columns className="h-4 w-4" />
-                Colunas
+                <span>Colunas</span>
               </button>
 
               {showColumnMenu && (
-                <div className="absolute top-full left-0 mt-2 w-56 bg-white border border-slate-200 rounded-lg shadow-xl z-20 py-2 max-h-80 overflow-y-auto">
-                  <div className="px-3 pb-2 mb-2 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Visibilidade</span>
+                <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-20 py-2 max-h-84 overflow-y-auto">
+                  <div className="px-3 pb-2 mb-2 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Colunas Visíveis</span>
+                    <button
+                      type="button"
+                      onClick={resetDefaultColumns}
+                      className="text-[11px] text-royal-blue hover:underline font-bold cursor-pointer"
+                    >
+                      Padrão
+                    </button>
+                  </div>
+                  <div className="px-3 pb-2 mb-2 border-b border-slate-100 flex items-center gap-2 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setAllColumnsVisibility(true)}
+                      className="text-royal-blue hover:underline font-semibold cursor-pointer"
+                    >
+                      Mostrar todas
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setAllColumnsVisibility(false)}
+                      className="text-slate-500 hover:text-slate-800 font-semibold cursor-pointer"
+                    >
+                      Ocultar todas
+                    </button>
                   </div>
                   {COLUMNS.map(col => (
-                    <label key={col.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer">
+                    <label key={col.id} className="flex items-center gap-3 px-4 py-1.5 hover:bg-slate-50 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={visibleColumns[col.id]}
+                        checked={visibleColumns[col.id] ?? false}
                         onChange={() => toggleColumn(col.id)}
                         className="rounded text-royal-blue focus:ring-royal-blue"
                       />
-                      <span className="text-sm text-slate-700">{col.label}</span>
+                      <span className="text-xs text-slate-700">{col.label}</span>
                     </label>
                   ))}
                 </div>
               )}
             </div>
+
+            {/* Clear All Filters button (visible when any filter has text) */}
+            {activeFiltersCount > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer"
+                title="Limpar todos os filtros da tabela"
+              >
+                <X className="h-3.5 w-3.5 text-amber-700" />
+                <span>Limpar filtros ({activeFiltersCount})</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -1949,13 +2196,29 @@ export default function FieldService({ canEdit = false, canClearData = false, on
                         <ChevronsUpDown className="w-3 h-3 opacity-30 hover:opacity-100" />
                       )}
                     </div>
-                    <input
-                      type="text"
-                      value={filters[col.id] || ''}
-                      onChange={e => handleFilterChange(col.id, e.target.value)}
-                      className="w-full mt-2 px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-normal outline-none focus:border-royal-blue"
-                      placeholder="Filtrar..."
-                    />
+                    <div className="relative mt-2">
+                      <input
+                        type="text"
+                        value={filters[col.id] || ''}
+                        onChange={e => handleFilterChange(col.id, e.target.value)}
+                        className={`w-full px-2 py-1.5 text-xs border rounded bg-white font-normal outline-none transition-colors ${
+                          filters[col.id]
+                            ? 'border-royal-blue bg-blue-50/50 text-blue-900 font-semibold pr-6'
+                            : 'border-slate-300 focus:border-royal-blue text-slate-800'
+                        }`}
+                        placeholder="Filtrar..."
+                      />
+                      {filters[col.id] && (
+                        <button
+                          type="button"
+                          onClick={() => handleFilterChange(col.id, '')}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 rounded transition cursor-pointer"
+                          title="Limpar este filtro"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   </th>
                 ))}
                 <th className="px-4 py-3 min-w-[80px]">Ações</th>
