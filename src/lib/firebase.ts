@@ -49,6 +49,35 @@ export const db = firebaseConfig.firestoreDatabaseId
 
 export const storage = getStorage(app);
 
+const refreshCurrentInternalClaims = async (): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const currentToken = await user.getIdToken();
+  const response = await fetch('/api/auth/sync-internal-profile', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${currentToken}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success !== true) {
+    throw new Error(
+      payload?.error ||
+      'Não foi possível atualizar as permissões da sessão. Saia e entre novamente no sistema.',
+    );
+  }
+
+  // Force Firebase Auth to mint a new token containing the claims just written
+  // by the trusted backend. This is required for Firestore rules that depend on
+  // the administrator profile during an administrative calibration replacement.
+  await user.getIdToken(true);
+};
+
+const isFirestorePermissionDenied = (error: any): boolean => {
+  const code = String(error?.code || '').toLowerCase();
+  const message = String(error?.message || error || '').toLowerCase();
+  return code.includes('permission-denied') || message.includes('missing or insufficient permissions');
+};
+
 const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
   const response = await fetch(dataUrl);
   if (!response.ok) throw new Error('Não foi possível preparar o arquivo para upload.');
@@ -1152,6 +1181,15 @@ export async function startCalibrationTimingSession(
   const nowIso = new Date().toISOString();
   const normalizedTechnician = String(technicianName || 'Técnico Responsável').trim() || 'Técnico Responsável';
 
+  // After an administrator archives a finalized calibration, Firestore requires
+  // the fresh administrator custom claim for the replacement workflow. A long-
+  // lived browser session can still hold an older token even though the backend
+  // has already authorized the replacement. Refresh claims before the first
+  // direct Firestore write in that flow.
+  if (instrumentCache.get(instrumentId)?.adminCalibrationReplacementPending === true) {
+    await refreshCurrentInternalClaims();
+  }
+
   const session = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(instrumentRef);
     if (!snapshot.exists()) throw new Error('INSTRUMENT_NOT_FOUND');
@@ -1211,6 +1249,10 @@ export async function cancelCalibrationTimingSession(
 ): Promise<Instrument['status']> {
   const instrumentRef = doc(db, 'instruments', instrumentId);
   const nowIso = new Date().toISOString();
+
+  if (instrumentCache.get(instrumentId)?.adminCalibrationReplacementPending === true) {
+    await refreshCurrentInternalClaims();
+  }
 
   const restoredStatus = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(instrumentRef);
@@ -1332,6 +1374,11 @@ export async function saveCalibrationDoc(data: {
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
+
+  const administrativeReplacement = activeInst.adminCalibrationReplacementPending === true;
+  if (administrativeReplacement) {
+    await refreshCurrentInternalClaims();
+  }
 
   if (data.referenceStandardSlots) {
     const slotA = (data.referenceStandardSlots.A || '').trim();
@@ -1654,7 +1701,6 @@ export async function saveCalibrationDoc(data: {
   const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);
   nextCal.setUTCFullYear(nextCal.getUTCFullYear() + 1);
 
-  const administrativeReplacement = activeInst.adminCalibrationReplacementPending === true;
   const preservedOperationalStatus = administrativeReplacement
     ? (activeInst.adminCalibrationReplacementOriginalStatus || activeInst.status)
     : 'Aguardando Emissão de Certificado';
@@ -1781,7 +1827,33 @@ export async function saveCalibrationDoc(data: {
   batch.set(doc(db, 'calibrationReports', reportId), cleanReport);
   batch.set(doc(db, 'calibrationAuditLogs', auditId), stripUndefinedDeep(auditLog));
   batch.update(doc(db, 'instruments', activeInst.id), instrumentUpdates);
-  await batch.commit();
+
+  try {
+    await batch.commit();
+  } catch (error: any) {
+    if (administrativeReplacement && isFirestorePermissionDenied(error)) {
+      // Retry once after synchronizing the profile and forcing a fresh token.
+      // The first failure may come from a stale token kept open before the
+      // administrator profile/custom claims were updated.
+      await refreshCurrentInternalClaims();
+      const retryBatch = writeBatch(db);
+      retryBatch.set(doc(db, 'calibrationReports', reportId), cleanReport);
+      retryBatch.set(doc(db, 'calibrationAuditLogs', auditId), stripUndefinedDeep(auditLog));
+      retryBatch.update(doc(db, 'instruments', activeInst.id), instrumentUpdates);
+      try {
+        await retryBatch.commit();
+      } catch (retryError: any) {
+        if (isFirestorePermissionDenied(retryError)) {
+          throw new Error(
+            'A substituição administrativa foi autorizada, mas as regras do Firestore recusaram a gravação da nova ficha. Publique as regras do LOTE 58 e tente novamente. A ficha anterior permanece arquivada e nenhum novo certificado foi concluído.',
+          );
+        }
+        throw retryError;
+      }
+    } else {
+      throw error;
+    }
+  }
 
   const cachedInstrument = instrumentCache.get(activeInst.id);
   const resolvedInstrument = {
@@ -1897,6 +1969,16 @@ export async function prepareAdminCalibrationReplacementDoc(
   if (result.instrument) {
     mergeInstrumentIntoCache(result.instrument);
     notifyInstrumentSubscribers();
+  }
+
+  // The archive/replacement authorization is already committed by the backend.
+  // Refresh browser claims for the direct Firestore writes that follow, but do
+  // not report the archive itself as failed if token refresh is temporarily
+  // unavailable; saveCalibrationDoc performs the same refresh again before save.
+  try {
+    await refreshCurrentInternalClaims();
+  } catch (error) {
+    console.warn('Substituição administrativa autorizada, mas não foi possível atualizar o token imediatamente:', error);
   }
   return result;
 }

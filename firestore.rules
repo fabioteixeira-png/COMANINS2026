@@ -505,6 +505,14 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'status',
           'lastCalibrationDate', 'nextCalibrationDate',
+          // Campos metrológicos que saveCalibrationDoc pode consolidar na
+          // ficha substituta. O gate continua exclusivo do Administrador e só
+          // existe enquanto adminCalibrationReplacementPending == true.
+          'typeSpec', 'metrologicalNorm', 'sensorType', 'outputSignal',
+          'setPoint', 'contactType',
+          'valveService', 'valveTestMedium', 'valveSeatType',
+          'acceptanceCriterion', 'maxBlowdownPercent',
+          'regulatorMode', 'regulatorActuation',
           'accuracyClass', 'mpe', 'temperature', 'humidity',
           'manualCalibrationDateAllowed', 'reissueSuggestedCalibrationDate',
           'calibrationStartedAt', 'calibrationTechnicianName', 'calibrationPreviousStatus',
