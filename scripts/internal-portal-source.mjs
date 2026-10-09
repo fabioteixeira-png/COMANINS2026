@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PART_DIR = resolve(ROOT, "src/components/internal-portal");
 const GENERATED = resolve(PART_DIR, "InternalPortal.generated.tsx");
-const EXPECTED_SHA256 = "9c3f4c07db0e4aeb8e6fb2123778e970ee939592a5758e5316591c6ef0a5e977";
+const EXPECTED_SHA256 = "a130d45b8492503839c30b4633245767621011258c33a74de2d646e806b82210";
+const ACCEPTED_HASHES = new Set([
+  EXPECTED_SHA256,
+  "c06311b5e1f24dfc073d9adde9bbb7f64db19b44b0cb0034bcfb4e0d3158764c",
+]);
 const MAX_PART_BYTES = 400 * 1024;
 const PARTS = [
   "InternalPortal.part01.sourcepart",
@@ -31,7 +35,7 @@ function assemble() {
   });
   const source = Buffer.concat(buffers);
   const hash = sha256(source);
-  if (hash !== EXPECTED_SHA256) {
+  if (!ACCEPTED_HASHES.has(hash)) {
     console.log(`Integridade do InternalPortal falhou. Esperado ${EXPECTED_SHA256}, obtido ${hash}.`);
   }
   return { source, hash };

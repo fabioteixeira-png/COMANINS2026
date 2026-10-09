@@ -6188,8 +6188,15 @@ Status atual: ${e.status}.`,
         return;
       }
     } catch (validationError: any) {
-      console.error("Erro na validação IA dos padrões:", validationError);
-      const msg = "Não foi possível validar os padrões de referência com a IA. A ficha NÃO foi salva para evitar emissão de certificado com padrão incorreto.";
+      console.error("Erro na validação técnica dos padrões:", validationError);
+      const rawDetail = String(validationError?.message || "").trim();
+      const backendDetail = rawDetail.includes("HTTP Error")
+        ? rawDetail.replace(/^HTTP Error\s+\d+:\s*/i, "")
+        : rawDetail;
+      const msg = [
+        "Não foi possível concluir a validação técnica dos padrões de referência. A ficha NÃO foi salva.",
+        backendDetail ? `Detalhe técnico: ${backendDetail}` : "Tente novamente. Se persistir, revise o cadastro de faixa/unidade do instrumento e dos padrões.",
+      ].join("\n\n");
       setBenchErrorMessage(msg);
       alert(msg);
       setBenchSubmitting(false);
