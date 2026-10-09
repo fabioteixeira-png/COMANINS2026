@@ -1,0 +1,211 @@
+ATUE COMO DESENVOLVEDOR SÊNIOR FULL-STACK ESPECIALISTA EM REACT, TYPESCRIPT, FIREBASE AUTH, FIRESTORE, FIREBASE STORAGE, INDEXEDDB E PERFORMANCE DE APLICAÇÕES WEB.
+
+Estou enviando o código do Sistema COMANINS com o LOTE 59 preparado.
+
+OBJETIVO DO LOTE
+
+Eliminar o atraso visual após login/F5/reentrada. O portal não deve abrir com Dashboard, Calibrações, instrumentos, clientes e demais módulos aparentando estar vazios enquanto aguarda Firestore/API.
+
+A arquitetura esperada é CACHE-FIRST / STALE-WHILE-REVALIDATE, igual ao conceito já usado com sucesso no Serviço de Campo:
+
+1. exibir imediatamente o último snapshot autorizado existente no navegador;
+2. sincronizar Firestore/API silenciosamente em segundo plano;
+3. quando a resposta autoritativa chegar, substituir o cache e atualizar a tela;
+4. nunca tratar o cache como fonte oficial de gravação ou autorização.
+
+NÃO DESFAÇA OS LOTES ANTERIORES
+
+Preserve integralmente:
+
+- LOTE 57: validação simples e determinística de faixa dos padrões, sem IA;
+- LOTE 58: correção de permissão para Nova Ficha Admin e renovação de claims/token;
+- regras de Padrão A RBC externo;
+- regras administrativas de exclusão;
+- RNC técnico;
+- análise de foto pós-laboratório;
+- PSV/PCV;
+- permissões atuais;
+- Firestore Rules atuais, salvo se algum erro real de compilação exigir ajuste estritamente relacionado a este lote.
+
+IMPLEMENTAÇÃO PREPARADA
+
+Existe o novo arquivo:
+
+src/lib/portalFastCache.ts
+
+Ele implementa cache IndexedDB persistente por Firebase UID.
+
+O cache é apenas para first paint e deve continuar subordinado ao Firestore/API.
+
+REGRAS OBRIGATÓRIAS
+
+1. CACHE POR USUÁRIO
+
+Todo cache IndexedDB de dados protegidos deve usar o Firebase UID.
+
+Nunca permita que usuário B receba o snapshot do usuário A.
+
+Os canais de `createSharedSync()` também devem ficar segregados por UID.
+
+2. DASHBOARD / CALIBRAÇÃO
+
+Antes de tornar `viewMode = 'portal'`, o sistema deve tentar hidratar:
+
+- instruments;
+- calibrationReports;
+- internalClients;
+- internalPortalUsers.
+
+Se cache válido existir, esses dados devem estar no React antes do primeiro render visível do portal.
+
+Não coloque chamada de rede nesse bloqueio inicial. IndexedDB é local; Firestore/API devem ocorrer depois.
+
+3. INSTRUMENTOS
+
+`syncInstruments()` deve:
+
+- ler cache IndexedDB;
+- entregar cache aos subscribers;
+- iniciar sincronização Firestore em segundo plano;
+- reconciliar registros removidos;
+- preservar atualizações capturadas pelo listener durante a paginação;
+- persistir o snapshot consolidado;
+- nunca utilizar dados de outro UID.
+
+4. RELATÓRIOS DE CALIBRAÇÃO
+
+`syncReports()` deve manter IndexedDB persistente por usuário.
+
+Não volte para `persistCache: false`.
+
+5. CLIENTES E DIRETÓRIO INTERNO
+
+Continuar usando as APIs protegidas:
+
+/api/internal/clients
+/api/internal/portal-users
+
+Não substituir por leitura Firestore pública.
+
+O cache serve para first paint. A API continua autoritativa.
+
+Em falha temporária de rede, não zere uma lista que já possui último snapshot autorizado.
+
+6. OUTROS MÓDULOS
+
+Preservar o fast cache implementado para RH, Financeiro, Locação, mensagens e demais sincronizações alteradas pelo lote.
+
+7. FIRESTORE LOCAL SNAPSHOT
+
+Um primeiro evento `snapshot.metadata.fromCache === true` não pode apagar um snapshot IndexedDB útil só porque a resposta do servidor ainda não chegou.
+
+A resposta `fromCache === false` é a atualização autoritativa para persistência do novo fast cache.
+
+8. PAYLOADS PESADOS
+
+Não persista Base64 de vários MB no IndexedDB apenas para first paint.
+
+A rotina existente remove data URLs pesadas antes de gravar o snapshot local. Preserve essa proteção.
+
+9. NÃO INVENTAR “TEMPO REAL ZERO” NA PRIMEIRA UTILIZAÇÃO
+
+Em navegador/dispositivo sem qualquer cache, o primeiro acesso precisa baixar os dados. Isso é esperado.
+
+Após o primeiro snapshot, login/F5/reentrada devem aproveitar o cache e aparecer preenchidos imediatamente.
+
+10. NÃO ALTERAR REGRAS DE NEGÓCIO
+
+Este é um lote de performance e experiência de carregamento.
+
+Não altere cálculos, status, certificados, faixa de padrões, RNC, lógica de calibração, regras de exclusão, dados de clientes ou estrutura de permissões.
+
+VALIDAÇÕES OBRIGATÓRIAS
+
+Execute:
+
+npm ci
+npm run internal-portal:verify
+npm run lint
+npm run build
+
+O hash esperado dos fragmentos do InternalPortal neste lote é:
+
+e27071891de6a464ab293ffb5de110991a55683d18937648db1751bf946862e9
+
+TESTE FUNCIONAL OBRIGATÓRIO
+
+CENÁRIO A — PRIMEIRO ACESSO SEM CACHE
+
+1. Limpe IndexedDB/local cache do domínio.
+2. Faça login.
+3. Confirme que o sistema baixa normalmente os dados.
+4. Aguarde a conclusão da sincronização.
+
+CENÁRIO B — SEGUNDO LOGIN
+
+1. Faça logout.
+2. Faça login novamente.
+3. Dashboard deve aparecer já com contadores/dados do último snapshot.
+4. Calibração/instrumentos devem aparecer sem aguardar round-trip do Firestore.
+5. Confirme pelo Network que a sincronização continua acontecendo em segundo plano.
+
+CENÁRIO C — F5
+
+Faça F5 após cache populado.
+
+O portal não deve dar impressão de dataset vazio enquanto a rede responde.
+
+CENÁRIO D — REDE LENTA
+
+Use DevTools para simular Slow 3G/alta latência.
+
+Dados cacheados devem aparecer antes da resposta remota.
+
+CENÁRIO E — DADO ALTERADO EM OUTRO NAVEGADOR
+
+1. Abra usuário A em dois navegadores.
+2. Modifique um instrumento no navegador 1.
+3. Abra/recarregue o navegador 2.
+4. Ele pode mostrar inicialmente o snapshot local, mas deve convergir para o dado novo assim que a resposta autoritativa chegar.
+
+CENÁRIO F — REGISTRO EXCLUÍDO
+
+Arquive/exclua um instrumento.
+
+Após a próxima sincronização autoritativa ele não pode permanecer eternamente no fast cache.
+
+CENÁRIO G — ISOLAMENTO
+
+1. Use usuário administrador e popule cache.
+2. Faça logout.
+3. Entre com outro usuário interno.
+4. Confirme que o IndexedDB do administrador não é usado como snapshot desse segundo usuário.
+
+CENÁRIO H — MÓDULOS
+
+Verifique pelo menos:
+
+- Dashboard;
+- Calibração;
+- Entradas;
+- RNC;
+- Padrões;
+- Estoque;
+- RH;
+- Financeiro;
+- Locação;
+- mensagens/comunicação.
+
+RESULTADO FINAL
+
+Não responda apenas “feito”. Informe:
+
+- arquivos modificados;
+- causa raiz do delay;
+- datasets com fast cache;
+- resultado do isolamento por UID;
+- resultado de npm run internal-portal:verify;
+- resultado de npm run lint;
+- resultado de npm run build;
+- tempos observados no primeiro acesso e no segundo acesso/F5, se o ambiente permitir medir;
+- qualquer regressão encontrada.

@@ -12,9 +12,11 @@ import {
   maskCEP,
 } from "../utils/masks";
 import {
+  getLocalCache,
   syncDropdownOptions,
   saveDropdownOptions,
   DEFAULT_DROPDOWN_OPTIONS,
+  normalizeDropdownOptions,
   ensureArray,
   syncIntakes,
   createIntakeDoc,
@@ -1021,7 +1023,9 @@ export default function InternalPortal({
         ? "dashboard"
         : "colaboradores",
   );
-  const [accessAuditLogs, setAccessAuditLogs] = useState<AccessAuditLog[]>([]);
+  const [accessAuditLogs, setAccessAuditLogs] = useState<AccessAuditLog[]>(() =>
+    getLocalCache<AccessAuditLog[]>('accessAuditLogs', []),
+  );
   const [showAfterHoursModal, setShowAfterHoursModal] = useState(false);
   const [afterHoursTargetTab, setAfterHoursTargetTab] = useState("");
   const [afterHoursTargetSubTab, setAfterHoursTargetSubTab] = useState("");
@@ -1596,7 +1600,9 @@ export default function InternalPortal({
       };
     });
   }, [employeeTrainings, trainings]);
-  const [savedIntakes, setSavedIntakes] = useState<any[]>([]);
+  const [savedIntakes, setSavedIntakes] = useState<any[]>(() =>
+    getLocalCache<any[]>('savedIntakes', []),
+  );
   const [issuedCertificates, setIssuedCertificates] = useState<
     Record<string, boolean>
   >(() => {
@@ -1989,7 +1995,9 @@ export default function InternalPortal({
   const [instrumentSheetInstrument, setInstrumentSheetInstrument] = useState<Instrument | null>(null);
 
   // RNC State (Relatórios de Não Conformidade)
-  const [rncReports, setRncReports] = useState<RncReport[]>([]);
+  const [rncReports, setRncReports] = useState<RncReport[]>(() =>
+    getLocalCache<RncReport[]>('rncReports', []),
+  );
 
   const countCompleted = instruments.filter(
     (i) =>
@@ -2068,13 +2076,15 @@ export default function InternalPortal({
   const [dashboardNotifications, setDashboardNotifications] = useState<any[]>(
     [],
   );
-  const [employeeBirthdays, setEmployeeBirthdays] = useState<any[]>([]);
+  const [employeeBirthdays, setEmployeeBirthdays] = useState<any[]>(() =>
+    getLocalCache<any[]>('employeeBirthdays', []),
+  );
   const [medicalExams, setMedicalExams] = useState<MedicalExam[]>([]);
 
   // Reference Standards State
   const [referenceStandards, setReferenceStandards] = useState<
     ReferenceStandard[]
-  >([]);
+  >(() => getLocalCache<ReferenceStandard[]>('referenceStandards', []));
   const [benchStandardA, setBenchStandardA] = useState<string>("");
   const [benchStandardB, setBenchStandardB] = useState<string>("");
   const [benchStandardC, setBenchStandardC] = useState<string>("");
@@ -2479,7 +2489,9 @@ export default function InternalPortal({
   const [photosSuccessMsg, setPhotosSuccessMsg] = useState("");
 
   // Calibration Audit Logs & Timing State
-  const [auditLogs, setAuditLogs] = useState<CalibrationAuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<CalibrationAuditLog[]>(() =>
+    getLocalCache<CalibrationAuditLog[]>('calibrationAuditLogs', []),
+  );
   const [calibrationStartTimes, setCalibrationStartTimes] = useState<
     Record<string, { startTime: string; technicianName: string; previousStatus?: string }>
   >({});
@@ -3190,8 +3202,8 @@ Status atual: ${e.status}.`,
       setSiteHeaderLogoPreview(customLogoProp);
     }
   }, [customLogoProp]);
-  const [dropdownOptions, setDropdownOptions] = useState<DropdownOptions>(
-    DEFAULT_DROPDOWN_OPTIONS,
+  const [dropdownOptions, setDropdownOptions] = useState<DropdownOptions>(() =>
+    normalizeDropdownOptions(getLocalCache<DropdownOptions>('dropdownOptions', DEFAULT_DROPDOWN_OPTIONS)),
   );
   const [editingIntakeId, setEditingIntakeId] = useState<string>("");
 
@@ -6911,8 +6923,12 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
   };
   const handleTestNotificationEmail = (...args: any[]) => {};
   const [intakeSuccessMessage, setIntakeSuccessMessage] = useState<string>("");
-  const [inventoryItems, setInventoryItems] = useState<any[]>([]);
-  const [inventoryTransactions, setInventoryTransactions] = useState<any[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<any[]>(() =>
+    getLocalCache<any[]>('inventoryItems', []),
+  );
+  const [inventoryTransactions, setInventoryTransactions] = useState<any[]>(() =>
+    getLocalCache<any[]>('inventoryTransactions', []),
+  );
   const [itemAttachments, setItemAttachments] = useState<string[]>([]);
   const [transactionAttachments, setTransactionAttachments] = useState<string[]>([]);
 

@@ -26,6 +26,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, CalibrationStandardValidation, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument, RentalService, RentalAsset, RentalContract, RentalInvoice, RentalMovement, RentalSettings } from '../types';
 import { generateAuthKey } from '../utils/authKey';
 import { trackFirebaseOp } from './firebaseTelemetry';
+import { readPortalFastCache, writePortalFastCache, DEFAULT_FAST_CACHE_MAX_AGE_MS } from './portalFastCache';
 
 import { getAuth } from 'firebase/auth';
 
@@ -633,56 +634,105 @@ interface SharedSubChannel<T> {
   unsubFirestore: (() => void) | null;
   lastData: T | null;
   isStarting: boolean;
+  cacheHydrationStarted: boolean;
+  remoteDelivered: boolean;
 }
 
 const activeChannels = new Map<string, SharedSubChannel<any>>();
+
+type SharedSyncCacheBackend = 'localStorage' | 'indexedDB' | 'none';
 
 export function createSharedSync<T>(
   channelKey: string,
   cacheKey: string,
   fallbackData: T,
-  startListener: (onData: (data: T) => void, onError: (err: any) => void) => () => void,
-  options?: { persistCache?: boolean }
+  startListener: (onData: (data: T, authoritative?: boolean) => void, onError: (err: any) => void) => () => void,
+  options?: {
+    persistCache?: boolean;
+    cacheBackend?: SharedSyncCacheBackend;
+    cacheMaxAgeMs?: number;
+    userScopedCache?: boolean;
+  }
 ): (callback: (data: T) => void) => () => void {
-  const shouldPersistCache = options?.persistCache ?? true;
+  const requestedPersistence = options?.persistCache ?? true;
+  const cacheBackend: SharedSyncCacheBackend = !requestedPersistence
+    ? 'none'
+    : (options?.cacheBackend || 'localStorage');
+  const cacheMaxAgeMs = options?.cacheMaxAgeMs ?? DEFAULT_FAST_CACHE_MAX_AGE_MS;
+  const userScopedCache = options?.userScopedCache !== false;
+  const cacheUserId = userScopedCache ? (auth.currentUser?.uid || 'anonymous') : 'global';
+  const activeChannelKey = userScopedCache ? `${cacheUserId}::${channelKey}` : channelKey;
+
   return (callback: (data: T) => void) => {
-    let channel = activeChannels.get(channelKey);
+    let channel = activeChannels.get(activeChannelKey);
     if (!channel) {
       channel = {
         listeners: new Set(),
         unsubFirestore: null,
-        lastData: shouldPersistCache ? getLocalCache<T>(cacheKey, fallbackData) : null,
+        lastData: cacheBackend === 'localStorage' ? getLocalCache<T>(cacheKey, fallbackData) : null,
         isStarting: false,
+        cacheHydrationStarted: false,
+        remoteDelivered: false,
       };
-      activeChannels.set(channelKey, channel);
+      activeChannels.set(activeChannelKey, channel);
     }
 
     channel.listeners.add(callback);
 
-    // Deliver latest cached/in-memory data immediately to new subscriber
+    // localStorage is synchronous. IndexedDB is hydrated asynchronously but, in
+    // normal use, still resolves long before a network round-trip. A remote
+    // snapshot always wins if it arrives first.
     if (channel.lastData !== null && channel.lastData !== undefined) {
       try {
         callback(channel.lastData);
       } catch (e) {
         console.error(`Error in shared sync callback (${channelKey}):`, e);
       }
+    } else if (cacheBackend === 'indexedDB' && !channel.cacheHydrationStarted) {
+      channel.cacheHydrationStarted = true;
+      const currentChannel = channel;
+      void readPortalFastCache<T>(cacheKey, cacheUserId, cacheMaxAgeMs).then((cached) => {
+        // If Firestore's own local cache already emitted data while IndexedDB
+        // was opening, keep the first usable snapshot instead of replacing it
+        // with a potentially older portal cache.
+        if (cached === null || currentChannel.remoteDelivered || currentChannel.lastData !== null) return;
+        currentChannel.lastData = cached;
+        currentChannel.listeners.forEach((cb) => {
+          try {
+            cb(cached);
+          } catch (e) {
+            console.error(`Error hydrating fast cache (${channelKey}):`, e);
+          }
+        });
+      }).catch(() => {});
     }
 
-    // Initialize Firestore onSnapshot if not already active
+    // Initialize Firestore onSnapshot if not already active. Firestore remains
+    // authoritative; cached data is only a fast first paint.
     if (!channel.unsubFirestore && !channel.isStarting) {
       channel.isStarting = true;
       try {
         const unsub = startListener(
-          (newData) => {
+          (newData, authoritative = true) => {
             if (channel) {
+              // Firestore may emit an empty memory-cache snapshot before the
+              // server answers. Do not let that erase a useful IndexedDB first
+              // paint. The first server-backed snapshot always wins.
+              if (authoritative === false && channel.lastData !== null) return;
+              if (authoritative) channel.remoteDelivered = true;
               channel.lastData = newData;
-              if (shouldPersistCache) {
+              if (authoritative && cacheBackend === 'localStorage') {
                 setLocalCache(cacheKey, newData);
+              } else if (authoritative && cacheBackend === 'indexedDB') {
+                void writePortalFastCache(cacheKey, cacheUserId, newData);
               }
-              
-              // Track Firestore Read Telemetry
-              const readCount = Array.isArray(newData) ? Math.max(1, newData.length) : 1;
-              trackFirebaseOp('read', readCount, getModuleNameForChannel(channelKey));
+
+              // Track only server-backed reads; memory-cache emissions are not
+              // billed as another remote read and should not inflate telemetry.
+              if (authoritative) {
+                const readCount = Array.isArray(newData) ? Math.max(1, newData.length) : 1;
+                trackFirebaseOp('read', readCount, getModuleNameForChannel(channelKey));
+              }
 
               channel.listeners.forEach((cb) => {
                 try {
@@ -722,7 +772,7 @@ export function createSharedSync<T>(
               channel.unsubFirestore();
             } catch (e) {}
           }
-          activeChannels.delete(channelKey);
+          activeChannels.delete(activeChannelKey);
         }
       }
     };
@@ -812,11 +862,70 @@ export async function updateClientDoc(client: Client): Promise<Client> {
 
 // 2. Instruments
 const INSTRUMENT_PAGE_SIZE = 1000;
+const INSTRUMENT_FAST_CACHE_KEY = 'instruments';
 const instrumentCache = new Map<string, Instrument>();
 let instrumentLoadPromise: Promise<void> | null = null;
+let instrumentCacheHydrationPromise: Promise<void> | null = null;
 let instrumentInitialLoadComplete = false;
 let instrumentLiveUnsubscribe: (() => void) | null = null;
+let instrumentCacheUserId = '';
+let instrumentPersistTimer: ReturnType<typeof setTimeout> | null = null;
 const instrumentSubscribers = new Set<(instruments: Instrument[]) => void>();
+
+const ensureInstrumentCacheScope = () => {
+  const nextUserId = auth.currentUser?.uid || 'anonymous';
+  if (instrumentCacheUserId === nextUserId) return nextUserId;
+
+  instrumentCacheUserId = nextUserId;
+  instrumentCache.clear();
+  instrumentInitialLoadComplete = false;
+  instrumentLoadPromise = null;
+  instrumentCacheHydrationPromise = null;
+  if (instrumentLiveUnsubscribe) {
+    try { instrumentLiveUnsubscribe(); } catch (e) {}
+    instrumentLiveUnsubscribe = null;
+  }
+  if (instrumentPersistTimer) {
+    clearTimeout(instrumentPersistTimer);
+    instrumentPersistTimer = null;
+  }
+  return nextUserId;
+};
+
+const schedulePersistInstrumentCache = () => {
+  const userId = ensureInstrumentCacheScope();
+  if (instrumentPersistTimer) clearTimeout(instrumentPersistTimer);
+  instrumentPersistTimer = setTimeout(() => {
+    instrumentPersistTimer = null;
+    const snapshot = deduplicateInstrumentsByCertificate(Array.from(instrumentCache.values()));
+    void writePortalFastCache(INSTRUMENT_FAST_CACHE_KEY, userId, snapshot);
+  }, 180);
+};
+
+const hydrateInstrumentCacheFromFastCache = async (): Promise<void> => {
+  ensureInstrumentCacheScope();
+  if (instrumentCache.size > 0) return;
+  if (instrumentCacheHydrationPromise) return instrumentCacheHydrationPromise;
+  const userId = instrumentCacheUserId;
+  const task = (async () => {
+    const cached = await readPortalFastCache<Instrument[]>(
+      INSTRUMENT_FAST_CACHE_KEY,
+      userId,
+      DEFAULT_FAST_CACHE_MAX_AGE_MS,
+    );
+    // Se a rede já terminou enquanto o IndexedDB era lido, não reintroduzimos
+    // dados antigos sobre o snapshot autoritativo.
+    if (!cached || instrumentInitialLoadComplete || instrumentCacheUserId !== userId) return;
+    cached
+      .filter((instrument) => instrument && instrument.id && (instrument as any).isDeleted !== true)
+      .forEach((instrument) => mergeInstrumentIntoCache(instrument));
+    if (instrumentCache.size > 0) notifyInstrumentSubscribers();
+  })().finally(() => {
+    if (instrumentCacheHydrationPromise === task) instrumentCacheHydrationPromise = null;
+  });
+  instrumentCacheHydrationPromise = task;
+  return task;
+};
 
 const normalizeInstrumentCertificate = (instrument: Partial<Instrument>): string =>
   String(instrument.certificateNumber || instrument.coma || '')
@@ -912,6 +1021,7 @@ const notifyInstrumentSubscribers = () => {
   )
     .sort((a, b) => String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true }));
   instrumentSubscribers.forEach((subscriber) => subscriber(snapshot));
+  if (snapshot.length > 0) schedulePersistInstrumentCache();
 };
 
 const mergeInstrumentIntoCache = (instrument: Instrument) => {
@@ -939,18 +1049,22 @@ const ensureInstrumentLiveListener = (fromIso: string) => {
       }
     });
     notifyInstrumentSubscribers();
+    schedulePersistInstrumentCache();
   }, (error) => {
     console.error('Instrument incremental listener error:', error);
   });
 };
 
 const loadInstrumentsInPages = async (force = false): Promise<void> => {
+  ensureInstrumentCacheScope();
   if (instrumentInitialLoadComplete && !force) return;
   if (instrumentLoadPromise && !force) return instrumentLoadPromise;
   const liveStartIso = new Date(Date.now() - 5000).toISOString();
   ensureInstrumentLiveListener(liveStartIso);
 
   const task = (async () => {
+    const cachedIdsBeforeRefresh = new Set(instrumentCache.keys());
+    const activeServerIds = new Set<string>();
     let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
     while (true) {
       const pageQuery = cursor
@@ -968,7 +1082,12 @@ const loadInstrumentsInPages = async (force = false): Promise<void> => {
       const page = await getDocs(pageQuery);
       page.docs.forEach((instrumentDoc) => {
         const instrument = { id: instrumentDoc.id, ...instrumentDoc.data() } as Instrument;
-        if ((instrument as any).isDeleted !== true) mergeInstrumentIntoCache(instrument);
+        if ((instrument as any).isDeleted === true) {
+          instrumentCache.delete(instrumentDoc.id);
+          return;
+        }
+        activeServerIds.add(instrumentDoc.id);
+        mergeInstrumentIntoCache(instrument);
       });
 
       // Mescla com alterações capturadas pelo listener incremental durante a carga.
@@ -978,7 +1097,15 @@ const loadInstrumentsInPages = async (force = false): Promise<void> => {
       cursor = page.docs[page.docs.length - 1] || null;
       if (!cursor) break;
     }
+    // Remove apenas itens que vieram do cache anterior e não existem mais no
+    // snapshot completo. Alterações novas recebidas pelo listener durante a
+    // carga não pertencem a cachedIdsBeforeRefresh e são preservadas.
+    cachedIdsBeforeRefresh.forEach((id) => {
+      if (!activeServerIds.has(id)) instrumentCache.delete(id);
+    });
+    notifyInstrumentSubscribers();
     instrumentInitialLoadComplete = true;
+    schedulePersistInstrumentCache();
   })().finally(() => {
     if (instrumentLoadPromise === task) instrumentLoadPromise = null;
   });
@@ -988,11 +1115,21 @@ const loadInstrumentsInPages = async (force = false): Promise<void> => {
 };
 
 export async function syncInstruments(callback: (instruments: Instrument[]) => void) {
+  ensureInstrumentCacheScope();
   instrumentSubscribers.add(callback);
   if (instrumentCache.size > 0) notifyInstrumentSubscribers();
-  loadInstrumentsInPages().catch((error) => {
-    console.error('Error loading instruments in pages:', error);
-  });
+
+  // Cache-first: hidrata o último snapshot local antes da carga paginada. A tela
+  // deixa de iniciar zerada após F5/login e a nuvem revalida logo em seguida.
+  void (async () => {
+    try {
+      await hydrateInstrumentCacheFromFastCache();
+      await loadInstrumentsInPages();
+    } catch (error) {
+      console.error('Error loading instruments cache/network:', error);
+    }
+  })();
+
   return () => {
     instrumentSubscribers.delete(callback);
   };
@@ -1298,6 +1435,7 @@ export async function deleteInstrumentDoc(id: string): Promise<void> {
   if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o instrumento.');
   instrumentCache.delete(id);
   notifyInstrumentSubscribers();
+  schedulePersistInstrumentCache();
 }
 
 // 3. Calibration Reports
@@ -1312,10 +1450,10 @@ export async function syncReports(callback: (reports: CalibrationReport[]) => vo
         const list = snapshot.docs
           .map(d => ({ ...d.data(), id: d.id } as CalibrationReport))
           .filter(report => report.isDeleted !== true);
-        onData(list);
+        onData(list, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 }
@@ -2004,21 +2142,20 @@ export async function recoverArchivedCalibrationDoc(
 
 // 4. Contact Messages / Leads
 export async function syncMessages(callback: (messages: ContactMessage[]) => void) {
-  const colRef = collection(db, 'contactMessages');
-  return onSnapshot(colRef, async (snapshot) => {
-    if (snapshot.empty) {
-      callback([]);
-    } else {
-      const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ContactMessage));
-      callback(list);
-    }
-  }, (err) => {
-    if (err && err.code === 'permission-denied') {
-      console.warn('Firestore sync permission denied (expected if not logged in).');
-    } else {
-      console.error('Firestore sync error:', err);
-    }
-  });
+  const shared = createSharedSync<ContactMessage[]>(
+    'contactMessages',
+    'contactMessages',
+    [],
+    (onData, onError) => {
+      const colRef = collection(db, 'contactMessages');
+      return onSnapshot(colRef, (snapshot) => {
+        const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ContactMessage));
+        onData(list, !snapshot.metadata.fromCache);
+      }, onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function updateMessageDoc(id: string, status: ContactMessage['status']): Promise<void> {
@@ -2034,16 +2171,16 @@ export interface CertSequenceConfig {
 }
 
 export async function syncCertSequenceConfig(callback: (config: CertSequenceConfig) => void) {
+  const fallback = { prefix: 'COMA-', nextNumber: 1, year: new Date().getFullYear() };
+  callback(getLocalCache<CertSequenceConfig>('certSequence', fallback));
   const docRef = doc(db, 'systemSettings', 'certSequence');
   return onSnapshot(docRef, (snapshot) => {
-    if (!snapshot.exists()) {
-      callback({ prefix: 'COMA-', nextNumber: 1, year: new Date().getFullYear() });
-    } else {
-      callback(snapshot.data() as CertSequenceConfig);
-    }
+    const config = snapshot.exists() ? snapshot.data() as CertSequenceConfig : fallback;
+    setLocalCache('certSequence', config);
+    callback(config);
   }, (err) => {
     console.error('Firestore syncCertSequenceConfig error:', err);
-    callback({ prefix: 'COMA-', nextNumber: 1, year: new Date().getFullYear() });
+    callback(getLocalCache<CertSequenceConfig>('certSequence', fallback));
   });
 }
 
@@ -2051,6 +2188,7 @@ export async function saveCertSequenceConfig(config: CertSequenceConfig): Promis
   try {
     const docRef = doc(db, 'systemSettings', 'certSequence');
     await setDoc(docRef, config);
+    setLocalCache('certSequence', config);
   } catch (err) {
     console.error('Error saving certSequence config:', err);
   }
@@ -2062,27 +2200,30 @@ export interface IntakeSequenceConfig {
 }
 
 export async function syncIntakeSequenceConfig(callback: (config: IntakeSequenceConfig) => void) {
+  const fallback = { prefix: 'C-', nextNumber: 19928 };
+  const cached = getLocalCache<IntakeSequenceConfig>('intakeSequence', fallback);
+  callback(cached);
   const docRef = doc(db, 'systemSettings', 'intakeSequence');
   return onSnapshot(docRef, (snapshot) => {
     if (!snapshot.exists()) {
-      const defaultConfig = { prefix: 'C-', nextNumber: 19928 };
-      setDoc(docRef, defaultConfig);
+      const defaultConfig = fallback;
+      setLocalCache('intakeSequence', defaultConfig);
+      localStorage.setItem('comanins_intake_sequence', JSON.stringify(defaultConfig));
+      void setDoc(docRef, defaultConfig).catch(() => {});
       callback(defaultConfig);
     } else {
       const data = snapshot.data();
-      callback({
+      const config = {
         prefix: data.prefix ?? 'C-',
         nextNumber: data.nextNumber ?? 19928
-      });
+      };
+      setLocalCache('intakeSequence', config);
+      localStorage.setItem('comanins_intake_sequence', JSON.stringify(config));
+      callback(config);
     }
   }, (err) => {
     console.error('Firestore syncIntakeSequenceConfig error:', err);
-    const saved = localStorage.getItem('comanins_intake_sequence');
-    if (saved) {
-      try { callback(JSON.parse(saved)); } catch (e) { callback({ prefix: 'C-', nextNumber: 19928 }); }
-    } else {
-      callback({ prefix: 'C-', nextNumber: 19928 });
-    }
+    callback(getLocalCache<IntakeSequenceConfig>('intakeSequence', cached));
   });
 }
 
@@ -2174,11 +2315,13 @@ export function normalizeDropdownOptions(raw: any): DropdownOptions {
 }
 
 export function syncDropdownOptions(callback: (options: DropdownOptions) => void) {
+  callback(normalizeDropdownOptions(getLocalCache<DropdownOptions>('dropdownOptions', DEFAULT_DROPDOWN_OPTIONS)));
   const docRef = doc(db, 'systemSettings', 'dropdownOptions');
   return onSnapshot(docRef, (snapshot) => {
     if (snapshot.exists()) {
       const rawData = snapshot.data();
       const normalized = normalizeDropdownOptions(rawData);
+      setLocalCache('dropdownOptions', normalized);
       callback(normalized);
       const needsRepair = Object.keys(normalized).some((key) => {
         const k = key as keyof DropdownOptions;
@@ -2192,7 +2335,7 @@ export function syncDropdownOptions(callback: (options: DropdownOptions) => void
     }
   }, (err) => {
     console.error('Firestore syncDropdownOptions error:', err);
-    callback(DEFAULT_DROPDOWN_OPTIONS);
+    callback(normalizeDropdownOptions(getLocalCache<DropdownOptions>('dropdownOptions', DEFAULT_DROPDOWN_OPTIONS)));
   });
 }
 
@@ -2201,6 +2344,7 @@ export async function saveDropdownOptions(options: DropdownOptions): Promise<voi
     const docRef = doc(db, 'systemSettings', 'dropdownOptions');
     const normalized = normalizeDropdownOptions(options);
     await setDoc(docRef, normalized);
+    setLocalCache('dropdownOptions', normalized);
   } catch (err) {
     console.error('Error saving dropdownOptions config:', err);
   }
@@ -2721,13 +2865,14 @@ export async function deleteEmployeeBirthdayDoc(id: string): Promise<void> {
 
 // 8. Trainings
 export async function syncTrainings(callback: (trainings: Training[]) => void) {
-  const colRef = collection(db, 'trainings');
-  return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Training)).filter((item: any) => item.isDeleted !== true);
-    callback(list);
-  }, (err) => {
-    console.error('Firestore syncTrainings error:', err);
-  });
+  const shared = createSharedSync<Training[]>(
+    'trainings', 'trainings', [],
+    (onData, onError) => onSnapshot(collection(db, 'trainings'), (snapshot) => {
+      onData(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Training)).filter((item: any) => item.isDeleted !== true), !snapshot.metadata.fromCache);
+    }, onError),
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function addTrainingDoc(data: Omit<Training, 'id'>): Promise<Training> {
@@ -2747,13 +2892,14 @@ export async function deleteTrainingDoc(id: string): Promise<void> {
 
 // 8.5 Employee ASOs
 export async function syncEmployeeAsos(callback: (records: EmployeeAsoRecord[]) => void) {
-  const colRef = collection(db, 'employeeAsos');
-  return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeAsoRecord)).filter((item: any) => item.isDeleted !== true);
-    callback(list);
-  }, (err) => {
-    console.error('Firestore syncEmployeeAsos error:', err);
-  });
+  const shared = createSharedSync<EmployeeAsoRecord[]>(
+    'employeeAsos', 'employeeAsos', [],
+    (onData, onError) => onSnapshot(collection(db, 'employeeAsos'), (snapshot) => {
+      onData(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeAsoRecord)).filter((item: any) => item.isDeleted !== true), !snapshot.metadata.fromCache);
+    }, onError),
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function addEmployeeAsoDoc(data: Omit<EmployeeAsoRecord, 'id'>): Promise<EmployeeAsoRecord> {
@@ -2776,13 +2922,14 @@ export async function deleteEmployeeAsoDoc(id: string): Promise<void> {
 
 // 9. Employee Trainings
 export async function syncEmployeeTrainings(callback: (records: EmployeeTrainingRecord[]) => void) {
-  const colRef = collection(db, 'employeeTrainings');
-  return onSnapshot(colRef, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeTrainingRecord)).filter((item: any) => item.isDeleted !== true);
-    callback(list);
-  }, (err) => {
-    console.error('Firestore syncEmployeeTrainings error:', err);
-  });
+  const shared = createSharedSync<EmployeeTrainingRecord[]>(
+    'employeeTrainings', 'employeeTrainings', [],
+    (onData, onError) => onSnapshot(collection(db, 'employeeTrainings'), (snapshot) => {
+      onData(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as EmployeeTrainingRecord)).filter((item: any) => item.isDeleted !== true), !snapshot.metadata.fromCache);
+    }, onError),
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function addEmployeeTrainingDoc(data: Omit<EmployeeTrainingRecord, 'id'>): Promise<EmployeeTrainingRecord> {
@@ -2936,10 +3083,14 @@ export async function saveHeaderLogoConfig(url: string): Promise<void> {
 }
 
 export async function syncCompanySettings(callback: (data: any) => void) {
+  const cached = getLocalCache<any>('companyInfo', null);
+  if (cached) callback(cached);
   const docRef = doc(db, 'systemSettings', 'companyInfo');
   return onSnapshot(docRef, (snapshot) => {
     if (snapshot.exists()) {
-      callback(snapshot.data());
+      const data = snapshot.data();
+      setLocalCache('companyInfo', data);
+      callback(data);
     }
   }, (err) => {
     if (err && err.code === 'permission-denied') {
@@ -2947,6 +3098,7 @@ export async function syncCompanySettings(callback: (data: any) => void) {
     } else {
       console.error('Firestore sync error:', err);
     }
+    if (cached) callback(cached);
   });
 }
 
@@ -2954,6 +3106,7 @@ export async function saveCompanySettings(data: any): Promise<void> {
   try {
     const docRef = doc(db, 'systemSettings', 'companyInfo');
     await setDoc(docRef, data);
+    setLocalCache('companyInfo', data);
   } catch (err) {
     console.error('Error saving companyInfo config:', err);
   }
@@ -3212,17 +3365,17 @@ export async function deleteReferenceStandardDoc(id: string): Promise<void> {
 }
 
 export async function syncMedicalExams(callback: (exams: MedicalExam[]) => void) {
-  try {
-    localStorage.removeItem('comanins_cache_medical_exams');
-  } catch (e) {}
-  const q = query(collection(db, 'medical_exams'), limit(25));
-  return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam)).filter((item: any) => item.isDeleted !== true);
-    callback(list);
-  }, (err) => {
-    handleQuotaOrError(err);
-    callback([]);
-  });
+  const shared = createSharedSync<MedicalExam[]>(
+    'medical_exams', 'medical_exams', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'medical_exams'), limit(25));
+      return onSnapshot(q, (snapshot) => {
+        onData(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MedicalExam)).filter((item: any) => item.isDeleted !== true), !snapshot.metadata.fromCache);
+      }, onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function addMedicalExamDoc(data: Omit<MedicalExam, 'id'>): Promise<MedicalExam> {
@@ -3241,47 +3394,49 @@ export async function deleteMedicalExamDoc(id: string): Promise<void> {
 }
 
 export async function syncExamTypes(callback: (types: ExamTypeItem[]) => void) {
+  const defaults: ExamTypeItem[] = [
+    { id: '1', name: 'Admissional', description: 'Realizado antes de o funcionário iniciar suas atividades.', validityMonths: null },
+    { id: '2', name: 'Demissional', description: 'Realizado no desligamento do funcionário.', validityMonths: null },
+    { id: '3', name: 'Periódico', description: 'Realizado em intervalos regulares.', validityMonths: 12 },
+    { id: '4', name: 'Retorno ao Trabalho', description: 'Após afastamento igual ou superior a 30 dias por doença ou acidente.', validityMonths: null },
+    { id: '5', name: 'Mudança de Função', description: 'Antes da mudança de função ou setor que implique alteração de risco.', validityMonths: null },
+    { id: '6', name: 'Audiometria', description: 'Avaliação da capacidade auditiva.', validityMonths: 6 }
+  ];
+  callback(getLocalCache<ExamTypeItem[]>('examTypes', defaults));
   const docRef = doc(db, 'systemSettings', 'examTypes');
   return onSnapshot(docRef, (snapshot) => {
-    if (snapshot.exists()) {
-      callback(snapshot.data().types as ExamTypeItem[]);
-    } else {
-      callback([
-        { id: '1', name: 'Admissional', description: 'Realizado antes de o funcionário iniciar suas atividades.', validityMonths: null },
-        { id: '2', name: 'Demissional', description: 'Realizado no desligamento do funcionário.', validityMonths: null },
-        { id: '3', name: 'Periódico', description: 'Realizado em intervalos regulares.', validityMonths: 12 },
-        { id: '4', name: 'Retorno ao Trabalho', description: 'Após afastamento igual ou superior a 30 dias por doença ou acidente.', validityMonths: null },
-        { id: '5', name: 'Mudança de Função', description: 'Antes da mudança de função ou setor que implique alteração de risco.', validityMonths: null },
-        { id: '6', name: 'Audiometria', description: 'Avaliação da capacidade auditiva.', validityMonths: 6 }
-      ]);
-    }
+    const types = snapshot.exists() ? snapshot.data().types as ExamTypeItem[] : defaults;
+    setLocalCache('examTypes', types);
+    callback(types);
   }, (err) => {
     console.error('Firestore syncExamTypes error:', err);
-    callback([]);
+    callback(getLocalCache<ExamTypeItem[]>('examTypes', defaults));
   });
 }
 
 export async function saveExamTypes(types: ExamTypeItem[]): Promise<void> {
   await setDoc(doc(db, 'systemSettings', 'examTypes'), { types });
+  setLocalCache('examTypes', types);
 }
 
 // Destructive production reset helpers were removed. Restore data only from an explicit backup/recovery workflow.
 
 // 8. Payslips (Contra-cheques)
 export async function syncPayslips(callback: (payslips: Payslip[]) => void, employeeId?: string) {
-  try {
-    localStorage.removeItem('comanins_cache_payslips');
-  } catch (e) {}
-  const q = employeeId
-    ? query(collection(db, 'payslips'), where('employeeId', '==', employeeId))
-    : query(collection(db, 'payslips'));
-  return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip)).filter((item: any) => item.isDeleted !== true);
-    callback(list);
-  }, (err) => {
-    handleQuotaOrError(err);
-    callback([]);
-  });
+  const scopeKey = employeeId ? `payslips_${employeeId}` : 'payslips_all';
+  const shared = createSharedSync<Payslip[]>(
+    scopeKey, scopeKey, [],
+    (onData, onError) => {
+      const q = employeeId
+        ? query(collection(db, 'payslips'), where('employeeId', '==', employeeId))
+        : query(collection(db, 'payslips'));
+      return onSnapshot(q, (snapshot) => {
+        onData(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payslip)).filter((item: any) => item.isDeleted !== true), !snapshot.metadata.fromCache);
+      }, onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function addPayslipDoc(data: Omit<Payslip, 'id'>): Promise<Payslip> {
@@ -3419,13 +3574,15 @@ const rentalApiRequest = async <T = any>(url: string, options: RequestInit = {})
 };
 
 export const syncRentalServices = (callback: (items: RentalService[]) => void) => {
-  const q = query(collection(db, 'rentalServices'), orderBy('name', 'asc'), limit(500));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalService)));
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback([]);
-  });
+  const shared = createSharedSync<RentalService[]>(
+    'rentalServices', 'rentalServices', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'rentalServices'), orderBy('name', 'asc'), limit(500));
+      return onSnapshot(q, (snapshot) => onData(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalService)), !snapshot.metadata.fromCache), onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 };
 
 export const saveRentalService = async (service: Partial<RentalService>): Promise<string> => {
@@ -3456,13 +3613,15 @@ export const saveRentalService = async (service: Partial<RentalService>): Promis
 };
 
 export const syncRentalAssets = (callback: (items: RentalAsset[]) => void) => {
-  const q = query(collection(db, 'rentalAssets'), orderBy('assetCode', 'asc'), limit(1000));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalAsset)));
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback([]);
-  });
+  const shared = createSharedSync<RentalAsset[]>(
+    'rentalAssets', 'rentalAssets', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'rentalAssets'), orderBy('assetCode', 'asc'), limit(1000));
+      return onSnapshot(q, (snapshot) => onData(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalAsset)), !snapshot.metadata.fromCache), onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 };
 
 export const saveRentalAsset = async (asset: Partial<RentalAsset>): Promise<string> => {
@@ -3502,42 +3661,50 @@ export const saveRentalAsset = async (asset: Partial<RentalAsset>): Promise<stri
 };
 
 export const syncRentalContracts = (callback: (items: RentalContract[]) => void) => {
-  const q = query(collection(db, 'rentalContracts'), orderBy('createdAt', 'desc'), limit(1000));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalContract)));
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback([]);
-  });
+  const shared = createSharedSync<RentalContract[]>(
+    'rentalContracts', 'rentalContracts', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'rentalContracts'), orderBy('createdAt', 'desc'), limit(1000));
+      return onSnapshot(q, (snapshot) => onData(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalContract)), !snapshot.metadata.fromCache), onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 };
 
 export const syncRentalInvoices = (callback: (items: RentalInvoice[]) => void) => {
-  const q = query(collection(db, 'rentalInvoices'), orderBy('createdAt', 'desc'), limit(1000));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalInvoice)));
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback([]);
-  });
+  const shared = createSharedSync<RentalInvoice[]>(
+    'rentalInvoices', 'rentalInvoices', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'rentalInvoices'), orderBy('createdAt', 'desc'), limit(1000));
+      return onSnapshot(q, (snapshot) => onData(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalInvoice)), !snapshot.metadata.fromCache), onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 };
 
 export const syncRentalMovements = (callback: (items: RentalMovement[]) => void) => {
-  const q = query(collection(db, 'rentalMovements'), orderBy('createdAt', 'desc'), limit(1000));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalMovement)));
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback([]);
-  });
+  const shared = createSharedSync<RentalMovement[]>(
+    'rentalMovements', 'rentalMovements', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'rentalMovements'), orderBy('createdAt', 'desc'), limit(1000));
+      return onSnapshot(q, (snapshot) => onData(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalMovement)), !snapshot.metadata.fromCache), onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 };
 
 export const syncRentalSettings = (callback: (settings: RentalSettings | null) => void) => {
-  return onSnapshot(doc(db, 'systemSettings', 'rentalBilling'), (snapshot) => {
-    callback(snapshot.exists() ? snapshot.data() as RentalSettings : null);
-  }, (error) => {
-    handleQuotaOrError(error);
-    callback(null);
-  });
+  const shared = createSharedSync<RentalSettings | null>(
+    'rentalSettings', 'rentalSettings', null,
+    (onData, onError) => onSnapshot(doc(db, 'systemSettings', 'rentalBilling'), (snapshot) => {
+      onData(snapshot.exists() ? snapshot.data() as RentalSettings : null, !snapshot.metadata.fromCache);
+    }, onError),
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 };
 
 export const saveRentalSettings = async (settings: Partial<RentalSettings>): Promise<RentalSettings> => {
@@ -3636,10 +3803,10 @@ export const syncFinanceTransactions = (callback: (transactions: FinanceTransact
       const q = query(collection(db, 'financeTransactions'), orderBy('date', 'desc'), limit(1000));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction)).filter((item: any) => item.isDeleted !== true);
-        onData(items);
+        onData(items, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 };
@@ -3755,10 +3922,10 @@ export const syncFinanceContracts = (callback: (contracts: FinanceContract[]) =>
       const q = query(collection(db, 'financeContracts'), limit(1000));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceContract)).filter((item: any) => item.isDeleted !== true);
-        onData(items);
+        onData(items, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 };
@@ -3786,10 +3953,10 @@ export const syncFinanceMeasurements = (callback: (measurements: FinanceMeasurem
       const q = query(collection(db, 'financeMeasurements'), orderBy('createdAt', 'desc'), limit(1000));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceMeasurement)).filter((item: any) => item.isDeleted !== true);
-        onData(items);
+        onData(items, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 };
@@ -3826,10 +3993,10 @@ export const syncFinanceCollection = <T>(collectionName: string, callback: (data
       const q = query(collection(db, collectionName), limit(Math.max(1, Math.min(1000, Math.floor(maxItems || 25)))));
       return onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as T)).filter((item: any) => item?.isDeleted !== true);
-        onData(items);
+        onData(items, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 };
@@ -3867,10 +4034,10 @@ export const syncFinanceOperations = (callback: (items: FinanceOperation[]) => v
         const items = snapshot.docs
           .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as FinanceOperation))
           .filter((item: any) => item?.isDeleted !== true);
-        onData(items);
+        onData(items, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 };
@@ -3955,10 +4122,10 @@ export const syncFinanceBankStatementItems = (callback: (items: FinanceBankState
         const items = snapshot.docs
           .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as FinanceBankStatementItem))
           .filter((item: any) => item?.isDeleted !== true);
-        onData(items);
+        onData(items, !snapshot.metadata.fromCache);
       }, onError);
     },
-    { persistCache: false }
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true }
   );
   return shared(callback);
 };
@@ -4991,17 +5158,17 @@ export async function bulkUpsertFieldServiceRecords(
 }
 
 export async function syncHealthProgramDocs(callback: (docs: HealthProgramDocument[]) => void) {
-  try {
-    localStorage.removeItem('comanins_cache_health_program_docs');
-  } catch (e) {}
-  const q = query(collection(db, 'health_program_docs'), limit(100));
-  return onSnapshot(q, async (snapshot) => {
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument)).filter((item: any) => item.isDeleted !== true);
-    callback(list);
-  }, (err) => {
-    handleQuotaOrError(err);
-    callback([]);
-  });
+  const shared = createSharedSync<HealthProgramDocument[]>(
+    'health_program_docs', 'health_program_docs', [],
+    (onData, onError) => {
+      const q = query(collection(db, 'health_program_docs'), limit(100));
+      return onSnapshot(q, (snapshot) => {
+        onData(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as HealthProgramDocument)).filter((item: any) => item.isDeleted !== true), !snapshot.metadata.fromCache);
+      }, onError);
+    },
+    { persistCache: true, cacheBackend: 'indexedDB', userScopedCache: true },
+  );
+  return shared(callback);
 }
 
 export async function addHealthProgramDoc(data: Omit<HealthProgramDocument, 'id'>, idOverride?: string): Promise<HealthProgramDocument> {

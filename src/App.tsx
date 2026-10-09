@@ -2,6 +2,7 @@ import React, { Component, useState, useEffect } from 'react';
 import { deleteField } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { authJsonFetch, clientAuthJsonFetch } from './utils/authApi';
+import { readPortalFastCache, writePortalFastCache } from './lib/portalFastCache';
 import { downloadInternalAccessCredentialsPdf } from './utils/internalAccessPdf';
 import PublicSite from './components/PublicSite';
 import InternalPortal from './components/InternalPortal';
@@ -97,6 +98,27 @@ export default function App() {
   // Loading and Error boundaries
   const [isLoading, setIsLoading] = useState(true);
   const [quotaExceededNotice, setQuotaExceededNotice] = useState(false);
+
+  const hydrateInternalPortalFastCache = async () => {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+    try {
+      const [cachedInstruments, cachedReports, cachedClients, cachedUsers] = await Promise.all([
+        readPortalFastCache<Instrument[]>('instruments', userId),
+        readPortalFastCache<CalibrationReport[]>('calibrationReports', userId),
+        readPortalFastCache<Client[]>('internalClients', userId),
+        readPortalFastCache<PortalUser[]>('internalPortalUsers', userId),
+      ]);
+      if (Array.isArray(cachedInstruments) && cachedInstruments.length > 0) {
+        setInstruments(deduplicateInstrumentsByCertificate(cachedInstruments));
+      }
+      if (Array.isArray(cachedReports) && cachedReports.length > 0) setReports(cachedReports);
+      if (Array.isArray(cachedClients) && cachedClients.length > 0) setClients(cachedClients);
+      if (Array.isArray(cachedUsers) && cachedUsers.length > 0) setInternalUsers(cachedUsers);
+    } catch (error) {
+      console.warn('Fast cache hydration skipped:', error);
+    }
+  };
 
   useEffect(() => {
     const handleQuota = () => setQuotaExceededNotice(true);
@@ -233,15 +255,26 @@ export default function App() {
       }
 
       try {
+        const cacheUserId = auth.currentUser?.uid || 'anonymous';
+        const cachedClients = await readPortalFastCache<Client[]>('internalClients', cacheUserId);
+        if (!cancelled && Array.isArray(cachedClients) && cachedClients.length > 0) {
+          setClients(cachedClients);
+        }
+
         const response = await authJsonFetch('/api/internal/clients');
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data?.success !== true || !Array.isArray(data?.clients)) {
           throw new Error(data?.error || 'CLIENT_DIRECTORY_UNAVAILABLE');
         }
-        if (!cancelled) setClients(data.clients);
+        if (!cancelled) {
+          setClients(data.clients);
+          void writePortalFastCache('internalClients', cacheUserId, data.clients);
+        }
       } catch (err) {
         console.error('Error loading authenticated clients directory:', err);
-        if (!cancelled) setClients([]);
+        // Preserve the last authorized snapshot when the network is slow/offline.
+        // Firestore/API remains authoritative and will replace it on the next success.
+        if (!cancelled) setClients((prev) => prev);
       }
     };
 
@@ -265,17 +298,25 @@ export default function App() {
       }
 
       try {
+        const cacheUserId = auth.currentUser?.uid || 'anonymous';
+        const cachedUsers = await readPortalFastCache<PortalUser[]>('internalPortalUsers', cacheUserId);
+        if (!cancelled && Array.isArray(cachedUsers) && cachedUsers.length > 0) {
+          setInternalUsers(cachedUsers);
+        }
+
         const response = await authJsonFetch('/api/internal/portal-users');
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data?.error || 'Não foi possível carregar o diretório interno.');
         }
         if (!cancelled) {
-          setInternalUsers(Array.isArray(data?.users) ? data.users : []);
+          const users = Array.isArray(data?.users) ? data.users : [];
+          setInternalUsers(users);
+          void writePortalFastCache('internalPortalUsers', cacheUserId, users);
         }
       } catch (err) {
         console.error('Error loading protected internal user directory:', err);
-        if (!cancelled) setInternalUsers([]);
+        if (!cancelled) setInternalUsers((prev) => prev);
       }
     };
 
@@ -708,8 +749,11 @@ export default function App() {
             initialTab={loginTab}
             internalUsers={internalUsers}
             onUpdateInternalUser={handleUpdateInternalUser}
-            onLoginSuccessInternal={(user) => {
+            onLoginSuccessInternal={async (user) => {
               setCurrentInternalUser(user);
+              // First paint do portal já recebe o último snapshot autorizado.
+              // Firestore/API revalidam silenciosamente depois que a tela monta.
+              await hydrateInternalPortalFastCache();
               setViewMode('portal');
             }}
             onLoginSuccessClient={(client) => {
