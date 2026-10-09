@@ -5207,8 +5207,13 @@ Status atual: ${e.status}.`,
 
     try {
       setIsUploadingInstPhoto(true);
-      const compressedList = await compressMultipleImages(e.target.files);
-      const photoDataUrl = compressedList[0];
+      const firstFile = e.target.files[0];
+      // Foto pós-laboratório precisa preservar texto pequeno da etiqueta e da escala.
+      // 800 px era suficiente para armazenamento, mas pode destruir caracteres finos
+      // em fotos de iPhone/Android antes da análise visual do Gemini.
+      const photoDataUrl = photoModalType === "calibrated"
+        ? await compressImageToWebResolution(firstFile, 1600, 1600, 0.8)
+        : (await compressMultipleImages(e.target.files))[0];
       if (!photoDataUrl) {
         alert("Nenhuma foto válida foi processada. Tente selecionar novamente no seu dispositivo.");
         return;
@@ -5238,7 +5243,22 @@ Status atual: ${e.status}.`,
           photoAiValidation = validation;
         } catch (validationError: any) {
           console.error("Erro na validação IA da foto pós-laboratório:", validationError);
-          alert("Não foi possível validar a Foto Após Laboratório com a IA. A imagem não foi salva. Tente novamente com a faixa do instrumento e a etiqueta de calibração bem visíveis.");
+          const rawMessage = String(validationError?.message || validationError || "");
+          let detail = "Falha técnica ao comunicar com a IA do servidor.";
+          if (rawMessage.includes("AI_NOT_CONFIGURED") || rawMessage.includes("GEMINI_API_KEY")) {
+            detail = "A IA não está configurada no servidor. É necessário configurar GEMINI_API_KEY no ambiente de produção e reiniciar o serviço.";
+          } else if (rawMessage.includes("AI_AUTH_FAILED") || rawMessage.includes("401")) {
+            detail = "A chave Gemini configurada no servidor não foi aceita pelo Google.";
+          } else if (rawMessage.includes("AI_PERMISSION_DENIED") || rawMessage.includes("403")) {
+            detail = "A chave/projeto Gemini não possui permissão para o modelo de visão configurado.";
+          } else if (rawMessage.includes("AI_MODEL_UNAVAILABLE") || rawMessage.includes("404")) {
+            detail = "O modelo de visão configurado não está disponível para este projeto. O servidor deve utilizar GEMINI_VISION_MODEL=gemini-3.8-flash ou um modelo Flash habilitado para o projeto.";
+          } else if (rawMessage.includes("AI_RATE_LIMITED") || rawMessage.includes("429") || rawMessage.includes("RATE_EXCEEDED")) {
+            detail = "A cota temporária da IA foi atingida. Aguarde alguns instantes e tente novamente.";
+          } else if (rawMessage.includes("AI_INVALID_RESPONSE")) {
+            detail = "A IA respondeu em formato inválido. Tente novamente; se persistir, revise o modelo configurado no servidor.";
+          }
+          alert(`Não foi possível validar a Foto Após Laboratório com a IA. A imagem não foi salva.\n\n${detail}`);
           return;
         }
       }

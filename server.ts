@@ -2,6 +2,9 @@ import express from "express";
 import type { NextFunction, Response } from "express";
 import path from "path";
 import dotenv from "dotenv";
+// Load AI/server secrets from .env.local in local/AI Studio exports, then .env as fallback.
+// Existing process environment variables are preserved because dotenv does not override them by default.
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 import fs from "fs";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
@@ -6091,6 +6094,78 @@ function getGeminiClient(): GoogleGenAI | null {
   }
 }
 
+const getGeminiVisionModels = (): string[] => {
+  const configured = String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || '').trim();
+  return Array.from(new Set([
+    configured,
+    'gemini-3.8-flash',
+    'gemini-flash-latest',
+    'gemini-2.5-flash',
+  ].filter(Boolean)));
+};
+
+const classifyGeminiRuntimeError = (error: unknown): { code: string; message: string } => {
+  const raw = String((error as any)?.message || error || '');
+  const lower = raw.toLowerCase();
+  if (lower.includes('api key') || lower.includes('api_key') || lower.includes('unauthenticated') || lower.includes('401')) {
+    return { code: 'AI_AUTH_FAILED', message: 'A chave GEMINI_API_KEY do servidor não foi aceita pela API do Google.' };
+  }
+  if (lower.includes('permission') || lower.includes('403')) {
+    return { code: 'AI_PERMISSION_DENIED', message: 'O projeto/chave Gemini não possui permissão para o modelo de visão configurado.' };
+  }
+  if (lower.includes('429') || lower.includes('resource_exhausted') || lower.includes('quota') || lower.includes('rate exceeded')) {
+    return { code: 'AI_RATE_LIMITED', message: 'A cota/limite temporário da IA foi atingido. Tente novamente em instantes.' };
+  }
+  if (lower.includes('404') || lower.includes('not found') || lower.includes('model')) {
+    return { code: 'AI_MODEL_UNAVAILABLE', message: 'O modelo Gemini configurado não está disponível para este projeto.' };
+  }
+  if (lower.includes('empty_ai_response') || lower.includes('invalid_ai_json') || lower.includes('json')) {
+    return { code: 'AI_INVALID_RESPONSE', message: 'A IA respondeu em formato inválido e a validação visual não pôde ser concluída.' };
+  }
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('fetch failed') || lower.includes('network')) {
+    return { code: 'AI_NETWORK_ERROR', message: 'Falha temporária de comunicação com a API do Gemini.' };
+  }
+  return { code: 'AI_VALIDATION_FAILED', message: 'A análise visual do Gemini falhou antes de concluir a validação.' };
+};
+
+async function generateVisionContentWithModelFallback(
+  gemini: GoogleGenAI,
+  prompt: string,
+  mimeType: string,
+  imageData: string,
+): Promise<{ response: any; model: string }> {
+  let lastError: unknown = null;
+  const models = getGeminiVisionModels();
+
+  for (const model of models) {
+    try {
+      const response = await callGeminiWithRetry(() => gemini.models.generateContent({
+        model,
+        // A Part[] is intentionally used here; @google/genai aggregates the parts into
+        // a single user Content, which is the documented multimodal request shape.
+        contents: [
+          { text: prompt },
+          { inlineData: { mimeType, data: imageData } },
+        ],
+        config: {
+          temperature: 0.05,
+          responseMimeType: 'application/json',
+        },
+      }), 2, 900);
+      return { response, model };
+    } catch (error) {
+      lastError = error;
+      const classified = classifyGeminiRuntimeError(error);
+      console.warn(`[Gemini Vision] modelo ${model} falhou: ${classified.code}`);
+      // Authentication, permission and quota failures are account-level; trying another
+      // model would only add latency. Model-not-found/availability errors can fall back.
+      if (!['AI_MODEL_UNAVAILABLE', 'AI_VALIDATION_FAILED'].includes(classified.code)) break;
+    }
+  }
+
+  throw lastError || new Error('AI_MODEL_UNAVAILABLE');
+}
+
 
 // ------------------- CRON JOB (NOTIFICAÇÕES E ALERTAS) -------------------
 
@@ -8813,6 +8888,16 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
 });
 
 
+// Lightweight diagnostics: exposes configuration state only, never the secret itself.
+app.get("/api/ai/status", requireAuth, requireInternalAccount, async (_req: AuthRequest, res) => {
+  const key = String(process.env.GEMINI_API_KEY || '').trim();
+  return res.json({
+    configured: Boolean(key && key !== 'MY_GEMINI_API_KEY'),
+    visionModels: getGeminiVisionModels(),
+    serverTime: new Date().toISOString(),
+  });
+});
+
 // Quality gate: inspect the post-laboratory photo before it is accepted.
 app.post("/api/validate-calibration-photo", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
   const instrumentId = asLimitedString(req.body?.instrumentId, 180);
@@ -8843,7 +8928,10 @@ app.post("/api/validate-calibration-photo", requireAuth, requireInternalAccount,
 
     const gemini = getGeminiClient();
     if (!gemini) {
-      return res.status(503).json({ error: 'AI_UNAVAILABLE', message: 'A IA está indisponível. A foto pós-laboratório não foi aceita.' });
+      return res.status(503).json({
+        error: 'AI_NOT_CONFIGURED',
+        message: 'GEMINI_API_KEY não está disponível no servidor. Configure o segredo no ambiente de produção e reinicie o serviço antes de validar fotos.',
+      });
     }
 
     const prompt = `Você atua como inspetor visual de qualidade de um laboratório de calibração.
@@ -8895,14 +8983,12 @@ FORMATO:
   "summary": "resumo curto"
 }`;
 
-    const response = await callGeminiWithRetry(() => gemini.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [
-        { text: prompt },
-        { inlineData: { mimeType: imageMatch[1].toLowerCase(), data: imageMatch[2] } },
-      ] }],
-      config: { temperature: 0.05, responseMimeType: 'application/json' },
-    }));
+    const { response, model: visionModel } = await generateVisionContentWithModelFallback(
+      gemini,
+      prompt,
+      imageMatch[1].toLowerCase(),
+      imageMatch[2],
+    );
     const parsed = parseGeminiJson(response.text || '');
     const detectedLabelNumber = asLimitedString(parsed.detectedLabelNumber, 180);
     let labelMatches: boolean | null = typeof parsed.labelMatches === 'boolean' ? parsed.labelMatches : null;
@@ -8938,7 +9024,7 @@ FORMATO:
     return res.json({
       overallStatus,
       analyzedAt: new Date().toISOString(),
-      model: 'gemini-2.5-flash',
+      model: visionModel,
       instrumentVisible,
       rangeVisible,
       detectedRange: asLimitedString(parsed.detectedRange, 240),
@@ -8953,8 +9039,14 @@ FORMATO:
       requireCalibrationLabel,
     });
   } catch (err: any) {
-    console.error('Erro ao validar foto pós-laboratório:', err);
-    return res.status(500).json({ error: 'PHOTO_AI_VALIDATION_FAILED', message: 'Não foi possível validar a foto pós-laboratório. A imagem não foi aceita.' });
+    const classified = classifyGeminiRuntimeError(err);
+    console.error('Erro ao validar foto pós-laboratório:', classified.code, err);
+    const httpStatus = classified.code === 'AI_RATE_LIMITED' ? 429 : 502;
+    return res.status(httpStatus).json({
+      error: classified.code,
+      message: classified.message,
+      visionModels: getGeminiVisionModels(),
+    });
   }
 });
 
