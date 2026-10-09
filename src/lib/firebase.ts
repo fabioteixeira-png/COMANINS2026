@@ -1551,7 +1551,7 @@ export async function saveCalibrationDoc(data: {
       throw new Error('Selecione pelo menos um padrão de referência válido.');
     }
     if (!data.standardRangeValidation || data.standardRangeValidation.overallStatus !== 'PASS') {
-      throw new Error('A comparação de faixa dos padrões não foi concluída com aprovação. Revise a faixa/unidade do padrão selecionado.');
+      throw new Error('A validação de faixa dos padrões não foi aprovada. A cobertura conjunta dos padrões deve cobrir continuamente a faixa do instrumento sem lacunas.');
     }
     const validatedPassIds = new Set(
       (data.standardRangeValidation.standards || [])
@@ -1559,7 +1559,7 @@ export async function saveCalibrationDoc(data: {
         .map((item) => item.standardId),
     );
     if (selectedStandardIds.some((id) => !validatedPassIds.has(id))) {
-      throw new Error('Um ou mais padrões selecionados possuem faixa inferior ou não comparável à faixa necessária.');
+      throw new Error('A cobertura conjunta dos padrões selecionados não cobre integralmente a faixa necessária do instrumento.');
     }
   }
 

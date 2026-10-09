@@ -1,0 +1,86 @@
+Atue como desenvolvedor sênior full-stack especialista em React, TypeScript, Firebase Firestore e Firebase Storage.
+
+Aplique o LOTE 63 no sistema COMANINS enviado, preservando integralmente os LOTES anteriores e sem alterar regras não relacionadas.
+
+OBJETIVO
+Corrigir a validação de faixa dos padrões de calibração. A regra atual exige incorretamente que cada padrão A/B/C cubra sozinho toda a faixa do instrumento. Isso bloqueia calibrações válidas que necessitam de padrões complementares.
+
+NOVA REGRA OBRIGATÓRIA
+- Não utilizar IA/Gemini para validar padrões.
+- Padrão A continua obrigatório e deve possuir laboratório RBC externo à COMANINS.
+- Padrões B e C continuam opcionais e podem ser COMANINS.
+- Para padrões da MESMA GRANDEZA do instrumento, A+B+C devem ser tratados como um conjunto de intervalos.
+- Converter as unidades para uma base comum antes de comparar.
+- A união das faixas selecionadas precisa cobrir CONTINUAMENTE toda a faixa do instrumento.
+- Sobreposição é permitida.
+- Se existir qualquer lacuna dentro da faixa do instrumento, bloquear.
+- Não exigir que cada padrão individualmente cubra 100% da faixa se os padrões selecionados se complementam.
+
+EXEMPLO 1 — DEVE PASSAR
+Instrumento: 0 a 200 °C
+A: -25 a 140 °C
+B: 35 a 650 °C
+A+B cobrem continuamente 0 a 200 °C. Salvar a ficha.
+
+EXEMPLO 2 — DEVE BLOQUEAR
+Instrumento: 0 a 200 °C
+A: -25 a 140 °C
+B: 150 a 650 °C
+Existe lacuna 140 a 150 °C. Não salvar a ficha e informar claramente a lacuna.
+
+EXEMPLO 3 — MANOVACUÔMETRO — DEVE PASSAR
+Instrumento: -1 a 10 bar
+A: -1 a 0 bar (vácuo)
+B: 0 a 1 bar (pressão positiva)
+C: 1 a 20 bar (balança de peso morto / pressão positiva)
+A+B+C cobrem continuamente -1 a 10 bar. Salvar a ficha.
+
+EXEMPLO 4 — CONVERSÃO DE UNIDADE — DEVE PASSAR
+Instrumento: 0 a 0,4 kgf/cm²
+A: 0 a 10000 PSI
+B: 0 a 1 kgf/cm²
+O conjunto cobre a faixa. Salvar.
+
+TRANSMISSORES
+Não quebrar o tratamento dos padrões de sinal elétrico. Um padrão B ou C em mA/V destinado ao outputSignal deve continuar sendo comparado separadamente ao sinal de saída (ex.: 4–20 mA), e não misturado com a união da grandeza primária de pressão/temperatura.
+
+PERSISTÊNCIA
+`saveCalibrationDoc()` deve continuar exigindo `standardRangeValidation.overallStatus === 'PASS'`, porém todos os padrões primários que participam de um conjunto aprovado devem chegar como PASS. Não reintroduzir validação individual que invalide a cobertura conjunta.
+
+INTERFACE
+Atualizar a mensagem de erro para falar em “cobertura conjunta dos padrões” e, quando possível, apresentar o trecho sem cobertura. Incluir abaixo do Padrão A uma orientação curta de que A+B+C podem complementar a faixa desde que não exista lacuna.
+
+NÃO ALTERAR
+- validação da Foto Após Laboratório;
+- IA do RNC;
+- regras do LOTE 57 de conversão de unidades;
+- regras de permissão dos LOTES 58/62;
+- Fast Cache do LOTE 59;
+- Firestore Rules e Storage Rules, salvo se houver erro comprovadamente relacionado (não é esperado neste lote);
+- dados existentes no Firestore.
+
+ARQUIVOS DE REFERÊNCIA DO PATCH
+- server.ts
+- src/lib/firebase.ts
+- InternalPortal.part01.sourcepart
+- InternalPortal.part03.sourcepart
+- scripts/internal-portal-source.mjs
+
+TESTES OBRIGATÓRIOS
+1. 0..200 °C + (-25..140 °C) + (35..650 °C) => PASS.
+2. 0..200 °C + (-25..140 °C) + (150..650 °C) => BLOCK e informar lacuna 140..150 °C.
+3. -1..10 bar + (-1..0 bar) + (0..1 bar) + (1..20 bar) => PASS.
+4. 0..0,4 kgf/cm² + 0..10000 PSI + 0..1 kgf/cm² => PASS.
+5. 0..10 bar + 0..2 bar + 3..20 bar => BLOCK.
+6. Transmissor de pressão com padrão primário de pressão e padrão B 0..24 mA para output 4..20 mA => PASS quando ambos os requisitos forem cobertos.
+7. Confirmar que Padrão A COMANINS continua bloqueado.
+8. Confirmar que B/C COMANINS continuam permitidos.
+
+Depois de aplicar:
+- npm ci
+- npm run internal-portal:generate
+- npm run internal-portal:verify
+- npm run lint
+- npm run build
+
+Não responda apenas “corrigido”. Informe arquivos alterados, resultados de cada caso de teste, hash do InternalPortal, resultado de lint/build e qualquer pendência.

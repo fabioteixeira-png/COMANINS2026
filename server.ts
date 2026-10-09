@@ -8390,7 +8390,7 @@ function measurementDomainFromText(value: unknown): 'pressure' | 'temperature' |
   return 'unknown';
 }
 
-function toCanonicalValue(value: number, unitValue: unknown): { domain: string; value: number; unit: string } | null {
+export function toCanonicalValue(value: number, unitValue: unknown): { domain: string; value: number; unit: string } | null {
   const unit = canonicalMeasurementUnit(unitValue);
   if (!Number.isFinite(value)) return null;
   const pressureFactorsToBar: Record<string, number> = {
@@ -8479,7 +8479,7 @@ function extractMeasurementUnitFromRange(raw: string): { unit: string; matchedTe
   return null;
 }
 
-function parseRangeText(value: unknown): ParsedMeasurementRange | null {
+export function parseRangeText(value: unknown): ParsedMeasurementRange | null {
   const raw = String(value || '').trim();
   if (!raw) return null;
 
@@ -8538,6 +8538,88 @@ function rangeCovers(
 function formatCanonicalRange(min: number, max: number, unit: string): string {
   const format = (n: number) => Number(n.toFixed(6)).toString();
   return `${format(Math.min(min, max))} a ${format(Math.max(min, max))} ${unit}`;
+}
+
+interface RangeGap {
+  min: number;
+  max: number;
+}
+
+interface ContinuousRangeCoverageResult {
+  covered: boolean;
+  mergedIntervals: Array<{ min: number; max: number }>;
+  gaps: RangeGap[];
+}
+
+export function checkContinuousRangeCoverage(
+  requiredMin: number,
+  requiredMax: number,
+  intervals: Array<{ min: number; max: number }>,
+): ContinuousRangeCoverageResult {
+  const rMin = Math.min(requiredMin, requiredMax);
+  const rMax = Math.max(requiredMin, requiredMax);
+  const scale = Math.max(1, Math.abs(rMin), Math.abs(rMax));
+  const eps = scale * 1e-7;
+
+  if (intervals.length === 0) {
+    return {
+      covered: false,
+      mergedIntervals: [],
+      gaps: [{ min: rMin, max: rMax }],
+    };
+  }
+
+  const normalized = intervals
+    .map((iv) => ({ min: Math.min(iv.min, iv.max), max: Math.max(iv.min, iv.max) }))
+    .sort((a, b) => a.min - b.min || b.max - a.max);
+
+  const merged: Array<{ min: number; max: number }> = [{ ...normalized[0] }];
+  for (let i = 1; i < normalized.length; i++) {
+    const cur = normalized[i];
+    const last = merged[merged.length - 1];
+    if (cur.min <= last.max + eps) {
+      last.max = Math.max(last.max, cur.max);
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+
+  const fullCover = merged.find((iv) => iv.min <= rMin + eps && iv.max + eps >= rMax);
+  if (fullCover) {
+    return {
+      covered: true,
+      mergedIntervals: merged,
+      gaps: [],
+    };
+  }
+
+  const gaps: RangeGap[] = [];
+
+  const first = merged[0];
+  if (first.min > rMin + eps) {
+    gaps.push({ min: rMin, max: Math.min(rMax, first.min) });
+  }
+
+  for (let i = 0; i < merged.length - 1; i++) {
+    const cur = merged[i];
+    const nxt = merged[i + 1];
+    const gapStart = Math.max(rMin, cur.max);
+    const gapEnd = Math.min(rMax, nxt.min);
+    if (gapStart + eps < gapEnd) {
+      gaps.push({ min: gapStart, max: gapEnd });
+    }
+  }
+
+  const last = merged[merged.length - 1];
+  if (last.max + eps < rMax) {
+    gaps.push({ min: Math.max(rMin, last.max), max: rMax });
+  }
+
+  return {
+    covered: false,
+    mergedIntervals: merged,
+    gaps,
+  };
 }
 
 
@@ -8726,7 +8808,20 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       parsedOutputSignal.canonicalMax !== undefined,
     );
 
-    const assessments: Array<{
+    type StandardCandidate = {
+      slot: 'A' | 'B' | 'C';
+      id: string;
+      std: Record<string, any>;
+      label: string;
+      rawRange: string;
+      parsedRange: ParsedMeasurementRange | null;
+      candidateMin?: number;
+      candidateMax?: number;
+      canonicalUnit?: string;
+    };
+
+    const parsedCandidates: StandardCandidate[] = [];
+    const directAssessments: Array<{
       standardId: string;
       identification: string;
       certificateNumber: string;
@@ -8770,7 +8865,7 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       if (!parsedRange || parsedRange.canonicalMin === undefined || parsedRange.canonicalMax === undefined) {
         const reason = `Padrão ${slot} ${label}: não foi possível interpretar a faixa cadastrada (${rawRange || 'não informada'}).`;
         issues.push(reason);
-        assessments.push({
+        directAssessments.push({
           standardId: id,
           identification: String(std.identification || ''),
           certificateNumber: String(std.certificateNumber || ''),
@@ -8789,9 +8884,9 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       // O Padrão A é sempre a referência primária: ele deve cobrir a faixa principal
       // do instrumento. Nunca trate o Padrão A como padrão do sinal de saída.
       if (slot === 'A' && parsedRange.domain !== primaryDomain) {
-        const reason = `Padrão A ${label}: a faixa cadastrada (${rawRange}) não é comparável com a grandeza principal do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}).`;
+        const reason = `Padrão A ${label}: a faixa cadastrada (${rawRange}) não é comparável com a grandeza principal do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}). O Padrão A é a referência primária e deve medir a grandeza principal.`;
         issues.push(reason);
-        assessments.push({
+        directAssessments.push({
           standardId: id,
           identification: String(std.identification || ''),
           certificateNumber: String(std.certificateNumber || ''),
@@ -8804,60 +8899,41 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
         continue;
       }
 
-      // Normal case: same physical quantity as the calibrated instrument.
-      if (parsedRange.domain === primaryDomain) {
-        const covers = rangeCovers(candidateMin, candidateMax, requiredPrimaryMin, requiredPrimaryMax);
-        const reason = covers
-          ? `Padrão ${slot} ${label} aprovado: ${rawRange} equivale a ${formatCanonicalRange(candidateMin, candidateMax, parsedRange.canonicalUnit || primaryCanonicalUnit)} e cobre o instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`
-          : `Padrão ${slot} ${label} bloqueado porque sua faixa é inferior à faixa do instrumento. Padrão: ${formatCanonicalRange(candidateMin, candidateMax, parsedRange.canonicalUnit || primaryCanonicalUnit)}; instrumento: ${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}.`;
-        if (covers) deterministicChecks.push(reason); else issues.push(reason);
-        assessments.push({
-          standardId: id,
-          identification: String(std.identification || ''),
-          certificateNumber: String(std.certificateNumber || ''),
-          slot,
-          role: 'primary_measurement',
-          status: covers ? 'PASS' : 'BLOCK',
-          rangeCoverage: covers ? 'YES' : 'NO',
-          reason,
-        });
-        continue;
-      }
+      parsedCandidates.push({
+        slot,
+        id,
+        std,
+        label,
+        rawRange,
+        parsedRange,
+        candidateMin,
+        candidateMax,
+        canonicalUnit: parsedRange.canonicalUnit || primaryCanonicalUnit,
+      });
+    }
 
-      // Keep support for transmitter output standards (e.g. B = 0-24 mA for a 4-20 mA transmitter),
-      // still using only a deterministic range comparison and no AI.
-      if (
+    // Separate primary measurement standards from output signal standards
+    const primaryGroup = parsedCandidates.filter((item) => item.parsedRange?.domain === primaryDomain);
+    const outputGroup = parsedCandidates.filter(
+      (item) =>
         hasOutputRange &&
         parsedOutputSignal &&
-        parsedRange.domain === parsedOutputSignal.domain
-      ) {
-        const outputMin = Math.min(Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax));
-        const outputMax = Math.max(Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax));
-        const covers = rangeCovers(candidateMin, candidateMax, outputMin, outputMax);
-        const reason = covers
-          ? `Padrão ${slot} ${label} aprovado para o sinal de saída ${outputSignal}; sua faixa (${rawRange}) cobre integralmente o sinal.`
-          : `Padrão ${slot} ${label} bloqueado porque sua faixa (${rawRange}) é inferior ao sinal de saída necessário (${outputSignal}).`;
-        if (covers) deterministicChecks.push(reason); else issues.push(reason);
-        assessments.push({
-          standardId: id,
-          identification: String(std.identification || ''),
-          certificateNumber: String(std.certificateNumber || ''),
-          slot,
-          role: 'output_measurement',
-          status: covers ? 'PASS' : 'BLOCK',
-          rangeCoverage: covers ? 'YES' : 'NO',
-          reason,
-        });
-        continue;
-      }
+        item.parsedRange?.domain === parsedOutputSignal.domain,
+    );
+    const unmatchedGroup = parsedCandidates.filter(
+      (item) =>
+        item.parsedRange?.domain !== primaryDomain &&
+        !(hasOutputRange && parsedOutputSignal && item.parsedRange?.domain === parsedOutputSignal.domain),
+    );
 
-      const reason = `Padrão ${slot} ${label}: a unidade/faixa cadastrada (${rawRange}) não é comparável com a faixa principal do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit})${outputSignal ? ` nem com o sinal de saída (${outputSignal})` : ''}.`;
+    for (const item of unmatchedGroup) {
+      const reason = `Padrão ${item.slot} ${item.label}: a unidade/faixa cadastrada (${item.rawRange}) não é comparável com a faixa principal do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit})${outputSignal ? ` nem com o sinal de saída (${outputSignal})` : ''}.`;
       issues.push(reason);
-      assessments.push({
-        standardId: id,
-        identification: String(std.identification || ''),
-        certificateNumber: String(std.certificateNumber || ''),
-        slot,
+      directAssessments.push({
+        standardId: item.id,
+        identification: String(item.std.identification || ''),
+        certificateNumber: String(item.std.certificateNumber || ''),
+        slot: item.slot,
         role: 'primary_measurement',
         status: 'BLOCK',
         rangeCoverage: 'NO',
@@ -8865,15 +8941,102 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       });
     }
 
+    // LOTE 63: Evaluate continuous joint coverage for all primary measurement standards
+    const primaryIntervals = primaryGroup.map((item) => ({
+      min: item.candidateMin!,
+      max: item.candidateMax!,
+    }));
+
+    const jointCoverage = checkContinuousRangeCoverage(
+      requiredPrimaryMin,
+      requiredPrimaryMax,
+      primaryIntervals,
+    );
+
+    const groupHasA = primaryGroup.some((item) => item.slot === 'A');
+
+    if (groupHasA && jointCoverage.covered) {
+      const jointSummary = primaryGroup.length > 1
+        ? `Cobertura conjunta aprovada: os padrões ${primaryGroup.map((i) => i.slot).join('+')} cobrem continuamente toda a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`
+        : `Faixa aprovada: o Padrão A cobre integralmente a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`;
+      deterministicChecks.push(jointSummary);
+
+      for (const item of primaryGroup) {
+        const coversAlone = rangeCovers(item.candidateMin!, item.candidateMax!, requiredPrimaryMin, requiredPrimaryMax);
+        const reason = coversAlone
+          ? `Padrão ${item.slot} ${item.label} aprovado: sua faixa individual (${item.rawRange} ≈ ${formatCanonicalRange(item.candidateMin!, item.candidateMax!, item.canonicalUnit!)}) cobre a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`
+          : `Padrão ${item.slot} ${item.label} aprovado por cobertura conjunta: sua faixa (${item.rawRange} ≈ ${formatCanonicalRange(item.candidateMin!, item.candidateMax!, item.canonicalUnit!)}) complementa os demais padrões para cobrir continuamente o instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`;
+        directAssessments.push({
+          standardId: item.id,
+          identification: String(item.std.identification || ''),
+          certificateNumber: String(item.std.certificateNumber || ''),
+          slot: item.slot,
+          role: 'primary_measurement',
+          status: 'PASS',
+          rangeCoverage: 'YES',
+          reason,
+        });
+      }
+    } else {
+      const gapDescriptions = jointCoverage.gaps.length > 0
+        ? jointCoverage.gaps.map((g) => formatCanonicalRange(g.min, g.max, primaryCanonicalUnit)).join('; ')
+        : `faixa necessária (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}) não coberta`;
+      const coverageMsg = `A cobertura conjunta dos padrões de ${primaryDomain} não cobre continuamente o instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}). Existe lacuna não coberta: ${gapDescriptions}.`;
+      issues.push(coverageMsg);
+
+      for (const item of primaryGroup) {
+        directAssessments.push({
+          standardId: item.id,
+          identification: String(item.std.identification || ''),
+          certificateNumber: String(item.std.certificateNumber || ''),
+          slot: item.slot,
+          role: 'primary_measurement',
+          status: 'BLOCK',
+          rangeCoverage: 'NO',
+          reason: `Padrão ${item.slot} ${item.label} bloqueado: a cobertura conjunta dos padrões não cobre continuamente a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}). Lacuna: ${gapDescriptions}.`,
+        });
+      }
+    }
+
+    // Evaluate output signal standards (for transmitters with electrical output like 4-20 mA)
+    if (hasOutputRange && parsedOutputSignal) {
+      const outputMin = Math.min(Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax));
+      const outputMax = Math.max(Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax));
+
+      for (const item of outputGroup) {
+        const covers = rangeCovers(item.candidateMin!, item.candidateMax!, outputMin, outputMax);
+        const reason = covers
+          ? `Padrão ${item.slot} ${item.label} aprovado para o sinal de saída ${outputSignal}; sua faixa (${item.rawRange}) cobre integralmente o sinal.`
+          : `Padrão ${item.slot} ${item.label} bloqueado porque sua faixa (${item.rawRange}) é inferior ao sinal de saída necessário (${outputSignal}).`;
+        if (covers) deterministicChecks.push(reason); else issues.push(reason);
+        directAssessments.push({
+          standardId: item.id,
+          identification: String(item.std.identification || ''),
+          certificateNumber: String(item.std.certificateNumber || ''),
+          slot: item.slot,
+          role: 'output_measurement',
+          status: covers ? 'PASS' : 'BLOCK',
+          rangeCoverage: covers ? 'YES' : 'NO',
+          reason,
+        });
+      }
+    }
+
+    // Sort assessments in slot order: A, B, C
+    const slotRank = { A: 0, B: 1, C: 2 };
+    const assessments = [...directAssessments].sort(
+      (a, b) => (slotRank[a.slot] ?? 9) - (slotRank[b.slot] ?? 9),
+    );
+
     const hasBlock = assessments.some((item) => item.status === 'BLOCK');
     return res.json({
       overallStatus: hasBlock ? 'BLOCK' : 'PASS',
       summary: hasBlock
-        ? 'A ficha não pode ser salva porque pelo menos um padrão selecionado possui faixa inferior ou não comparável à faixa necessária.'
-        : 'Padrões aprovados por comparação matemática de faixa. Nenhuma IA foi utilizada nesta validação.',
+        ? 'A ficha não pode ser salva porque a cobertura conjunta dos padrões é insuficiente, existe lacuna de medição ou há incompatibilidade de grandeza.'
+        : 'Padrões aprovados por cobertura conjunta contínua de faixa. Nenhuma IA foi utilizada nesta validação.',
       instrumentId,
       analyzedAt: new Date().toISOString(),
-      model: 'deterministic-range-only-v1',
+      model: 'deterministic-joint-range-v1',
       deterministicChecks,
       issues,
       standards: assessments,

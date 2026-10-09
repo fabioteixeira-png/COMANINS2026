@@ -1876,7 +1876,7 @@
                                   ))}
                               </select>
                               <p className="text-[10px] text-slate-500 mt-1">
-                                Obrigatório laboratório RBC externo. Padrões COMANINS só podem ser utilizados nos campos Padrão B ou Padrão C.
+                                Obrigatório laboratório RBC externo. Padrões A, B e C podem complementar a faixa conjuntamente desde que não exista lacuna. Padrões COMANINS são permitidos em B e C.
                               </p>
                             </div>
 

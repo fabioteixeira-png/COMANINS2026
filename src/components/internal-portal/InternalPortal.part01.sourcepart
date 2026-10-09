@@ -6203,9 +6203,13 @@ Status atual: ${e.status}.`,
               .map((item: any) => `• Padrão ${item.slot || ""} ${item.identification || item.certificateNumber || item.standardId}: ${item.reason || "Faixa insuficiente."}`)
               .join("\n")
           : "";
+        const issues = Array.isArray(validation?.issues) && validation.issues.length
+          ? validation.issues.map((item: string) => `• ${item}`).join("\n")
+          : "";
         const msg = [
-          "A ficha NÃO foi salva porque pelo menos um padrão selecionado não cobre a faixa necessária.",
-          validation?.summary || "Revise somente a faixa/unidade do padrão indicado.",
+          "A ficha NÃO foi salva porque a cobertura conjunta dos padrões não cobre continuamente a faixa necessária.",
+          validation?.summary || "Revise os padrões selecionados para assegurar cobertura conjunta sem lacunas.",
+          issues,
           details,
         ].filter(Boolean).join("\n\n");
         setBenchErrorMessage(msg);
