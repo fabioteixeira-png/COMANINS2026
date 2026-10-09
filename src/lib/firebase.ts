@@ -1303,6 +1303,23 @@ export async function saveCalibrationDoc(data: {
   contactType?: string;
   transmitterPoints?: any[];
   switchPoints?: any[];
+  safetyValvePoints?: any[];
+  pressureRegulatorPoints?: any[];
+  valveService?: string;
+  valveTestMedium?: string;
+  valveSeatType?: string;
+  acceptanceCriterion?: string;
+  maxBlowdownPercent?: number;
+  seatLeakageResult?: 'Aprovado' | 'Reprovado' | 'Não avaliado';
+  seatLeakageTestPressure?: number;
+  seatLeakageMeasured?: number;
+  seatLeakageLimit?: number;
+  seatLeakageUnit?: string;
+  regulatorMode?: string;
+  regulatorActuation?: string;
+  flowPerformanceTested?: boolean;
+  droopPercent?: number;
+  droopLimitPercent?: number;
   approved?: boolean;
   calibrationDate?: string;
   materialsUsed?: string[];
@@ -1385,9 +1402,111 @@ export async function saveCalibrationDoc(data: {
     };
   });
 
+  const setPoint = Number(data.setPoint ?? 0);
+  const valveTolerance = Number(data.mpe ?? activeInst.mpe);
+  const hasValidValveSetPoint = Number.isFinite(setPoint) && setPoint > 0;
+  const hasValidValveTolerance = Number.isFinite(valveTolerance) && valveTolerance > 0;
+  const hasValidBlowdownLimit =
+    data.maxBlowdownPercent === undefined ||
+    (Number.isFinite(Number(data.maxBlowdownPercent)) && Number(data.maxBlowdownPercent) >= 0);
+  let maxBlowdownPercent = 0;
+  const processedSafetyValvePoints = (data.safetyValvePoints || []).map((point: any) => {
+    const opening = Number(point.openingPressure);
+    const reseating = Number(point.reseatingPressure);
+    const setError = Number((opening - setPoint).toFixed(4));
+    const setErrorPercent = setPoint !== 0
+      ? Number(((setError / setPoint) * 100).toFixed(4))
+      : 0;
+    const blowdown = Number((opening - reseating).toFixed(4));
+    const blowdownPercent = opening !== 0
+      ? Number((Math.abs(blowdown / opening) * 100).toFixed(4))
+      : 0;
+    maxError = Math.max(maxError, Math.abs(setError));
+    maxBlowdownPercent = Math.max(maxBlowdownPercent, blowdownPercent);
+    const openingPass =
+      hasValidValveSetPoint &&
+      hasValidValveTolerance &&
+      Math.abs(setError) <= valveTolerance;
+    const blowdownPass =
+      hasValidBlowdownLimit &&
+      (data.maxBlowdownPercent === undefined
+        ? true
+        : blowdownPercent <= Number(data.maxBlowdownPercent));
+    return { ...point, setError, setErrorPercent, blowdown, blowdownPercent, pass: openingPass && blowdownPass };
+  });
+
+  let maxRegulatorHysteresis = 0;
+  const processedPressureRegulatorPoints = (data.pressureRegulatorPoints || []).map((point: any) => {
+    const fromBelow = Number(point.measuredFromBelow);
+    const fromAbove = Number(point.measuredFromAbove);
+    const average = Number(((fromBelow + fromAbove) / 2).toFixed(4));
+    const error = Number((average - setPoint).toFixed(4));
+    const errorPercent = setPoint !== 0
+      ? Number(((error / setPoint) * 100).toFixed(4))
+      : 0;
+    const hysteresis = Number(Math.abs(fromBelow - fromAbove).toFixed(4));
+    maxError = Math.max(maxError, Math.abs(error));
+    maxRegulatorHysteresis = Math.max(maxRegulatorHysteresis, hysteresis);
+    const pass =
+      hasValidValveSetPoint &&
+      hasValidValveTolerance &&
+      Math.abs(error) <= valveTolerance;
+    return { ...point, average, error, errorPercent, hysteresis, pass };
+  });
+  maxHysteresis = Math.max(maxHysteresis, maxRegulatorHysteresis);
+
   const span = activeInst.rangeMax - activeInst.rangeMin;
   const maxRelativeError = span > 0 ? Number(((maxError / span) * 100).toFixed(4)) : 0;
-  const approved = processedPoints.every(p => p.pass);
+  const specialtyPoints = data.instrumentType === 'psv'
+    ? processedSafetyValvePoints
+    : data.instrumentType === 'pcv'
+      ? processedPressureRegulatorPoints
+      : processedPoints;
+
+  const seatLeakageMeasured = data.seatLeakageMeasured;
+  const seatLeakageLimit = data.seatLeakageLimit;
+  const numericSeatLeakagePass =
+    seatLeakageMeasured === undefined ||
+    seatLeakageLimit === undefined ||
+    seatLeakageMeasured <= seatLeakageLimit;
+  const psvSupplementalPass =
+    data.instrumentType !== 'psv' ||
+    (hasValidValveSetPoint &&
+      hasValidValveTolerance &&
+      hasValidBlowdownLimit &&
+      String(data.acceptanceCriterion || '').trim().length > 0 &&
+      data.seatLeakageResult === 'Aprovado' &&
+      numericSeatLeakagePass);
+  const pcvSupplementalPass =
+    data.instrumentType !== 'pcv' ||
+    (hasValidValveSetPoint &&
+      hasValidValveTolerance &&
+      data.seatLeakageResult !== 'Reprovado' &&
+      numericSeatLeakagePass &&
+      (!data.flowPerformanceTested ||
+        (data.droopPercent !== undefined &&
+          data.droopLimitPercent !== undefined &&
+          Number.isFinite(Number(data.droopPercent)) &&
+          Number.isFinite(Number(data.droopLimitPercent)) &&
+          Number(data.droopPercent) >= 0 &&
+          Number(data.droopLimitPercent) >= 0 &&
+          Number(data.droopPercent) <= Number(data.droopLimitPercent))));
+  const calculatedGenericApproved = processedPoints.every((p: any) => p.pass !== false);
+  const calculatedValveApproved =
+    specialtyPoints.length > 0 &&
+    specialtyPoints.every((p: any) => p.pass !== false) &&
+    psvSupplementalPass &&
+    pcvSupplementalPass;
+
+  if (
+    (data.instrumentType === 'psv' || data.instrumentType === 'pcv') &&
+    data.approved !== false &&
+    !calculatedValveApproved
+  ) {
+    throw new Error(
+      'Os resultados de PSV/PCV não atendem aos critérios registrados. Revise a ficha ou emita uma RNC.',
+    );
+  }
 
   const now = new Date();
   const automaticCalibrationDate = new Date(
@@ -1428,7 +1547,14 @@ export async function saveCalibrationDoc(data: {
     maxError,
     maxRelativeError,
     maxHysteresis,
-    approved: data.approved !== undefined ? data.approved : approved,
+    approved:
+      data.instrumentType === 'psv' || data.instrumentType === 'pcv'
+        ? data.approved === false
+          ? false
+          : calculatedValveApproved
+        : data.approved !== undefined
+          ? data.approved
+          : calculatedGenericApproved,
     observations: data.observations || '',
     materialsUsed: Array.from(new Set((data.materialsUsed || []).map((item) => String(item || '').trim()).filter(Boolean))).slice(0, 50),
     administrativeReplacement: activeInst.adminCalibrationReplacementPending === true ? true : undefined,
@@ -1444,8 +1570,32 @@ export async function saveCalibrationDoc(data: {
     outputSignal: data.outputSignal,
     setPoint: data.setPoint,
     contactType: data.contactType,
+    accuracyClass: data.accuracyClass,
+    mpe: data.mpe,
     transmitterPoints: data.transmitterPoints,
     switchPoints: data.switchPoints,
+    safetyValvePoints: processedSafetyValvePoints,
+    pressureRegulatorPoints: processedPressureRegulatorPoints,
+    valveService: data.valveService,
+    valveTestMedium: data.valveTestMedium,
+    valveSeatType: data.valveSeatType,
+    acceptanceCriterion: data.acceptanceCriterion,
+    maxBlowdownPercent: data.maxBlowdownPercent,
+    measuredMaxBlowdownPercent: processedSafetyValvePoints.length ? maxBlowdownPercent : undefined,
+    seatLeakageResult: data.seatLeakageResult,
+    seatLeakageTestPressure: data.seatLeakageTestPressure,
+    seatLeakageMeasured: data.seatLeakageMeasured,
+    seatLeakageLimit: data.seatLeakageLimit,
+    seatLeakageUnit: data.seatLeakageUnit,
+    regulatorMode: data.regulatorMode,
+    regulatorActuation: data.regulatorActuation,
+    flowPerformanceTested: data.flowPerformanceTested,
+    droopPercent: data.droopPercent,
+    droopLimitPercent: data.droopLimitPercent,
+    droopPass:
+      data.flowPerformanceTested && data.droopPercent !== undefined && data.droopLimitPercent !== undefined
+        ? data.droopPercent <= data.droopLimitPercent
+        : undefined,
     curveCount: data.curveCount || 5,
     referenceStandardIds: data.referenceStandardIds || [],
     referenceStandards: data.referenceStandards || []
@@ -1464,6 +1614,19 @@ export async function saveCalibrationDoc(data: {
     status: preservedOperationalStatus as Instrument['status'],
     lastCalibrationDate: report.date,
     nextCalibrationDate: nextCal.toISOString().split('T')[0],
+    ...(data.instrumentType ? { typeSpec: data.instrumentType } : {}),
+    ...(data.metrologicalNorm ? { metrologicalNorm: data.metrologicalNorm } : {}),
+    ...(data.sensorType ? { sensorType: data.sensorType } : {}),
+    ...(data.outputSignal ? { outputSignal: data.outputSignal } : {}),
+    ...(data.setPoint !== undefined ? { setPoint: data.setPoint } : {}),
+    ...(data.contactType ? { contactType: data.contactType } : {}),
+    ...(data.valveService ? { valveService: data.valveService } : {}),
+    ...(data.valveTestMedium ? { valveTestMedium: data.valveTestMedium } : {}),
+    ...(data.valveSeatType ? { valveSeatType: data.valveSeatType } : {}),
+    ...(data.acceptanceCriterion ? { acceptanceCriterion: data.acceptanceCriterion } : {}),
+    ...(data.maxBlowdownPercent !== undefined ? { maxBlowdownPercent: data.maxBlowdownPercent } : {}),
+    ...(data.regulatorMode ? { regulatorMode: data.regulatorMode } : {}),
+    ...(data.regulatorActuation ? { regulatorActuation: data.regulatorActuation } : {}),
     ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
     ...(data.humidity !== undefined ? { humidity: data.humidity } : {})
   };
@@ -1472,6 +1635,19 @@ export async function saveCalibrationDoc(data: {
     status: preservedOperationalStatus,
     lastCalibrationDate: report.date,
     nextCalibrationDate: updatedInst.nextCalibrationDate,
+    typeSpec: data.instrumentType,
+    metrologicalNorm: data.metrologicalNorm,
+    sensorType: data.sensorType,
+    outputSignal: data.outputSignal,
+    setPoint: data.setPoint,
+    contactType: data.contactType,
+    valveService: data.valveService,
+    valveTestMedium: data.valveTestMedium,
+    valveSeatType: data.valveSeatType,
+    acceptanceCriterion: data.acceptanceCriterion,
+    maxBlowdownPercent: data.maxBlowdownPercent,
+    regulatorMode: data.regulatorMode,
+    regulatorActuation: data.regulatorActuation,
     accuracyClass: data.accuracyClass,
     mpe: data.mpe,
     temperature: data.temperature,

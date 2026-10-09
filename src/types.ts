@@ -1,6 +1,6 @@
 export type InstrumentCategory = 'pressure' | 'temperature';
 
-export type InstrumentType = 'manometro' | 'termometro' | 'transmissor' | 'pressostato' | 'termostato' | 'manovacuometro';
+export type InstrumentType = 'manometro' | 'termometro' | 'transmissor' | 'pressostato' | 'termostato' | 'manovacuometro' | 'psv' | 'pcv';
 
 export type CalibrationStatus = 'Aguardando Triagem' | 'Aguardando Calibração' | 'Em Calibração' | 'Calibrado' | 'Aguardando Emissão de Certificado' | 'Entregue' | 'Não Conforme' | 'Disponível para Retirada' | 'Disponível na Prateleira' | 'RNC';
 
@@ -40,6 +40,13 @@ export interface Instrument {
   contactType?: string;
   thermalMedium?: string;
   hasteLength?: string;
+  valveService?: string;
+  valveTestMedium?: string;
+  valveSeatType?: string;
+  acceptanceCriterion?: string;
+  maxBlowdownPercent?: number;
+  regulatorMode?: string;
+  regulatorActuation?: string;
   rangeMin: number;
   rangeMax: number;
   unit: string;
@@ -165,6 +172,28 @@ export interface TransmitterCalibrationPoint {
   pass: boolean;
 }
 
+export interface SafetyValveCalibrationPoint {
+  repeat: number;
+  openingPressure: string | number;
+  reseatingPressure: string | number;
+  setError?: number;
+  setErrorPercent?: number;
+  blowdown?: number;
+  blowdownPercent?: number;
+  pass?: boolean;
+}
+
+export interface PressureRegulatorCalibrationPoint {
+  repeat: number;
+  measuredFromBelow: string | number;
+  measuredFromAbove: string | number;
+  average?: number;
+  error?: number;
+  errorPercent?: number;
+  hysteresis?: number;
+  pass?: boolean;
+}
+
 export interface ReferenceStandard {
   id: string;
   certificateNumber: string;
@@ -198,9 +227,30 @@ export interface CalibrationReport {
   outputSignal?: string;
   setPoint?: number;
   contactType?: string;
+  accuracyClass?: string;
+  mpe?: number;
   points: CalibrationPoint[];
   switchPoints?: SwitchCalibrationPoint[];
   transmitterPoints?: TransmitterCalibrationPoint[];
+  safetyValvePoints?: SafetyValveCalibrationPoint[];
+  pressureRegulatorPoints?: PressureRegulatorCalibrationPoint[];
+  valveService?: string;
+  valveTestMedium?: string;
+  valveSeatType?: string;
+  acceptanceCriterion?: string;
+  maxBlowdownPercent?: number;
+  measuredMaxBlowdownPercent?: number;
+  seatLeakageResult?: 'Aprovado' | 'Reprovado' | 'Não avaliado';
+  seatLeakageTestPressure?: number;
+  seatLeakageMeasured?: number;
+  seatLeakageLimit?: number;
+  seatLeakageUnit?: string;
+  regulatorMode?: string;
+  regulatorActuation?: string;
+  flowPerformanceTested?: boolean;
+  droopPercent?: number;
+  droopLimitPercent?: number;
+  droopPass?: boolean;
   maxError: number;
   maxRelativeError: number;
   maxHysteresis?: number;

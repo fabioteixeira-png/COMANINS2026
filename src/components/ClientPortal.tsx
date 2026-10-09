@@ -1007,6 +1007,16 @@ export default function ClientPortal({
               const certNumber = selectedReport?.certNumber || (inst?.certificateNumber ? inst.certificateNumber : `COMA-${inst?.id.substring(0,4).toUpperCase()}`);
               const certAuthKey = getReportAuthKey(selectedReport, inst?.id + certNumber);
               const points = selectedReport?.points || (inst as any)?.calibrationPoints || [];
+              const clientInstrumentType = selectedReport?.instrumentType || inst?.typeSpec;
+              const isPsvCertificate = clientInstrumentType === 'psv';
+              const isPcvCertificate = clientInstrumentType === 'pcv';
+              const calibrationReference = isPsvCertificate && selectedReport?.acceptanceCriterion
+                ? selectedReport.acceptanceCriterion
+                : (selectedReport?.metrologicalNorm || (isPsvCertificate
+                    ? 'NR-13 / ISO 4126-1:2013+Amd 1:2016 / API RP 576 (5ª ed. + A1) / API Std 527 (5ª ed.) / ASME BPVC XIII:2025 (quando aplicável)'
+                    : isPcvCertificate
+                      ? 'IEC 60534-1:2023 / IEC 60534-4:2021 / IOGP S-739 (revisão contratual aplicável)'
+                      : 'PR-001-2017 Rev. 4'));
               
               let maxHysteresis = 0;
               let maxRepeatability = 0;
@@ -1165,9 +1175,9 @@ export default function ClientPortal({
                         <p><span className="font-bold">Marca:</span> {inst?.brand || 'Não Consta'}</p>
                         <p><span className="font-bold">Modelo:</span> {inst?.model || 'Não Consta'}</p>
                         <p><span className="font-bold">Nº Série:</span> {inst?.serialNumber || 'NAO CONSTA'}</p>
-                        <p><span className="font-bold">Tipo:</span> ANALOGICO</p>
+                        <p><span className="font-bold">Tipo:</span> {isPsvCertificate ? 'PSV / VÁLVULA DE SEGURANÇA' : isPcvCertificate ? 'PCV / REGULADOR AUTO-OPERADO' : 'ANALÓGICO'}</p>
                         <p><span className="font-bold">Faixa:</span> {inst?.rangeMin} {inst?.typeSpec === 'manovacuometro' || (inst?.description || '').toLowerCase().includes('manovacu') ? (inst?.unitNegative || 'mmHg') : ''} a {inst?.rangeMax} {inst?.unit}</p>
-                        <p><span className="font-bold">Tolerância (MPE):</span> ±{inst?.mpe} {inst?.unit}</p>
+                        <p><span className="font-bold">Tolerância (MPE):</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
                       </div>
                     </div>
 
@@ -1230,8 +1240,14 @@ export default function ClientPortal({
                     <div>
                       <p className="font-bold text-sm uppercase mb-1">5. Resumo do Método de Calibração:</p>
                       <div className="pl-4">
-                        <p><span className="font-bold">Método de Calibração:</span> conforme procedimento PR-001-2017 Rev. 4</p>
-                        <p><span className="font-bold">Descrição do Método:</span> A Calibração foi realizada conforme procedimento PR-001-2017 Rev. 4 comparando-se o instrumento com o padrão listado no item 7. A série de medições estão definidas nas tabelas de valores encontrados.</p>
+                        <p><span className="font-bold">Método de Calibração:</span> procedimento PR-001-2017 Rev. 4, com referência técnica {calibrationReference}</p>
+                        <p><span className="font-bold">Descrição do Método:</span>{' '}
+                          {isPsvCertificate
+                            ? 'Ensaio em bancada para determinação da pressão de abertura, repetibilidade, reassentamento/blowdown e estanqueidade da sede, conforme o critério de aceitação registrado para o equipamento.'
+                            : isPcvCertificate
+                              ? 'Verificação do set point por aproximação ascendente e descendente, com cálculo de erro e histerese. Estanqueidade e droop são declarados somente quando efetivamente ensaiados.'
+                              : 'A calibração foi realizada conforme procedimento PR-001-2017 Rev. 4 comparando-se o instrumento com o padrão listado no item 7. As medições estão registradas nas tabelas de valores encontrados.'}
+                        </p>
                       </div>
                     </div>
 
@@ -1259,48 +1275,138 @@ export default function ClientPortal({
 
                     <div className="pt-4 border-t border-slate-300">
                       <p className="font-bold text-sm uppercase mb-2">8. Valores Encontrados:</p>
-                      <table className="w-full text-center border-collapse text-[10px]">
-                        <thead>
-                          <tr className="bg-slate-100 font-bold border border-slate-300">
-                            <th className="p-1 border border-slate-300" rowSpan={2}>VI<br/>(Nominal)</th>
-                            <th className="p-1 border border-slate-300" colSpan={2}>VRef Primeiro Ciclo</th>
-                            <th className="p-1 border border-slate-300" colSpan={2}>VRef Segundo Ciclo</th>
-                            <th className="p-1 border border-slate-300" rowSpan={2}>VRef Média<br/>de Leituras</th>
-                            <th className="p-1 border border-slate-300" rowSpan={2}>Erro</th>
-                            <th className="p-1 border border-slate-300" rowSpan={2}>Unidade<br/>de Medida</th>
-                          </tr>
-                          <tr className="bg-slate-100 font-bold border border-slate-300">
-                            <th className="p-1 border border-slate-300">Crescente</th>
-                            <th className="p-1 border border-slate-300">Decrescente</th>
-                            <th className="p-1 border border-slate-300">Crescente</th>
-                            <th className="p-1 border border-slate-300">Decrescente</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {formattedPoints.map((p: any, idx: number) => (
-                            <tr key={idx}>
-                              <td className="p-1 border border-slate-300 font-bold">{p.nominal}</td>
-                              <td className="p-1 border border-slate-300">{p.refAsc1 !== undefined ? p.refAsc1 : (p.a1 !== 0 ? p.a1 : '-')}</td>
-                              <td className="p-1 border border-slate-300">{p.refDesc1 !== undefined ? p.refDesc1 : (p.d1 !== 0 ? p.d1 : '-')}</td>
-                              <td className="p-1 border border-slate-300">{p.refAsc2 !== undefined ? p.refAsc2 : (p.a2 !== 0 ? p.a2 : '-')}</td>
-                              <td className="p-1 border border-slate-300">{p.refDesc2 !== undefined ? p.refDesc2 : (p.d2 !== 0 ? p.d2 : '-')}</td>
-                              <td className="p-1 border border-slate-300">{p.count > 0 ? p.avg.toFixed(2) : '-'}</td>
-                              <td className="p-1 border border-slate-300">{p.count > 0 ? (p.err > 0 ? `+${p.err}` : p.err) : '-'}</td>
-                              <td className="p-1 border border-slate-300">
-                                {(inst?.typeSpec === 'manovacuometro' || (inst?.description || '').toLowerCase().includes('manovacu')) && p.nominal < 0
-                                  ? (inst?.unitNegative || (inst?.rangeMin && inst.rangeMin <= -700 ? 'mmHg' : inst?.rangeMin && inst.rangeMin <= -25 ? 'inHg' : inst?.unit || 'mmHg'))
-                                  : inst?.unit}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      
-                      <div className="mt-4 font-bold text-[10px]">
-                        <p>Índice de Classe (%): {classPct.toFixed(2)}</p>
-                        <p>Repetitividade (%): {repPct.toFixed(3)}</p>
-                        <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
-                      </div>
+                      {isPsvCertificate ? (
+                        <div className="space-y-3 text-[10px]">
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                            <p><span className="font-bold">Set Pressure:</span> {selectedReport?.setPoint ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Tolerância de abertura:</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Serviço:</span> {selectedReport?.valveService || '—'}</p>
+                            <p><span className="font-bold">Meio de ensaio:</span> {selectedReport?.valveTestMedium || '—'}</p>
+                            <p><span className="font-bold">Tipo de sede:</span> {selectedReport?.valveSeatType || '—'}</p>
+                            <p><span className="font-bold">Critério:</span> {selectedReport?.acceptanceCriterion || 'Código/fabricante aplicável'}</p>
+                          </div>
+                          <table className="w-full text-center border-collapse text-[10px]">
+                            <thead><tr className="bg-slate-100 font-bold">
+                              <th className="p-1 border border-slate-300">Ensaio</th>
+                              <th className="p-1 border border-slate-300">Abertura</th>
+                              <th className="p-1 border border-slate-300">Reassentamento</th>
+                              <th className="p-1 border border-slate-300">Erro</th>
+                              <th className="p-1 border border-slate-300">Blowdown</th>
+                              <th className="p-1 border border-slate-300">Resultado</th>
+                            </tr></thead>
+                            <tbody>
+                              {(selectedReport?.safetyValvePoints || []).map((point: any, idx: number) => (
+                                <tr key={idx}>
+                                  <td className="p-1 border border-slate-300">{point.repeat || idx + 1}</td>
+                                  <td className="p-1 border border-slate-300">{point.openingPressure} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.reseatingPressure} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.setError !== undefined ? `${Number(point.setError) > 0 ? '+' : ''}${point.setError}` : '—'} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.blowdownPercent !== undefined ? `${point.blowdownPercent}%` : '—'}</td>
+                                  <td className="p-1 border border-slate-300 font-bold">{point.pass === false ? 'NÃO CONFORME' : 'CONFORME'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <div className="border border-slate-300 p-2 grid grid-cols-2 gap-x-6 gap-y-1">
+                            <p><span className="font-bold">Estanqueidade da sede:</span> {selectedReport?.seatLeakageResult || '—'}</p>
+                            <p><span className="font-bold">Pressão de teste:</span> {selectedReport?.seatLeakageTestPressure ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Vazamento medido:</span> {selectedReport?.seatLeakageMeasured ?? '—'} {selectedReport?.seatLeakageUnit || ''}</p>
+                            <p><span className="font-bold">Limite:</span> {selectedReport?.seatLeakageLimit ?? '—'} {selectedReport?.seatLeakageUnit || ''}</p>
+                            <p><span className="font-bold">Blowdown máximo registrado:</span> {selectedReport?.measuredMaxBlowdownPercent !== undefined ? `${selectedReport.measuredMaxBlowdownPercent}%` : '—'}</p>
+                            <p><span className="font-bold">Limite de blowdown:</span> {selectedReport?.maxBlowdownPercent !== undefined ? `${selectedReport.maxBlowdownPercent}%` : 'Não definido'}</p>
+                            <p><span className="font-bold">Resultado geral:</span> {selectedReport?.approved ? 'APROVADO' : 'NÃO APROVADO'}</p>
+                          </div>
+                        </div>
+                      ) : isPcvCertificate ? (
+                        <div className="space-y-3 text-[10px]">
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                            <p><span className="font-bold">Set Point:</span> {selectedReport?.setPoint ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Tolerância:</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Função:</span> {selectedReport?.regulatorMode || '—'}</p>
+                            <p><span className="font-bold">Atuação:</span> {selectedReport?.regulatorActuation || '—'}</p>
+                            <p><span className="font-bold">Meio de ensaio:</span> {selectedReport?.valveTestMedium || '—'}</p>
+                            <p><span className="font-bold">Estanqueidade:</span> {selectedReport?.seatLeakageResult || 'Não avaliado'}</p>
+                          </div>
+                          <table className="w-full text-center border-collapse text-[10px]">
+                            <thead><tr className="bg-slate-100 font-bold">
+                              <th className="p-1 border border-slate-300">Ensaio</th>
+                              <th className="p-1 border border-slate-300">Aprox. por Baixo</th>
+                              <th className="p-1 border border-slate-300">Aprox. por Cima</th>
+                              <th className="p-1 border border-slate-300">Média</th>
+                              <th className="p-1 border border-slate-300">Erro</th>
+                              <th className="p-1 border border-slate-300">Histerese</th>
+                              <th className="p-1 border border-slate-300">Resultado</th>
+                            </tr></thead>
+                            <tbody>
+                              {(selectedReport?.pressureRegulatorPoints || []).map((point: any, idx: number) => (
+                                <tr key={idx}>
+                                  <td className="p-1 border border-slate-300">{point.repeat || idx + 1}</td>
+                                  <td className="p-1 border border-slate-300">{point.measuredFromBelow} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.measuredFromAbove} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.average ?? '—'} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.error !== undefined ? `${Number(point.error) > 0 ? '+' : ''}${point.error}` : '—'} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300">{point.hysteresis ?? '—'} {inst?.unit}</td>
+                                  <td className="p-1 border border-slate-300 font-bold">{point.pass === false ? 'NÃO CONFORME' : 'CONFORME'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <div className="border border-slate-300 p-2 grid grid-cols-2 gap-x-6 gap-y-1">
+                            <p><span className="font-bold">Estanqueidade da sede:</span> {selectedReport?.seatLeakageResult || 'Não avaliado'}</p>
+                            <p><span className="font-bold">Pressão do ensaio de estanqueidade:</span> {selectedReport?.seatLeakageTestPressure ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Vazamento medido:</span> {selectedReport?.seatLeakageMeasured ?? '—'} {selectedReport?.seatLeakageUnit || ''}</p>
+                            <p><span className="font-bold">Limite de vazamento:</span> {selectedReport?.seatLeakageLimit ?? '—'} {selectedReport?.seatLeakageUnit || ''}</p>
+                            <p><span className="font-bold">Ensaio de vazão/droop:</span> {selectedReport?.flowPerformanceTested ? 'Executado' : 'Não executado'}</p>
+                            <p><span className="font-bold">Droop:</span> {selectedReport?.flowPerformanceTested ? `${selectedReport?.droopPercent ?? '—'}% (limite ${selectedReport?.droopLimitPercent ?? '—'}%)` : 'Não avaliado'}</p>
+                            <p><span className="font-bold">Resultado do droop:</span> {selectedReport?.flowPerformanceTested ? (selectedReport?.droopPass === false ? 'NÃO CONFORME' : 'CONFORME') : 'Não aplicável ao ensaio estático'}</p>
+                            <p><span className="font-bold">Resultado geral:</span> {selectedReport?.approved ? 'APROVADO' : 'NÃO APROVADO'}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <table className="w-full text-center border-collapse text-[10px]">
+                            <thead>
+                              <tr className="bg-slate-100 font-bold border border-slate-300">
+                                <th className="p-1 border border-slate-300" rowSpan={2}>VI<br/>(Nominal)</th>
+                                <th className="p-1 border border-slate-300" colSpan={2}>VRef Primeiro Ciclo</th>
+                                <th className="p-1 border border-slate-300" colSpan={2}>VRef Segundo Ciclo</th>
+                                <th className="p-1 border border-slate-300" rowSpan={2}>VRef Média<br/>de Leituras</th>
+                                <th className="p-1 border border-slate-300" rowSpan={2}>Erro</th>
+                                <th className="p-1 border border-slate-300" rowSpan={2}>Unidade<br/>de Medida</th>
+                              </tr>
+                              <tr className="bg-slate-100 font-bold border border-slate-300">
+                                <th className="p-1 border border-slate-300">Crescente</th>
+                                <th className="p-1 border border-slate-300">Decrescente</th>
+                                <th className="p-1 border border-slate-300">Crescente</th>
+                                <th className="p-1 border border-slate-300">Decrescente</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {formattedPoints.map((point: any, idx: number) => (
+                                <tr key={idx}>
+                                  <td className="p-1 border border-slate-300 font-bold">{point.nominal}</td>
+                                  <td className="p-1 border border-slate-300">{point.refAsc1 !== undefined ? point.refAsc1 : (point.a1 !== 0 ? point.a1 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refDesc1 !== undefined ? point.refDesc1 : (point.d1 !== 0 ? point.d1 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refAsc2 !== undefined ? point.refAsc2 : (point.a2 !== 0 ? point.a2 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refDesc2 !== undefined ? point.refDesc2 : (point.d2 !== 0 ? point.d2 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.count > 0 ? point.avg.toFixed(2) : '-'}</td>
+                                  <td className="p-1 border border-slate-300">{point.count > 0 ? (point.err > 0 ? `+${point.err}` : point.err) : '-'}</td>
+                                  <td className="p-1 border border-slate-300">
+                                    {(inst?.typeSpec === 'manovacuometro' || (inst?.description || '').toLowerCase().includes('manovacu')) && point.nominal < 0
+                                      ? (inst?.unitNegative || (inst?.rangeMin && inst.rangeMin <= -700 ? 'mmHg' : inst?.rangeMin && inst.rangeMin <= -25 ? 'inHg' : inst?.unit || 'mmHg'))
+                                      : inst?.unit}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <div className="mt-4 font-bold text-[10px]">
+                            <p>Índice de Classe (%): {classPct.toFixed(2)}</p>
+                            <p>Repetitividade (%): {repPct.toFixed(3)}</p>
+                            <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="mt-16 grid grid-cols-2 gap-8 px-12">

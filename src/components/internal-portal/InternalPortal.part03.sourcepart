@@ -350,6 +350,10 @@
                                   "Pressostato (ABNT NBR IEC 60947)"}
                                 {selectedInstrumentType === "termostato" &&
                                   "Termostato (ABNT NBR IEC 60947)"}
+                                {selectedInstrumentType === "psv" &&
+                                  "PSV / Válvula de Segurança (NR-13 / ISO 4126)"}
+                                {selectedInstrumentType === "pcv" &&
+                                  "PCV / Válvula Auto-operada (IEC 60534 / IOGP S-739)"}
                               </span>
                             </div>
                             <button
@@ -388,6 +392,45 @@
                                         activeInst.outputSignal ||
                                           info.defaultSignal,
                                       );
+                                      if (t === "psv" || t === "pcv") {
+                                        setBenchSetPoint(activeInst.setPoint ?? "");
+                                        const savedTolerance = Number(activeInst.mpe);
+                                        setBenchMpe(
+                                          Number.isFinite(savedTolerance) && savedTolerance > 0
+                                            ? savedTolerance
+                                            : 0,
+                                        );
+                                        setBenchAccuracyClass(
+                                          t === "psv"
+                                            ? "Código de projeto / fabricante"
+                                            : "Especificação de processo / fabricante",
+                                        );
+                                        setBenchValveTestMedium(activeInst.valveTestMedium || "Ar / Nitrogênio");
+                                        setBenchSeatLeakageResult("Não avaliado");
+                                        setBenchSeatLeakageTestPressure("");
+                                        setBenchSeatLeakageMeasured("");
+                                        setBenchSeatLeakageLimit("");
+                                        if (t === "psv") {
+                                          setBenchValveService(activeInst.valveService || "Gás / Vapor");
+                                          setBenchValveSeatType(activeInst.valveSeatType || "Metal-Metal");
+                                          setBenchAcceptanceCriterion(activeInst.acceptanceCriterion || "");
+                                          setBenchMaxBlowdownPct(activeInst.maxBlowdownPercent ?? "");
+                                        } else {
+                                          setBenchRegulatorMode(
+                                            activeInst.regulatorMode ||
+                                              "Redutora de Pressão (controle a jusante)",
+                                          );
+                                          const regulatorActuation =
+                                            activeInst.regulatorActuation ||
+                                            "Auto-operada / Ação Direta";
+                                          setBenchRegulatorActuation(regulatorActuation);
+                                          setBenchDroopLimitPercent(
+                                            regulatorActuation.includes("Pilotada") ? 5 : 15,
+                                          );
+                                          setBenchFlowPerformanceTested(false);
+                                          setBenchDroopPercent("");
+                                        }
+                                      }
                                     }}
                                     className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                                       isSelected
@@ -396,10 +439,13 @@
                                     }`}
                                   >
                                     {t === "manometro" && "Manômetro"}
+                                    {t === "manovacuometro" && "Manovacuômetro"}
                                     {t === "termometro" && "Termômetro"}
                                     {t === "transmissor" && "Transmissor"}
                                     {t === "pressostato" && "Pressostato"}
                                     {t === "termostato" && "Termostato"}
+                                    {t === "psv" && "PSV / Segurança"}
+                                    {t === "pcv" && "PCV / Auto-operada"}
                                   </button>
                                 );
                               })}
@@ -927,6 +973,126 @@
                                       Classe 3.0 (±3.0%) - ABNT IEC 60947
                                     </option>
                                   </select>
+                                </div>
+                              </>
+                            )}
+
+                            {selectedInstrumentType === "psv" && (
+                              <>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">
+                                    Pressão de Abertura / Set Pressure ({activeInst.unit}) *
+                                  </label>
+                                  <input type="number" step="any" required value={benchSetPoint}
+                                    onChange={(e) => setBenchSetPoint(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold" />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">
+                                    Tolerância de Abertura ({activeInst.unit}) *
+                                  </label>
+                                  <input type="number" min="0.000001" step="any" required value={benchMpe}
+                                    onChange={(e) => setBenchMpe(Number(e.target.value))}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold" />
+                                  <p className="text-[9px] text-amber-700 mt-1">Confirmar conforme código de projeto, faixa, serviço e fabricante.</p>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Serviço / Fluido Protegido</label>
+                                  <select value={benchValveService} onChange={(e) => setBenchValveService(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900">
+                                    <option>Gás / Vapor</option><option>Vapor d'água</option><option>Líquido</option><option>Serviço bifásico / conforme fabricante</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Meio de Ensaio</label>
+                                  <select value={benchValveTestMedium} onChange={(e) => setBenchValveTestMedium(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900">
+                                    <option>Ar / Nitrogênio</option><option>Água</option><option>Vapor</option><option>Outro conforme procedimento</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Tipo de Sede</label>
+                                  <select value={benchValveSeatType} onChange={(e) => setBenchValveSeatType(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900">
+                                    <option>Metal-Metal</option><option>Sede Resiliente / Soft Seat</option><option>Conforme fabricante</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Blowdown Máximo (%)</label>
+                                  <input type="number" min="0" step="any" value={benchMaxBlowdownPct}
+                                    onChange={(e) => setBenchMaxBlowdownPct(e.target.value)} placeholder="Opcional / conforme código ou fabricante"
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono" />
+                                </div>
+                                <div className="sm:col-span-3">
+                                  <label className="block text-slate-600 font-bold mb-1">Critério de Aceitação / Código de Projeto *</label>
+                                  <input type="text" required value={benchAcceptanceCriterion} onChange={(e) => setBenchAcceptanceCriterion(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900"
+                                    placeholder="Ex.: ASME VIII / fabricante / procedimento interno" />
+                                </div>
+                              </>
+                            )}
+
+                            {selectedInstrumentType === "pcv" && (
+                              <>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Set Point de Regulação ({activeInst.unit}) *</label>
+                                  <input type="number" step="any" required value={benchSetPoint}
+                                    onChange={(e) => setBenchSetPoint(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold" />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Tolerância do Set Point ({activeInst.unit}) *</label>
+                                  <input type="number" min="0.000001" step="any" required value={benchMpe}
+                                    onChange={(e) => setBenchMpe(Number(e.target.value))}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold" />
+                                  <p className="text-[9px] text-amber-700 mt-1">Definir por especificação do processo/fabricante. Não é um limite universal da IEC 60534.</p>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Função do Regulador</label>
+                                  <select value={benchRegulatorMode} onChange={(e) => setBenchRegulatorMode(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900">
+                                    <option>Redutora de Pressão (controle a jusante)</option><option>Back Pressure (controle a montante)</option>
+                                    <option>Pressão Diferencial</option><option>Tank Blanketing / Inertização</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Atuação</label>
+                                  <select value={benchRegulatorActuation} onChange={(e) => {
+                                    const actuation = e.target.value;
+                                    setBenchRegulatorActuation(actuation);
+                                    setBenchDroopLimitPercent(actuation.includes("Pilotada") ? 5 : 15);
+                                  }}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900">
+                                    <option>Auto-operada / Ação Direta</option><option>Auto-operada / Pilotada</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">Meio de Ensaio</label>
+                                  <select value={benchValveTestMedium} onChange={(e) => setBenchValveTestMedium(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900">
+                                    <option>Ar / Nitrogênio</option><option>Água</option><option>Outro conforme procedimento</option>
+                                  </select>
+                                </div>
+                                <div className="sm:col-span-3 bg-cyan-50 border border-cyan-200 rounded-lg p-3">
+                                  <label className="flex items-center gap-2 font-bold text-cyan-900">
+                                    <input type="checkbox" checked={benchFlowPerformanceTested}
+                                      onChange={(e) => setBenchFlowPerformanceTested(e.target.checked)} />
+                                    Ensaio de desempenho com vazão executado
+                                  </label>
+                                  <p className="text-[10px] text-cyan-800 mt-1">Marque somente quando houver bancada capaz de aplicar/medir vazão. Sem esse ensaio, o certificado não deve declarar conformidade de droop.</p>
+                                  {benchFlowPerformanceTested && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                                      <div><label className="block font-bold text-slate-600 mb-1">Droop medido (% do set point) *</label>
+                                        <input type="number" min="0" step="any" value={benchDroopPercent}
+                                          onChange={(e) => setBenchDroopPercent(e.target.value)}
+                                          className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono" /></div>
+                                      <div><label className="block font-bold text-slate-600 mb-1">Limite de droop (%)</label>
+                                        <input type="number" min="0" step="any" value={benchDroopLimitPercent}
+                                          onChange={(e) => setBenchDroopLimitPercent(Number(e.target.value) || (benchRegulatorActuation.includes("Pilotada") ? 5 : 15))}
+                                          className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono" />
+                                        <p className="text-[9px] text-slate-500 mt-1">Referência pública IOGP S-739 v1.0 (2022): 15% para ação direta/self-acting e 5% para regulador pilotado em vazão máxima. Confirme a revisão contratual vigente e a especificação do fabricante antes de aprovar.</p></div>
+                                    </div>
+                                  )}
                                 </div>
                               </>
                             )}
@@ -1495,6 +1661,171 @@
                                   )}
                                 </tbody>
                               </table>
+                            </div>
+                          )}
+
+                          {/* TABLE RENDER: 4. PSV / SAFETY VALVE */}
+                          {selectedInstrumentType === "psv" && (
+                            <div className="space-y-3">
+                              <div className="overflow-x-auto border border-red-200 rounded-lg">
+                                <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                  <thead>
+                                    <tr className="bg-red-50 text-slate-700 border-b border-red-200 font-sans">
+                                      <th className="p-2 text-center border-r border-slate-200">Ensaio</th>
+                                      <th className="p-2 text-center border-r border-slate-200">Set Pressure ({activeInst.unit})</th>
+                                      <th className="p-2 text-center border-r border-slate-200">Abertura ({activeInst.unit})</th>
+                                      <th className="p-2 text-center border-r border-slate-200">Reassentamento ({activeInst.unit})</th>
+                                      <th className="p-2 text-center border-r border-slate-200">Erro Abertura</th>
+                                      <th className="p-2 text-center border-r border-slate-200">Blowdown (%)</th>
+                                      <th className="p-2 text-center">Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 font-mono">
+                                    {benchSafetyValvePoints.map((point: any, index: number) => {
+                                      const setPointNom = Number(benchSetPoint) || 0;
+                                      const hasOpening = point.openingPressure !== "";
+                                      const hasReseating = point.reseatingPressure !== "";
+                                      const opening = Number(point.openingPressure) || 0;
+                                      const reseating = Number(point.reseatingPressure) || 0;
+                                      const error = hasOpening ? Number((opening - setPointNom).toFixed(4)) : 0;
+                                      const blowdownPct = hasOpening && hasReseating && opening !== 0
+                                        ? Number((Math.abs((opening - reseating) / opening) * 100).toFixed(2))
+                                        : 0;
+                                      const openingPass = hasOpening && Math.abs(error) <= benchMpe;
+                                      const blowdownLimit = Number(benchMaxBlowdownPct);
+                                      const blowdownPass = benchMaxBlowdownPct === "" ||
+                                        !Number.isFinite(blowdownLimit) || blowdownPct <= blowdownLimit;
+                                      const pass = openingPass && hasReseating && blowdownPass;
+                                      return (
+                                        <tr key={index} className="hover:bg-slate-50">
+                                          <td className="p-2 text-center border-r border-slate-200 font-bold bg-red-50 text-red-900">Teste 0{point.repeat}</td>
+                                          <td className="p-2 text-center border-r border-slate-200 font-bold">{setPointNom}</td>
+                                          <td className="p-2 text-center border-r border-slate-200">
+                                            <input type="number" step="any" value={point.openingPressure}
+                                              onChange={(e) => { const next = [...benchSafetyValvePoints]; next[index].openingPressure = e.target.value; setBenchSafetyValvePoints(next); }}
+                                              className="w-24 bg-white border border-slate-300 rounded px-1.5 py-1 text-center font-bold" />
+                                          </td>
+                                          <td className="p-2 text-center border-r border-slate-200">
+                                            <input type="number" step="any" value={point.reseatingPressure}
+                                              onChange={(e) => { const next = [...benchSafetyValvePoints]; next[index].reseatingPressure = e.target.value; setBenchSafetyValvePoints(next); }}
+                                              className="w-24 bg-white border border-slate-300 rounded px-1.5 py-1 text-center font-bold" />
+                                          </td>
+                                          <td className={`p-2 text-center border-r border-slate-200 font-bold ${hasOpening && !openingPass ? "text-rose-600" : ""}`}>
+                                            {hasOpening ? `${error > 0 ? "+" : ""}${error} ${activeInst.unit}` : "-"}
+                                          </td>
+                                          <td className={`p-2 text-center border-r border-slate-200 font-bold ${hasOpening && hasReseating && !blowdownPass ? "text-rose-600" : "text-amber-700"}`}>
+                                            {hasOpening && hasReseating ? `${blowdownPct}%` : "-"}
+                                          </td>
+                                          <td className="p-2 text-center">
+                                            {hasOpening && hasReseating && (
+                                              <span className={`px-2 py-0.5 rounded font-bold text-[9px] ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                                                {pass ? "OK" : "FORA DO CRITÉRIO"}
+                                              </span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-red-50/60 border border-red-200 rounded-lg p-3 text-xs">
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1">Estanqueidade da Sede *</label>
+                                  <select required value={benchSeatLeakageResult} onChange={(e) => setBenchSeatLeakageResult(e.target.value as any)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5">
+                                    <option value="Não avaliado">Não avaliado</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
+                                  </select>
+                                </div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Pressão do ensaio ({activeInst.unit})</label>
+                                  <input type="number" step="any" value={benchSeatLeakageTestPressure} onChange={(e) => setBenchSeatLeakageTestPressure(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 font-mono" /></div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Vazamento medido</label>
+                                  <input type="number" min="0" step="any" value={benchSeatLeakageMeasured} onChange={(e) => setBenchSeatLeakageMeasured(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 font-mono" /></div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Limite aplicável</label>
+                                  <input type="number" min="0" step="any" value={benchSeatLeakageLimit} onChange={(e) => setBenchSeatLeakageLimit(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 font-mono" /></div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Unidade de vazamento</label>
+                                  <select value={benchSeatLeakageUnit} onChange={(e) => setBenchSeatLeakageUnit(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5">
+                                    <option>bolhas/min</option><option>mL/min</option><option>cm³/min</option><option>sem vazamento visível</option><option>conforme fabricante</option>
+                                  </select></div>
+                                <p className="md:col-span-5 text-[10px] text-red-800">A aprovação da PSV exige resultado de estanqueidade “Aprovado”. O limite numérico deve ser preenchido conforme API 527 quando aplicável ou conforme o código/fabricante do equipamento.</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TABLE RENDER: 5. PCV / SELF-OPERATED PRESSURE REGULATOR */}
+                          {selectedInstrumentType === "pcv" && (
+                            <div className="overflow-x-auto border border-cyan-200 rounded-lg">
+                              <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                <thead>
+                                  <tr className="bg-cyan-50 text-slate-700 border-b border-cyan-200 font-sans">
+                                    <th className="p-2 text-center border-r border-slate-200">Ensaio</th>
+                                    <th className="p-2 text-center border-r border-slate-200">Set Point ({activeInst.unit})</th>
+                                    <th className="p-2 text-center border-r border-slate-200">Aproximação por Baixo</th>
+                                    <th className="p-2 text-center border-r border-slate-200">Aproximação por Cima</th>
+                                    <th className="p-2 text-center border-r border-slate-200">Média</th>
+                                    <th className="p-2 text-center border-r border-slate-200">Erro</th>
+                                    <th className="p-2 text-center border-r border-slate-200">Histerese</th>
+                                    <th className="p-2 text-center">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 font-mono">
+                                  {benchPressureRegulatorPoints.map((point: any, index: number) => {
+                                    const setPointNom = Number(benchSetPoint) || 0;
+                                    const hasBelow = point.measuredFromBelow !== "";
+                                    const hasAbove = point.measuredFromAbove !== "";
+                                    const below = Number(point.measuredFromBelow) || 0;
+                                    const above = Number(point.measuredFromAbove) || 0;
+                                    const average = hasBelow && hasAbove ? Number(((below + above) / 2).toFixed(4)) : 0;
+                                    const error = hasBelow && hasAbove ? Number((average - setPointNom).toFixed(4)) : 0;
+                                    const hysteresis = hasBelow && hasAbove ? Number(Math.abs(below - above).toFixed(4)) : 0;
+                                    const pass = hasBelow && hasAbove && Math.abs(error) <= benchMpe;
+                                    return (
+                                      <tr key={index} className="hover:bg-slate-50">
+                                        <td className="p-2 text-center border-r border-slate-200 font-bold bg-cyan-50 text-cyan-900">Teste 0{point.repeat}</td>
+                                        <td className="p-2 text-center border-r border-slate-200 font-bold">{setPointNom}</td>
+                                        <td className="p-2 text-center border-r border-slate-200"><input type="number" step="any" value={point.measuredFromBelow}
+                                          onChange={(e) => { const next = [...benchPressureRegulatorPoints]; next[index].measuredFromBelow = e.target.value; setBenchPressureRegulatorPoints(next); }}
+                                          className="w-24 bg-white border border-slate-300 rounded px-1.5 py-1 text-center font-bold" /></td>
+                                        <td className="p-2 text-center border-r border-slate-200"><input type="number" step="any" value={point.measuredFromAbove}
+                                          onChange={(e) => { const next = [...benchPressureRegulatorPoints]; next[index].measuredFromAbove = e.target.value; setBenchPressureRegulatorPoints(next); }}
+                                          className="w-24 bg-white border border-slate-300 rounded px-1.5 py-1 text-center font-bold" /></td>
+                                        <td className="p-2 text-center border-r border-slate-200 font-bold">{hasBelow && hasAbove ? average : "-"}</td>
+                                        <td className={`p-2 text-center border-r border-slate-200 font-bold ${hasBelow && hasAbove && !pass ? "text-rose-600" : ""}`}>{hasBelow && hasAbove ? `${error > 0 ? "+" : ""}${error}` : "-"}</td>
+                                        <td className="p-2 text-center border-r border-slate-200 font-bold text-amber-700">{hasBelow && hasAbove ? hysteresis : "-"}</td>
+                                        <td className="p-2 text-center">{hasBelow && hasAbove && <span className={`px-2 py-0.5 rounded font-bold text-[9px] ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{pass ? "OK" : "EXCEDE TOLERÂNCIA"}</span>}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-cyan-50/60 border-t border-cyan-200 p-3 text-xs">
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1">Estanqueidade da Sede</label>
+                                  <select value={benchSeatLeakageResult} onChange={(e) => setBenchSeatLeakageResult(e.target.value as any)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5">
+                                    <option value="Não avaliado">Não avaliado</option><option value="Aprovado">Aprovado</option><option value="Reprovado">Reprovado</option>
+                                  </select>
+                                </div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Pressão do ensaio ({activeInst.unit})</label>
+                                  <input type="number" step="any" value={benchSeatLeakageTestPressure} onChange={(e) => setBenchSeatLeakageTestPressure(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 font-mono" /></div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Vazamento medido</label>
+                                  <input type="number" min="0" step="any" value={benchSeatLeakageMeasured} onChange={(e) => setBenchSeatLeakageMeasured(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 font-mono" /></div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Limite aplicável</label>
+                                  <input type="number" min="0" step="any" value={benchSeatLeakageLimit} onChange={(e) => setBenchSeatLeakageLimit(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 font-mono" /></div>
+                                <div><label className="block font-bold text-slate-700 mb-1">Unidade de vazamento</label>
+                                  <select value={benchSeatLeakageUnit} onChange={(e) => setBenchSeatLeakageUnit(e.target.value)}
+                                    className="w-full bg-white border border-slate-300 rounded px-2 py-1.5">
+                                    <option>bolhas/min</option><option>mL/min</option><option>cm³/min</option><option>sem vazamento visível</option><option>conforme fabricante</option>
+                                  </select></div>
+                                <p className="md:col-span-5 text-[10px] text-cyan-800">Quando o ensaio de estanqueidade for executado, registre o critério aplicável. A IOGP S-739 remete a estanqueidade da sede à IEC 60534-4 ou ANSI/FCI 70-3.</p>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -2483,6 +2814,11 @@
                           new Date(a.date).getTime(),
                       )
                       .find((r: any) => r.instrumentId === inst.id);
+                    const certificateInstrumentType: InstrumentType =
+                      report?.instrumentType || detectInstrumentType(inst);
+                    const certificateNorm =
+                      METROLOGICAL_NORMS_INFO[certificateInstrumentType] ||
+                      METROLOGICAL_NORMS_INFO.manometro;
                     const certNumber =
                       report?.certNumber ||
                       `COMA-${inst.id.substring(0, 4).toUpperCase()}`;
@@ -2500,13 +2836,9 @@
                       Math.abs((inst.rangeMax || 0) - (inst.rangeMin || 0)) ||
                       1;
                     const mpeVal =
-                      report?.mpe !== undefined &&
-                      report?.mpe !== null &&
-                      report?.mpe !== ""
+                      report?.mpe !== undefined && report?.mpe !== null
                         ? Number(report.mpe)
-                        : inst.mpe !== undefined &&
-                            inst.mpe !== null &&
-                            inst.mpe !== ""
+                        : inst.mpe !== undefined && inst.mpe !== null
                           ? Number(inst.mpe)
                           : 0;
 
@@ -2985,17 +3317,13 @@
                                 <span className="font-bold">
                                   Método de Calibração:
                                 </span>{" "}
-                                conforme procedimento PR-001-2017 Rev. 4
+                                procedimento PR-001-2017 Rev. 4, com referência técnica {certificateInstrumentType === "psv" && report?.acceptanceCriterion ? report.acceptanceCriterion : (report?.metrologicalNorm || certificateNorm.code)}
                               </p>
                               <p>
                                 <span className="font-bold">
                                   Descrição do Método:
                                 </span>{" "}
-                                A Calibração foi realizada conforme procedimento
-                                PR-001-2017 Rev. 4 comparando-se o instrumento
-                                com o padrão listado no item 7. A série de
-                                medições estão definidas nas tabelas de valores
-                                encontrados.
+                                {certificateNorm.methodology} O instrumento foi comparado com o(s) padrão(ões) rastreável(is) listado(s) no item 7 e os resultados efetivamente ensaiados estão registrados no item 8.
                               </p>
                             </div>
                           </div>
@@ -3069,6 +3397,95 @@
                             <p className="font-bold text-sm uppercase mb-2">
                               8. Valores Encontrados:
                             </p>
+                            {certificateInstrumentType === "psv" ? (
+                              <div className="space-y-3 text-[10px]">
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                                  <p><span className="font-bold">Set Pressure:</span> {report?.setPoint ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Tolerância de abertura:</span> ±{report?.mpe ?? inst.mpe ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Serviço:</span> {report?.valveService || "—"}</p>
+                                  <p><span className="font-bold">Meio de ensaio:</span> {report?.valveTestMedium || "—"}</p>
+                                  <p><span className="font-bold">Tipo de sede:</span> {report?.valveSeatType || "—"}</p>
+                                  <p><span className="font-bold">Critério:</span> {report?.acceptanceCriterion || "Código/fabricante aplicável"}</p>
+                                </div>
+                                <table className="w-full text-center border-collapse text-[10px]">
+                                  <thead><tr className="bg-slate-100 font-bold">
+                                    <th className="p-1 border border-slate-300">Ensaio</th>
+                                    <th className="p-1 border border-slate-300">Abertura</th>
+                                    <th className="p-1 border border-slate-300">Reassentamento</th>
+                                    <th className="p-1 border border-slate-300">Erro</th>
+                                    <th className="p-1 border border-slate-300">Blowdown</th>
+                                    <th className="p-1 border border-slate-300">Resultado</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {(report?.safetyValvePoints || []).map((p: any, idx: number) => (
+                                      <tr key={idx}>
+                                        <td className="p-1 border border-slate-300">{p.repeat || idx + 1}</td>
+                                        <td className="p-1 border border-slate-300">{p.openingPressure} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.reseatingPressure} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.setError !== undefined ? `${Number(p.setError) > 0 ? "+" : ""}${p.setError}` : "—"} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.blowdownPercent !== undefined ? `${p.blowdownPercent}%` : "—"}</td>
+                                        <td className="p-1 border border-slate-300 font-bold">{p.pass === false ? "NÃO CONFORME" : "CONFORME"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <div className="border border-slate-300 p-2 grid grid-cols-2 gap-x-6 gap-y-1">
+                                  <p><span className="font-bold">Estanqueidade da sede:</span> {report?.seatLeakageResult || "—"}</p>
+                                  <p><span className="font-bold">Pressão de teste:</span> {report?.seatLeakageTestPressure ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Vazamento medido:</span> {report?.seatLeakageMeasured ?? "—"} {report?.seatLeakageUnit || ""}</p>
+                                  <p><span className="font-bold">Limite:</span> {report?.seatLeakageLimit ?? "—"} {report?.seatLeakageUnit || ""}</p>
+                                  <p><span className="font-bold">Blowdown máximo registrado:</span> {report?.measuredMaxBlowdownPercent !== undefined ? `${report.measuredMaxBlowdownPercent}%` : "—"}</p>
+                                  <p><span className="font-bold">Limite de blowdown configurado:</span> {report?.maxBlowdownPercent !== undefined ? `${report.maxBlowdownPercent}%` : "Não definido"}</p>
+                                  <p><span className="font-bold">Resultado geral:</span> {report?.approved ? "APROVADO" : "NÃO APROVADO"}</p>
+                                </div>
+                              </div>
+                            ) : certificateInstrumentType === "pcv" ? (
+                              <div className="space-y-3 text-[10px]">
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                                  <p><span className="font-bold">Set Point:</span> {report?.setPoint ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Tolerância:</span> ±{report?.mpe ?? inst.mpe ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Função:</span> {report?.regulatorMode || "—"}</p>
+                                  <p><span className="font-bold">Atuação:</span> {report?.regulatorActuation || "—"}</p>
+                                  <p><span className="font-bold">Meio de ensaio:</span> {report?.valveTestMedium || "—"}</p>
+                                  <p><span className="font-bold">Estanqueidade:</span> {report?.seatLeakageResult || "Não avaliado"}</p>
+                                </div>
+                                <table className="w-full text-center border-collapse text-[10px]">
+                                  <thead><tr className="bg-slate-100 font-bold">
+                                    <th className="p-1 border border-slate-300">Ensaio</th>
+                                    <th className="p-1 border border-slate-300">Aprox. por Baixo</th>
+                                    <th className="p-1 border border-slate-300">Aprox. por Cima</th>
+                                    <th className="p-1 border border-slate-300">Média</th>
+                                    <th className="p-1 border border-slate-300">Erro</th>
+                                    <th className="p-1 border border-slate-300">Histerese</th>
+                                    <th className="p-1 border border-slate-300">Resultado</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {(report?.pressureRegulatorPoints || []).map((p: any, idx: number) => (
+                                      <tr key={idx}>
+                                        <td className="p-1 border border-slate-300">{p.repeat || idx + 1}</td>
+                                        <td className="p-1 border border-slate-300">{p.measuredFromBelow} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.measuredFromAbove} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.average ?? "—"} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.error !== undefined ? `${Number(p.error) > 0 ? "+" : ""}${p.error}` : "—"} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300">{p.hysteresis ?? "—"} {inst.unit}</td>
+                                        <td className="p-1 border border-slate-300 font-bold">{p.pass === false ? "NÃO CONFORME" : "CONFORME"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <div className="border border-slate-300 p-2 grid grid-cols-2 gap-x-6 gap-y-1">
+                                  <p><span className="font-bold">Estanqueidade da sede:</span> {report?.seatLeakageResult || "Não avaliado"}</p>
+                                  <p><span className="font-bold">Pressão do ensaio de estanqueidade:</span> {report?.seatLeakageTestPressure ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Vazamento medido:</span> {report?.seatLeakageMeasured ?? "—"} {report?.seatLeakageUnit || ""}</p>
+                                  <p><span className="font-bold">Limite de vazamento:</span> {report?.seatLeakageLimit ?? "—"} {report?.seatLeakageUnit || ""}</p>
+                                  <p><span className="font-bold">Ensaio de vazão/droop:</span> {report?.flowPerformanceTested ? "Executado" : "Não executado"}</p>
+                                  <p><span className="font-bold">Droop:</span> {report?.flowPerformanceTested ? `${report?.droopPercent ?? "—"}% (limite ${report?.droopLimitPercent ?? "—"}%)` : "Não avaliado"}</p>
+                                  <p><span className="font-bold">Resultado do droop:</span> {report?.flowPerformanceTested ? (report?.droopPass === false ? "NÃO CONFORME" : "CONFORME") : "Não aplicável ao ensaio estático"}</p>
+                                  <p><span className="font-bold">Resultado geral:</span> {report?.approved ? "APROVADO" : "NÃO APROVADO"}</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
                             <table className="w-full text-center border-collapse text-[10px]">
                               <thead>
                                 <tr className="bg-slate-100 font-bold border border-slate-300">
@@ -3173,6 +3590,8 @@
                               <p>Repetitividade (%): {repPct.toFixed(3)}</p>
                               <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
                             </div>
+                              </>
+                            )}
                           </div>
 
                           <div className="mt-16 grid grid-cols-2 gap-8 px-12">

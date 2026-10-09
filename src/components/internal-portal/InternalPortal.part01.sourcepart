@@ -493,6 +493,39 @@ export const detectInstrumentType = (
     return inst.instrumentType as InstrumentType;
   }
 
+  // Detect pressure valves before generic pressure instruments.
+  // Avoid a bare "PRV" match because it can mean either relief valve or regulator.
+  if (
+    /(^|[^a-z0-9])psv([^a-z0-9]|$)/i.test(fullText) ||
+    fullText.includes("válvula de segurança") ||
+    fullText.includes("valvula de seguranca") ||
+    fullText.includes("safety valve") ||
+    fullText.includes("safety relief") ||
+    fullText.includes("relief valve") ||
+    typeSpec === "psv" ||
+    instType === "psv"
+  ) {
+    return "psv";
+  }
+
+  if (
+    /(^|[^a-z0-9])pcv([^a-z0-9]|$)/i.test(fullText) ||
+    fullText.includes("válvula auto operada") ||
+    fullText.includes("valvula auto operada") ||
+    fullText.includes("auto-operada") ||
+    fullText.includes("self-operated") ||
+    fullText.includes("self acting") ||
+    fullText.includes("pressure regulator") ||
+    fullText.includes("reguladora de pressão") ||
+    fullText.includes("reguladora de pressao") ||
+    fullText.includes("back pressure regulator") ||
+    fullText.includes("blanketing") ||
+    typeSpec === "pcv" ||
+    instType === "pcv"
+  ) {
+    return "pcv";
+  }
+
   // Detect Manovacuometro first (since it might also match manometro logic)
   if (
     fullText.includes("manovacu") ||
@@ -683,6 +716,30 @@ export const METROLOGICAL_NORMS_INFO: Record<
     defaultSignal: "Contato Elétrico NA/NF (SPDT)",
     methodology:
       "Calibração realizada conforme normas ABNT NBR IEC 60947-5-1 e DIN 3440 com aquecimento e resfriamento controlados para determinação do Ponto de Disparo Térmico (T_set), Rearme (T_reset) e Banda Morta Térmica.",
+  },
+  psv: {
+    name: "PSV / Válvula de Segurança e Alívio",
+    code: "NR-13 / ISO 4126-1:2013+Amd 1:2016 / API RP 576 (5ª ed. + A1) / API Std 527 (5ª ed.) / ASME BPVC XIII:2025 (quando aplicável)",
+    description:
+      "Verificação de pressão de abertura, reassentamento e estanqueidade conforme código de projeto e fabricante",
+    badgeBg: "bg-red-100 border-red-300",
+    badgeText: "text-red-800",
+    defaultSensor: "Mola Direta / Disco-Sede",
+    defaultSignal: "Abertura Mecânica por Pressão",
+    methodology:
+      "Ensaio em bancada para determinação da pressão de abertura (set pressure/CDTP quando aplicável), repetibilidade, reassentamento e estanqueidade da sede. A tolerância de abertura deve seguir o código de projeto, serviço e fabricante. A NR-13 exige que instrumentos e sistemas de segurança sejam mantidos adequados e inspecionados/testados ou, quando aplicável, calibrados; para válvulas de segurança de vasos de pressão, também estabelece desmontagem, inspeção e teste periódico.",
+  },
+  pcv: {
+    name: "PCV / Válvula Reguladora de Pressão Auto-operada",
+    code: "IEC 60534-1:2023 / IEC 60534-4:2021 / IOGP S-739 (revisão contratual aplicável)",
+    description:
+      "Verificação funcional de set point, repetibilidade, histerese e desempenho de reguladores auto-operados",
+    badgeBg: "bg-cyan-100 border-cyan-300",
+    badgeText: "text-cyan-800",
+    defaultSensor: "Diafragma / Mola Auto-operada",
+    defaultSignal: "Regulação Mecânica Direta de Pressão",
+    methodology:
+      "Ensaio funcional por aplicação controlada de pressão para verificar set point, repetibilidade e histerese. Quando houver bancada de vazão, registrar o droop sob fluxo. O limite deve ser confirmado contra a revisão contratual aplicável da IOGP S-739, especificação de processo e fabricante; a referência pública S-739 v1.0 (2022) utiliza 15% do set point para ação direta (self-acting) e 5% para reguladores pilotados no fluxo máximo. A estanqueidade da sede deve seguir IEC 60534-4 ou ANSI/FCI 70-3, conforme aplicável.",
   },
 };
 
@@ -2036,6 +2093,29 @@ export default function InternalPortal({
     [],
   );
   const [benchSwitchPoints, setBenchSwitchPoints] = useState<any[]>([]);
+  const [benchSafetyValvePoints, setBenchSafetyValvePoints] = useState<any[]>([]);
+  const [benchPressureRegulatorPoints, setBenchPressureRegulatorPoints] = useState<any[]>([]);
+  const [benchValveService, setBenchValveService] = useState<string>("Gás / Vapor");
+  const [benchValveTestMedium, setBenchValveTestMedium] = useState<string>("Ar / Nitrogênio");
+  const [benchValveSeatType, setBenchValveSeatType] = useState<string>("Metal-Metal");
+  const [benchAcceptanceCriterion, setBenchAcceptanceCriterion] = useState<string>("");
+  const [benchMaxBlowdownPct, setBenchMaxBlowdownPct] = useState<string | number>("");
+  const [benchSeatLeakageResult, setBenchSeatLeakageResult] = useState<
+    "Aprovado" | "Reprovado" | "Não avaliado"
+  >("Não avaliado");
+  const [benchSeatLeakageTestPressure, setBenchSeatLeakageTestPressure] = useState<string | number>("");
+  const [benchSeatLeakageMeasured, setBenchSeatLeakageMeasured] = useState<string | number>("");
+  const [benchSeatLeakageLimit, setBenchSeatLeakageLimit] = useState<string | number>("");
+  const [benchSeatLeakageUnit, setBenchSeatLeakageUnit] = useState<string>("bolhas/min");
+  const [benchRegulatorMode, setBenchRegulatorMode] = useState<string>(
+    "Redutora de Pressão (controle a jusante)",
+  );
+  const [benchRegulatorActuation, setBenchRegulatorActuation] = useState<string>(
+    "Auto-operada / Ação Direta",
+  );
+  const [benchFlowPerformanceTested, setBenchFlowPerformanceTested] = useState<boolean>(false);
+  const [benchDroopPercent, setBenchDroopPercent] = useState<string | number>("");
+  const [benchDroopLimitPercent, setBenchDroopLimitPercent] = useState<number>(15);
   const [benchAccuracyClass, setBenchAccuracyClass] = useState<string>("A1");
   const [benchMpe, setBenchMpe] = useState<number>(1.0);
   const [showAllTypeOptions, setShowAllTypeOptions] = useState<boolean>(false);
@@ -2515,6 +2595,8 @@ export default function InternalPortal({
       setBenchPoints([]);
       setBenchTransmitterPoints([]);
       setBenchSwitchPoints([]);
+      setBenchSafetyValvePoints([]);
+      setBenchPressureRegulatorPoints([]);
       setBenchObs("");
       setBenchStandardA("");
       setBenchStandardB("");
@@ -3143,6 +3225,30 @@ Status atual: ${e.status}.`,
           setBenchThermalMedium(
             inst.thermalMedium || "Banho Termostático / Bloco Seco",
           );
+        } else if (detectedType === "psv") {
+          setBenchThermalMedium(inst.thermalMedium || "Bancada de Pressão para PSV");
+          setBenchValveService((inst as any).valveService || "Gás / Vapor");
+          setBenchValveTestMedium((inst as any).valveTestMedium || "Ar / Nitrogênio");
+          setBenchValveSeatType((inst as any).valveSeatType || "Metal-Metal");
+          setBenchAcceptanceCriterion((inst as any).acceptanceCriterion || "");
+          setBenchMaxBlowdownPct((inst as any).maxBlowdownPercent ?? "");
+          setBenchSeatLeakageResult("Não avaliado");
+          setBenchSeatLeakageTestPressure("");
+          setBenchSeatLeakageMeasured("");
+          setBenchSeatLeakageLimit("");
+        } else if (detectedType === "pcv") {
+          setBenchThermalMedium(inst.thermalMedium || "Bancada de Pressão / Vazão para Reguladores");
+          setBenchValveTestMedium((inst as any).valveTestMedium || "Ar / Nitrogênio");
+          setBenchRegulatorMode((inst as any).regulatorMode || "Redutora de Pressão (controle a jusante)");
+          const regulatorActuation = (inst as any).regulatorActuation || "Auto-operada / Ação Direta";
+          setBenchRegulatorActuation(regulatorActuation);
+          setBenchSeatLeakageResult("Não avaliado");
+          setBenchSeatLeakageTestPressure("");
+          setBenchSeatLeakageMeasured("");
+          setBenchSeatLeakageLimit("");
+          setBenchFlowPerformanceTested(false);
+          setBenchDroopPercent("");
+          setBenchDroopLimitPercent(regulatorActuation.includes("Pilotada") ? 5 : 15);
         } else {
           setBenchThermalMedium(inst.thermalMedium || "Bomba Comparativa");
         }
@@ -3152,7 +3258,11 @@ Status atual: ${e.status}.`,
         const span = Math.abs(max - min) || 1;
         const midPoint = Number((min + span / 2).toFixed(2));
         setBenchSetPoint(
-          inst.setPoint !== undefined ? inst.setPoint : midPoint,
+          inst.setPoint !== undefined
+            ? inst.setPoint
+            : detectedType === "psv" || detectedType === "pcv"
+              ? ""
+              : midPoint,
         );
 
         const initialAccuracyClass = inst.accuracyClass || "A1";
@@ -3210,7 +3320,24 @@ Status atual: ${e.status}.`,
         else if (initialAccuracyClass.includes("2.0")) pct = 2.0;
         else if (initialAccuracyClass.includes("3.0")) pct = 3.0;
 
-        setBenchMpe(Number(((pct / 100) * fe).toFixed(4)));
+        const genericMpe = Number(((pct / 100) * fe).toFixed(4));
+        const registeredMpe = Number(inst.mpe);
+        if (detectedType === "psv" || detectedType === "pcv") {
+          // Never invent a normative valve tolerance. Force an explicit criterion
+          // unless a valid MPE/tolerance was already registered on the instrument.
+          setBenchMpe(
+            Number.isFinite(registeredMpe) && registeredMpe > 0
+              ? registeredMpe
+              : 0,
+          );
+          setBenchAccuracyClass(
+            detectedType === "psv"
+              ? "Código de projeto / fabricante"
+              : "Especificação de processo / fabricante",
+          );
+        } else {
+          setBenchMpe(Number(inst.mpe ?? genericMpe));
+        }
 
         // 1. Manômetro & Termômetro & Manovacuometro Points
         let pts = [];
@@ -3304,6 +3431,21 @@ Status atual: ${e.status}.`,
           });
         }
         setBenchSwitchPoints(swPts);
+
+        setBenchSafetyValvePoints(
+          Array.from({ length: 3 }, (_, index) => ({
+            repeat: index + 1,
+            openingPressure: "",
+            reseatingPressure: "",
+          })),
+        );
+        setBenchPressureRegulatorPoints(
+          Array.from({ length: 5 }, (_, index) => ({
+            repeat: index + 1,
+            measuredFromBelow: "",
+            measuredFromAbove: "",
+          })),
+        );
       }
     }
   }, [selectedInstId, benchPointCount, activeTab]);
@@ -5853,6 +5995,105 @@ Status atual: ${e.status}.`,
           }
         }
       }
+    } else if (selectedInstrumentType === "psv") {
+      const setPointNominal = Number(benchSetPoint);
+      if (
+        benchSetPoint === "" ||
+        !Number.isFinite(setPointNominal) ||
+        !(benchMpe > 0) ||
+        !benchSafetyValvePoints.length
+      ) {
+        isAllFilled = false;
+      } else {
+        for (const point of benchSafetyValvePoints) {
+          const opening = Number(point.openingPressure);
+          const reseating = Number(point.reseatingPressure);
+          if (
+            point.openingPressure === "" ||
+            point.reseatingPressure === "" ||
+            !Number.isFinite(opening) ||
+            !Number.isFinite(reseating)
+          ) {
+            isAllFilled = false;
+            break;
+          }
+          const openingError = Math.abs(opening - setPointNominal);
+          const blowdownPct = opening !== 0
+            ? Math.abs(((opening - reseating) / opening) * 100)
+            : 0;
+          if (openingError > benchMpe) isAllOk = false;
+          const blowdownLimit = Number(benchMaxBlowdownPct);
+          if (
+            benchMaxBlowdownPct !== "" &&
+            Number.isFinite(blowdownLimit) &&
+            blowdownPct > blowdownLimit
+          ) {
+            isAllOk = false;
+          }
+        }
+      }
+      if (!benchAcceptanceCriterion.trim()) {
+        isAllFilled = false;
+      }
+      // PSV approved certificate requires a positive seat-tightness result.
+      if (benchSeatLeakageResult !== "Aprovado") isAllOk = false;
+      const leakageMeasured = Number(benchSeatLeakageMeasured);
+      const leakageLimit = Number(benchSeatLeakageLimit);
+      if (
+        benchSeatLeakageMeasured !== "" &&
+        benchSeatLeakageLimit !== "" &&
+        Number.isFinite(leakageMeasured) &&
+        Number.isFinite(leakageLimit) &&
+        leakageMeasured > leakageLimit
+      ) {
+        isAllOk = false;
+      }
+    } else if (selectedInstrumentType === "pcv") {
+      const setPointNominal = Number(benchSetPoint);
+      if (
+        benchSetPoint === "" ||
+        !Number.isFinite(setPointNominal) ||
+        !(benchMpe > 0) ||
+        !benchPressureRegulatorPoints.length
+      ) {
+        isAllFilled = false;
+      } else {
+        for (const point of benchPressureRegulatorPoints) {
+          const fromBelow = Number(point.measuredFromBelow);
+          const fromAbove = Number(point.measuredFromAbove);
+          if (
+            point.measuredFromBelow === "" ||
+            point.measuredFromAbove === "" ||
+            !Number.isFinite(fromBelow) ||
+            !Number.isFinite(fromAbove)
+          ) {
+            isAllFilled = false;
+            break;
+          }
+          const average = (fromBelow + fromAbove) / 2;
+          if (Math.abs(average - setPointNominal) > benchMpe) isAllOk = false;
+        }
+      }
+      if (benchSeatLeakageResult === "Reprovado") isAllOk = false;
+      const pcvLeakageMeasured = Number(benchSeatLeakageMeasured);
+      const pcvLeakageLimit = Number(benchSeatLeakageLimit);
+      if (
+        benchSeatLeakageMeasured !== "" &&
+        benchSeatLeakageLimit !== "" &&
+        Number.isFinite(pcvLeakageMeasured) &&
+        Number.isFinite(pcvLeakageLimit) &&
+        pcvLeakageMeasured > pcvLeakageLimit
+      ) {
+        isAllOk = false;
+      }
+      if (benchFlowPerformanceTested) {
+        const droop = Number(benchDroopPercent);
+        if (benchDroopPercent === "" || !Number.isFinite(droop)) {
+          isAllFilled = false;
+        } else if (droop > benchDroopLimitPercent) {
+          isAllOk = false;
+        }
+      }
     } else if (
       selectedInstrumentType === "pressostato" ||
       selectedInstrumentType === "termostato"
@@ -5862,18 +6103,18 @@ Status atual: ${e.status}.`,
       } else {
         for (const sp of benchSwitchPoints) {
           const trip =
-            sp.tripAsc !== "" && sp.tripAsc !== undefined
-              ? Number(sp.tripAsc)
+            sp.pSetAsc !== "" && sp.pSetAsc !== undefined
+              ? Number(sp.pSetAsc)
               : NaN;
           const reset =
-            sp.resetDesc !== "" && sp.resetDesc !== undefined
-              ? Number(sp.resetDesc)
+            sp.pResetDesc !== "" && sp.pResetDesc !== undefined
+              ? Number(sp.pResetDesc)
               : NaN;
           if (isNaN(trip) || isNaN(reset)) {
             isAllFilled = false;
             break;
           }
-          const tripErr = Math.abs(trip - (sp.setPoint || 0));
+          const tripErr = Math.abs(trip - (Number(benchSetPoint) || 0));
           if (tripErr > (benchMpe || 1.0)) {
             isAllOk = false;
           }
@@ -5953,13 +6194,67 @@ Status atual: ${e.status}.`,
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
           mpe: benchMpe,
-          points: benchPoints,
+          points:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? []
+              : benchPoints,
           transmitterPoints: benchTransmitterPoints,
           switchPoints: benchSwitchPoints,
+          safetyValvePoints: benchSafetyValvePoints,
+          pressureRegulatorPoints: benchPressureRegulatorPoints,
+          valveService: selectedInstrumentType === "psv" ? benchValveService : undefined,
+          valveTestMedium:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? benchValveTestMedium
+              : undefined,
+          valveSeatType: selectedInstrumentType === "psv" ? benchValveSeatType : undefined,
+          acceptanceCriterion: selectedInstrumentType === "psv" ? benchAcceptanceCriterion : undefined,
+          maxBlowdownPercent:
+            selectedInstrumentType === "psv" && benchMaxBlowdownPct !== ""
+              ? Number(benchMaxBlowdownPct)
+              : undefined,
+          seatLeakageResult:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? benchSeatLeakageResult
+              : undefined,
+          seatLeakageTestPressure:
+            benchSeatLeakageTestPressure !== ""
+              ? Number(benchSeatLeakageTestPressure)
+              : undefined,
+          seatLeakageMeasured:
+            benchSeatLeakageMeasured !== ""
+              ? Number(benchSeatLeakageMeasured)
+              : undefined,
+          seatLeakageLimit:
+            benchSeatLeakageLimit !== "" ? Number(benchSeatLeakageLimit) : undefined,
+          seatLeakageUnit:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? benchSeatLeakageUnit
+              : undefined,
+          regulatorMode: selectedInstrumentType === "pcv" ? benchRegulatorMode : undefined,
+          regulatorActuation:
+            selectedInstrumentType === "pcv" ? benchRegulatorActuation : undefined,
+          flowPerformanceTested:
+            selectedInstrumentType === "pcv" ? benchFlowPerformanceTested : undefined,
+          droopPercent:
+            selectedInstrumentType === "pcv" &&
+            benchFlowPerformanceTested &&
+            benchDroopPercent !== ""
+              ? Number(benchDroopPercent)
+              : undefined,
+          droopLimitPercent:
+            selectedInstrumentType === "pcv" && benchFlowPerformanceTested
+              ? benchDroopLimitPercent
+              : undefined,
           observations: benchObs,
           temperature: benchTemperature as number,
           humidity: benchHumidity as number,
-          curveCount: benchPointCount,
+          curveCount:
+            selectedInstrumentType === "psv"
+              ? benchSafetyValvePoints.length
+              : selectedInstrumentType === "pcv"
+                ? benchPressureRegulatorPoints.length
+                : benchPointCount,
           certNumber: generatedCertNumber,
           authKey: generateAuthKey(),
           referenceStandardIds: [
@@ -6005,6 +6300,8 @@ Status atual: ${e.status}.`,
           setBenchPoints([]);
           setBenchTransmitterPoints([]);
           setBenchSwitchPoints([]);
+          setBenchSafetyValvePoints([]);
+          setBenchPressureRegulatorPoints([]);
           setBenchObs("");
           setBenchMaterialsUsed([]);
           setBenchCustomMaterial("");
@@ -6124,7 +6421,11 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
             : selectedInstrumentType === "pressostato" ||
                 selectedInstrumentType === "termostato"
               ? benchSwitchPoints
-              : benchPoints,
+              : selectedInstrumentType === "psv"
+                ? benchSafetyValvePoints
+                : selectedInstrumentType === "pcv"
+                  ? benchPressureRegulatorPoints
+                  : benchPoints,
       };
 
       // Save RNC report to Firestore
@@ -6136,19 +6437,74 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
           instrumentId: selectedInstId,
           technicianName: rncTechnician || benchTechnician,
           instrumentType: selectedInstrumentType,
+          metrologicalNorm: METROLOGICAL_NORMS_INFO[selectedInstrumentType]?.code,
           sensorType: benchSensorType,
           outputSignal: benchOutputSignal,
           setPoint: Number(benchSetPoint) || 0,
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
           mpe: benchMpe,
-          points: benchPoints,
+          points:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? []
+              : benchPoints,
           transmitterPoints: benchTransmitterPoints,
           switchPoints: benchSwitchPoints,
+          safetyValvePoints: benchSafetyValvePoints,
+          pressureRegulatorPoints: benchPressureRegulatorPoints,
+          valveService: selectedInstrumentType === "psv" ? benchValveService : undefined,
+          valveTestMedium:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? benchValveTestMedium
+              : undefined,
+          valveSeatType: selectedInstrumentType === "psv" ? benchValveSeatType : undefined,
+          acceptanceCriterion: selectedInstrumentType === "psv" ? benchAcceptanceCriterion : undefined,
+          maxBlowdownPercent:
+            selectedInstrumentType === "psv" && benchMaxBlowdownPct !== ""
+              ? Number(benchMaxBlowdownPct)
+              : undefined,
+          seatLeakageResult:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? benchSeatLeakageResult
+              : undefined,
+          seatLeakageTestPressure:
+            benchSeatLeakageTestPressure !== ""
+              ? Number(benchSeatLeakageTestPressure)
+              : undefined,
+          seatLeakageMeasured:
+            benchSeatLeakageMeasured !== ""
+              ? Number(benchSeatLeakageMeasured)
+              : undefined,
+          seatLeakageLimit:
+            benchSeatLeakageLimit !== "" ? Number(benchSeatLeakageLimit) : undefined,
+          seatLeakageUnit:
+            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
+              ? benchSeatLeakageUnit
+              : undefined,
+          regulatorMode: selectedInstrumentType === "pcv" ? benchRegulatorMode : undefined,
+          regulatorActuation:
+            selectedInstrumentType === "pcv" ? benchRegulatorActuation : undefined,
+          flowPerformanceTested:
+            selectedInstrumentType === "pcv" ? benchFlowPerformanceTested : undefined,
+          droopPercent:
+            selectedInstrumentType === "pcv" &&
+            benchFlowPerformanceTested &&
+            benchDroopPercent !== ""
+              ? Number(benchDroopPercent)
+              : undefined,
+          droopLimitPercent:
+            selectedInstrumentType === "pcv" && benchFlowPerformanceTested
+              ? benchDroopLimitPercent
+              : undefined,
           observations: `RNC EMITIDO (${rncNumber}): ${rncReason}`,
           temperature: benchTemperature !== "" ? Number(benchTemperature) : undefined,
           humidity: benchHumidity !== "" ? Number(benchHumidity) : undefined,
-          curveCount: benchPointCount,
+          curveCount:
+            selectedInstrumentType === "psv"
+              ? benchSafetyValvePoints.length
+              : selectedInstrumentType === "pcv"
+                ? benchPressureRegulatorPoints.length
+                : benchPointCount,
           referenceStandardIds: [
             benchStandardA,
             benchStandardB,
@@ -6226,6 +6582,8 @@ Encaminhar para manutenção especializada ou substituição do instrumento.`;
       setBenchPoints([]);
       setBenchTransmitterPoints([]);
       setBenchSwitchPoints([]);
+      setBenchSafetyValvePoints([]);
+      setBenchPressureRegulatorPoints([]);
       setBenchObs("");
       setBenchStandardA("");
       setBenchStandardB("");
