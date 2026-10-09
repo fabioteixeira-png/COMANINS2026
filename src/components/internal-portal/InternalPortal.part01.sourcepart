@@ -5209,6 +5209,35 @@ Status atual: ${e.status}.`,
         return;
       }
 
+      let photoAiValidation: any = undefined;
+      if (photoModalType === "calibrated") {
+        try {
+          const validation = await safeFetch<any>("/api/validate-calibration-photo", {
+            method: "POST",
+            maxRetries: 1,
+            body: JSON.stringify({
+              instrumentId: photoModalInstrument.id,
+              imageBase64: photoDataUrl,
+            }),
+          });
+          if (!validation || validation.overallStatus !== "PASS") {
+            const issues = Array.isArray(validation?.issues) && validation.issues.length
+              ? `\n\n${validation.issues.map((item: string) => `• ${item}`).join("\n")}`
+              : "";
+            const headline = validation?.overallStatus === "BLOCK"
+              ? "A IA identificou divergência na Foto Após Laboratório."
+              : "A IA não conseguiu confirmar a Foto Após Laboratório com segurança.";
+            alert(`${headline}\n\n${validation?.summary || "Refaça a foto mostrando claramente a faixa do instrumento e a etiqueta de calibração."}${issues}\n\nA foto não foi salva.`);
+            return;
+          }
+          photoAiValidation = validation;
+        } catch (validationError: any) {
+          console.error("Erro na validação IA da foto pós-laboratório:", validationError);
+          alert("Não foi possível validar a Foto Após Laboratório com a IA. A imagem não foi salva. Tente novamente com a faixa do instrumento e a etiqueta de calibração bem visíveis.");
+          return;
+        }
+      }
+
       const fieldToUpdate =
         photoModalType === "registration"
           ? "photoRegistration"
@@ -5226,6 +5255,9 @@ Status atual: ${e.status}.`,
       let updatePayload: any = {
         [fieldToUpdate]: uploadedPhoto.url,
         [pathFieldToUpdate]: uploadedPhoto.path,
+        ...(photoModalType === "calibrated" && photoAiValidation
+          ? { photoCalibratedAiValidation: photoAiValidation }
+          : {}),
       };
 
       let finalStatus = photoModalInstrument.status;
@@ -6151,6 +6183,47 @@ Status atual: ${e.status}.`,
       return;
     }
 
+    let standardAiValidation: any = undefined;
+    try {
+      const standardIds = [benchStandardA, benchStandardB, benchStandardC].filter(Boolean);
+      const validation = await safeFetch<any>("/api/validate-calibration-standards", {
+        method: "POST",
+        maxRetries: 1,
+        body: JSON.stringify({ instrumentId: selectedInstId, standardIds }),
+      });
+      standardAiValidation = validation;
+      if (!validation || validation.overallStatus !== "PASS") {
+        const details = Array.isArray(validation?.standards)
+          ? validation.standards
+              .filter((item: any) => item.status !== "PASS")
+              .map((item: any) => `• ${item.identification || item.certificateNumber || item.standardId}: ${item.reason || "Revisar compatibilidade."}`)
+              .join("\n")
+          : "";
+        const issues = Array.isArray(validation?.issues) && validation.issues.length
+          ? validation.issues.map((item: string) => `• ${item}`).join("\n")
+          : "";
+        const msg = [
+          validation?.overallStatus === "BLOCK"
+            ? "A ficha NÃO foi salva porque existe padrão de referência incompatível."
+            : "A ficha NÃO foi salva porque a compatibilidade de um ou mais padrões precisa ser revisada.",
+          validation?.summary || "Revise os padrões selecionados.",
+          details,
+          issues,
+        ].filter(Boolean).join("\n\n");
+        setBenchErrorMessage(msg);
+        alert(msg);
+        setBenchSubmitting(false);
+        return;
+      }
+    } catch (validationError: any) {
+      console.error("Erro na validação IA dos padrões:", validationError);
+      const msg = "Não foi possível validar os padrões de referência com a IA. A ficha NÃO foi salva para evitar emissão de certificado com padrão incorreto.";
+      setBenchErrorMessage(msg);
+      alert(msg);
+      setBenchSubmitting(false);
+      return;
+    }
+
     try {
       if (onSaveCalibration) {
         const year = new Date().getFullYear();
@@ -6263,6 +6336,8 @@ Status atual: ${e.status}.`,
             benchStandardC,
           ].filter(Boolean),
           referenceStandards: selectedStandards,
+          standardAiValidation,
+          standardAiValidationRequired: true,
           approved: true,
           materialsUsed: benchMaterialsUsed,
           calibrationDate: activeInst?.manualCalibrationDateAllowed
@@ -6364,9 +6439,55 @@ Status atual: ${e.status}.`,
 
       let aiAnalysis = "";
       try {
+        const selectedStandardsForRnc = [benchStandardA, benchStandardB, benchStandardC]
+          .filter(Boolean)
+          .map((id) => referenceStandards.find((std) => std.id === id))
+          .filter(Boolean)
+          .map((std: any) => ({
+            identification: std.identification,
+            certificateNumber: std.certificateNumber,
+            instrumentType: std.instrumentType,
+            range: std.range,
+            expirationDate: std.expirationDate,
+            rbcLab: std.rbcLab,
+          }));
+        const normInfo = METROLOGICAL_NORMS_INFO[selectedInstrumentType];
+        const calibrationContext = {
+          instrumentType: selectedInstrumentType,
+          metrologicalNorm: normInfo?.code || activeInst?.metrologicalNorm || "",
+          accuracyClass: benchAccuracyClass || activeInst?.accuracyClass || "",
+          mpe: benchMpe,
+          sensorType: benchSensorType,
+          outputSignal: benchOutputSignal,
+          setPoint: benchSetPoint !== "" ? Number(benchSetPoint) : activeInst?.setPoint,
+          contactType: benchContactType,
+          temperature: benchTemperature,
+          humidity: benchHumidity,
+          observations: benchObs,
+          referenceStandards: selectedStandardsForRnc,
+          points:
+            selectedInstrumentType === "transmissor"
+              ? benchTransmitterPoints
+              : selectedInstrumentType === "pressostato" || selectedInstrumentType === "termostato"
+                ? benchSwitchPoints
+                : selectedInstrumentType === "psv"
+                  ? benchSafetyValvePoints
+                  : selectedInstrumentType === "pcv"
+                    ? benchPressureRegulatorPoints
+                    : benchPoints,
+          valveService: benchValveService,
+          valveTestMedium: benchValveTestMedium,
+          valveSeatType: benchValveSeatType,
+          seatLeakageResult: benchSeatLeakageResult,
+          seatLeakageMeasured: benchSeatLeakageMeasured,
+          seatLeakageLimit: benchSeatLeakageLimit,
+          droopPercent: benchDroopPercent,
+          droopLimitPercent: benchDroopLimitPercent,
+        };
         const data = await safeFetch("/api/generate-rnc", {
           method: "POST",
           body: JSON.stringify({
+            instrumentId: activeInst?.id,
             instrumentTag: activeInst?.tag,
             instrumentDescription: activeInst?.description,
             coma: activeInst?.certificateNumber || activeInst?.coma,
@@ -6374,6 +6495,7 @@ Status atual: ${e.status}.`,
             reason: rncReason,
             technicianName: rncTechnician || benchTechnician,
             range: `${activeInst?.rangeMin} a ${activeInst?.rangeMax} ${activeInst?.unit}`,
+            calibrationContext,
           }),
         });
         aiAnalysis = data.analysis || "";
@@ -6382,16 +6504,22 @@ Status atual: ${e.status}.`,
       }
 
       if (!aiAnalysis) {
-        aiAnalysis = `ANÁLISE TÉCNICA E RECOMENDAÇÃO:
+        aiAnalysis = `RELATÓRIO TÉCNICO DE NÃO CONFORMIDADE
 
-1. DIAGNÓSTICO DO DEFEITO:
-O instrumento ${activeInst?.tag || ""} apresentou a seguinte anormalidade: "${rncReason}".
+1. IDENTIFICAÇÃO DA NÃO CONFORMIDADE E EVIDÊNCIAS
+O instrumento ${activeInst?.tag || "sem TAG"} (${activeInst?.description || "instrumento"}), faixa ${activeInst?.rangeMin ?? ""} a ${activeInst?.rangeMax ?? ""} ${activeInst?.unit || ""}, apresentou durante a avaliação laboratorial a seguinte evidência: "${rncReason}".
 
-2. IMPACTO METROLÓGICO:
-A falha descrita impede a garantia de exatidão e rastreabilidade RBC.
+2. ANÁLISE TÉCNICA DA ANOMALIA
+A condição registrada compromete a capacidade de demonstrar que o instrumento responde de forma confiável à grandeza aplicada. A causa raiz não deve ser presumida sem diagnóstico específico; entretanto, a evidência observada é suficiente para impedir a aprovação metrológica na condição atual.
 
-3. AÇÃO CORRETIVA RECOMENDADA:
-Encaminhar para manutenção especializada ou substituição do instrumento.`;
+3. IMPACTO METROLÓGICO E RISCO PARA O USO PRETENDIDO
+O retorno do instrumento ao processo sem correção pode produzir indicação, acionamento ou resposta incompatível com a condição real do processo, introduzindo erro não controlado e comprometendo decisões operacionais baseadas na medição.
+
+4. CONCLUSÃO DE APTIDÃO / JUSTIFICATIVA DA REPROVAÇÃO
+O instrumento é considerado NÃO APTO para uso na condição atual e não deve retornar ao processo até que a não conformidade seja tratada e uma nova calibração demonstre atendimento aos critérios de aceitação.
+
+5. AÇÃO CORRETIVA E DISPOSIÇÃO RECOMENDADA
+Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior recalibração completa. Caso o reparo seja tecnicamente ou economicamente inviável, recomenda-se substituição do instrumento.`;
       }
 
       const year = new Date().getFullYear();

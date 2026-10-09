@@ -109,6 +109,7 @@ export interface Instrument {
   calibrationLabelPrintedByUid?: string;
   calibrationLabelPrintCount?: number;
   registrationSnapshot?: InstrumentRegistrationSnapshot;
+  photoCalibratedAiValidation?: CalibrationPhotoValidation;
 }
 
 export interface RncReport {
@@ -209,6 +210,47 @@ export interface ReferenceStandard {
   updatedAt?: string;
 }
 
+
+export type AiValidationStatus = 'PASS' | 'BLOCK' | 'REVIEW';
+
+export interface CalibrationStandardValidationItem {
+  standardId: string;
+  identification?: string;
+  certificateNumber?: string;
+  role?: 'primary_measurement' | 'output_measurement' | 'support' | 'unknown';
+  status: AiValidationStatus;
+  rangeCoverage?: 'YES' | 'NO' | 'UNKNOWN';
+  reason: string;
+}
+
+export interface CalibrationStandardValidation {
+  overallStatus: AiValidationStatus;
+  summary: string;
+  instrumentId: string;
+  analyzedAt: string;
+  model?: string;
+  deterministicChecks?: string[];
+  issues?: string[];
+  standards: CalibrationStandardValidationItem[];
+}
+
+export interface CalibrationPhotoValidation {
+  overallStatus: AiValidationStatus;
+  analyzedAt: string;
+  model?: string;
+  instrumentVisible: boolean;
+  rangeVisible: boolean;
+  detectedRange?: string;
+  rangeMatches?: boolean | null;
+  calibrationLabelPresent: boolean;
+  labelVisible: boolean;
+  detectedLabelNumber?: string;
+  labelMatches?: boolean | null;
+  confidence: number;
+  issues: string[];
+  summary: string;
+}
+
 export interface CalibrationReport {
   certNumber?: string;
   clientId?: string;
@@ -262,6 +304,7 @@ export interface CalibrationReport {
   curveCount?: number;
   referenceStandardIds?: string[];
   referenceStandards?: ReferenceStandard[];
+  standardAiValidation?: CalibrationStandardValidation;
   rncNumber?: string;
   rncData?: RncReport;
   materialsUsed?: string[];

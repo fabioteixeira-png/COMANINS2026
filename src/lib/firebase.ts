@@ -23,7 +23,7 @@ import {
   QueryDocumentSnapshot
 , runTransaction, writeBatch } from "firebase/firestore";
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument, RentalService, RentalAsset, RentalContract, RentalInvoice, RentalMovement, RentalSettings } from '../types';
+import { Client, Instrument, InstrumentType, CalibrationReport, CalibrationAuditLog, ContactMessage, DropdownOptions, EmployeeBirthday, Training, EmployeeTrainingRecord, InventoryItem, InventoryTransaction, ReferenceStandard, CalibrationStandardValidation, MedicalExam, ExamTypeItem, Payslip, RncReport, AccessAuditLog, HealthProgramDocument, RentalService, RentalAsset, RentalContract, RentalInvoice, RentalMovement, RentalSettings } from '../types';
 import { generateAuthKey } from '../utils/authKey';
 import { trackFirebaseOp } from './firebaseTelemetry';
 
@@ -1293,6 +1293,8 @@ export async function saveCalibrationDoc(data: {
   certNumber?: string;
   referenceStandardIds?: string[];
   referenceStandards?: ReferenceStandard[];
+  standardAiValidation?: CalibrationStandardValidation;
+  standardAiValidationRequired?: boolean;
   temperature?: number;
   humidity?: number;
   instrumentType?: InstrumentType;
@@ -1329,6 +1331,24 @@ export async function saveCalibrationDoc(data: {
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
+
+  if (data.standardAiValidationRequired === true && data.approved !== false) {
+    const selectedStandardIds = Array.from(new Set((data.referenceStandardIds || []).filter(Boolean)));
+    if (selectedStandardIds.length === 0) {
+      throw new Error('Selecione pelo menos um padrão de referência válido.');
+    }
+    if (!data.standardAiValidation || data.standardAiValidation.overallStatus !== 'PASS') {
+      throw new Error('A validação inteligente dos padrões não foi concluída com aprovação. Revise os padrões selecionados.');
+    }
+    const validatedPassIds = new Set(
+      (data.standardAiValidation.standards || [])
+        .filter((item) => item.status === 'PASS')
+        .map((item) => item.standardId),
+    );
+    if (selectedStandardIds.some((id) => !validatedPassIds.has(id))) {
+      throw new Error('Um ou mais padrões selecionados não possuem validação técnica aprovada para esta calibração.');
+    }
+  }
 
   const processedPoints = data.points.map((p, index) => {
     // legacy fallback
@@ -1598,7 +1618,8 @@ export async function saveCalibrationDoc(data: {
         : undefined,
     curveCount: data.curveCount || 5,
     referenceStandardIds: data.referenceStandardIds || [],
-    referenceStandards: data.referenceStandards || []
+    referenceStandards: data.referenceStandards || [],
+    standardAiValidation: data.standardAiValidation
   };
 
   const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);
