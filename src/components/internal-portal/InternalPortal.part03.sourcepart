@@ -1840,8 +1840,9 @@
                           </label>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <div>
-                              <label className="block text-slate-600 font-semibold mb-1">
-                                Padrão A
+                              <label className="block text-slate-700 font-semibold mb-1 flex items-center gap-1">
+                                <span>Padrão A (RBC Externo)</span>
+                                <span className="text-red-500 font-bold">*</span>
                               </label>
                               <select
                                 value={benchStandardA}
@@ -1851,34 +1852,37 @@
                                 className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-800 text-xs focus:ring-1 focus:ring-royal-blue font-sans"
                               >
                                 <option value="">
-                                  Nenhum Padrão Selecionado
+                                  Selecione um padrão RBC externo (Obrigatório)
                                 </option>
                                 {referenceStandards
-                                  .filter(
-                                    (std) =>
-                                      !std.expirationDate ||
-                                      std.expirationDate >=
-                                        new Date()
-                                          .toISOString()
-                                          .split("T")[0] ||
-                                      benchStandardA === std.id,
-                                  )
+                                  .filter((std) => {
+                                    if (std.isDeleted) return false;
+                                    const lab = String(std.rbcLab || "").trim();
+                                    if (!lab || /comanins/i.test(lab)) return false;
+                                    const todayStr = new Date().toISOString().split("T")[0];
+                                    const isExpired = std.expirationDate && std.expirationDate < todayStr;
+                                    if (isExpired && benchStandardA !== std.id) return false;
+                                    if (benchStandardB && std.id === benchStandardB) return false;
+                                    if (benchStandardC && std.id === benchStandardC) return false;
+                                    return true;
+                                  })
                                   .map((std) => (
                                     <option key={std.id} value={std.id}>
                                       {std.identification
                                         ? `[${std.identification}] `
                                         : ""}
-                                      {std.instrumentType} (Cert:{" "}
-                                      {std.certificateNumber} - Val:{" "}
-                                      {std.expirationDate})
+                                      {std.instrumentType} | Cert: {std.certificateNumber} | Lab: {std.rbcLab} | Val: {std.expirationDate || "S/D"}
                                     </option>
                                   ))}
                               </select>
+                              <p className="text-[10px] text-slate-500 mt-1">
+                                Obrigatório laboratório RBC externo. Padrões COMANINS só podem ser utilizados nos campos Padrão B ou Padrão C.
+                              </p>
                             </div>
 
                             <div>
                               <label className="block text-slate-600 font-semibold mb-1">
-                                Padrão B
+                                Padrão B (Opcional)
                               </label>
                               <select
                                 value={benchStandardB}
@@ -1891,23 +1895,21 @@
                                   Nenhum Padrão Selecionado
                                 </option>
                                 {referenceStandards
-                                  .filter(
-                                    (std) =>
-                                      !std.expirationDate ||
-                                      std.expirationDate >=
-                                        new Date()
-                                          .toISOString()
-                                          .split("T")[0] ||
-                                      benchStandardB === std.id,
-                                  )
+                                  .filter((std) => {
+                                    if (std.isDeleted) return false;
+                                    const todayStr = new Date().toISOString().split("T")[0];
+                                    const isExpired = std.expirationDate && std.expirationDate < todayStr;
+                                    if (isExpired && benchStandardB !== std.id) return false;
+                                    if (benchStandardA && std.id === benchStandardA) return false;
+                                    if (benchStandardC && std.id === benchStandardC) return false;
+                                    return true;
+                                  })
                                   .map((std) => (
                                     <option key={std.id} value={std.id}>
                                       {std.identification
                                         ? `[${std.identification}] `
                                         : ""}
-                                      {std.instrumentType} (Cert:{" "}
-                                      {std.certificateNumber} - Val:{" "}
-                                      {std.expirationDate})
+                                      {std.instrumentType} | Cert: {std.certificateNumber} | Lab: {std.rbcLab || "Não informado"} | Val: {std.expirationDate || "S/D"}
                                     </option>
                                   ))}
                               </select>
@@ -1915,7 +1917,7 @@
 
                             <div>
                               <label className="block text-slate-600 font-semibold mb-1">
-                                Padrão C
+                                Padrão C (Opcional)
                               </label>
                               <select
                                 value={benchStandardC}
@@ -1928,23 +1930,21 @@
                                   Nenhum Padrão Selecionado
                                 </option>
                                 {referenceStandards
-                                  .filter(
-                                    (std) =>
-                                      !std.expirationDate ||
-                                      std.expirationDate >=
-                                        new Date()
-                                          .toISOString()
-                                          .split("T")[0] ||
-                                      benchStandardC === std.id,
-                                  )
+                                  .filter((std) => {
+                                    if (std.isDeleted) return false;
+                                    const todayStr = new Date().toISOString().split("T")[0];
+                                    const isExpired = std.expirationDate && std.expirationDate < todayStr;
+                                    if (isExpired && benchStandardC !== std.id) return false;
+                                    if (benchStandardA && std.id === benchStandardA) return false;
+                                    if (benchStandardB && std.id === benchStandardB) return false;
+                                    return true;
+                                  })
                                   .map((std) => (
                                     <option key={std.id} value={std.id}>
                                       {std.identification
                                         ? `[${std.identification}] `
                                         : ""}
-                                      {std.instrumentType} (Cert:{" "}
-                                      {std.certificateNumber} - Val:{" "}
-                                      {std.expirationDate})
+                                      {std.instrumentType} | Cert: {std.certificateNumber} | Lab: {std.rbcLab || "Não informado"} | Val: {std.expirationDate || "S/D"}
                                     </option>
                                   ))}
                               </select>

@@ -1292,6 +1292,7 @@ export async function saveCalibrationDoc(data: {
   curveCount?: number;
   certNumber?: string;
   referenceStandardIds?: string[];
+  referenceStandardSlots?: { A?: string; B?: string; C?: string };
   referenceStandards?: ReferenceStandard[];
   standardAiValidation?: CalibrationStandardValidation;
   standardAiValidationRequired?: boolean;
@@ -1331,6 +1332,33 @@ export async function saveCalibrationDoc(data: {
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
+
+  if (data.referenceStandardSlots) {
+    const slotA = (data.referenceStandardSlots.A || '').trim();
+    if (!slotA) {
+      throw new Error('O Padrão A é obrigatório e deve ser proveniente de laboratório RBC externo à COMANINS.');
+    }
+    const slotB = (data.referenceStandardSlots.B || '').trim();
+    const slotC = (data.referenceStandardSlots.C || '').trim();
+    const activeSlots = [slotA, slotB, slotC].filter(Boolean);
+    if (new Set(activeSlots).size !== activeSlots.length) {
+      throw new Error('O mesmo padrão de referência não pode ser utilizado em mais de um slot (A, B ou C).');
+    }
+    const stdA = (data.referenceStandards || []).find((s) => s.id === slotA);
+    if (stdA) {
+      const labA = String(stdA.rbcLab || '').trim();
+      if (!labA) {
+        throw new Error('O campo Laboratório RBC/Origem do Padrão A está vazio. O Padrão A deve ser proveniente de laboratório RBC externo à COMANINS.');
+      }
+      if (/comanins/i.test(labA)) {
+        throw new Error('Padrões com Laboratório/Origem COMANINS não podem ser utilizados como Padrão A. Utilize COMANINS somente nos campos Padrão B ou Padrão C.');
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (stdA.expirationDate && stdA.expirationDate < today) {
+        throw new Error(`O Padrão A (${stdA.identification || stdA.certificateNumber || stdA.id}) está com o certificado vencido.`);
+      }
+    }
+  }
 
   if (data.standardAiValidationRequired === true && data.approved !== false) {
     const selectedStandardIds = Array.from(new Set((data.referenceStandardIds || []).filter(Boolean)));
@@ -1618,6 +1646,7 @@ export async function saveCalibrationDoc(data: {
         : undefined,
     curveCount: data.curveCount || 5,
     referenceStandardIds: data.referenceStandardIds || [],
+    referenceStandardSlots: data.referenceStandardSlots,
     referenceStandards: data.referenceStandards || [],
     standardAiValidation: data.standardAiValidation
   };

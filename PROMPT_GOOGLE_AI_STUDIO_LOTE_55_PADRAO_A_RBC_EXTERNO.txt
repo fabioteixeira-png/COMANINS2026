@@ -1,0 +1,206 @@
+Atue como desenvolvedor sênior full-stack especialista em React, TypeScript, Firebase Firestore, Firebase Storage e Google Gemini.
+
+Estou enviando o código-fonte atual do Sistema COMANINS acompanhado do **LOTE 55 — Bloqueio do Padrão A / Laboratório RBC externo**.
+
+Sua tarefa é revisar, aplicar e validar este lote SEM desfazer os LOTES anteriores e SEM alterar regras de calibração que não estejam relacionadas a este requisito.
+
+## REGRA DE NEGÓCIO OBRIGATÓRIA
+
+Na aba **Calibração**, dentro da ficha de calibração, podem existir até três padrões associados:
+
+- Padrão A
+- Padrão B
+- Padrão C
+
+Porém:
+
+1. **Padrão A é obrigatório.**
+2. **Padrão A nunca pode ser um padrão cuja origem/laboratório seja COMANINS.**
+3. Padrão A deve ser um padrão proveniente de **laboratório RBC externo à COMANINS**, utilizando o campo existente `rbcLab` / “Laboratório RBC / Origem”.
+4. Se `rbcLab` estiver vazio, o padrão não pode ser utilizado como Padrão A.
+5. Se `rbcLab` contiver COMANINS, independentemente de maiúsculas/minúsculas, o padrão não pode ser utilizado como Padrão A.
+6. Padrões COMANINS podem ser utilizados somente como **Padrão B ou Padrão C**.
+7. Padrões externos também podem ser utilizados como B ou C.
+8. O mesmo padrão não pode ocupar mais de um slot simultaneamente.
+9. A regra também deve valer quando a ficha resultar em **RNC / Não Conforme**.
+
+## NÃO CONFUNDIR COM A VALIDAÇÃO DE FAIXA/IA
+
+O LOTE 53 já possui validação dos padrões por IA e verificações determinísticas de faixa/grandeza.
+
+A regra do Padrão A é uma **regra determinística de rastreabilidade e posição** e deve ser executada ANTES da IA.
+
+A IA não pode liberar COMANINS como Padrão A em nenhuma hipótese.
+
+## INTERFACE
+
+No select do Padrão A:
+
+- mostrar somente padrões válidos cujo `rbcLab` esteja preenchido e não seja COMANINS;
+- indicar visualmente que o campo é obrigatório;
+- usar texto semelhante a “Selecione um padrão RBC externo”;
+- exibir identificação, tipo, certificado, laboratório e validade;
+- informar abaixo do campo que COMANINS só pode ser usado em B ou C.
+
+Nos selects B e C:
+
+- manter padrões COMANINS disponíveis;
+- também manter padrões externos disponíveis;
+- impedir selecionar o mesmo padrão já usado em outro slot.
+
+## ESTRUTURA A/B/C
+
+Não tratar os padrões apenas como uma lista compactada.
+
+Enviar explicitamente:
+
+`standardSlots: { A, B, C }`
+
+para `/api/validate-calibration-standards`.
+
+Isso é obrigatório porque, se A estiver vazio e B estiver preenchido, uma lista filtrada poderia transformar B indevidamente no primeiro item.
+
+## BACKEND
+
+Na rota:
+
+`POST /api/validate-calibration-standards`
+
+validar deterministicamente:
+
+- instrumento informado;
+- `standardSlots.A` obrigatório;
+- IDs enviados correspondem exatamente aos slots informados;
+- sem IDs duplicados;
+- buscar os padrões novamente no Firestore;
+- Padrão A existe;
+- Padrão A não está arquivado;
+- `rbcLab` do A está preenchido;
+- `rbcLab` do A não contém COMANINS;
+- validade continua sendo verificada pela regra existente.
+
+Se Padrão A for COMANINS, retornar bloqueio/erro claro, por exemplo:
+
+“Padrões com Laboratório/Origem COMANINS não podem ser utilizados como Padrão A. Utilize COMANINS somente nos campos Padrão B ou Padrão C.”
+
+Não delegar essa decisão ao Gemini.
+
+## FIRESTORE / PERSISTÊNCIA
+
+Adicionar a estrutura:
+
+`referenceStandardSlots?: { A?: string; B?: string; C?: string }`
+
+no relatório de calibração.
+
+`saveCalibrationDoc()` deve revalidar o Padrão A quando a ficha atual enviar os slots.
+
+O relatório salvo deve manter:
+
+- `referenceStandardIds`
+- `referenceStandardSlots`
+- `referenceStandards`
+- `standardAiValidation`
+
+Não quebrar importações históricas antigas que não possuam `referenceStandardSlots`.
+
+## RNC
+
+Antes de gerar/gravar o RNC, aplicar a mesma regra do Padrão A.
+
+Mesmo um instrumento reprovado precisa manter a rastreabilidade correta da calibração executada.
+
+Não permitir que o fluxo de RNC seja usado para contornar o bloqueio.
+
+## PRESERVAR LOTES ANTERIORES
+
+Não remover nem alterar indevidamente:
+
+- PSV e PCV do LOTE 52;
+- RNC técnico por IA do LOTE 53;
+- validação IA de compatibilidade de padrão do LOTE 53;
+- análise da foto pós-laboratório do LOTE 53;
+- segurança de exclusões administrativas do LOTE 54;
+- regras de certificados, Serviço de Campo, Portal do Cliente, NR-13, Financeiro, RH e demais módulos.
+
+Não limpar Firestore.
+Não recriar coleções.
+Não apagar padrões existentes.
+Não renomear IDs existentes.
+Não alterar certificados históricos.
+
+## INTEGRIDADE DO INTERNALPORTAL
+
+O projeto utiliza fragmentos `InternalPortal.partXX.sourcepart` e `scripts/internal-portal-source.mjs`.
+
+Preserve essa arquitetura.
+
+Após aplicar o lote, o hash esperado do InternalPortal deve ser:
+
+`316272d93fa4bf8be51d60b2b5b3119b4c5bdedbc406806f5cfaccd560f065dc`
+
+Execute:
+
+`npm run internal-portal:verify`
+
+## TESTES OBRIGATÓRIOS
+
+Teste pelo menos:
+
+1. A vazio + B COMANINS → deve bloquear.
+2. COMANINS no slot A por manipulação manual da requisição → backend deve bloquear.
+3. A com laboratório externo RBC → pode prosseguir.
+4. A externo + B COMANINS → pode prosseguir.
+5. A externo + C COMANINS → pode prosseguir.
+6. A/B/C externos → pode prosseguir.
+7. Mesmo padrão em A e B → bloquear.
+8. A vencido → bloquear.
+9. A sem `rbcLab` → bloquear.
+10. RNC com A vazio → bloquear.
+11. RNC com A COMANINS → bloquear.
+12. Confirmar que relatório salvo contém `referenceStandardSlots` correto.
+13. Confirmar que a IA do LOTE 53 continua validando faixa/grandeza normalmente depois da regra determinística.
+
+## BUILD
+
+Execute:
+
+`npm ci`
+`npm run internal-portal:verify`
+`npm run lint`
+`npm run build`
+
+Corrija apenas erros introduzidos pelo LOTE 55 ou regressões diretamente relacionadas.
+
+## OBSERVAÇÃO SOBRE RBC
+
+O cadastro atual possui o campo `rbcLab`, mas não possui número estruturado de acreditação RBC, status de acreditação ou escopo acreditado.
+
+Portanto, neste lote, considerar “RBC externo” como:
+
+- `rbcLab` preenchido;
+- `rbcLab` diferente de COMANINS.
+
+Não inventar número de acreditação ou escopo.
+
+Caso seja desejada validação formal futura, proponha separadamente campos como:
+
+- `rbcAccredited`
+- `rbcAccreditationNumber`
+- `rbcAccreditationScope`
+
+mas não torne isso requisito deste lote.
+
+## ENTREGA
+
+Ao terminar, informe objetivamente:
+
+- arquivos alterados;
+- onde o bloqueio foi aplicado;
+- resultado de cada cenário de teste;
+- resultado de `internal-portal:verify`;
+- resultado de `npm run lint`;
+- resultado de `npm run build`;
+- qualquer pendência real.
+
+Não responda apenas “corrigido”.

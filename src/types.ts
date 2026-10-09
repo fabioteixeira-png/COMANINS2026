@@ -303,6 +303,7 @@ export interface CalibrationReport {
   humidity?: number;
   curveCount?: number;
   referenceStandardIds?: string[];
+  referenceStandardSlots?: { A?: string; B?: string; C?: string };
   referenceStandards?: ReferenceStandard[];
   standardAiValidation?: CalibrationStandardValidation;
   rncNumber?: string;

@@ -8410,11 +8410,71 @@ Suas diretrizes:
 // Quality gate: validate the reference standards selected for a calibration before saving.
 app.post("/api/validate-calibration-standards", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
   const instrumentId = asLimitedString(req.body?.instrumentId, 180);
-  const standardIds: string[] = Array.isArray(req.body?.standardIds)
-    ? Array.from(new Set<string>(req.body.standardIds.map((id: unknown) => asLimitedString(id, 180)).filter((id): id is string => Boolean(id)))).slice(0, 3)
-    : [];
-  if (!instrumentId || standardIds.length === 0) {
-    return res.status(400).json({ error: 'Instrumento e ao menos um padrão são obrigatórios.' });
+  if (!instrumentId) {
+    return res.status(400).json({ error: 'Instrumento é obrigatório.' });
+  }
+
+  const rawSlots = req.body?.standardSlots;
+  const slotA = typeof rawSlots?.A === 'string' ? asLimitedString(rawSlots.A, 180).trim() : '';
+  const slotB = typeof rawSlots?.B === 'string' ? asLimitedString(rawSlots.B, 180).trim() : '';
+  const slotC = typeof rawSlots?.C === 'string' ? asLimitedString(rawSlots.C, 180).trim() : '';
+
+  // LOTE 55: Padrão A é obrigatório
+  if (!slotA) {
+    return res.json({
+      overallStatus: 'BLOCK',
+      error: 'O Padrão A é obrigatório e deve ser proveniente de laboratório RBC externo à COMANINS.',
+      summary: 'O Padrão A é obrigatório e deve ser proveniente de laboratório RBC externo à COMANINS.',
+      issues: ['O Padrão A é obrigatório e deve ser proveniente de laboratório RBC externo à COMANINS.'],
+      deterministicChecks: [],
+      standards: [],
+      model: 'deterministic',
+      instrumentId,
+      analyzedAt: new Date().toISOString(),
+    });
+  }
+
+  const slotEntries = [
+    { slot: 'A', id: slotA },
+    { slot: 'B', id: slotB },
+    { slot: 'C', id: slotC },
+  ].filter((s) => Boolean(s.id));
+
+  const standardIds = slotEntries.map((s) => s.id);
+
+  // Sem IDs duplicados
+  if (new Set(standardIds).size !== standardIds.length) {
+    return res.json({
+      overallStatus: 'BLOCK',
+      error: 'O mesmo padrão de referência não pode ser utilizado em mais de um slot (A, B ou C).',
+      summary: 'O mesmo padrão de referência não pode ser utilizado em mais de um slot (A, B ou C).',
+      issues: ['O mesmo padrão de referência não pode ser utilizado em mais de um slot simultaneamente.'],
+      deterministicChecks: [],
+      standards: [],
+      model: 'deterministic',
+      instrumentId,
+      analyzedAt: new Date().toISOString(),
+    });
+  }
+
+  // Se standardIds também foi enviado, conferir correspondência exata
+  if (Array.isArray(req.body?.standardIds)) {
+    const rawIds = Array.from(new Set<string>(req.body.standardIds.map((id: unknown) => asLimitedString(id, 180).trim()).filter((id): id is string => Boolean(id))));
+    const sortedSlotIds = [...standardIds].sort();
+    const sortedRawIds = [...rawIds].sort();
+    if (sortedSlotIds.join(',') !== sortedRawIds.join(',')) {
+      return res.json({
+        overallStatus: 'BLOCK',
+        error: 'Inconsistência entre os slots de padrões e a lista de padrões enviada.',
+        summary: 'Inconsistência entre os slots de padrões e a lista de padrões enviada.',
+        issues: ['Os IDs dos padrões enviados não correspondem exatamente aos slots informados.'],
+        deterministicChecks: [],
+        standards: [],
+        model: 'deterministic',
+        instrumentId,
+        analyzedAt: new Date().toISOString(),
+      });
+    }
   }
 
   try {
@@ -8432,10 +8492,76 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       return res.status(400).json({ error: 'Um dos padrões selecionados está arquivado/inativo.' });
     }
 
+    // Validação específica do Padrão A
+    const stdA = standards.find((std) => std.id === slotA);
+    if (!stdA) {
+      return res.json({
+        overallStatus: 'BLOCK',
+        error: 'Padrão A não encontrado no sistema.',
+        summary: 'Padrão A não encontrado no sistema.',
+        issues: ['Padrão A não encontrado no sistema.'],
+        deterministicChecks: [],
+        standards: [],
+        model: 'deterministic',
+        instrumentId,
+        analyzedAt: new Date().toISOString(),
+      });
+    }
+    const rbcLabA = String(stdA.rbcLab || '').trim();
+    if (!rbcLabA) {
+      return res.json({
+        overallStatus: 'BLOCK',
+        error: 'O Padrão A selecionado não possui o campo Laboratório RBC/Origem preenchido. O Padrão A deve ser proveniente de laboratório RBC externo à COMANINS.',
+        summary: 'O Padrão A selecionado não possui o campo Laboratório RBC/Origem preenchido. O Padrão A deve ser proveniente de laboratório RBC externo à COMANINS.',
+        issues: ['O campo Laboratório RBC/Origem do Padrão A está vazio. O Padrão A deve ser proveniente de laboratório RBC externo à COMANINS.'],
+        deterministicChecks: [],
+        standards: [
+          {
+            standardId: stdA.id,
+            identification: stdA.identification || '',
+            certificateNumber: stdA.certificateNumber || '',
+            role: 'primary_measurement',
+            status: 'BLOCK',
+            rangeCoverage: 'UNKNOWN',
+            reason: 'Padrão A sem laboratório RBC externo informado.',
+          }
+        ],
+        model: 'deterministic',
+        instrumentId,
+        analyzedAt: new Date().toISOString(),
+      });
+    }
+    if (/comanins/i.test(rbcLabA)) {
+      return res.json({
+        overallStatus: 'BLOCK',
+        error: 'Padrões com Laboratório/Origem COMANINS não podem ser utilizados como Padrão A. Utilize COMANINS somente nos campos Padrão B ou Padrão C.',
+        summary: 'Padrões com Laboratório/Origem COMANINS não podem ser utilizados como Padrão A. Utilize COMANINS somente nos campos Padrão B ou Padrão C.',
+        issues: ['Padrões com Laboratório/Origem COMANINS não podem ser utilizados como Padrão A. Utilize COMANINS somente nos campos Padrão B ou Padrão C.'],
+        deterministicChecks: [],
+        standards: [
+          {
+            standardId: stdA.id,
+            identification: stdA.identification || '',
+            certificateNumber: stdA.certificateNumber || '',
+            role: 'primary_measurement',
+            status: 'BLOCK',
+            rangeCoverage: 'UNKNOWN',
+            reason: 'Padrões com Laboratório/Origem COMANINS não podem ser utilizados como Padrão A. Utilize COMANINS somente nos campos Padrão B ou Padrão C.',
+          }
+        ],
+        model: 'deterministic',
+        instrumentId,
+        analyzedAt: new Date().toISOString(),
+      });
+    }
+
     const today = new Date().toISOString().slice(0, 10);
     const expired = standards.filter((std) => String(std.expirationDate || '') && String(std.expirationDate) < today);
     const deterministicChecks: string[] = [];
     const deterministicIssues: string[] = [];
+
+    deterministicChecks.push('Padrão A é proveniente de laboratório RBC externo à COMANINS.');
+
     if (expired.length > 0) {
       deterministicIssues.push(`Padrão(ões) vencido(s): ${expired.map((std) => std.identification || std.certificateNumber || std.id).join(', ')}.`);
     } else {

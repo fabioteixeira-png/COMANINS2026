@@ -6116,29 +6116,52 @@ Status atual: ${e.status}.`,
       return;
     }
 
-    const selectedStandardsCount = [
-      benchStandardA,
-      benchStandardB,
-      benchStandardC,
-    ].filter(Boolean).length;
-    if (selectedStandardsCount === 0) {
+    if (!benchStandardA) {
       setBenchSubmitting(false);
-      setBenchErrorMessage(
-        "Atenção: Por favor, selecione pelo menos um padrão de referência para emitir o certificado.",
-      );
-      alert(
-        "Por favor, selecione pelo menos um padrão de referência para emitir o certificado.",
-      );
+      const msg =
+        "Atenção: O Padrão A é obrigatório e deve ser proveniente de laboratório RBC externo à COMANINS.";
+      setBenchErrorMessage(msg);
+      alert(msg);
+      return;
+    }
+
+    const stdA = referenceStandards.find((s) => s.id === benchStandardA);
+    const labA = String(stdA?.rbcLab || "").trim();
+    if (!stdA || !labA || /comanins/i.test(labA)) {
+      setBenchSubmitting(false);
+      const msg =
+        "Padrões com Laboratório/Origem COMANINS ou sem laboratório informado não podem ser utilizados como Padrão A. O Padrão A deve ser de laboratório RBC externo à COMANINS. Utilize COMANINS somente nos campos Padrão B ou Padrão C.";
+      setBenchErrorMessage(msg);
+      alert(msg);
+      return;
+    }
+
+    const activeSlots = [
+      { slot: "A", id: benchStandardA },
+      { slot: "B", id: benchStandardB },
+      { slot: "C", id: benchStandardC },
+    ].filter((item) => Boolean(item.id));
+    if (new Set(activeSlots.map((item) => item.id)).size !== activeSlots.length) {
+      setBenchSubmitting(false);
+      const msg =
+        "Não é permitido selecionar o mesmo padrão de referência em mais de um campo (A, B ou C).";
+      setBenchErrorMessage(msg);
+      alert(msg);
       return;
     }
 
     let standardAiValidation: any = undefined;
     try {
+      const standardSlots = {
+        A: benchStandardA,
+        B: benchStandardB || undefined,
+        C: benchStandardC || undefined,
+      };
       const standardIds = [benchStandardA, benchStandardB, benchStandardC].filter(Boolean);
       const validation = await safeFetch<any>("/api/validate-calibration-standards", {
         method: "POST",
         maxRetries: 1,
-        body: JSON.stringify({ instrumentId: selectedInstId, standardIds }),
+        body: JSON.stringify({ instrumentId: selectedInstId, standardSlots, standardIds }),
       });
       standardAiValidation = validation;
       if (!validation || validation.overallStatus !== "PASS") {
@@ -6284,6 +6307,11 @@ Status atual: ${e.status}.`,
             benchStandardB,
             benchStandardC,
           ].filter(Boolean),
+          referenceStandardSlots: {
+            A: benchStandardA || undefined,
+            B: benchStandardB || undefined,
+            C: benchStandardC || undefined,
+          },
           referenceStandards: selectedStandards,
           standardAiValidation,
           standardAiValidationRequired: true,
@@ -6354,6 +6382,16 @@ Status atual: ${e.status}.`,
       alert("Selecione um instrumento na bancada para emitir o RNC.");
       return;
     }
+    if (!benchStandardA) {
+      alert("Atenção: Para emitir o RNC, é obrigatório selecionar o Padrão A com laboratório RBC externo à COMANINS.");
+      return;
+    }
+    const stdA = referenceStandards.find((s) => s.id === benchStandardA);
+    const labA = String(stdA?.rbcLab || "").trim();
+    if (!stdA || !labA || /comanins/i.test(labA)) {
+      alert("Padrões com Laboratório/Origem COMANINS ou sem laboratório informado não podem ser utilizados como Padrão A. O Padrão A deve ser de laboratório RBC externo à COMANINS.");
+      return;
+    }
     setBenchErrorMessage("");
     setRncTechnician(benchTechnician || currentUser?.name || "");
     setRncReason("");
@@ -6363,6 +6401,16 @@ Status atual: ${e.status}.`,
   const handleGenerateAndSaveRnc = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedInstId) return;
+    if (!benchStandardA) {
+      alert("O Padrão A é obrigatório para emitir o RNC e deve ser de laboratório RBC externo à COMANINS.");
+      return;
+    }
+    const stdA = referenceStandards.find((s) => s.id === benchStandardA);
+    const labA = String(stdA?.rbcLab || "").trim();
+    if (!stdA || !labA || /comanins/i.test(labA)) {
+      alert("Padrões com Laboratório/Origem COMANINS ou sem laboratório informado não podem ser utilizados como Padrão A. O Padrão A deve ser de laboratório RBC externo à COMANINS.");
+      return;
+    }
     if (!rncReason.trim()) {
       alert(
         "Por favor, informe o motivo do impedimento ou da não conformidade do instrumento.",
@@ -6587,6 +6635,15 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
             benchStandardB,
             benchStandardC,
           ].filter(Boolean),
+          referenceStandardSlots: {
+            A: benchStandardA || undefined,
+            B: benchStandardB || undefined,
+            C: benchStandardC || undefined,
+          },
+          referenceStandards: [benchStandardA, benchStandardB, benchStandardC]
+            .filter(Boolean)
+            .map((id) => referenceStandards.find((s) => s.id === id))
+            .filter(Boolean) as ReferenceStandard[],
           approved: false,
           materialsUsed: benchMaterialsUsed,
           calibrationDate: activeInst.manualCalibrationDateAllowed
