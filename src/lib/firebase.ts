@@ -1294,8 +1294,8 @@ export async function saveCalibrationDoc(data: {
   referenceStandardIds?: string[];
   referenceStandardSlots?: { A?: string; B?: string; C?: string };
   referenceStandards?: ReferenceStandard[];
-  standardAiValidation?: CalibrationStandardValidation;
-  standardAiValidationRequired?: boolean;
+  standardRangeValidation?: CalibrationStandardValidation;
+  standardRangeValidationRequired?: boolean;
   temperature?: number;
   humidity?: number;
   instrumentType?: InstrumentType;
@@ -1360,21 +1360,21 @@ export async function saveCalibrationDoc(data: {
     }
   }
 
-  if (data.standardAiValidationRequired === true && data.approved !== false) {
+  if (data.standardRangeValidationRequired === true && data.approved !== false) {
     const selectedStandardIds = Array.from(new Set((data.referenceStandardIds || []).filter(Boolean)));
     if (selectedStandardIds.length === 0) {
       throw new Error('Selecione pelo menos um padrão de referência válido.');
     }
-    if (!data.standardAiValidation || data.standardAiValidation.overallStatus !== 'PASS') {
-      throw new Error('A validação inteligente dos padrões não foi concluída com aprovação. Revise os padrões selecionados.');
+    if (!data.standardRangeValidation || data.standardRangeValidation.overallStatus !== 'PASS') {
+      throw new Error('A comparação de faixa dos padrões não foi concluída com aprovação. Revise a faixa/unidade do padrão selecionado.');
     }
     const validatedPassIds = new Set(
-      (data.standardAiValidation.standards || [])
+      (data.standardRangeValidation.standards || [])
         .filter((item) => item.status === 'PASS')
         .map((item) => item.standardId),
     );
     if (selectedStandardIds.some((id) => !validatedPassIds.has(id))) {
-      throw new Error('Um ou mais padrões selecionados não possuem validação técnica aprovada para esta calibração.');
+      throw new Error('Um ou mais padrões selecionados possuem faixa inferior ou não comparável à faixa necessária.');
     }
   }
 
@@ -1648,7 +1648,7 @@ export async function saveCalibrationDoc(data: {
     referenceStandardIds: data.referenceStandardIds || [],
     referenceStandardSlots: data.referenceStandardSlots,
     referenceStandards: data.referenceStandards || [],
-    standardAiValidation: data.standardAiValidation
+    standardRangeValidation: data.standardRangeValidation
   };
 
   const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);

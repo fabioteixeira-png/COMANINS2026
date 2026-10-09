@@ -8367,35 +8367,35 @@ function extractMeasurementUnitFromRange(raw: string): { unit: string; matchedTe
   const patterns: Array<{ regex: RegExp; unit: string }> = [
     { regex: /kgf\s*\/\s*cm\s*(?:\^?\s*2|²)/i, unit: 'kgf/cm2' },
     { regex: /kg\s*\/\s*cm\s*(?:\^?\s*2|²)/i, unit: 'kgf/cm2' },
-    { regex: /\bkgf\b/i, unit: 'kgf/cm2' },
-    { regex: /\bmm\s*h2o\b/i, unit: 'mmh2o' },
-    { regex: /\bcm\s*h2o\b/i, unit: 'cmh2o' },
-    { regex: /\bm\s*h2o\b/i, unit: 'mh2o' },
-    { regex: /\bin\s*h2o\b/i, unit: 'inh2o' },
-    { regex: /\bmmca\b/i, unit: 'mmh2o' },
-    { regex: /\bcmca\b/i, unit: 'cmh2o' },
-    { regex: /\bmca\b/i, unit: 'mh2o' },
-    { regex: /\bmmhg\b/i, unit: 'mmhg' },
-    { regex: /\binhg\b/i, unit: 'inhg' },
-    { regex: /\bmbar\b/i, unit: 'mbar' },
-    { regex: /\bmpa\b/i, unit: 'mpa' },
-    { regex: /\bkpa\b/i, unit: 'kpa' },
-    { regex: /\bpsi(?:g|a)?\b/i, unit: 'psi' },
-    { regex: /\bbar(?:g|a|\s*abs)?\b/i, unit: 'bar' },
-    { regex: /\bpa\b/i, unit: 'pa' },
-    { regex: /\batm\b/i, unit: 'atm' },
-    { regex: /\btorr\b/i, unit: 'torr' },
-    { regex: /°\s*c\b|\bdeg\s*c\b|\bcelsius\b/i, unit: '°c' },
-    { regex: /°\s*f\b|\bdeg\s*f\b|\bfahrenheit\b/i, unit: '°f' },
-    { regex: /\bma\b/i, unit: 'ma' },
-    { regex: /\bmv\b/i, unit: 'mv' },
+    { regex: /(?<![a-z])kgf(?![a-z])/i, unit: 'kgf/cm2' },
+    { regex: /(?<![a-z])mm\s*h2o(?![a-z])/i, unit: 'mmh2o' },
+    { regex: /(?<![a-z])cm\s*h2o(?![a-z])/i, unit: 'cmh2o' },
+    { regex: /(?<![a-z])m\s*h2o(?![a-z])/i, unit: 'mh2o' },
+    { regex: /(?<![a-z])in\s*h2o(?![a-z])/i, unit: 'inh2o' },
+    { regex: /(?<![a-z])mmca(?![a-z])/i, unit: 'mmh2o' },
+    { regex: /(?<![a-z])cmca(?![a-z])/i, unit: 'cmh2o' },
+    { regex: /(?<![a-z])mca(?![a-z])/i, unit: 'mh2o' },
+    { regex: /(?<![a-z])mmhg(?![a-z])/i, unit: 'mmhg' },
+    { regex: /(?<![a-z])inhg(?![a-z])/i, unit: 'inhg' },
+    { regex: /(?<![a-z])mbar(?![a-z])/i, unit: 'mbar' },
+    { regex: /(?<![a-z])mpa(?![a-z])/i, unit: 'mpa' },
+    { regex: /(?<![a-z])kpa(?![a-z])/i, unit: 'kpa' },
+    { regex: /(?<![a-z])psi(?:g|a)?(?![a-z])/i, unit: 'psi' },
+    { regex: /(?<![a-z])bar(?:g|a|\s*abs)?(?![a-z])/i, unit: 'bar' },
+    { regex: /(?<![a-z])pa(?![a-z])/i, unit: 'pa' },
+    { regex: /(?<![a-z])atm(?![a-z])/i, unit: 'atm' },
+    { regex: /(?<![a-z])torr(?![a-z])/i, unit: 'torr' },
+    { regex: /°\s*c(?![a-z])|(?<![a-z])deg\s*c(?![a-z])|(?<![a-z])celsius(?![a-z])/i, unit: '°c' },
+    { regex: /°\s*f(?![a-z])|(?<![a-z])deg\s*f(?![a-z])|(?<![a-z])fahrenheit(?![a-z])/i, unit: '°f' },
+    { regex: /(?<![a-z])ma(?![a-z])/i, unit: 'ma' },
+    { regex: /(?<![a-z])mv(?![a-z])/i, unit: 'mv' },
     { regex: /\bk\s*ohm\b|\bk[Ωω]\b/i, unit: 'kohm' },
     { regex: /\bm\s*ohm\b/i, unit: 'mohm' },
     { regex: /\bohm\b|[Ωω]/i, unit: 'ohm' },
-    { regex: /\bvolt(?:s)?\b|\bv\b/i, unit: 'v' },
-    { regex: /\bamp(?:ere)?s?\b/i, unit: 'a' },
-    { regex: /\bA\b/, unit: 'a' },
-    { regex: /\bkelvin\b|\bk\b/i, unit: 'k' },
+    { regex: /(?<![a-z])volt(?:s)?(?![a-z])|(?<![a-z])v(?![a-z])/i, unit: 'v' },
+    { regex: /(?<![a-z])amp(?:ere)?s?(?![a-z])/i, unit: 'a' },
+    { regex: /(?<![A-Za-z])A(?![A-Za-z])/, unit: 'a' },
+    { regex: /(?<![a-z])kelvin(?![a-z])|(?<![a-z])k(?![a-z])/i, unit: 'k' },
   ];
   for (const item of patterns) {
     const match = raw.match(item.regex);
@@ -8560,10 +8560,11 @@ Suas diretrizes:
 });
 
 
-// Quality gate: validate the reference standards selected for a calibration before saving.
-// LOTE 56: range/unit compatibility is deterministic. Gemini is used only to resolve
-// genuinely ambiguous auxiliary standards and can never overrule a conclusive range check.
-app.post("/api/validate-calibration-standards", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
+// Quality gate: validate reference-standard range coverage before saving.
+// LOTE 57: no Gemini/AI is used here. The decision is purely deterministic:
+// a selected standard may have a higher range, but must never be lower than the
+// range it is intended to cover. Pressure units are converted to the same base.
+app.post("/api/validate-calibration-standards", requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
   const instrumentId = asLimitedString(req.body?.instrumentId, 180);
   const requestedSlots = req.body?.standardSlots && typeof req.body.standardSlots === 'object'
     ? {
@@ -8573,16 +8574,15 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       }
     : { A: '', B: '', C: '' };
 
-  const standardIds: string[] = Array.isArray(req.body?.standardIds)
-    ? Array.from(new Set<string>(req.body.standardIds.map((id: unknown) => asLimitedString(id, 180)).filter((id): id is string => Boolean(id)))).slice(0, 3)
-    : [];
-
   if (!instrumentId || !requestedSlots.A) {
     return res.status(400).json({ error: 'O instrumento e o Padrão A são obrigatórios.' });
   }
 
-  const requestedSlotIds = [requestedSlots.A, requestedSlots.B, requestedSlots.C].filter(Boolean);
-  if (new Set(requestedSlotIds).size !== requestedSlotIds.length) {
+  const slotEntries = (['A', 'B', 'C'] as const)
+    .map((slot) => ({ slot, id: requestedSlots[slot] }))
+    .filter((item): item is { slot: 'A' | 'B' | 'C'; id: string } => Boolean(item.id));
+
+  if (new Set(slotEntries.map((item) => item.id)).size !== slotEntries.length) {
     return res.status(400).json({ error: 'O mesmo padrão não pode ocupar mais de uma posição (A, B ou C).' });
   }
 
@@ -8591,28 +8591,29 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
     if (!instrumentSnap.exists) return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
     const instrument = { id: instrumentSnap.id, ...(instrumentSnap.data() || {}) } as Record<string, any>;
 
-    const standardIdsToFetch = standardIds.length > 0 ? standardIds : requestedSlotIds;
     const standardSnaps = await Promise.all(
-      standardIdsToFetch.map((id) => firestoreDb.collection('referenceStandards').doc(id).get())
+      slotEntries.map(({ id }) => firestoreDb.collection('referenceStandards').doc(id).get()),
     );
-    const missing = standardSnaps.find((snap) => !snap.exists);
-    if (missing) return res.status(400).json({ error: 'Um dos padrões selecionados não existe mais.' });
-
-    const standards = standardSnaps.map((snap) => ({ id: snap.id, ...(snap.data() || {}) } as Record<string, any>));
-    if (standards.some((std) => std.isDeleted === true)) {
-      return res.status(400).json({ error: 'Um dos padrões selecionados está arquivado/inativo.' });
+    const missingIndex = standardSnaps.findIndex((snap) => !snap.exists);
+    if (missingIndex >= 0) {
+      return res.status(400).json({
+        error: `O Padrão ${slotEntries[missingIndex].slot} selecionado não existe mais no cadastro.`,
+      });
     }
 
-    const primaryStandard = standards.find((std) => std.id === requestedSlots.A);
+    const standardsById = new Map(
+      standardSnaps.map((snap) => [snap.id, { id: snap.id, ...(snap.data() || {}) } as Record<string, any>]),
+    );
+
+    const primaryStandard = standardsById.get(requestedSlots.A);
     if (!primaryStandard) {
       return res.status(400).json({ error: 'O Padrão A selecionado não existe mais no cadastro.' });
     }
 
+    // Mantém a regra corporativa já definida no LOTE 55: A deve ser RBC externo.
     const primaryLab = String(primaryStandard.rbcLab || '').trim();
     if (!primaryLab) {
-      return res.status(400).json({
-        error: 'O Padrão A deve possuir laboratório RBC externo preenchido.',
-      });
+      return res.status(400).json({ error: 'O Padrão A deve possuir laboratório RBC externo preenchido.' });
     }
     if (/comanins/i.test(primaryLab)) {
       return res.status(400).json({
@@ -8620,449 +8621,193 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       });
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-    const expiredIds = new Set(
-      standards
-        .filter((std) => String(std.expirationDate || '') && String(std.expirationDate) < today)
-        .map((std) => std.id),
-    );
-
-    const deterministicChecks: string[] = [];
-    const deterministicIssues: string[] = [];
-    const deterministicReviews: string[] = [];
-
-    if (expiredIds.size > 0) {
-      deterministicIssues.push(
-        `Padrão(ões) vencido(s): ${standards.filter((std) => expiredIds.has(std.id)).map((std) => std.identification || std.certificateNumber || std.id).join(', ')}.`,
-      );
-    } else {
-      deterministicChecks.push('Todos os padrões selecionados estão dentro da validade cadastrada.');
+    const inactiveSlot = slotEntries.find(({ id }) => standardsById.get(id)?.isDeleted === true);
+    if (inactiveSlot) {
+      return res.status(400).json({ error: `O Padrão ${inactiveSlot.slot} selecionado está arquivado/inativo.` });
     }
+
     const instrumentMin = Number(instrument.rangeMin);
-    const instrumentUnit = String(instrument.unit || '');
     const instrumentMax = Number(instrument.rangeMax);
+    const instrumentUnit = String(instrument.unit || '').trim();
     const instrumentMinCanonical = toCanonicalValue(instrumentMin, instrumentUnit);
     const instrumentMaxCanonical = toCanonicalValue(instrumentMax, instrumentUnit);
-    const instrumentDomain = instrumentMinCanonical?.domain && instrumentMinCanonical.domain === instrumentMaxCanonical?.domain
-      ? instrumentMinCanonical.domain
-      : instrument.category === 'temperature'
-        ? 'temperature'
-        : instrument.category === 'pressure'
-          ? 'pressure'
-          : measurementDomainFromUnit(instrumentUnit) !== 'unknown'
-            ? measurementDomainFromUnit(instrumentUnit)
-            : measurementDomainFromText(`${instrument.typeSpec || ''} ${instrument.description || ''}`);
 
-    const hasCanonicalInstrumentRange = Boolean(
-      instrumentMinCanonical &&
-      instrumentMaxCanonical &&
-      instrumentMinCanonical.domain === instrumentMaxCanonical.domain,
-    );
-    const requiredMin = hasCanonicalInstrumentRange
-      ? Math.min(instrumentMinCanonical!.value, instrumentMaxCanonical!.value)
-      : undefined;
-    const requiredMax = hasCanonicalInstrumentRange
-      ? Math.max(instrumentMinCanonical!.value, instrumentMaxCanonical!.value)
-      : undefined;
-    const canonicalUnit = instrumentMinCanonical?.unit || instrumentMaxCanonical?.unit || '';
-
-    if (hasCanonicalInstrumentRange) {
-      deterministicChecks.push(
-        `Faixa do instrumento normalizada para comparação: ${formatCanonicalRange(requiredMin!, requiredMax!, canonicalUnit)} (origem: ${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}).`,
-      );
-    } else {
-      deterministicReviews.push(`Não foi possível normalizar automaticamente a faixa do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}).`);
+    if (!instrumentMinCanonical || !instrumentMaxCanonical || instrumentMinCanonical.domain !== instrumentMaxCanonical.domain) {
+      return res.status(400).json({
+        error: `Não foi possível interpretar a faixa do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}). Revise apenas faixa/unidade do cadastro.`,
+      });
     }
 
-    const outputSignal = String(instrument.outputSignal || '');
-    const parsedOutputSignal = parseRangeText(outputSignal);
+    const primaryDomain = instrumentMinCanonical.domain;
+    const requiredPrimaryMin = Math.min(instrumentMinCanonical.value, instrumentMaxCanonical.value);
+    const requiredPrimaryMax = Math.max(instrumentMinCanonical.value, instrumentMaxCanonical.value);
+    const primaryCanonicalUnit = instrumentMinCanonical.unit;
 
-    const parsedStandards = standards.map((std) => {
-      const parsedRange = parseRangeText(std.range);
-      const domain = parsedRange?.domain && parsedRange.domain !== 'unknown'
-        ? parsedRange.domain
-        : measurementDomainFromText(`${std.instrumentType || ''} ${std.range || ''}`);
-      return {
-        id: std.id,
-        identification: String(std.identification || ''),
-        certificateNumber: String(std.certificateNumber || ''),
-        range: String(std.range || ''),
-        instrumentType: String(std.instrumentType || ''),
-        rbcLab: String(std.rbcLab || ''),
-        expirationDate: String(std.expirationDate || ''),
-        slot: requestedSlots.A === std.id ? 'A' : requestedSlots.B === std.id ? 'B' : requestedSlots.C === std.id ? 'C' : undefined,
-        parsedRange,
-        inferredDomain: domain || 'unknown',
-      };
-    });
+    const outputSignal = String(instrument.outputSignal || '').trim();
+    const parsedOutputSignal = outputSignal ? parseRangeText(outputSignal) : null;
+    const hasOutputRange = Boolean(
+      parsedOutputSignal &&
+      parsedOutputSignal.canonicalMin !== undefined &&
+      parsedOutputSignal.canonicalMax !== undefined,
+    );
 
-    type StandardAssessment = {
+    const assessments: Array<{
       standardId: string;
       identification: string;
       certificateNumber: string;
-      slot?: 'A' | 'B' | 'C';
-      role: 'primary_measurement' | 'output_measurement' | 'support' | 'unknown';
-      status: CalibrationAiStatus;
-      rangeCoverage: 'YES' | 'NO' | 'UNKNOWN';
+      slot: 'A' | 'B' | 'C';
+      role: 'primary_measurement' | 'output_measurement';
+      status: 'PASS' | 'BLOCK';
+      rangeCoverage: 'YES' | 'NO';
       reason: string;
-      deterministic: boolean;
-    };
+    }> = [];
+    const issues: string[] = [];
+    const deterministicChecks: string[] = [];
 
-    const deterministicAssessments: StandardAssessment[] = parsedStandards.map((std) => {
-      const label = std.identification || std.certificateNumber || std.id;
-      const slot = std.slot as 'A' | 'B' | 'C' | undefined;
+    for (const { slot, id } of slotEntries) {
+      const std = standardsById.get(id)!;
+      const label = String(std.identification || std.certificateNumber || id);
+      const rawRange = String(std.range || '').trim();
 
-      if (expiredIds.has(std.id)) {
-        return {
-          standardId: std.id,
-          identification: std.identification,
-          certificateNumber: std.certificateNumber,
-          slot,
-          role: slot === 'A' ? 'primary_measurement' : 'unknown',
-          status: 'BLOCK',
-          rangeCoverage: 'UNKNOWN',
-          reason: 'Certificado do padrão vencido.',
-          deterministic: true,
-        };
+      // First parse the exact range field. If legacy data omitted the unit there,
+      // try the instrument-type text. As a last legacy fallback, assume the primary
+      // instrument unit so old numeric-only ranges do not become false negatives.
+      let parsedRange = parseRangeText(rawRange);
+      if (parsedRange && (!parsedRange.unit || parsedRange.canonicalMin === undefined || parsedRange.canonicalMax === undefined)) {
+        const typeUnit = extractMeasurementUnitFromRange(String(std.instrumentType || ''))?.unit || '';
+        const fallbackUnit = typeUnit || instrumentUnit;
+        if (fallbackUnit) {
+          const minConverted = toCanonicalValue(parsedRange.min, fallbackUnit);
+          const maxConverted = toCanonicalValue(parsedRange.max, fallbackUnit);
+          if (minConverted && maxConverted && minConverted.domain === maxConverted.domain) {
+            parsedRange = {
+              ...parsedRange,
+              unit: canonicalMeasurementUnit(fallbackUnit),
+              domain: minConverted.domain,
+              canonicalMin: minConverted.value,
+              canonicalMax: maxConverted.value,
+              canonicalUnit: minConverted.unit,
+            };
+          }
+        }
       }
 
-      const stdRange = std.parsedRange;
-      const hasCanonicalStandardRange = Boolean(
-        stdRange &&
-        stdRange.canonicalMin !== undefined &&
-        stdRange.canonicalMax !== undefined,
-      );
-
-      // Padrão A é a referência primária. Se a faixa dele cobre integralmente a faixa
-      // do instrumento após conversão de unidades, a IA não pode rebaixá-lo.
-      if (slot === 'A') {
-        if (!hasCanonicalInstrumentRange || !hasCanonicalStandardRange) {
-          const reason = `Não foi possível comprovar automaticamente a cobertura de faixa do Padrão A (${std.range || 'faixa não informada'}) para o instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}).`;
-          deterministicReviews.push(reason);
-          return {
-            standardId: std.id,
-            identification: std.identification,
-            certificateNumber: std.certificateNumber,
-            slot,
-            role: 'primary_measurement',
-            status: 'REVIEW',
-            rangeCoverage: 'UNKNOWN',
-            reason,
-            deterministic: false,
-          };
-        }
-        if (std.inferredDomain !== instrumentDomain) {
-          const reason = `Padrão A ${label} é da grandeza ${std.inferredDomain || 'desconhecida'}, enquanto o instrumento requer ${instrumentDomain}.`;
-          deterministicIssues.push(reason);
-          return {
-            standardId: std.id,
-            identification: std.identification,
-            certificateNumber: std.certificateNumber,
-            slot,
-            role: 'primary_measurement',
-            status: 'BLOCK',
-            rangeCoverage: 'NO',
-            reason,
-            deterministic: true,
-          };
-        }
-        const cMin = Number(stdRange!.canonicalMin);
-        const cMax = Number(stdRange!.canonicalMax);
-        if (!rangeCovers(cMin, cMax, requiredMin!, requiredMax!)) {
-          const reason = `Padrão A ${label} não cobre integralmente a faixa do instrumento. Padrão: ${formatCanonicalRange(cMin, cMax, stdRange!.canonicalUnit || canonicalUnit)}; instrumento: ${formatCanonicalRange(requiredMin!, requiredMax!, canonicalUnit)}.`;
-          deterministicIssues.push(reason);
-          return {
-            standardId: std.id,
-            identification: std.identification,
-            certificateNumber: std.certificateNumber,
-            slot,
-            role: 'primary_measurement',
-            status: 'BLOCK',
-            rangeCoverage: 'NO',
-            reason,
-            deterministic: true,
-          };
-        }
-        const reason = `Padrão A aprovado por regra metrológica: sua faixa (${std.range}) equivale a ${formatCanonicalRange(cMin, cMax, stdRange!.canonicalUnit || canonicalUnit)} e cobre integralmente o instrumento (${formatCanonicalRange(requiredMin!, requiredMax!, canonicalUnit)}).`;
-        deterministicChecks.push(reason);
-        return {
-          standardId: std.id,
-          identification: std.identification,
-          certificateNumber: std.certificateNumber,
-          slot,
-          role: 'primary_measurement',
-          status: 'PASS',
-          rangeCoverage: 'YES',
-          reason,
-          deterministic: true,
-        };
-      }
-
-      // Padrões B/C da mesma grandeza principal também precisam ter capacidade de faixa
-      // não inferior à faixa do instrumento quando usados como padrão de medição principal.
-      if (
-        hasCanonicalInstrumentRange &&
-        hasCanonicalStandardRange &&
-        instrumentDomain !== 'unknown' &&
-        std.inferredDomain === instrumentDomain
-      ) {
-        const cMin = Number(stdRange!.canonicalMin);
-        const cMax = Number(stdRange!.canonicalMax);
-        if (rangeCovers(cMin, cMax, requiredMin!, requiredMax!)) {
-          const reason = `Padrão ${slot} ${label} possui grandeza compatível e faixa suficiente após conversão: ${formatCanonicalRange(cMin, cMax, stdRange!.canonicalUnit || canonicalUnit)}.`;
-          deterministicChecks.push(reason);
-          return {
-            standardId: std.id,
-            identification: std.identification,
-            certificateNumber: std.certificateNumber,
-            slot,
-            role: 'primary_measurement',
-            status: 'PASS',
-            rangeCoverage: 'YES',
-            reason,
-            deterministic: true,
-          };
-        }
-        const reason = `Padrão ${slot} ${label} é da mesma grandeza do instrumento, porém sua faixa é inferior à faixa necessária. Padrão: ${formatCanonicalRange(cMin, cMax, stdRange!.canonicalUnit || canonicalUnit)}; instrumento: ${formatCanonicalRange(requiredMin!, requiredMax!, canonicalUnit)}.`;
-        deterministicIssues.push(reason);
-        return {
-          standardId: std.id,
-          identification: std.identification,
-          certificateNumber: std.certificateNumber,
+      if (!parsedRange || parsedRange.canonicalMin === undefined || parsedRange.canonicalMax === undefined) {
+        const reason = `Padrão ${slot} ${label}: não foi possível interpretar a faixa cadastrada (${rawRange || 'não informada'}).`;
+        issues.push(reason);
+        assessments.push({
+          standardId: id,
+          identification: String(std.identification || ''),
+          certificateNumber: String(std.certificateNumber || ''),
           slot,
           role: 'primary_measurement',
           status: 'BLOCK',
           rangeCoverage: 'NO',
           reason,
-          deterministic: true,
-        };
+        });
+        continue;
       }
 
-      // Ex.: transmissor 0-10 bar / 4-20 mA. Um B/C de corrente é válido se cobrir 4-20 mA.
+      const candidateMin = Number(parsedRange.canonicalMin);
+      const candidateMax = Number(parsedRange.canonicalMax);
+
+      // O Padrão A é sempre a referência primária: ele deve cobrir a faixa principal
+      // do instrumento. Nunca trate o Padrão A como padrão do sinal de saída.
+      if (slot === 'A' && parsedRange.domain !== primaryDomain) {
+        const reason = `Padrão A ${label}: a faixa cadastrada (${rawRange}) não é comparável com a grandeza principal do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}).`;
+        issues.push(reason);
+        assessments.push({
+          standardId: id,
+          identification: String(std.identification || ''),
+          certificateNumber: String(std.certificateNumber || ''),
+          slot,
+          role: 'primary_measurement',
+          status: 'BLOCK',
+          rangeCoverage: 'NO',
+          reason,
+        });
+        continue;
+      }
+
+      // Normal case: same physical quantity as the calibrated instrument.
+      if (parsedRange.domain === primaryDomain) {
+        const covers = rangeCovers(candidateMin, candidateMax, requiredPrimaryMin, requiredPrimaryMax);
+        const reason = covers
+          ? `Padrão ${slot} ${label} aprovado: ${rawRange} equivale a ${formatCanonicalRange(candidateMin, candidateMax, parsedRange.canonicalUnit || primaryCanonicalUnit)} e cobre o instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`
+          : `Padrão ${slot} ${label} bloqueado porque sua faixa é inferior à faixa do instrumento. Padrão: ${formatCanonicalRange(candidateMin, candidateMax, parsedRange.canonicalUnit || primaryCanonicalUnit)}; instrumento: ${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}.`;
+        if (covers) deterministicChecks.push(reason); else issues.push(reason);
+        assessments.push({
+          standardId: id,
+          identification: String(std.identification || ''),
+          certificateNumber: String(std.certificateNumber || ''),
+          slot,
+          role: 'primary_measurement',
+          status: covers ? 'PASS' : 'BLOCK',
+          rangeCoverage: covers ? 'YES' : 'NO',
+          reason,
+        });
+        continue;
+      }
+
+      // Keep support for transmitter output standards (e.g. B = 0-24 mA for a 4-20 mA transmitter),
+      // still using only a deterministic range comparison and no AI.
       if (
+        hasOutputRange &&
         parsedOutputSignal &&
-        parsedOutputSignal.canonicalMin !== undefined &&
-        parsedOutputSignal.canonicalMax !== undefined &&
-        hasCanonicalStandardRange &&
-        std.inferredDomain === parsedOutputSignal.domain
+        parsedRange.domain === parsedOutputSignal.domain
       ) {
-        const cMin = Number(stdRange!.canonicalMin);
-        const cMax = Number(stdRange!.canonicalMax);
-        if (rangeCovers(cMin, cMax, Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax))) {
-          const reason = `Padrão ${slot} ${label} cobre o sinal de saída do instrumento (${outputSignal}).`;
-          deterministicChecks.push(reason);
-          return {
-            standardId: std.id,
-            identification: std.identification,
-            certificateNumber: std.certificateNumber,
-            slot,
-            role: 'output_measurement',
-            status: 'PASS',
-            rangeCoverage: 'YES',
-            reason,
-            deterministic: true,
-          };
-        }
-        const reason = `Padrão ${slot} ${label} foi identificado como padrão do sinal de saída, mas sua faixa (${std.range}) não cobre ${outputSignal}.`;
-        deterministicIssues.push(reason);
-        return {
-          standardId: std.id,
-          identification: std.identification,
-          certificateNumber: std.certificateNumber,
+        const outputMin = Math.min(Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax));
+        const outputMax = Math.max(Number(parsedOutputSignal.canonicalMin), Number(parsedOutputSignal.canonicalMax));
+        const covers = rangeCovers(candidateMin, candidateMax, outputMin, outputMax);
+        const reason = covers
+          ? `Padrão ${slot} ${label} aprovado para o sinal de saída ${outputSignal}; sua faixa (${rawRange}) cobre integralmente o sinal.`
+          : `Padrão ${slot} ${label} bloqueado porque sua faixa (${rawRange}) é inferior ao sinal de saída necessário (${outputSignal}).`;
+        if (covers) deterministicChecks.push(reason); else issues.push(reason);
+        assessments.push({
+          standardId: id,
+          identification: String(std.identification || ''),
+          certificateNumber: String(std.certificateNumber || ''),
           slot,
           role: 'output_measurement',
-          status: 'BLOCK',
-          rangeCoverage: 'NO',
+          status: covers ? 'PASS' : 'BLOCK',
+          rangeCoverage: covers ? 'YES' : 'NO',
           reason,
-          deterministic: true,
-        };
+        });
+        continue;
       }
 
-      const reason = `O papel técnico do Padrão ${slot} ${label} não pôde ser concluído apenas pelos dados cadastrados (${std.instrumentType || 'tipo não informado'}; faixa ${std.range || 'não informada'}).`;
-      deterministicReviews.push(reason);
-      return {
-        standardId: std.id,
-        identification: std.identification,
-        certificateNumber: std.certificateNumber,
+      const reason = `Padrão ${slot} ${label}: a unidade/faixa cadastrada (${rawRange}) não é comparável com a faixa principal do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit})${outputSignal ? ` nem com o sinal de saída (${outputSignal})` : ''}.`;
+      issues.push(reason);
+      assessments.push({
+        standardId: id,
+        identification: String(std.identification || ''),
+        certificateNumber: String(std.certificateNumber || ''),
         slot,
-        role: 'unknown',
-        status: 'REVIEW',
-        rangeCoverage: 'UNKNOWN',
+        role: 'primary_measurement',
+        status: 'BLOCK',
+        rangeCoverage: 'NO',
         reason,
-        deterministic: false,
-      };
-    });
-
-    const hardBlocks = deterministicAssessments.filter((item) => item.status === 'BLOCK');
-    if (hardBlocks.length > 0) {
-      return res.json({
-        overallStatus: 'BLOCK',
-        summary: 'A ficha não pode ser salva porque existe incompatibilidade objetiva de validade, grandeza ou faixa de medição.',
-        instrumentId,
-        analyzedAt: new Date().toISOString(),
-        model: 'deterministic-range-v2',
-        deterministicChecks,
-        issues: deterministicIssues,
-        standards: deterministicAssessments.map(({ deterministic: _deterministic, ...item }) => item),
       });
     }
 
-    const unresolved = deterministicAssessments.filter((item) => item.status === 'REVIEW');
-    if (unresolved.length === 0) {
-      return res.json({
-        overallStatus: 'PASS',
-        summary: 'Padrões aprovados por validação determinística de rastreabilidade, validade, grandeza e cobertura de faixa. Conversões de unidade foram consideradas.',
-        instrumentId,
-        analyzedAt: new Date().toISOString(),
-        model: 'deterministic-range-v2',
-        deterministicChecks,
-        issues: [],
-        standards: deterministicAssessments.map(({ deterministic: _deterministic, ...item }) => item),
-      });
-    }
-
-    const baseResult = {
+    const hasBlock = assessments.some((item) => item.status === 'BLOCK');
+    return res.json({
+      overallStatus: hasBlock ? 'BLOCK' : 'PASS',
+      summary: hasBlock
+        ? 'A ficha não pode ser salva porque pelo menos um padrão selecionado possui faixa inferior ou não comparável à faixa necessária.'
+        : 'Padrões aprovados por comparação matemática de faixa. Nenhuma IA foi utilizada nesta validação.',
       instrumentId,
       analyzedAt: new Date().toISOString(),
+      model: 'deterministic-range-only-v1',
       deterministicChecks,
-      issues: deterministicIssues,
-      standards: deterministicAssessments.map(({ deterministic: _deterministic, ...item }) => item),
-    };
-
-    const gemini = getGeminiClient();
-    if (!gemini) {
-      return res.json({
-        ...baseResult,
-        overallStatus: 'REVIEW',
-        summary: 'O Padrão A foi validado pela regra de faixa. Há padrão auxiliar que precisa de revisão porque a IA está indisponível e os dados cadastrados não permitem concluir sua função automaticamente.',
-        issues: [...deterministicIssues, ...deterministicReviews],
-        model: 'deterministic-range-v2',
-      });
-    }
-
-    const prompt = `Você é um metrologista sênior responsável pelo controle de qualidade de um laboratório de calibração industrial.
-Analise SOMENTE os padrões auxiliares marcados como REVIEW. As decisões determinísticas abaixo são fatos e não podem ser alteradas.
-
-INSTRUMENTO:
-${JSON.stringify({
-  tag: instrument.tag,
-  description: instrument.description,
-  typeSpec: instrument.typeSpec,
-  category: instrument.category,
-  rangeMin: instrument.rangeMin,
-  rangeMax: instrument.rangeMax,
-  unit: instrument.unit,
-  unitNegative: instrument.unitNegative,
-  rangeMin2: instrument.rangeMin2,
-  rangeMax2: instrument.rangeMax2,
-  unit2: instrument.unit2,
-  setPoint: instrument.setPoint,
-  sensorType: instrument.sensorType,
-  outputSignal,
-  accuracyClass: instrument.accuracyClass,
-  mpe: instrument.mpe,
-}, null, 2)}
-
-PADRÕES:
-${JSON.stringify(parsedStandards, null, 2)}
-
-DECISÕES DETERMINÍSTICAS:
-${JSON.stringify(deterministicAssessments, null, 2)}
-
-REGRAS:
-1. O Padrão A já foi validado deterministicamente. Se estiver PASS, mantenha PASS. Nunca rebaixe o Padrão A por diferença de unidade; bar, kgf/cm², psi, kPa, MPa etc. são comparados após conversão.
-2. Um padrão de mesma grandeza cuja faixa convertida seja inferior à faixa necessária deve ser BLOCK. Faixa superior é permitida.
-3. Para transmissores, um padrão elétrico pode ser legítimo para o sinal de saída (por exemplo 4-20 mA).
-4. Padrões B/C podem ser COMANINS. A origem COMANINS só é proibida no slot A.
-5. Não avalie incerteza/TUR porque esses dados não existem no cadastro atual.
-6. Não invente dados. Se não houver informação suficiente para justificar o padrão auxiliar, use REVIEW.
-7. Responda apenas JSON válido.
-
-FORMATO:
-{
-  "overallStatus": "PASS|BLOCK|REVIEW",
-  "summary": "resumo objetivo",
-  "issues": ["..."],
-  "standards": [
-    {
-      "standardId": "id exato",
-      "role": "primary_measurement|output_measurement|support|unknown",
-      "status": "PASS|BLOCK|REVIEW",
-      "rangeCoverage": "YES|NO|UNKNOWN",
-      "reason": "justificativa técnica curta"
-    }
-  ]
-}`;
-
-    try {
-      const response = await callGeminiWithRetry(() => gemini.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: { temperature: 0.1, responseMimeType: 'application/json' },
-      }));
-      const parsed = parseGeminiJson(response.text || '');
-      const rawItems = Array.isArray(parsed.standards) ? parsed.standards : [];
-      const itemById = new Map(rawItems.map((item: any) => [String(item?.standardId || ''), item]));
-
-      const normalizedStandards = deterministicAssessments.map((det) => {
-        // Toda decisão determinística conclusiva prevalece sobre a IA.
-        if (det.status !== 'REVIEW') {
-          const { deterministic: _deterministic, ...item } = det;
-          return item;
-        }
-        const aiItem: any = itemById.get(det.standardId) || {};
-        const rawStatus = String(aiItem.status || 'REVIEW').toUpperCase();
-        const status: CalibrationAiStatus = rawStatus === 'PASS' || rawStatus === 'BLOCK' ? rawStatus : 'REVIEW';
-        const rawRole = String(aiItem.role || 'unknown');
-        const role = ['primary_measurement', 'output_measurement', 'support'].includes(rawRole) ? rawRole : 'unknown';
-        const rawCoverage = String(aiItem.rangeCoverage || 'UNKNOWN').toUpperCase();
-        const rangeCoverage = rawCoverage === 'YES' || rawCoverage === 'NO' ? rawCoverage : 'UNKNOWN';
-        return {
-          standardId: det.standardId,
-          identification: det.identification,
-          certificateNumber: det.certificateNumber,
-          slot: det.slot,
-          role,
-          status,
-          rangeCoverage,
-          reason: asLimitedString(aiItem.reason, 700) || det.reason,
-        };
-      });
-
-      let overallStatus: CalibrationAiStatus = 'PASS';
-      if (normalizedStandards.some((item) => item.status === 'BLOCK')) overallStatus = 'BLOCK';
-      else if (normalizedStandards.some((item) => item.status === 'REVIEW')) overallStatus = 'REVIEW';
-
-      return res.json({
-        overallStatus,
-        summary: asLimitedString(parsed.summary, 1200) || (overallStatus === 'PASS' ? 'Validação técnica concluída.' : 'Há padrão auxiliar que requer revisão.'),
-        instrumentId,
-        analyzedAt: new Date().toISOString(),
-        model: 'gemini-2.5-flash+deterministic-range-v2',
-        deterministicChecks,
-        issues: [
-          ...deterministicIssues,
-          ...(Array.isArray(parsed.issues) ? parsed.issues.map((item: unknown) => asLimitedString(item, 700)).filter(Boolean).slice(0, 8) : []),
-        ],
-        standards: normalizedStandards,
-      });
-    } catch (aiError: any) {
-      console.error('IA indisponível na validação complementar dos padrões:', aiError);
-      // Não transforme indisponibilidade do Gemini em erro 500. A decisão metrológica
-      // determinística continua válida e o usuário recebe exatamente o que falta revisar.
-      return res.json({
-        ...baseResult,
-        overallStatus: 'REVIEW',
-        summary: 'O Padrão A foi validado pela regra de faixa, mas a IA não respondeu para um padrão auxiliar ainda ambíguo. A ficha não foi salva até revisar somente esse padrão auxiliar.',
-        issues: [...deterministicIssues, ...deterministicReviews],
-        model: 'deterministic-range-v2-ai-unavailable',
-      });
-    }
+      issues,
+      standards: assessments,
+    });
   } catch (err: any) {
-    console.error('Erro ao validar padrões de calibração:', err);
+    console.error('Erro ao validar faixas dos padrões de calibração:', err);
     return res.status(500).json({
-      error: 'STANDARD_VALIDATION_FAILED',
-      message: asLimitedString(err?.message, 900) || 'Não foi possível validar os padrões selecionados.',
+      error: 'STANDARD_RANGE_VALIDATION_FAILED',
+      message: asLimitedString(err?.message, 900) || 'Não foi possível validar a faixa dos padrões selecionados.',
     });
   }
 });

@@ -305,7 +305,9 @@ export interface CalibrationReport {
   referenceStandardIds?: string[];
   referenceStandardSlots?: { A?: string; B?: string; C?: string };
   referenceStandards?: ReferenceStandard[];
+  /** @deprecated Registros antigos dos LOTES 53-56. Não é mais usado para novas calibrações. */
   standardAiValidation?: CalibrationStandardValidation;
+  standardRangeValidation?: CalibrationStandardValidation;
   rncNumber?: string;
   rncData?: RncReport;
   materialsUsed?: string[];

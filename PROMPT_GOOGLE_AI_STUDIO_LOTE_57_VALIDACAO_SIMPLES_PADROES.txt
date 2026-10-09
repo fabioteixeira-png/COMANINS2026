@@ -1,0 +1,103 @@
+Atue como desenvolvedor sênior full-stack especialista em React, TypeScript, Firebase Firestore e Firebase Storage.
+
+Estou enviando o código-fonte atualizado do Sistema COMANINS com o LOTE 57 preparado. Sua tarefa é revisar, aplicar/preservar e validar a nova regra da ficha de calibração SEM recriar lógica de IA para padrões.
+
+PROBLEMA REAL
+O sistema está bloqueando calibrações corretas. Exemplo real:
+- instrumento: 0 a 0,4 kgf/cm²;
+- Padrão A: 0 a 10000 PSI;
+- Padrão B: 0 a 1 kgf/cm².
+
+Os dois padrões cobrem amplamente o instrumento e a ficha deve ser salva.
+
+CAUSA ENCONTRADA
+1. A validação ainda dependia do Gemini para padrões auxiliares e podia retornar REVIEW.
+2. O parser não reconhecia corretamente unidades coladas aos números, especialmente formatos como `0/10000PSI`, porque algumas regex utilizavam limite de palavra (`\\b`).
+
+REGRA DEFINITIVA
+REMOVA COMPLETAMENTE A IA/GEMINI DA VALIDAÇÃO DOS PADRÕES DE REFERÊNCIA.
+
+A rota `/api/validate-calibration-standards` deve ser 100% determinística.
+
+Não usar Gemini.
+Não usar prompt.
+Não usar REVIEW.
+Não bloquear por interpretação da IA.
+Não tentar decidir se um padrão é melhor, mais preciso ou adequado por opinião da IA.
+
+A única validação de compatibilidade metrológica deve ser a COBERTURA DE FAIXA.
+
+REGRAS DE FAIXA
+1. Converta unidades equivalentes antes de comparar.
+2. O padrão pode ter faixa maior que o instrumento.
+3. O padrão não pode ter faixa inferior à faixa que precisa medir.
+4. A faixa do padrão deve conter integralmente a faixa necessária:
+   standardMin <= instrumentMin
+   standardMax >= instrumentMax
+5. Padrão A é a referência primária e deve sempre ser comparado à faixa principal do instrumento.
+6. B e C, quando da mesma grandeza do instrumento, também devem cobrir a faixa principal.
+7. Para transmissores, B/C elétrico pode ser comparado ao sinal de saída, por exemplo um padrão 0–24 mA para instrumento 4–20 mA.
+8. Se C estiver selecionado, aplique a mesma regra de B.
+
+EXEMPLOS OBRIGATÓRIOS
+Instrumento 0–0,4 kgf/cm²:
+- A = 0–10000 PSI => PASS
+- B = 0–1 kgf/cm² => PASS
+- padrão = 0–0,2 kgf/cm² => BLOCK
+
+Conversões devem considerar pelo menos:
+bar, mbar, psi, kPa, MPa, Pa, kgf/cm², mmHg, inHg, mmH2O, cmH2O, mH2O, inH2O, atm, torr, °C, °F, K, mA, A, mV, V e resistência.
+
+O parser deve aceitar unidade colada ao número:
+`0/10000PSI`
+`0/1Kgf/cm²`
+`0-10bar`
+`4-20mA`
+
+PADRÃO A — REGRA CORPORATIVA QUE DEVE PERMANECER
+Não remova a regra já aprovada no LOTE 55:
+- A é obrigatório;
+- deve ter Laboratório RBC/Origem externo preenchido;
+- COMANINS não pode ser A;
+- COMANINS pode ser B/C.
+
+Também preserve a prevenção de padrão duplicado e registros arquivados/inativos.
+
+IMPORTANTE
+Não reintroduza `standardAiValidation` para novas calibrações.
+Use `standardRangeValidation`.
+O campo antigo `standardAiValidation` pode permanecer no tipo apenas para leitura/compatibilidade com documentos antigos do Firestore.
+
+A rota de validação de FOTO pós-laboratório pode continuar usando IA. A IA do RNC também deve continuar. A remoção de IA é SOMENTE da validação dos padrões A/B/C.
+
+NÃO ALTERAR
+- RNC técnico do LOTE 53;
+- validação de foto pós-laboratório;
+- PSV/PCV do LOTE 52;
+- controle de exclusões do LOTE 54;
+- regra RBC externo do LOTE 55;
+- cálculos de erro/MPE;
+- certificados;
+- clientes, instrumentos ou histórico existente.
+
+TESTES OBRIGATÓRIOS
+1. Instrumento 0–0,4 kgf/cm², A 0–10000PSI, B 0–1Kgf/cm² => PASS e salvar.
+2. Mesmo instrumento, B 0–0,2Kgf/cm² => BLOCK.
+3. Instrumento 0–10 bar, padrão 0–150 psi => PASS.
+4. Instrumento 0–10 bar, padrão 0–100 psi => BLOCK.
+5. Instrumento 0–100 psi, padrão 0–10 bar => PASS.
+6. Transmissor 0–10 bar / 4–20 mA, A de pressão suficiente + B 0–24mA => PASS.
+7. Transmissor 0–10 bar / 4–20 mA, B 0–10mA => BLOCK.
+8. A COMANINS => continuar bloqueado pela regra RBC/origem.
+9. A externo RBC com faixa suficiente => PASS sem consultar Gemini.
+10. Desligar/indisponibilizar a API Gemini e confirmar que a ficha continua salvando normalmente quando as faixas são válidas.
+
+Antes de concluir:
+- execute `npm ci`;
+- execute `npm run internal-portal:verify`;
+- execute `npm run lint`;
+- execute `npm run build`;
+- corrija qualquer erro introduzido;
+- informe os arquivos alterados e o resultado dos 10 testes acima.
+
+Não responda apenas “corrigido”. Não simplifique a implementação removendo conversão de unidades.
