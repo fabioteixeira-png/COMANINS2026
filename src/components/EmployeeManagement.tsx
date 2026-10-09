@@ -13,7 +13,7 @@ import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrain
   uploadCorporateFile, uploadCorporateDataUrl, openCorporateFile, downloadCorporateFile } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
-import { verifyAdminCredentials } from '../utils/authApi';
+import { verifyCurrentAdminPassword } from '../utils/authApi';
 import { isAdministratorAccess, userHasAccessModule } from '../access-control';
 
 interface EmployeeManagementProps {
@@ -264,7 +264,7 @@ export default function EmployeeManagement({
     }
 
     try {
-      const valid = await verifyAdminCredentials(currentUser?.username || '', pwd);
+      const valid = await verifyCurrentAdminPassword(pwd);
       if (!valid) {
         alert('Credencial administrativa inválida.');
         return false;
@@ -1031,13 +1031,11 @@ export default function EmployeeManagement({
                               {isUserAdmin && (
                                 <button
                                   onClick={() => {
-                                    if (requestAdminDelete) {
-                                      requestAdminDelete('user', emp.username, emp.name);
-                                    } else {
-                                      if (confirm(`Tem certeza que deseja excluir o colaborador ${emp.name}?`)) {
-                                        onDeleteInternalUser(emp.username);
-                                      }
+                                    if (!requestAdminDelete) {
+                                      alert('A exclusão administrativa está indisponível nesta sessão.');
+                                      return;
                                     }
+                                    requestAdminDelete('user', emp.username, emp.name);
                                   }}
                                   className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors"
                                   title="Excluir Colaborador"
@@ -2968,23 +2966,26 @@ export default function EmployeeManagement({
                                       </button>
                                     </>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      if (confirm('Deseja arquivar este anexo? O arquivo e o histórico serão preservados.')) {
+                                  {isUserAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const authorized = await confirmAdministratorPassword('o arquivamento deste anexo');
+                                        if (!authorized) return;
+                                        if (!confirm('Deseja arquivar este anexo? O arquivo e o histórico serão preservados.')) return;
                                         try {
                                           await deleteEmployeeDocument(docItem.id);
                                           setUserDocuments(userDocuments.filter(d => d.id !== docItem.id));
                                         } catch (err) {
                                           alert("Erro ao excluir: " + err);
                                         }
-                                      }
-                                    }}
-                                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                                    title="Excluir Anexo"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                      }}
+                                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                      title="Excluir Anexo (requer senha do Administrador logado)"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             ))}

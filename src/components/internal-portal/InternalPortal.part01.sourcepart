@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 import { safeFetch } from "../utils/apiClient";
-import { authJsonFetch, verifyAdminCredentials } from "../utils/authApi";
+import { authJsonFetch, verifyAdminCredentials, verifyCurrentAdminPassword } from "../utils/authApi";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
 import {
@@ -2216,6 +2216,10 @@ export default function InternalPortal({
     id: string,
     name: string,
   ) => {
+    if (!isUserAdmin) {
+      alert("Somente o perfil Administrador pode visualizar e executar exclusões.");
+      return;
+    }
     setDeleteTarget({ type, id, name });
     setAdminPasswordInput("");
     setAdminPasswordError("");
@@ -2229,10 +2233,18 @@ export default function InternalPortal({
   const handleConfirmAdminDelete = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminPasswordError("");
+    if (!isUserAdmin || !currentUser?.username) {
+      setAdminPasswordError("A sessão atual não possui perfil Administrador válido.");
+      return;
+    }
     const typedPassword = adminPasswordInput.trim();
+    if (!typedPassword) {
+      setAdminPasswordError("Digite a senha do administrador atualmente logado.");
+      return;
+    }
 
     try {
-      const valid = await verifyAdminCredentials(currentUser?.username || '', typedPassword);
+      const valid = await verifyCurrentAdminPassword(typedPassword);
       if (!valid) {
         setAdminPasswordError("Credencial administrativa inválida.");
         return;
@@ -5123,9 +5135,9 @@ Status atual: ${e.status}.`,
     }
   };
 
-  const handleDeletePhoto = async (photoIndex: number) => {
-    if (!canEditMaterialIntake) {
-      alert("Seu perfil possui somente visualização neste módulo.");
+  const handleDeletePhoto = (photoIndex: number) => {
+    if (!isUserAdmin) {
+      alert("Somente o perfil Administrador pode excluir fotos de entrada.");
       return;
     }
     if (!selectedIntakeForPhotos) return;
@@ -5133,30 +5145,11 @@ Status atual: ${e.status}.`,
       alert("Esta entrada já foi entregue e está bloqueada para alterações.");
       return;
     }
-    if (!confirm("Deseja realmente remover esta foto?")) return;
-    try {
-      const existingPhotos = selectedIntakeForPhotos.photos || [];
-      const updatedPhotos = existingPhotos.filter(
-        (_, idx) => idx !== photoIndex,
-      );
-
-      await updateIntakePhotosDoc(selectedIntakeForPhotos.id, updatedPhotos);
-
-      setSelectedIntakeForPhotos({
-        ...selectedIntakeForPhotos,
-        photos: updatedPhotos,
-      });
-
-      setSavedIntakes((prev) =>
-        prev.map((item) =>
-          item.id === selectedIntakeForPhotos.id
-            ? { ...item, photos: updatedPhotos }
-            : item,
-        ),
-      );
-    } catch (err) {
-      console.error("Error deleting photo:", err);
-    }
+    requestAdminDelete(
+      "intake_photo",
+      `${selectedIntakeForPhotos.id}::${photoIndex}`,
+      `Foto ${photoIndex + 1} da Entrada ${selectedIntakeForPhotos.numEntrada || selectedIntakeForPhotos.id}`,
+    );
   };
 
   const handleUploadInstrumentPhoto = async (
@@ -5295,68 +5288,24 @@ Status atual: ${e.status}.`,
     }
   };
 
-  const handleDeleteInstrumentPhoto = async () => {
+  const handleDeleteInstrumentPhoto = () => {
+    if (!isUserAdmin) {
+      alert("Somente o perfil Administrador pode excluir fotos de instrumentos.");
+      return;
+    }
     if (!photoModalInstrument) return;
 
     const currentStatus = photoModalInstrument.status as string;
     if (currentStatus === "Entregue") {
-      alert(isUserAdmin
-        ? "Instrumento entregue. Para corrigir fotos, use o botão Correção Admin e confirme a senha administrativa."
-        : "Este instrumento pertence a uma entrada já entregue. Os registros fotográficos estão bloqueados para alteração.");
+      alert("Instrumento entregue. Para corrigir fotos, use o botão Correção Admin e confirme a senha administrativa.");
       return;
     }
 
-    // Constraint: completed calibration registration photo cannot be deleted except by admin
-    const isConcluded =
-      currentStatus === "Calibrado" ||
-      currentStatus === "Aguardando Emissão de Certificado" ||
-      currentStatus === "Disponível para Retirada" ||
-      currentStatus === "Disponível na Prateleira" ||
-      currentStatus === "Entregue" ||
-      currentStatus === "Não Conforme";
-    const isRegPhoto = photoModalType === "registration";
-    if (isConcluded && isRegPhoto) {
-      alert(isUserAdmin
-        ? "Para excluir/corrigir a foto de cadastro após a calibração, use Correção Admin e confirme a senha administrativa."
-        : "Após a conclusão da calibração, a foto de cadastro não pode ser excluída por este perfil.");
-      return;
-    }
-
-    // Constraint: once inserted, laboratory photo can only be deleted by admin
-    const isCalPhoto = photoModalType === "calibrated";
-    const alreadyHasCalPhoto = !!photoModalInstrument.photoCalibrated;
-    if (isCalPhoto && alreadyHasCalPhoto) {
-      alert(isUserAdmin
-        ? "Para excluir/corrigir a foto após laboratório, use Correção Admin e confirme a senha administrativa."
-        : "Uma vez inserida, a foto após laboratório não pode ser excluída por este perfil.");
-      return;
-    }
-
-    if (!confirm("Deseja realmente remover esta foto do instrumento?")) return;
-    try {
-      setIsUploadingInstPhoto(true);
-      const fieldToUpdate =
-        photoModalType === "registration"
-          ? "photoRegistration"
-          : "photoCalibrated";
-
-      const pathFieldToUpdate =
-        photoModalType === "registration"
-          ? "photoRegistrationPath"
-          : "photoCalibratedPath";
-      await updateInstrumentDoc(photoModalInstrument.id, {
-        [fieldToUpdate]: "",
-        [pathFieldToUpdate]: "",
-      } as any);
-
-      setPhotoModalInstrument((prev) =>
-        prev ? { ...prev, [fieldToUpdate]: "", [pathFieldToUpdate]: "" } : null,
-      );
-    } catch (err) {
-      console.error("Error deleting instrument photo:", err);
-    } finally {
-      setIsUploadingInstPhoto(false);
-    }
+    requestAdminDelete(
+      photoModalType === "registration" ? "inst_photo_reg" : "inst_photo_calib",
+      photoModalInstrument.id,
+      `${photoModalType === "registration" ? "Foto de Cadastro" : "Foto Após Laboratório"} - ${photoModalInstrument.tag || photoModalInstrument.certificateNumber || photoModalInstrument.id}`,
+    );
   };
 
   const handleInstrumentSubmit = async (e: React.FormEvent) => {

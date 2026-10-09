@@ -34,6 +34,7 @@ import type {
 import type { PortalUser } from '../lib/firebase';
 import { uploadRentalAttachment } from '../lib/firebase';
 import { isAdministratorAccess } from '../access-control';
+import { verifyCurrentAdminPassword } from '../utils/authApi';
 import {
   createRentalContract,
   deleteRentalAsset,
@@ -435,6 +436,30 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     }
   };
 
+  const confirmAdministratorPassword = async (actionDescription: string): Promise<boolean> => {
+    if (!isAdmin || !currentUser?.username) {
+      setError('Somente o perfil Administrador pode executar esta exclusão.');
+      return false;
+    }
+    const password = window.prompt(`Digite a senha do administrador logado (${currentUser.username}) para confirmar ${actionDescription}:`);
+    if (password === null) return false;
+    if (!password.trim()) {
+      setError('Informe a senha do administrador para continuar.');
+      return false;
+    }
+    try {
+      const valid = await verifyCurrentAdminPassword(password);
+      if (!valid) {
+        setError('Credencial administrativa inválida.');
+        return false;
+      }
+      return true;
+    } catch (error: any) {
+      setError(error?.message || 'Não foi possível validar a autorização administrativa.');
+      return false;
+    }
+  };
+
   const requireDeletionReason = (entityLabel: string) => {
     const confirmed = window.confirm(
       `Excluir ${entityLabel}? Esta ação é restrita ao Administrador e não poderá ser desfeita.`,
@@ -454,6 +479,8 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
       setError('Somente o perfil Administrador pode excluir equipamentos locáveis.');
       return;
     }
+    const authorized = await confirmAdministratorPassword('a exclusão deste equipamento locável');
+    if (!authorized) return;
     if (asset.status === 'locado' || asset.currentRentalId) {
       setError('Este equipamento está vinculado a uma locação ativa e não pode ser excluído.');
       return;
@@ -483,6 +510,8 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
       setError('Somente o perfil Administrador pode excluir faturas de locação.');
       return;
     }
+    const authorized = await confirmAdministratorPassword('a exclusão desta fatura de locação');
+    if (!authorized) return;
     const reason = requireDeletionReason(`a fatura ${invoice.invoiceNumber}`);
     if (!reason) return;
     setBusy(true);
@@ -503,6 +532,8 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
       setError('Somente o perfil Administrador pode excluir locações.');
       return;
     }
+    const authorized = await confirmAdministratorPassword('a exclusão desta locação');
+    if (!authorized) return;
     const reason = requireDeletionReason(`a locação ${rental.rentalNumber}`);
     if (!reason) return;
     const cascadeConfirmed = window.confirm(

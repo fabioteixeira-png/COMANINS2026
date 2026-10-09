@@ -11,8 +11,9 @@ import {
   bulkUpsertFieldServiceRecords,
   deleteFieldServiceRecord, clearAllFieldServiceRecords, syncInstruments, syncClients, refreshFieldServiceRecords
 } from '../lib/firebase';
-import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
+import { authJsonFetch, verifyCurrentAdminPassword } from '../utils/authApi';
 import { buildFieldServiceA4Workbook } from '../utils/fieldServiceA4Workbook';
+import { isAdministratorAccess } from '../access-control';
 
 const parseDateForSort = (dString: string) => {
   if (!dString) return 0;
@@ -204,6 +205,7 @@ const loadInitialItemsPerPage = (): number => {
 interface FieldServiceProps {
   canEdit?: boolean;
   canClearData?: boolean;
+  currentUser?: { username?: string; role?: string; permissionLevel?: string; accessProfileId?: string; allowedModules?: string[] } | null;
   onPrintCertificate?: (
     instId: string,
     tagData: string,
@@ -211,7 +213,8 @@ interface FieldServiceProps {
     context: FieldServiceCertificateContext,
   ) => void;
 }
-export default function FieldService({ canEdit = false, canClearData = false, onPrintCertificate }: FieldServiceProps = {}) {
+export default function FieldService({ canEdit = false, canClearData = false, currentUser = null, onPrintCertificate }: FieldServiceProps = {}) {
+  const isUserAdmin = isAdministratorAccess(currentUser);
   const [records, setRecords] = useState<FieldServiceRecord[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -379,22 +382,24 @@ export default function FieldService({ canEdit = false, canClearData = false, on
   };
 
   const handleDeleteRecord = async (id: string) => {
-    if (!canEdit) {
-      alert("Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.");
+    if (!canEdit || !isUserAdmin || !currentUser?.username) {
+      alert("Somente o perfil Administrador pode excluir registros de Serviço de Campo.");
       return;
     }
-    const adminUsername = prompt("Digite o usuário do administrador:");
-    if (adminUsername === null) return;
-    const pwd = prompt("Digite a senha do administrador para excluir este registro:");
+    const pwd = prompt(`Digite a senha do administrador logado (${currentUser.username}) para excluir este registro:`);
     if (pwd === null) return;
+    if (!pwd.trim()) {
+      alert("Informe a senha do administrador para continuar.");
+      return;
+    }
 
     try {
-      const isAdminValid = await verifyAdminCredentials(adminUsername, pwd);
+      const isAdminValid = await verifyCurrentAdminPassword(pwd);
       if (!isAdminValid) {
         alert("Credencial administrativa inválida.");
         return;
       }
-      if (confirm("Tem certeza que deseja excluir?")) {
+      if (confirm("Tem certeza que deseja excluir este registro?")) {
         await deleteFieldServiceRecord(id);
       }
     } catch (e: any) {
@@ -2330,9 +2335,11 @@ export default function FieldService({ canEdit = false, canClearData = false, on
                           <button onClick={() => { setFormData(record); setShowAddModal(true); }} className="text-slate-400 hover:text-royal-blue mr-3" title="Editar Formulário">
                             <Edit2 className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500" title="Excluir">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {isUserAdmin && (
+                            <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500" title="Excluir (requer senha do Administrador logado)">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </>
                       )}
                     </td>

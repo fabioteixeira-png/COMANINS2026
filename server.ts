@@ -8075,6 +8075,45 @@ app.post("/api/auth/create-user", requireAuth, requireAdministratorAccount, admi
   }
 });
 
+app.post("/api/auth/verify-current-admin", requireAuth, requireInternalAccount, requireAdministratorAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
+  try {
+    if (!adminAuth || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    const password = String(req.body?.password || '');
+    if (!password) return res.json({ valid: false });
+
+    const sessionEmail = String(req.user?.email || '').trim().toLowerCase();
+    if (!sessionEmail || !sessionEmail.endsWith('@comanins.internal')) {
+      return res.status(403).json({ valid: false });
+    }
+
+    const sessionProfile = await findPortalUserForAuth(req.user);
+    if (!sessionProfile || !isAdministratorProfile(sessionProfile)) {
+      return res.status(403).json({ valid: false });
+    }
+
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: sessionEmail, password, returnSecureToken: true }),
+      },
+    );
+    if (!response.ok) return res.json({ valid: false });
+
+    const data: any = await response.json();
+    if (!data?.idToken) return res.json({ valid: false });
+    const reauthenticated = await adminAuth.verifyIdToken(data.idToken);
+    const reauthenticatedEmail = String(reauthenticated.email || '').trim().toLowerCase();
+    return res.json({ valid: reauthenticated.uid === req.user?.uid && reauthenticatedEmail === sessionEmail });
+  } catch (error) {
+    console.error('Verify current admin password error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 app.post("/api/auth/verify-admin", requireAuth, requireInternalAccount, adminApiRateLimit, async (req: AuthRequest, res) => {
   try {
     if (!adminAuth || !firestoreDb) {

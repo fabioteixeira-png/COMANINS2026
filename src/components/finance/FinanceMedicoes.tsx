@@ -47,13 +47,8 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
 
   const handleDelete = async (med: FinanceMeasurement) => {
     if (!canEdit) return;
-    if (requestAdminDelete) {
-      requestAdminDelete('finance_measurement', med.id, `Medição: ${med.contractNumber} (${med.period})`);
-    } else {
-      if (confirm('Tem certeza que deseja excluir esta medição?')) {
-        await deleteFinanceMeasurement(med.id);
-      }
-    }
+    if (!requestAdminDelete) return;
+    requestAdminDelete('finance_measurement', med.id, `Medição: ${med.contractNumber} (${med.period})`);
   };
 
   const handleOpenAddModal = () => {
@@ -302,13 +297,15 @@ export default function FinanceMedicoes({ requestAdminDelete, canEdit = false }:
                     >
                       <Edit className="h-4 w-4" />
                     </button>
-                    <button
-                      onClick={() => handleDelete(item)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded"
-                      title="Excluir"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {requestAdminDelete && (
+                      <button
+                        onClick={() => handleDelete(item)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded"
+                        title="Excluir (requer senha do Administrador logado)"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                     </>}
                   </div>
                 </td>

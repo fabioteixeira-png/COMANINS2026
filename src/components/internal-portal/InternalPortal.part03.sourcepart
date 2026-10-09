@@ -2667,20 +2667,21 @@
                                 </td>
 
                                 <td className="p-3.5 text-right whitespace-nowrap print:hidden">
-                                  <button
-                                    onClick={() =>
-                                      requestAdminDelete(
-                                        "audit_log",
-                                        log.id,
-                                        `Registro de Auditoria (${log.certNumber})`,
-                                      )
-                                    }
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                    title="Excluir registro de auditoria (requer senha do Administrador)"
-
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                  {isUserAdmin && (
+                                    <button
+                                      onClick={() =>
+                                        requestAdminDelete(
+                                          "audit_log",
+                                          log.id,
+                                          `Registro de Auditoria (${log.certNumber})`,
+                                        )
+                                      }
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                      title="Excluir registro de auditoria (requer senha do Administrador logado)"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -3753,6 +3754,7 @@
           <FieldService
             canEdit={canEditFieldService}
             canClearData={isUserAdmin}
+            currentUser={currentUser}
             onPrintCertificate={async (instId, tagData, equipmentData, context) => {
               const instrument = instruments.find((item) => item.id === instId);
               const resolvedClient = resolveFieldServiceCertificateClient(
@@ -3786,7 +3788,7 @@
             }}
           />
         )}
-        {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={requestAdminDelete} canEdit={canEditModule("finance")} currentUser={currentUser} />}
+        {activeTab === "financeiro" && canAccessModule("finance") && <FinanceManagement requestAdminDelete={isUserAdmin ? requestAdminDelete : undefined} canEdit={canEditModule("finance")} currentUser={currentUser} />}
         {activeTab === "locacao_instrumentos" && canAccessModule("rental") && <RentalManagement clients={clients} currentUser={currentUser} canEdit={canEditModule("rental")} companyData={companyData} />}
         {activeTab === "programas_saude" && canAccessModule("health_programs") && <HealthProgramManagement currentUser={currentUser as any} internalUsers={internalUsers} />}
         {activeTab === "comunicacao_interna" && canAccessModule("internal_communication") && (

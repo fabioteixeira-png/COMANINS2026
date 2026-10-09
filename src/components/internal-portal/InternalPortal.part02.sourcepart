@@ -1148,16 +1148,17 @@
                                   Editar
                                 </span>
                               </button>
-                              <button
-                                onClick={() =>
-                                  requestAdminDelete("client", c.id, c.name)
-                                }
-                                className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 hover:bg-rose-50 rounded-lg cursor-pointer"
-                                title="Remover Cliente"
-
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              {isUserAdmin && (
+                                <button
+                                  onClick={() =>
+                                    requestAdminDelete("client", c.id, c.name)
+                                  }
+                                  className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                  title="Remover Cliente (requer senha do Administrador logado)"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
                                 </>
                               )}
                             </div>
@@ -2535,21 +2536,22 @@
                               </button>
                             )}
 
-                            {/* Excluir Button */}
-                            <button
-                              onClick={() =>
-                                requestAdminDelete(
-                                  "instrument",
-                                  inst.id,
-                                  `Equipamento ${inst.certificateNumber || inst.coma} (${inst.tag || inst.description})`,
-                                )
-                              }
-                              className="text-slate-400 hover:text-rose-700 transition-colors p-1 cursor-pointer"
-                              title="Excluir Calibração/Equipamento (Requer Senha do Administrador)"
-
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {/* Excluir Button - somente Administrador */}
+                            {isUserAdmin && (
+                              <button
+                                onClick={() =>
+                                  requestAdminDelete(
+                                    "instrument",
+                                    inst.id,
+                                    `Equipamento ${inst.certificateNumber || inst.coma} (${inst.tag || inst.description})`,
+                                  )
+                                }
+                                className="text-slate-400 hover:text-rose-700 transition-colors p-1 cursor-pointer"
+                                title="Excluir Calibração/Equipamento (requer senha do Administrador logado)"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

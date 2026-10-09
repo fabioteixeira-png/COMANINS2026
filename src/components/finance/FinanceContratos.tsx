@@ -30,13 +30,8 @@ export default function FinanceContratos({ requestAdminDelete, canEdit = false }
 
   const handleDelete = async (contract: FinanceContract) => {
     if (!canEdit) return;
-    if (requestAdminDelete) {
-      requestAdminDelete('finance_contract', contract.id, `Contrato: ${contract.contractNumber} - ${contract.clientName}`);
-    } else {
-      if (confirm('Tem certeza que deseja excluir este contrato?')) {
-        await deleteFinanceContract(contract.id);
-      }
-    }
+    if (!requestAdminDelete) return;
+    requestAdminDelete('finance_contract', contract.id, `Contrato: ${contract.contractNumber} - ${contract.clientName}`);
   };
 
   const handleOpenAdd = () => {
@@ -208,13 +203,15 @@ export default function FinanceContratos({ requestAdminDelete, canEdit = false }
                     >
                       <Edit className="h-4 w-4" />
                     </button>
-                    <button
-                      onClick={() => handleDelete(item)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
-                      title="Excluir Contrato"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {requestAdminDelete && (
+                      <button
+                        onClick={() => handleDelete(item)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
+                        title="Excluir Contrato (requer senha do Administrador logado)"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                     </>}
                   </div>
                 </td>

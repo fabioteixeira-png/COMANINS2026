@@ -145,24 +145,14 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
 
   const handleDeleteAccount = async (banco: any) => {
     if (!canEdit) return;
-    if (requestAdminDelete) {
-      requestAdminDelete('finance_bank', banco.id, `Conta Bancária: ${banco.bank}`);
-    } else {
-      if (confirm('Tem certeza que deseja excluir esta conta bancária? Lançamentos vinculados perderão a referência.')) {
-        await deleteFinanceDoc('financeBankAccounts', banco.id);
-      }
-    }
+    if (!requestAdminDelete) return;
+    requestAdminDelete('finance_bank', banco.id, `Conta Bancária: ${banco.bank}`);
   };
 
   const handleDeleteCategory = async (cat: any) => {
     if (!canEdit) return;
-    if (requestAdminDelete) {
-      requestAdminDelete('finance_category', cat.id, `Categoria: ${cat.name}`);
-    } else {
-      if (confirm('Tem certeza que deseja excluir esta categoria do Plano de Contas?')) {
-        await deleteFinanceDoc('financeCategories', cat.id);
-      }
-    }
+    if (!requestAdminDelete) return;
+    requestAdminDelete('finance_category', cat.id, `Categoria: ${cat.name}`);
   };
 
   return (
@@ -233,7 +223,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {bankAccounts.map(account => (
                 <div key={account.id} className="p-5 rounded-xl border border-slate-200 bg-slate-50/20 relative group hover:shadow-sm transition-shadow">
-                  {canEdit && (
+                  {canEdit && requestAdminDelete && (
                     <button
                       onClick={() => handleDeleteAccount(account)}
                       className="absolute top-4 right-4 text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-slate-100 transition-colors"
@@ -322,7 +312,7 @@ export default function CadastrosFinanceiros({ requestAdminDelete, canEdit = fal
                       </td>
                       <td className="px-6 py-3 text-emerald-600">✓ Ativo</td>
                       <td className="px-6 py-3 text-center">
-                        {canEdit && (
+                        {canEdit && requestAdminDelete && (
                           <button
                             onClick={() => handleDeleteCategory(cat)}
                             className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"

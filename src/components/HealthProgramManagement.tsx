@@ -33,7 +33,7 @@ import {
   fetchCorporateFileBlobUrl,
   downloadCorporateFile,
 } from '../lib/firebase';
-import { authJsonFetch, verifyAdminCredentials } from '../utils/authApi';
+import { authJsonFetch, verifyCurrentAdminPassword } from '../utils/authApi';
 import { isAdministratorAccess, userCanEditModule } from '../access-control';
 
 interface HealthProgramManagementProps {
@@ -470,7 +470,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
     }
 
     try {
-      const isValid = await verifyAdminCredentials(currentUser?.username || '', pwd);
+      const isValid = await verifyCurrentAdminPassword(pwd);
       if (!isValid) {
         setDeleteError("Credencial administrativa inválida. O arquivamento foi cancelado.");
         return;
@@ -876,16 +876,11 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
                             </button>
                           )}
 
-                          {canEditHealthPrograms && (
+                          {canEditHealthPrograms && isUserAdmin && (
                             <button
                               onClick={() => handleRequestDelete(doc)}
-                              disabled={!isUserAdmin}
-                              className={`p-1.5 rounded transition ${
-                                isUserAdmin
-                                  ? 'text-slate-600 hover:text-red-600 hover:bg-red-50 cursor-pointer'
-                                  : 'text-slate-300 cursor-not-allowed opacity-40'
-                              }`}
-                              title={isUserAdmin ? "Arquivar Documento (Requer senha de Administrador)" : "Apenas usuários com perfil Administrador podem arquivar"}
+                              className="p-1.5 rounded transition text-slate-600 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                              title="Arquivar Documento (requer senha do Administrador logado)"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -1205,7 +1200,7 @@ export const HealthProgramManagement: React.FC<HealthProgramManagementProps> = (
       )}
 
       {/* Delete Password Confirmation Modal */}
-      {deleteConfirmDoc && canEditHealthPrograms && (
+      {deleteConfirmDoc && canEditHealthPrograms && isUserAdmin && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="bg-red-600 text-white p-4 flex items-center justify-between">

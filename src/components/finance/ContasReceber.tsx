@@ -114,13 +114,8 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
 
   const handleDelete = async (tx: FinanceTransaction) => {
     if (!canEdit) return;
-    if (requestAdminDelete) {
-      requestAdminDelete('finance_transaction', tx.id, `Receita: ${tx.description}`);
-    } else {
-      if (confirm('Tem certeza que deseja excluir esta receita?')) {
-        await deleteFinanceTransaction(tx.id);
-      }
-    }
+    if (!requestAdminDelete) return;
+    requestAdminDelete('finance_transaction', tx.id, `Receita: ${tx.description}`);
   };
 
   const handleOpenForm = (tx: FinanceTransaction | null) => {
@@ -372,7 +367,7 @@ export default function ContasReceber({ requestAdminDelete, canEdit = false, cur
                     )}
                     {canEdit && (<>
                       <button onClick={() => handleOpenForm(item)} className="p-1 text-slate-400 hover:text-royal-blue"><Edit className="h-4 w-4" /></button>
-                      <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                      {requestAdminDelete && <button onClick={() => handleDelete(item)} className="p-1 text-slate-400 hover:text-rose-600" title="Excluir (requer senha do Administrador logado)"><Trash2 className="h-4 w-4" /></button>}
                     </>)}
                   </div>
                 </td>

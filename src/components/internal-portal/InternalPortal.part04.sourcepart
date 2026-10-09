@@ -1494,21 +1494,22 @@
                                     >
                                       <Edit className="h-4 w-4" />
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        requestAdminDelete(
-                                          "standard",
-                                          std.id,
-                                          std.instrumentType,
-                                        )
-                                      }
-                                      className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                      title="Excluir Padrão"
-
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
+                                    {isUserAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          requestAdminDelete(
+                                            "standard",
+                                            std.id,
+                                            std.instrumentType,
+                                          )
+                                        }
+                                        className="p-1.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                        title="Excluir Padrão (requer senha do Administrador logado)"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -2427,7 +2428,7 @@
               onAddInternalUser={onAddInternalUser}
               onUpdateInternalUser={onUpdateInternalUser}
               onDeleteInternalUser={onDeleteInternalUser}
-              requestAdminDelete={requestAdminDelete}
+              requestAdminDelete={isUserAdmin ? requestAdminDelete : undefined}
               onManagePayslips={(user) => {
                 setRhSubTab("contra_cheques");
                 setActivePayslipTab("gerenciar");
@@ -2650,19 +2651,21 @@
                                 >
                                   <Settings className="h-4 w-4" />
                                 </button>
-                                <button
-                                  onClick={() =>
-                                    requestAdminDelete(
-                                      "employee_training",
-                                      record.id,
-                                      "Registro de Treinamento",
-                                    )
-                                  }
-                                  className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
+                                {isUserAdmin && (
+                                  <button
+                                    onClick={() =>
+                                      requestAdminDelete(
+                                        "employee_training",
+                                        record.id,
+                                        "Registro de Treinamento",
+                                      )
+                                    }
+                                    className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                                    title="Excluir registro (requer senha do Administrador logado)"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -2716,15 +2719,17 @@
                             >
                               <Settings className="h-4 w-4" />
                             </button>
-                            <button
-                              onClick={() =>
-                                requestAdminDelete("training", t.id, t.title)
-                              }
-                              className="p-1 text-slate-400 hover:text-red-500"
-
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {isUserAdmin && (
+                              <button
+                                onClick={() =>
+                                  requestAdminDelete("training", t.id, t.title)
+                                }
+                                className="p-1 text-slate-400 hover:text-red-500"
+                                title="Excluir treinamento (requer senha do Administrador logado)"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
                         <p className="text-xs text-slate-500 mb-4 line-clamp-2">
@@ -2984,20 +2989,21 @@
                                   >
                                     <Edit className="h-4 w-4" />
                                   </button>
-                                  <button
-                                    onClick={() =>
-                                      requestAdminDelete(
-                                        "inventory",
-                                        item.id,
-                                        item.name,
-                                      )
-                                    }
-                                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Excluir Item"
-
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                  {isUserAdmin && (
+                                    <button
+                                      onClick={() =>
+                                        requestAdminDelete(
+                                          "inventory",
+                                          item.id,
+                                          item.name,
+                                        )
+                                      }
+                                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                      title="Excluir Item (requer senha do Administrador logado)"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
                                 )}
                               </div>
@@ -3396,16 +3402,17 @@
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-sm text-right whitespace-nowrap">
-                                  <button
-                                    onClick={() =>
-                                      handleDeleteBirthday(bday.id)
-                                    }
-                                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                    title="Excluir"
-
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                  {isUserAdmin && (
+                                    <button
+                                      onClick={() =>
+                                        handleDeleteBirthday(bday.id)
+                                      }
+                                      className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                      title="Excluir aniversário (requer senha do Administrador logado)"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -3582,14 +3589,17 @@
                                   >
                                     <Edit className="h-4 w-4" />
                                   </button>
-                                  <button
-                                    onClick={() => {
-                                      requestAdminDelete("exam", exam.id, `Exame Médico (${exam.examDate})`);
-                                    }}
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                  {isUserAdmin && (
+                                    <button
+                                      onClick={() => {
+                                        requestAdminDelete("exam", exam.id, `Exame Médico (${exam.examDate})`);
+                                      }}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                                      title="Excluir exame (requer senha do Administrador logado)"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -3677,14 +3687,17 @@
                               >
                                 <Edit className="h-4 w-4" />
                               </button>
-                              <button
-                                onClick={() => {
-                                  requestAdminDelete("exam_type", tipo.id, `Tipo de Exame: ${tipo.name}`);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              {isUserAdmin && (
+                                <button
+                                  onClick={() => {
+                                    requestAdminDelete("exam_type", tipo.id, `Tipo de Exame: ${tipo.name}`);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                                  title="Excluir tipo de exame (requer senha do Administrador logado)"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

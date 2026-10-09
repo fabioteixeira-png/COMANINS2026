@@ -60,3 +60,24 @@ export async function verifyAdminCredentials(
   const data = await response.json();
   return data.valid === true;
 }
+
+
+/** Reautentica exclusivamente o Administrador da sessão interna atual. */
+export async function verifyCurrentAdminPassword(password: string): Promise<boolean> {
+  const cleanPassword = password || '';
+  if (!cleanPassword) return false;
+
+  const response = await authJsonFetch('/api/auth/verify-current-admin', {
+    method: 'POST',
+    body: JSON.stringify({ password: cleanPassword }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('Sessão expirada. Faça login novamente.');
+    if (response.status === 403) return false;
+    throw new Error('Não foi possível validar a senha do Administrador logado.');
+  }
+
+  const data = await response.json();
+  return data.valid === true;
+}

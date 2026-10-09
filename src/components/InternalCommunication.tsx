@@ -51,6 +51,7 @@ import {
 import { compressImageToWebResolution } from "../lib/imageCompressor";
 import { safeFetch } from "../utils/apiClient";
 import { isAdministratorAccess, userHasAccessModule } from "../access-control";
+import { verifyCurrentAdminPassword } from "../utils/authApi";
 
 export interface ParsedAttachment {
   name: string;
@@ -695,8 +696,35 @@ export default function InternalCommunication({
     setSelectedTicket(updated);
   };
 
+
+  const confirmAdministratorPassword = async (actionDescription: string): Promise<boolean> => {
+    if (!isUserAdmin || !currentUser?.username) {
+      showToast("Somente o perfil Administrador pode executar esta exclusão.");
+      return false;
+    }
+    const password = window.prompt(`Digite a senha do administrador logado (${currentUser.username}) para confirmar ${actionDescription}:`);
+    if (password === null) return false;
+    if (!password.trim()) {
+      showToast("Informe a senha do administrador para continuar.");
+      return false;
+    }
+    try {
+      const valid = await verifyCurrentAdminPassword(password);
+      if (!valid) {
+        showToast("Credencial administrativa inválida.");
+        return false;
+      }
+      return true;
+    } catch (error: any) {
+      showToast(error?.message || "Não foi possível validar a autorização administrativa.");
+      return false;
+    }
+  };
+
   const handleDeleteTicket = async () => {
     if (!selectedTicket || !isUserAdmin) return;
+    const authorized = await confirmAdministratorPassword('a exclusão deste chamado');
+    if (!authorized) return;
     if (confirm("Tem certeza que deseja excluir este chamado permanentemente?")) {
       await deleteInternalTicket(selectedTicket.id);
       setSelectedTicket(null);
@@ -1091,6 +1119,8 @@ export default function InternalCommunication({
                           <button
                             type="button"
                             onClick={async () => {
+                              const authorized = await confirmAdministratorPassword('a exclusão deste comunicado');
+                              if (!authorized) return;
                               if (confirm(`Deseja excluir permanentemente o comunicado "${comm.title}"?`)) {
                                 await deleteCompanyCommunication(comm.id);
                                 showToast("Comunicado excluído com sucesso.");

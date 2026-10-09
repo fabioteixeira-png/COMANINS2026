@@ -1913,7 +1913,7 @@
             {/* Upload & Gallery Body */}
             <div className="p-6 space-y-6">
               {/* Upload Action Box - entradas finalizadas ficam somente leitura */}
-              {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
+              {isUserAdmin && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
               <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center space-y-3 hover:border-blue-500 transition-colors">
                 <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
                   {isUploadingPhotos ? (
@@ -2001,7 +2001,7 @@
                                 type="button"
                                 onClick={() => handleDeletePhoto(index)}
                                 className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition-transform hover:scale-105 cursor-pointer"
-                                title="Excluir foto"
+                                title="Excluir foto (requer senha do Administrador logado)"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -2306,15 +2306,18 @@
                             />
                           </label>
 
-                          <button
-                            type="button"
-                            onClick={handleDeleteInstrumentPhoto}
-                            disabled={isUploadingInstPhoto}
-                            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Trash2 className="h-4 w-4 text-rose-600" />
-                            <span>Excluir Foto</span>
-                          </button>
+                          {isUserAdmin && (
+                            <button
+                              type="button"
+                              onClick={handleDeleteInstrumentPhoto}
+                              disabled={isUploadingInstPhoto}
+                              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                              title="Excluir foto (requer senha do Administrador logado)"
+                            >
+                              <Trash2 className="h-4 w-4 text-rose-600" />
+                              <span>Excluir Foto</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
