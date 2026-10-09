@@ -1913,7 +1913,7 @@
             {/* Upload & Gallery Body */}
             <div className="p-6 space-y-6">
               {/* Upload Action Box - entradas finalizadas ficam somente leitura */}
-              {isUserAdmin && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
+              {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
               <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center space-y-3 hover:border-blue-500 transition-colors">
                 <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
                   {isUploadingPhotos ? (
@@ -1996,7 +1996,7 @@
                             >
                               <Eye className="h-4 w-4" />
                             </button>
-                            {canEditMaterialIntake && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
+                            {isUserAdmin && !selectedIntakeForPhotos.deliveryFinalizedAt && !selectedIntakeForPhotos.deliveryLocked && (
                               <button
                                 type="button"
                                 onClick={() => handleDeletePhoto(index)}
