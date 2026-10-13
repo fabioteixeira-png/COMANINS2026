@@ -7456,7 +7456,7 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     if (!req.user || !adminStorage || !adminStorageBucketName) {
       return res.status(503).json({ error: 'STORAGE_SERVICE_UNAVAILABLE' });
     }
-    await requireInternalPortalRequester(req.user);
+    const requesterProfile = await requireInternalPortalRequester(req.user);
 
     const purpose = String(req.body?.purpose || '').trim();
     const entityId = safeStorageSegmentServer(req.body?.entityId);
@@ -7466,7 +7466,10 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     const requiredModule: AccessModuleId = purpose === 'intake-entry'
       ? 'material_intake'
       : 'calibration';
-    if (!userCanEditModule(req.user as any, requiredModule)) {
+    const canEdit =
+      userCanEditModule(requesterProfile as any, requiredModule) ||
+      userCanEditModule(req.user as any, requiredModule);
+    if (!canEdit) {
       return res.status(403).json({ error: 'MODULE_EDIT_DENIED', moduleId: requiredModule });
     }
 
@@ -7500,6 +7503,41 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     if (error?.message === 'IMAGE_TOO_LARGE') return res.status(413).json({ error: 'IMAGE_TOO_LARGE' });
     console.error('Operational image upload error:', error);
     return res.status(500).json({ error: 'UPLOAD_FAILED' });
+  }
+});
+
+app.patch('/api/internal/intakes/:id/photos', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  try {
+    if (!firestoreDb || !req.user) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    const requesterProfile = await requireInternalPortalRequester(req.user);
+    const canEdit =
+      userCanEditModule(requesterProfile as any, 'material_intake') ||
+      userCanEditModule(req.user as any, 'material_intake');
+    if (!canEdit) {
+      return res.status(403).json({ error: 'MODULE_EDIT_DENIED', moduleId: 'material_intake' });
+    }
+    const intakeId = safeStorageSegmentServer(req.params.id);
+    if (!intakeId) return res.status(400).json({ error: 'INVALID_INTAKE_ID' });
+
+    const intakeRef = firestoreDb.collection('savedIntakes').doc(intakeId);
+    const snap = await intakeRef.get();
+    if (!snap.exists) return res.status(404).json({ error: 'INTAKE_NOT_FOUND' });
+    const currentData = snap.data() || {};
+    if (currentData.deliveryFinalizedAt || currentData.deliveryLocked) {
+      return res.status(400).json({ error: 'INTAKE_LOCKED' });
+    }
+
+    const photos = Array.isArray(req.body?.photos)
+      ? req.body.photos.map((p: any) => String(p || '').trim()).filter(Boolean)
+      : [];
+
+    await intakeRef.update({ photos });
+    return res.json({ success: true, photos });
+  } catch (error: any) {
+    console.error('Update intake photos error:', error);
+    return res.status(500).json({ error: 'UPDATE_PHOTOS_FAILED' });
   }
 });
 

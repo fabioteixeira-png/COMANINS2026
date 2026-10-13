@@ -2784,7 +2784,25 @@ export async function uploadInventoryAttachment(
 }
 
 export async function updateIntakePhotosDoc(id: string, photos: string[]): Promise<void> {
-  await updateDoc(doc(db, 'savedIntakes', id), { photos });
+  try {
+    await updateDoc(doc(db, 'savedIntakes', id), { photos });
+  } catch (clientError) {
+    console.warn('Direct updateIntakePhotosDoc failed; trying authenticated backend fallback:', clientError);
+    const user = auth.currentUser;
+    if (!user) throw clientError;
+    const response = await fetch(`/api/internal/intakes/${encodeURIComponent(id)}/photos`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${await user.getIdToken()}`,
+      },
+      body: JSON.stringify({ photos }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.success !== true) {
+      throw clientError;
+    }
+  }
 }
 
 export async function deleteIntakeDoc(id: string): Promise<void> {

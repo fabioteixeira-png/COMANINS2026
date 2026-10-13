@@ -26,10 +26,17 @@ service cloud.firestore {
       );
     }
 
+    function isStandardProfile() {
+      return isInternalAccount() && (
+        request.auth.token.accessProfileId == 'standard' ||
+        (request.auth.token.accessProfileId == null && request.auth.token.permissionLevel in ['Padrão', 'Padrao'])
+      );
+    }
+
     function legacyHasModule(moduleId) {
-      return request.auth.token.accessProfileId == null && (
+      return (request.auth.token.accessProfileId == null || request.auth.token.accessProfileId == 'standard') && (
         (moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
-        (request.auth.token.permissionLevel in ['Padrão', 'Padrao'] &&
+        ((request.auth.token.permissionLevel in ['Padrão', 'Padrao'] || request.auth.token.accessProfileId == 'standard') &&
           moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory', 'rental']) ||
         (request.auth.token.permissionLevel == 'Limitado' &&
           moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
@@ -47,6 +54,8 @@ service cloud.firestore {
         isInternalAccount() && (
           (request.auth.token.allowedModules is list &&
             request.auth.token.allowedModules.hasAny([moduleId])) ||
+          (isStandardProfile() &&
+            moduleId in ['dashboard', 'clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory', 'rental', 'personal_documents', 'internal_communication']) ||
           legacyHasModule(moduleId)
         )
       );
@@ -65,6 +74,8 @@ service cloud.firestore {
         isInternalAccount() && (
           (request.auth.token.editableModules is list &&
             request.auth.token.editableModules.hasAny([moduleId])) ||
+          (isStandardProfile() &&
+            moduleId in ['dashboard', 'clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory', 'rental', 'personal_documents', 'internal_communication']) ||
           // Compatibilidade durante o rollout: tokens antigos não possuem
           // editableModules e mantêm temporariamente o comportamento anterior.
           (request.auth.token.editableModules == null && hasModule(moduleId))

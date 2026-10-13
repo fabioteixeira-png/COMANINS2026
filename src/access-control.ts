@@ -185,6 +185,9 @@ export const getDefaultAccessProfile = (profileId: string) =>
   DEFAULT_ACCESS_PROFILES.find(({ id }) => id === profileId);
 
 export const resolveLegacyAccessProfileId = (user?: AccessAwareUser | null): string => {
+  const explicitProfileId = normalize(user?.accessProfileId);
+  if (explicitProfileId) return explicitProfileId;
+
   const permission = normalize(user?.permissionLevel);
   const role = normalize(user?.role);
 
@@ -209,8 +212,8 @@ export const resolveLegacyAccessProfileId = (user?: AccessAwareUser | null): str
   if (permission === "limitado") return "limited";
   if (permission === "padrão" || permission === "padrao") return "standard";
 
-  // Compatibilidade somente para cadastros legados sem nível de permissão.
-  if (!permission && (role.includes("técnico") || role.includes("tecnico") || role === "comercial")) {
+  // Cadastros legados sem nível de permissão: comercial é limitado; demais funções operacionais são padrão.
+  if (!permission && role === "comercial") {
     return "limited";
   }
   return "standard";
@@ -228,7 +231,8 @@ export const resolveUserAccessModules = (user?: AccessAwareUser | null): AccessM
     return sanitizeAccessModules(user.allowedModules);
   }
 
-  const legacyProfile = getDefaultAccessProfile(resolveLegacyAccessProfileId(user));
+  const profileId = user?.accessProfileId || resolveLegacyAccessProfileId(user);
+  const legacyProfile = getDefaultAccessProfile(profileId);
   return legacyProfile ? [...legacyProfile.modules] : [];
 };
 
@@ -245,7 +249,8 @@ export const resolveUserEditableModules = (user?: AccessAwareUser | null): Acces
     return sanitizeAccessModules(user.allowedModules);
   }
 
-  const legacyProfile = getDefaultAccessProfile(resolveLegacyAccessProfileId(user));
+  const profileId = user?.accessProfileId || resolveLegacyAccessProfileId(user);
+  const legacyProfile = getDefaultAccessProfile(profileId);
   return legacyProfile ? editableModulesFromPermissions(legacyProfile.modulePermissions) : [];
 };
 

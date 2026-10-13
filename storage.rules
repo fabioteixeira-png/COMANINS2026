@@ -28,11 +28,18 @@ service firebase.storage {
       );
     }
 
+    function isStandardProfile() {
+      return isInternalAccount() && (
+        request.auth.token.accessProfileId == 'standard' ||
+        (request.auth.token.accessProfileId == null && request.auth.token.permissionLevel in ['Padrão', 'Padrao'])
+      );
+    }
+
     function legacyHasModule(moduleId) {
-      return request.auth.token.accessProfileId == null && (
+      return (request.auth.token.accessProfileId == null || request.auth.token.accessProfileId == 'standard') && (
         (moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
-        (request.auth.token.permissionLevel in ['Padrão', 'Padrao'] &&
-          moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory']) ||
+        ((request.auth.token.permissionLevel in ['Padrão', 'Padrao'] || request.auth.token.accessProfileId == 'standard') &&
+          moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory', 'rental']) ||
         (request.auth.token.permissionLevel == 'Limitado' &&
           moduleId in ['dashboard', 'personal_documents', 'internal_communication']) ||
         (request.auth.token.permissionLevel in ['Recursos Humanos (RH)', 'Recursos Humanos', 'RH'] &&
@@ -51,6 +58,8 @@ service firebase.storage {
           request.auth.token.allowedModules is list
           && request.auth.token.allowedModules.hasAny([moduleId])
         ) ||
+        (isStandardProfile() &&
+          moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory', 'rental', 'dashboard', 'personal_documents', 'internal_communication']) ||
         legacyHasModule(moduleId)
       );
     }
@@ -62,6 +71,8 @@ service firebase.storage {
           request.auth.token.editableModules is list
           && request.auth.token.editableModules.hasAny([moduleId])
         ) ||
+        (isStandardProfile() &&
+          moduleId in ['clients', 'material_intake', 'calibration', 'digital_signature', 'field_service', 'inventory', 'rental', 'dashboard', 'personal_documents', 'internal_communication']) ||
         (
           !(request.auth.token.editableModules is list)
           && hasModule(moduleId)
