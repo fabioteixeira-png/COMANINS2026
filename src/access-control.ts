@@ -227,31 +227,47 @@ export const isAdministratorAccess = (user?: AccessAwareUser | null): boolean =>
 export const resolveUserAccessModules = (user?: AccessAwareUser | null): AccessModuleId[] => {
   if (isAdministratorAccess(user)) return [...ALL_ACCESS_MODULES];
 
+  const profileId = user?.accessProfileId || resolveLegacyAccessProfileId(user);
+
+  let allowed: AccessModuleId[] = [];
   if (Array.isArray(user?.allowedModules)) {
-    return sanitizeAccessModules(user.allowedModules);
+    allowed = sanitizeAccessModules(user.allowedModules);
+  } else {
+    const legacyProfile = getDefaultAccessProfile(profileId);
+    allowed = legacyProfile ? [...legacyProfile.modules] : [];
   }
 
-  const profileId = user?.accessProfileId || resolveLegacyAccessProfileId(user);
-  const legacyProfile = getDefaultAccessProfile(profileId);
-  return legacyProfile ? [...legacyProfile.modules] : [];
+  if (profileId === "standard" || normalize(user?.permissionLevel) === "padrão" || normalize(user?.permissionLevel) === "padrao") {
+    if (!allowed.includes("material_intake")) allowed.push("material_intake");
+    if (!allowed.includes("calibration")) allowed.push("calibration");
+  }
+
+  return allowed;
 };
 
 export const resolveUserEditableModules = (user?: AccessAwareUser | null): AccessModuleId[] => {
   if (isAdministratorAccess(user)) return [...ALL_ACCESS_MODULES];
 
-  if (Array.isArray(user?.editableModules)) {
-    return sanitizeAccessModules(user.editableModules);
-  }
-
-  // Tokens/perfis anteriores a esta versão não tinham editableModules. Para não
-  // interromper produção durante rollout, os módulos já autorizados continuam editáveis.
-  if (Array.isArray(user?.allowedModules)) {
-    return sanitizeAccessModules(user.allowedModules);
-  }
-
   const profileId = user?.accessProfileId || resolveLegacyAccessProfileId(user);
-  const legacyProfile = getDefaultAccessProfile(profileId);
-  return legacyProfile ? editableModulesFromPermissions(legacyProfile.modulePermissions) : [];
+
+  let editable: AccessModuleId[] = [];
+  if (Array.isArray(user?.editableModules)) {
+    editable = sanitizeAccessModules(user.editableModules);
+  } else if (Array.isArray(user?.allowedModules)) {
+    editable = sanitizeAccessModules(user.allowedModules);
+  } else {
+    const legacyProfile = getDefaultAccessProfile(profileId);
+    editable = legacyProfile ? editableModulesFromPermissions(legacyProfile.modulePermissions) : [];
+  }
+
+  // Garantia para o perfil Padrão (standard): os módulos operacionais essenciais (incluindo material_intake)
+  // são editáveis por definição da COMANINS para permitir fotos na entrada de material e fluxo de bancada.
+  if (profileId === "standard" || normalize(user?.permissionLevel) === "padrão" || normalize(user?.permissionLevel) === "padrao") {
+    if (!editable.includes("material_intake")) editable.push("material_intake");
+    if (!editable.includes("calibration")) editable.push("calibration");
+  }
+
+  return editable;
 };
 
 export const userHasAccessModule = (

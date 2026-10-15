@@ -1,8 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { Download, FileDown, Upload, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Download, FileDown, Upload, X, CheckCircle2, AlertTriangle, BookOpen } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { FinanceOperation, FinanceOperationKind } from '../../types';
 import { importFinanceOperations } from '../../lib/firebase';
+import { createRichOperationTemplateWorkbook, getOptionsForOperation, getColumnInstructionsForOperation } from './financeSpreadsheetOptions';
+import FinanceAllocationGuideModal from './FinanceAllocationGuideModal';
 
 interface Props {
   kind: FinanceOperationKind;
@@ -120,16 +122,23 @@ export default function FinanceOperationSpreadsheetActions({ kind, rows, canEdit
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [preview, setPreview] = useState<Preview[]>([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const meta = META[kind];
 
   const handleTemplate = () => {
-    const workbook = XLSX.utils.book_new();
-    const sheet = XLSX.utils.json_to_sheet([meta.example], { header: meta.headers });
-    XLSX.utils.book_append_sheet(workbook, sheet, meta.sheet);
-    const instructions = XLSX.utils.aoa_to_sheet([['INSTRUÇÕES'], ...meta.instructions.map(item => [item]), ['Não altere nomes das colunas. Datas: DD/MM/AAAA. Valores: número ou moeda.']]);
-    XLSX.utils.book_append_sheet(workbook, instructions, 'Leia-me');
-    saveWorkbook(workbook, `modelo_${meta.sheet.toLowerCase()}.xlsx`);
+    try {
+      const workbook = createRichOperationTemplateWorkbook(kind);
+      saveWorkbook(workbook, `modelo_${meta.sheet.toLowerCase()}.xlsx`);
+    } catch (e) {
+      console.warn('Erro ao gerar modelo rico, usando gerador padrão:', e);
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.json_to_sheet([meta.example], { header: meta.headers });
+      XLSX.utils.book_append_sheet(workbook, sheet, meta.sheet);
+      const instructions = XLSX.utils.aoa_to_sheet([['INSTRUÇÕES'], ...meta.instructions.map(item => [item]), ['Não altere nomes das colunas. Datas: DD/MM/AAAA. Valores: número ou moeda.']]);
+      XLSX.utils.book_append_sheet(workbook, instructions, 'Leia-me');
+      saveWorkbook(workbook, `modelo_${meta.sheet.toLowerCase()}.xlsx`);
+    }
   };
 
   const handleExport = () => {
@@ -174,9 +183,10 @@ export default function FinanceOperationSpreadsheetActions({ kind, rows, canEdit
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={handleTemplate} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"><FileDown className="h-3.5 w-3.5" />Modelo</button>
-        <button type="button" onClick={handleExport} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"><Download className="h-3.5 w-3.5" />Exportar</button>
-        <button type="button" disabled={!canEdit} onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"><Upload className="h-3.5 w-3.5" />Importar</button>
+        <button type="button" onClick={handleTemplate} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer shadow-2xs" title={`Baixar planilha modelo de ${meta.label} com abas de dados, opções de alocação e instruções`}><FileDown className="h-3.5 w-3.5 text-blue-600" />Modelo</button>
+        <button type="button" onClick={() => setShowGuideModal(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer shadow-2xs" title={`Ver opções e regras de alocação de ${meta.label}`}><BookOpen className="h-3.5 w-3.5 text-indigo-600" />Opções de Alocação</button>
+        <button type="button" onClick={handleExport} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer shadow-2xs"><Download className="h-3.5 w-3.5" />Exportar</button>
+        <button type="button" disabled={!canEdit} onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer shadow-2xs"><Upload className="h-3.5 w-3.5" />Importar</button>
         <input ref={inputRef} className="hidden" type="file" accept=".xls,.xlsx" onChange={event => handleFile(event.target.files?.[0])} />
       </div>
 
@@ -202,6 +212,16 @@ export default function FinanceOperationSpreadsheetActions({ kind, rows, canEdit
           </div>
         </div>
       )}
+
+      <FinanceAllocationGuideModal
+        isOpen={showGuideModal}
+        onClose={() => setShowGuideModal(false)}
+        title={`Guia de Alocação · ${meta.label}`}
+        subtitle={`Consulte as opções padronizadas para alocação correta dos campos de ${meta.label}.`}
+        optionsTables={getOptionsForOperation(kind)}
+        columnInstructions={getColumnInstructionsForOperation(kind)}
+        onDownloadTemplate={handleTemplate}
+      />
     </>
   );
 }

@@ -28,8 +28,9 @@ service cloud.firestore {
 
     function isStandardProfile() {
       return isInternalAccount() && (
-        request.auth.token.accessProfileId == 'standard' ||
-        (request.auth.token.accessProfileId == null && request.auth.token.permissionLevel in ['Padrão', 'Padrao'])
+        request.auth.token.accessProfileId in ['standard', 'padrao', 'padrão'] ||
+        request.auth.token.permissionLevel in ['Padrão', 'Padrao', 'padrão', 'padrao'] ||
+        (request.auth.token.accessProfileId == null && !(request.auth.token.permissionLevel in ['Limitado', 'limitado', 'Financeiro', 'Recursos Humanos (RH)', 'Recursos Humanos', 'RH']))
       );
     }
 

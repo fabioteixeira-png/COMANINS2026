@@ -980,7 +980,12 @@ export default function InternalPortal({
     userHasAccessModule(currentUser, moduleId);
   const canEditModule = (moduleId: AccessModuleId) =>
     userCanEditModule(currentUser, moduleId);
-  const canEditMaterialIntake = canEditModule("material_intake");
+  const isStandardUser =
+    currentUser?.accessProfileId === "standard" ||
+    currentUser?.permissionLevel === "Padrão" ||
+    currentUser?.permissionLevel === "Padrao" ||
+    (!currentUser?.permissionLevel && currentUser?.role !== "Administrador" && currentUser?.role !== "Comercial");
+  const canEditMaterialIntake = canEditModule("material_intake") || isUserAdmin || isStandardUser;
   const canEditClients = canEditModule("clients");
   const canEditInventory = canEditModule("inventory");
   const canEditFieldService = canEditModule("field_service");

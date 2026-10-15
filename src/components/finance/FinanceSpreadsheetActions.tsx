@@ -1,8 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { AlertTriangle, CheckCircle, Download, FileSpreadsheet, Upload, X, XCircle } from 'lucide-react';
+import { AlertTriangle, BookOpen, CheckCircle, Download, FileSpreadsheet, Upload, X, XCircle } from 'lucide-react';
 import { importFinanceModuleRows, importFinanceTransactions } from '../../lib/firebase';
 import type { FinanceContract, FinanceMeasurement, FinanceTransaction } from '../../types';
+import { createRichTemplateWorkbook, getOptionsForEntity, getColumnInstructionsForEntity } from './financeSpreadsheetOptions';
+import FinanceAllocationGuideModal from './FinanceAllocationGuideModal';
 
 export type FinanceSpreadsheetEntity = 'payables' | 'receivables' | 'contracts' | 'measurements' | 'bankAccounts' | 'categories';
 
@@ -326,21 +328,28 @@ export default function FinanceSpreadsheetActions({ entity, canEdit, exportRows,
   const [fileName, setFileName] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [showGuideModal, setShowGuideModal] = useState(false);
   const meta = ENTITY_META[entity];
   const validRows = useMemo(() => preview.filter((row) => row.errors.length === 0), [preview]);
   const invalidRows = preview.length - validRows.length;
 
   const downloadTemplate = () => {
-    const headers = [templateHeaders(entity)];
-    const ws = XLSX.utils.aoa_to_sheet(headers);
-    ws['!cols'] = headers[0].map((header) => ({ wch: Math.max(14, Math.min(32, header.length + 4)) }));
-    const instructionRows = [['INSTRUÇÕES'], ...meta.instructions.map((text) => [text]), ['Máximo de 1.000 linhas por importação.'], ['A aba de dados é entregue sem linhas fictícias para evitar cadastro acidental.']];
-    const instructionSheet = XLSX.utils.aoa_to_sheet(instructionRows);
-    instructionSheet['!cols'] = [{ wch: 115 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, meta.sheet);
-    XLSX.utils.book_append_sheet(wb, instructionSheet, 'Instruções');
-    XLSX.writeFile(wb, `${meta.template}.xlsx`);
+    try {
+      const wb = createRichTemplateWorkbook(entity);
+      XLSX.writeFile(wb, `${meta.template}.xlsx`);
+    } catch (e) {
+      console.warn('Erro ao gerar modelo rico, usando gerador padrão:', e);
+      const headers = [templateHeaders(entity)];
+      const ws = XLSX.utils.aoa_to_sheet(headers);
+      ws['!cols'] = headers[0].map((header) => ({ wch: Math.max(14, Math.min(32, header.length + 4)) }));
+      const instructionRows = [['INSTRUÇÕES'], ...meta.instructions.map((text) => [text]), ['Máximo de 1.000 linhas por importação.'], ['A aba de dados é entregue sem linhas fictícias para evitar cadastro acidental.']];
+      const instructionSheet = XLSX.utils.aoa_to_sheet(instructionRows);
+      instructionSheet['!cols'] = [{ wch: 115 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, meta.sheet);
+      XLSX.utils.book_append_sheet(wb, instructionSheet, 'Instruções');
+      XLSX.writeFile(wb, `${meta.template}.xlsx`);
+    }
   };
 
   const exportData = () => {
@@ -404,13 +413,16 @@ export default function FinanceSpreadsheetActions({ entity, canEdit, exportRows,
   return (
     <>
       <div className={`flex flex-wrap items-center ${compact ? 'gap-1.5' : 'gap-2'}`}>
-        <button type="button" onClick={downloadTemplate} className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold flex items-center gap-1.5 hover:bg-slate-50" title={`Baixar modelo de ${meta.label}`}>
-          <FileSpreadsheet className="h-3.5 w-3.5" /> Modelo
+        <button type="button" onClick={downloadTemplate} className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold flex items-center gap-1.5 hover:bg-slate-50 cursor-pointer shadow-2xs" title={`Baixar planilha modelo de ${meta.label} com abas de dados, opções de alocação e instruções`}>
+          <FileSpreadsheet className="h-3.5 w-3.5 text-blue-600" /> Modelo
         </button>
-        <button type="button" onClick={exportData} className="px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-100" title={`Exportar ${meta.label}`}>
+        <button type="button" onClick={() => setShowGuideModal(true)} className="px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50/80 text-indigo-700 text-xs font-bold flex items-center gap-1.5 hover:bg-indigo-100 transition-colors cursor-pointer shadow-2xs" title={`Ver tabelas de opções de alocação de ${meta.label}`}>
+          <BookOpen className="h-3.5 w-3.5 text-indigo-600" /> Opções de Alocação
+        </button>
+        <button type="button" onClick={exportData} className="px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-100 cursor-pointer shadow-2xs" title={`Exportar ${meta.label}`}>
           <Download className="h-3.5 w-3.5" /> Exportar
         </button>
-        <button type="button" disabled={!canEdit} onClick={() => inputRef.current?.click()} className="px-3 py-2 rounded-lg border border-blue-300 bg-blue-50 text-blue-800 text-xs font-bold flex items-center gap-1.5 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed" title={!canEdit ? 'Seu perfil possui somente visualização' : `Importar ${meta.label}`}>
+        <button type="button" disabled={!canEdit} onClick={() => inputRef.current?.click()} className="px-3 py-2 rounded-lg border border-blue-300 bg-blue-50 text-blue-800 text-xs font-bold flex items-center gap-1.5 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-2xs" title={!canEdit ? 'Seu perfil possui somente visualização' : `Importar ${meta.label}`}>
           <Upload className="h-3.5 w-3.5" /> Importar
         </button>
         <input ref={inputRef} type="file" accept=".xls,.xlsx" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} />
@@ -452,6 +464,16 @@ export default function FinanceSpreadsheetActions({ entity, canEdit, exportRows,
           </div>
         </div>
       )}
+
+      <FinanceAllocationGuideModal
+        isOpen={showGuideModal}
+        onClose={() => setShowGuideModal(false)}
+        title={`Guia de Alocação · ${meta.label}`}
+        subtitle={`Consulte as opções padronizadas para alocação correta de campos na planilha de ${meta.label}.`}
+        optionsTables={getOptionsForEntity(entity)}
+        columnInstructions={getColumnInstructionsForEntity(entity)}
+        onDownloadTemplate={downloadTemplate}
+      />
     </>
   );
 }

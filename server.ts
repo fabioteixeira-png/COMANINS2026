@@ -7466,7 +7466,15 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     const requiredModule: AccessModuleId = purpose === 'intake-entry'
       ? 'material_intake'
       : 'calibration';
+    const isStandardRequester =
+      requesterProfile?.accessProfileId === 'standard' ||
+      requesterProfile?.permissionLevel === 'Padrão' ||
+      requesterProfile?.permissionLevel === 'Padrao' ||
+      req.user?.accessProfileId === 'standard' ||
+      (req.user as any)?.permissionLevel === 'Padrão' ||
+      (req.user as any)?.permissionLevel === 'Padrao';
     const canEdit =
+      isStandardRequester ||
       userCanEditModule(requesterProfile as any, requiredModule) ||
       userCanEditModule(req.user as any, requiredModule);
     if (!canEdit) {
@@ -7512,7 +7520,15 @@ app.patch('/api/internal/intakes/:id/photos', requireAuth, requireInternalAccoun
       return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
     }
     const requesterProfile = await requireInternalPortalRequester(req.user);
+    const isStandardRequester =
+      requesterProfile?.accessProfileId === 'standard' ||
+      requesterProfile?.permissionLevel === 'Padrão' ||
+      requesterProfile?.permissionLevel === 'Padrao' ||
+      req.user?.accessProfileId === 'standard' ||
+      (req.user as any)?.permissionLevel === 'Padrão' ||
+      (req.user as any)?.permissionLevel === 'Padrao';
     const canEdit =
+      isStandardRequester ||
       userCanEditModule(requesterProfile as any, 'material_intake') ||
       userCanEditModule(req.user as any, 'material_intake');
     if (!canEdit) {
