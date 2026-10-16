@@ -1028,6 +1028,7 @@ export default function InternalPortal({
         ? "dashboard"
         : "colaboradores",
   );
+  const [isTabPending, startTabTransition] = React.useTransition();
   const [accessAuditLogs, setAccessAuditLogs] = useState<AccessAuditLog[]>(() =>
     getLocalCache<AccessAuditLog[]>('accessAuditLogs', []),
   );
@@ -1088,8 +1089,10 @@ export default function InternalPortal({
       }
     }
 
-    setRawActiveTab(t);
     setIsMobileMenuOpen(false);
+    startTabTransition(() => {
+      setRawActiveTab(t);
+    });
   };
 
   const [rhSubTab, setRhSubTab] = useState<
@@ -2004,62 +2007,119 @@ export default function InternalPortal({
     getLocalCache<RncReport[]>('rncReports', []),
   );
 
-  const countCompleted = instruments.filter(
-    (i) =>
-      i.status === "Calibrado" ||
-      i.status === "Aguardando Emissão de Certificado" ||
-      i.status === "Disponível para Retirada" ||
-      i.status === "Disponível na Prateleira" ||
-      i.status === "Entregue",
-  ).length;
-  const countPending = savedIntakes.reduce((acc, intake) => {
-    const numEntrada = (intake.numEntrada || "").trim().toLowerCase();
-    const totalAllowed = (intake.rows || []).reduce(
-      (sum: number, r: any) => sum + (Number(r.quant) || 0),
-      0,
-    );
-    const registeredCount = numEntrada
-      ? instruments.filter(
-          (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada,
-        ).length
-      : 0;
-    return acc + Math.max(0, totalAllowed - registeredCount);
-  }, 0);
-  const countInCalibration = instruments.filter(
-    (i) =>
-      i.status === "Em Calibração" ||
-      i.status === "Aguardando Calibração" ||
-      i.status === "Aguardando Triagem" ||
-      !i.status,
-  ).length;
+  const instrumentsByIntake = React.useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const inst of instruments) {
+      const key = (inst.numeroDaEntrada || "").trim().toLowerCase();
+      if (!key) continue;
+      let list = map.get(key);
+      if (!list) {
+        list = [];
+        map.set(key, list);
+      }
+      list.push(inst);
+    }
+    return map;
+  }, [instruments]);
 
-  const countAguardandoCalibracao = instruments.filter(
-    (i) =>
-      i.status === "Aguardando Calibração" ||
-      i.status === "Aguardando Triagem" ||
-      !i.status,
-  ).length;
-  const countEmCalibracao = instruments.filter(
-    (i) => i.status === "Em Calibração",
-  ).length;
-  const countCalibrado = instruments.filter(
-    (i) => i.status === "Calibrado",
-  ).length;
-  const countAguardandoCertificado = instruments.filter(
-    (i) => i.status === "Aguardando Emissão de Certificado",
-  ).length;
-  const countDisponivelRetirada = instruments.filter(
-    (i) => i.status === "Disponível para Retirada",
-  ).length;
-  const countEntregue = instruments.filter(
-    (i) => i.status === "Entregue",
-  ).length;
-  const countRnc = instruments.filter(
-    (i) =>
-      i.status === "Não Conforme" ||
-      i.hasRnc ||
-      rncReports.some((r: any) => r.instrumentId === i.id),
-  ).length;
+  const dashboardCounts = React.useMemo(() => {
+    let completed = 0;
+    let inCalibration = 0;
+    let aguardandoCalibracao = 0;
+    let emCalibracao = 0;
+    let calibrado = 0;
+    let aguardandoCertificado = 0;
+    let disponivelRetirada = 0;
+    let entregue = 0;
+    let rnc = 0;
+
+    const rncInstrumentIds = new Set(rncReports.map((r: any) => r.instrumentId));
+
+    for (const i of instruments) {
+      const st = i.status;
+      if (
+        st === "Calibrado" ||
+        st === "Aguardando Emissão de Certificado" ||
+        st === "Disponível para Retirada" ||
+        st === "Disponível na Prateleira" ||
+        st === "Entregue"
+      ) {
+        completed++;
+      }
+      if (
+        st === "Em Calibração" ||
+        st === "Aguardando Calibração" ||
+        st === "Aguardando Triagem" ||
+        !st
+      ) {
+        inCalibration++;
+      }
+      if (
+        st === "Aguardando Calibração" ||
+        st === "Aguardando Triagem" ||
+        !st
+      ) {
+        aguardandoCalibracao++;
+      }
+      if (st === "Em Calibração") {
+        emCalibracao++;
+      }
+      if (st === "Calibrado") {
+        calibrado++;
+      }
+      if (st === "Aguardando Emissão de Certificado") {
+        aguardandoCertificado++;
+      }
+      if (st === "Disponível para Retirada") {
+        disponivelRetirada++;
+      }
+      if (st === "Entregue") {
+        entregue++;
+      }
+      if (st === "Não Conforme" || i.hasRnc || rncInstrumentIds.has(i.id)) {
+        rnc++;
+      }
+    }
+
+    let pending = 0;
+    for (const intake of savedIntakes) {
+      const numEntrada = (intake.numEntrada || "").trim().toLowerCase();
+      const totalAllowed = (intake.rows || []).reduce(
+        (sum: number, r: any) => sum + (Number(r.quant) || 0),
+        0,
+      );
+      const registeredCount = numEntrada
+        ? (instrumentsByIntake.get(numEntrada)?.length || 0)
+        : 0;
+      pending += Math.max(0, totalAllowed - registeredCount);
+    }
+
+    return {
+      countCompleted: completed,
+      countPending: pending,
+      countInCalibration: inCalibration,
+      countAguardandoCalibracao: aguardandoCalibracao,
+      countEmCalibracao: emCalibracao,
+      countCalibrado: calibrado,
+      countAguardandoCertificado: aguardandoCertificado,
+      countDisponivelRetirada: disponivelRetirada,
+      countEntregue: entregue,
+      countRnc: rnc,
+    };
+  }, [instruments, savedIntakes, rncReports, instrumentsByIntake]);
+
+  const {
+    countCompleted,
+    countPending,
+    countInCalibration,
+    countAguardandoCalibracao,
+    countEmCalibracao,
+    countCalibrado,
+    countAguardandoCertificado,
+    countDisponivelRetirada,
+    countEntregue,
+    countRnc,
+  } = dashboardCounts;
   const [showRncModal, setShowRncModal] = useState<boolean>(false);
   const [rncReason, setRncReason] = useState<string>("");
   const [rncTechnician, setRncTechnician] = useState<string>("");
@@ -3214,7 +3274,6 @@ Status atual: ${e.status}.`,
 
   const [filteredClients, setFilteredClients] = useState<any[]>([]);
   const [filteredInstruments, setFilteredInstruments] = useState<any[]>([]);
-  const [filteredIntakes, setFilteredIntakes] = useState<any[]>([]);
 
   // Generated points logic per instrument type
   useEffect(() => {
@@ -3495,25 +3554,29 @@ Status atual: ${e.status}.`,
       0,
     );
     const matching = numEntrada
-      ? instrumentsList.filter(
+      ? (instrumentsByIntake.get(numEntrada) || (Array.isArray(instrumentsList) ? instrumentsList.filter(
           (i) => (i.numeroDaEntrada || "").trim().toLowerCase() === numEntrada,
-        )
+        ) : []))
       : [];
     const registeredCount = matching.length;
-    const calibratingCount = matching.filter(
-      (i) => i.status === "Em Calibração",
-    ).length;
-    const calibratedCount = matching.filter(
-      (i) =>
+    let calibratingCount = 0;
+    let calibratedCount = 0;
+    let availableCount = 0;
+    for (const i of matching) {
+      if (i.status === "Em Calibração") calibratingCount++;
+      if (
         i.status === "Calibrado" ||
         i.status === "Aguardando Emissão de Certificado" ||
         i.status === "Disponível para Retirada" ||
         i.status === "Entregue" ||
-        i.status === "Não Conforme",
-    ).length;
-    const availableCount = matching.filter(
-      (i) => i.status === "Disponível para Retirada" || i.status === "Entregue" || i.status === "Não Conforme",
-    ).length;
+        i.status === "Não Conforme"
+      ) {
+        calibratedCount++;
+      }
+      if (i.status === "Disponível para Retirada" || i.status === "Entregue" || i.status === "Não Conforme") {
+        availableCount++;
+      }
+    }
 
     if (intake.deliveryFinalizedAt || intake.deliveryLocked) {
       return {
@@ -7094,8 +7157,8 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
   };
 
   const triggerQuickPrompt = (...args: any[]) => {};
-
-  useEffect(() => {
+ 
+  const filteredIntakes = React.useMemo(() => {
     let filtered = [...savedIntakes];
 
     // Reverse chronological sort (by ID/timestamp, which works as long as ID is Date.now())
@@ -7137,7 +7200,7 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
       });
     }
 
-    setFilteredIntakes(filtered);
+    return filtered;
   }, [
     savedIntakes,
     intakeFilterClient,

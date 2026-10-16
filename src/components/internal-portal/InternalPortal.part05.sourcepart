@@ -4806,6 +4806,138 @@
           </div>
         </div>
       )}
+
+      {/* Botão Flutuante de Ação Rápida no Celular */}
+      {activeTab === "entrada_material" && canEditMaterialIntake && (
+        <button
+          type="button"
+          onClick={() => {
+            const formEl = document.getElementById("form-nova-entrada") || document.querySelector("input[name='numEntrada']");
+            if (formEl) {
+              formEl.scrollIntoView({ behavior: "smooth", block: "center" });
+              (formEl as HTMLElement).focus();
+            } else {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          }}
+          className="md:hidden fixed bottom-20 right-4 z-40 bg-royal-blue hover:bg-blue-700 text-white rounded-full p-3.5 shadow-xl flex items-center gap-2 active:scale-90 transition-transform shadow-blue-900/30"
+          title="Nova Entrada de Material"
+        >
+          <Plus className="h-5 w-5" />
+          <span className="text-xs font-bold pr-1">Nova Entrada</span>
+        </button>
+      )}
+
+      {/* Barra de Navegação Inferior Móvel - Acesso Rápido e Fluido em Celulares */}
+      <nav
+        aria-label="Navegação rápida móvel"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-2 py-1 pb-[max(env(safe-area-inset-bottom),0.5rem)] flex items-center justify-around print:hidden"
+      >
+        {canAccessModule("dashboard") && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("dashboard")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 ${
+              activeTab === "dashboard"
+                ? "text-royal-blue font-bold bg-blue-50/80"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Activity className="h-5 w-5 mb-0.5" />
+            <span className="text-[10px] leading-tight tracking-tight">Painel</span>
+          </button>
+        )}
+
+        {canAccessModule("material_intake") && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("entrada_material")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 relative ${
+              activeTab === "entrada_material"
+                ? "text-royal-blue font-bold bg-blue-50/80"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <FileText className="h-5 w-5 mb-0.5" />
+            <span className="text-[10px] leading-tight tracking-tight">Entrada</span>
+            {countPending > 0 && (
+              <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-amber-500" />
+            )}
+          </button>
+        )}
+
+        {canAccessModule("calibration") && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("instruments")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 ${
+              activeTab === "instruments" || activeTab === "bench" || activeTab === "registro_calibracao"
+                ? "text-royal-blue font-bold bg-blue-50/80"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Gauge className="h-5 w-5 mb-0.5" />
+            <span className="text-[10px] leading-tight tracking-tight">Calibração</span>
+          </button>
+        )}
+
+        {canAccessModule("field_service") ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab("field_service")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 ${
+              activeTab === "field_service"
+                ? "text-royal-blue font-bold bg-blue-50/80"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Briefcase className="h-5 w-5 mb-0.5" />
+            <span className="text-[10px] leading-tight tracking-tight">Campo</span>
+          </button>
+        ) : canAccessModule("personal_documents") || canAccessModule("hr") ? (
+          <button
+            type="button"
+            onClick={() => {
+              setRhSubTab("contra_cheques");
+              setActivePayslipTab("meus");
+              setActiveTab("colaboradores");
+            }}
+            className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 ${
+              activeTab === "colaboradores"
+                ? "text-royal-blue font-bold bg-blue-50/80"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Users className="h-5 w-5 mb-0.5" />
+            <span className="text-[10px] leading-tight tracking-tight">Documentos</span>
+          </button>
+        ) : canAccessModule("finance") ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab("financeiro")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 ${
+              activeTab === "financeiro"
+                ? "text-royal-blue font-bold bg-blue-50/80"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <TrendingUp className="h-5 w-5 mb-0.5" />
+            <span className="text-[10px] leading-tight tracking-tight">Financeiro</span>
+          </button>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => setIsMobileMenuOpen(true)}
+          className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all active:scale-95 ${
+            isMobileMenuOpen ? "text-royal-blue font-bold bg-blue-50/80" : "text-slate-500 hover:text-slate-800"
+          }`}
+          title="Abrir menu com todos os módulos"
+        >
+          <Menu className="h-5 w-5 mb-0.5" />
+          <span className="text-[10px] leading-tight tracking-tight">Mais</span>
+        </button>
+      </nav>
     </div>
   );
 }

@@ -306,7 +306,11 @@
           </button>
         </nav>
       </aside>
-      <div className="flex-1 min-w-0 min-h-0 p-3 sm:p-6 md:p-8 overflow-y-auto w-full">
+      <div className="flex-1 min-w-0 min-h-0 p-3 sm:p-6 md:p-8 pb-28 md:pb-8 overflow-y-auto w-full touch-smooth overscroll-contain relative">
+        {/* Barra de progresso de transição fluida */}
+        {isTabPending && (
+          <div className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-royal-blue z-[100] animate-pulse" />
+        )}
         {/* Top Navigation Header with Notification Bell */}
         <div className="sticky top-0 z-30 bg-slate-50 mb-6 pb-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 print:hidden">
           <div className="flex items-center space-x-3">
@@ -1304,11 +1308,7 @@
                           (acc: number, r: any) => acc + (Number(r.quant) || 0),
                           0,
                         );
-                        const registeredCount = instruments.filter(
-                          (i) =>
-                            (i.numeroDaEntrada || "").trim().toLowerCase() ===
-                            (intake.numEntrada || "").trim().toLowerCase(),
-                        ).length;
+                        const registeredCount = (instrumentsByIntake.get((intake.numEntrada || "").trim().toLowerCase()) || []).length;
                         const isFull =
                           registeredCount >= totalAllowed && totalAllowed > 0;
                         const hasPhotos = intake.photos && intake.photos.length > 0;
@@ -1340,11 +1340,7 @@
                           (acc: number, r: any) => acc + (Number(r.quant) || 0),
                           0,
                         );
-                        const registeredCount = instruments.filter(
-                          (i) =>
-                            (i.numeroDaEntrada || "").trim().toLowerCase() ===
-                            instNumeroDaEntrada.trim().toLowerCase(),
-                        ).length;
+                        const registeredCount = (instrumentsByIntake.get(instNumeroDaEntrada.trim().toLowerCase()) || []).length;
                         const isFull = registeredCount >= totalAllowed;
                         return (
                           <p

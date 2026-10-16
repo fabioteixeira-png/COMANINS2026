@@ -135,3 +135,37 @@
     margin: 10mm;
   }
 }
+
+/* Otimizações de fluidez móvel e toques ágeis */
+html, body {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+@layer utilities {
+  .touch-smooth {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  .mobile-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Transição de tela ultrassuave sem engasgos */
+.tab-screen-enter {
+  animation: tabFadeSlide 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes tabFadeSlide {
+  from {
+    opacity: 0.88;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
