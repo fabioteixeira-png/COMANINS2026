@@ -8837,15 +8837,29 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       return res.status(400).json({ error: `O Padrão ${inactiveSlot.slot} selecionado está arquivado/inativo.` });
     }
 
+    const rawCalMin = req.body?.calibrationRangeMin !== undefined && req.body?.calibrationRangeMin !== null && req.body?.calibrationRangeMin !== ''
+      ? Number(req.body.calibrationRangeMin)
+      : undefined;
+    const rawCalMax = req.body?.calibrationRangeMax !== undefined && req.body?.calibrationRangeMax !== null && req.body?.calibrationRangeMax !== ''
+      ? Number(req.body.calibrationRangeMax)
+      : undefined;
+    const hasCustomCalibrationRange = rawCalMin !== undefined && rawCalMax !== undefined && Number.isFinite(rawCalMin) && Number.isFinite(rawCalMax);
+
     const instrumentMin = Number(instrument.rangeMin);
     const instrumentMax = Number(instrument.rangeMax);
     const instrumentUnit = String(instrument.unit || '').trim();
-    const instrumentMinCanonical = toCanonicalValue(instrumentMin, instrumentUnit);
-    const instrumentMaxCanonical = toCanonicalValue(instrumentMax, instrumentUnit);
+
+    // Quando o usuário define a faixa de calibração (ex: padrão BPC-058-60BT-01 atende a -25ºC enquanto instrumento é -50ºC),
+    // a verificação dos padrões de referência tem como base a faixa de calibração informada e não a capacidade total.
+    const effectiveMin = hasCustomCalibrationRange ? rawCalMin : instrumentMin;
+    const effectiveMax = hasCustomCalibrationRange ? rawCalMax : instrumentMax;
+
+    const instrumentMinCanonical = toCanonicalValue(effectiveMin, instrumentUnit);
+    const instrumentMaxCanonical = toCanonicalValue(effectiveMax, instrumentUnit);
 
     if (!instrumentMinCanonical || !instrumentMaxCanonical || instrumentMinCanonical.domain !== instrumentMaxCanonical.domain) {
       return res.status(400).json({
-        error: `Não foi possível interpretar a faixa do instrumento (${instrument.rangeMin} a ${instrument.rangeMax} ${instrumentUnit}). Revise apenas faixa/unidade do cadastro.`,
+        error: `Não foi possível interpretar a faixa ${hasCustomCalibrationRange ? 'de calibração' : 'do instrumento'} (${effectiveMin} a ${effectiveMax} ${instrumentUnit}). Revise apenas faixa/unidade do cadastro.`,
       });
     }
 
@@ -9009,17 +9023,21 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
 
     const groupHasA = primaryGroup.some((item) => item.slot === 'A');
 
+    const rangeTargetDescription = hasCustomCalibrationRange
+      ? `faixa de calibração definida (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)})`
+      : `faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)})`;
+
     if (groupHasA && jointCoverage.covered) {
       const jointSummary = primaryGroup.length > 1
-        ? `Cobertura conjunta aprovada: os padrões ${primaryGroup.map((i) => i.slot).join('+')} cobrem continuamente toda a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`
-        : `Faixa aprovada: o Padrão A cobre integralmente a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`;
+        ? `Cobertura conjunta aprovada: os padrões ${primaryGroup.map((i) => i.slot).join('+')} cobrem continuamente toda a ${rangeTargetDescription}.`
+        : `Faixa aprovada: o Padrão A cobre integralmente a ${rangeTargetDescription}.`;
       deterministicChecks.push(jointSummary);
 
       for (const item of primaryGroup) {
         const coversAlone = rangeCovers(item.candidateMin!, item.candidateMax!, requiredPrimaryMin, requiredPrimaryMax);
         const reason = coversAlone
-          ? `Padrão ${item.slot} ${item.label} aprovado: sua faixa individual (${item.rawRange} ≈ ${formatCanonicalRange(item.candidateMin!, item.candidateMax!, item.canonicalUnit!)}) cobre a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`
-          : `Padrão ${item.slot} ${item.label} aprovado por cobertura conjunta: sua faixa (${item.rawRange} ≈ ${formatCanonicalRange(item.candidateMin!, item.candidateMax!, item.canonicalUnit!)}) complementa os demais padrões para cobrir continuamente o instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}).`;
+          ? `Padrão ${item.slot} ${item.label} aprovado: sua faixa individual (${item.rawRange} ≈ ${formatCanonicalRange(item.candidateMin!, item.candidateMax!, item.canonicalUnit!)}) cobre a ${rangeTargetDescription}.`
+          : `Padrão ${item.slot} ${item.label} aprovado por cobertura conjunta: sua faixa (${item.rawRange} ≈ ${formatCanonicalRange(item.candidateMin!, item.candidateMax!, item.canonicalUnit!)}) complementa os demais padrões para cobrir continuamente a ${rangeTargetDescription}.`;
         directAssessments.push({
           standardId: item.id,
           identification: String(item.std.identification || ''),
@@ -9034,8 +9052,8 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
     } else {
       const gapDescriptions = jointCoverage.gaps.length > 0
         ? jointCoverage.gaps.map((g) => formatCanonicalRange(g.min, g.max, primaryCanonicalUnit)).join('; ')
-        : `faixa necessária (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}) não coberta`;
-      const coverageMsg = `A cobertura conjunta dos padrões de ${primaryDomain} não cobre continuamente o instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}). Existe lacuna não coberta: ${gapDescriptions}.`;
+        : `${rangeTargetDescription} não coberta`;
+      const coverageMsg = `A cobertura conjunta dos padrões de ${primaryDomain} não cobre continuamente a ${rangeTargetDescription}. Existe lacuna não coberta: ${gapDescriptions}.`;
       issues.push(coverageMsg);
 
       for (const item of primaryGroup) {
@@ -9047,7 +9065,7 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
           role: 'primary_measurement',
           status: 'BLOCK',
           rangeCoverage: 'NO',
-          reason: `Padrão ${item.slot} ${item.label} bloqueado: a cobertura conjunta dos padrões não cobre continuamente a faixa do instrumento (${formatCanonicalRange(requiredPrimaryMin, requiredPrimaryMax, primaryCanonicalUnit)}). Lacuna: ${gapDescriptions}.`,
+          reason: `Padrão ${item.slot} ${item.label} bloqueado: a cobertura conjunta dos padrões não cobre continuamente a ${rangeTargetDescription}. Lacuna: ${gapDescriptions}.`,
         });
       }
     }
@@ -9892,6 +9910,12 @@ REGRAS DE QUALIDADE:
 
   if (process.env.NODE_ENV !== "production") {
     try {
+      const generatedPath = path.join(process.cwd(), "src/components/internal-portal/InternalPortal.generated.tsx");
+      if (!fs.existsSync(generatedPath)) {
+        console.log("Gerando InternalPortal.generated.tsx para o servidor de desenvolvimento...");
+        const { execSync } = await import("node:child_process");
+        execSync("node scripts/internal-portal-source.mjs generate", { stdio: "inherit" });
+      }
       const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
@@ -9899,7 +9923,7 @@ REGRAS DE QUALIDADE:
       });
       app.use(vite.middlewares);
     } catch (err) {
-      console.warn("⚠️ Vite não encontrado. Pulando HMR/Middleware de desenvolvimento.");
+      console.warn("⚠️ Vite não encontrado ou falha no HMR/Middleware de desenvolvimento:", err);
     }
   } else {
     const distPath = path.join(process.cwd(), "dist");

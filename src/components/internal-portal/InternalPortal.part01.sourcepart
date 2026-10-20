@@ -2193,7 +2193,137 @@ export default function InternalPortal({
   const [benchDroopLimitPercent, setBenchDroopLimitPercent] = useState<number>(15);
   const [benchAccuracyClass, setBenchAccuracyClass] = useState<string>("A1");
   const [benchMpe, setBenchMpe] = useState<number>(1.0);
+  const [benchCalibrationRangeMin, setBenchCalibrationRangeMin] = useState<string | number>("");
+  const [benchCalibrationRangeMax, setBenchCalibrationRangeMax] = useState<string | number>("");
+  const [isCustomCalibrationRange, setIsCustomCalibrationRange] = useState<boolean>(false);
   const [showAllTypeOptions, setShowAllTypeOptions] = useState<boolean>(false);
+
+  const generatePointsForRange = (
+    cMin: number,
+    cMax: number,
+    count: number,
+    type: InstrumentType,
+    _inst?: any,
+  ) => {
+    let pts: any[] = [];
+    if (type === "manovacuometro") {
+      const totalPointsToGenerate = count + 1;
+      const vacPointsCount = Math.floor(totalPointsToGenerate / 2);
+      const pressPointsCount = totalPointsToGenerate - vacPointsCount;
+
+      let vacStep =
+        vacPointsCount > 1
+          ? Math.abs(cMin) / (vacPointsCount - 1)
+          : Math.abs(cMin);
+      for (let i = 0; i < vacPointsCount; i++) {
+        pts.push({
+          nominal: Number((cMin + vacStep * i).toFixed(2)),
+          refAsc1: "",
+          refDesc1: "",
+          refAsc2: "",
+          refDesc2: "",
+        });
+      }
+
+      let pressStep =
+        pressPointsCount > 1 ? cMax / (pressPointsCount - 1) : cMax;
+      for (let i = 0; i < pressPointsCount; i++) {
+        pts.push({
+          nominal: Number((0 + pressStep * i).toFixed(2)),
+          refAsc1: "",
+          refDesc1: "",
+          refAsc2: "",
+          refDesc2: "",
+        });
+      }
+      pts = pts.sort((a, b) => a.nominal - b.nominal);
+      pts = pts.filter(
+        (pt, index, self) =>
+          index === self.findIndex((t) => t.nominal === pt.nominal),
+      );
+    } else {
+      const span = Math.abs(cMax - cMin) || 1;
+      let pcts: number[] = [];
+      if (count === 10) {
+        pcts = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+      } else if (count === 5) {
+        pcts = [0, 25, 50, 75, 100];
+      } else {
+        const step = 100 / Math.max(1, count - 1);
+        for (let i = 0; i < count; i++) {
+          pcts.push(i * step);
+        }
+      }
+
+      pts = pcts.map((pct) => ({
+        nominal: Number((cMin + (span * pct) / 100).toFixed(2)),
+        refAsc1: "",
+        refDesc1: "",
+        refAsc2: "",
+        refDesc2: "",
+      }));
+    }
+    return pts;
+  };
+
+  const handleApplyCustomCalibrationRange = (newMinVal?: string | number, newMaxVal?: string | number) => {
+    if (!isUserAdmin) {
+      alert("A alteração da faixa de calibração é permitida exclusivamente para o perfil Administrador.");
+      return;
+    }
+    const activeInst = instruments.find((i) => i.id === selectedInstId);
+    if (!activeInst) return;
+    const rawMin = newMinVal !== undefined ? newMinVal : benchCalibrationRangeMin;
+    const rawMax = newMaxVal !== undefined ? newMaxVal : benchCalibrationRangeMax;
+    const minVal = Number(rawMin);
+    const maxVal = Number(rawMax);
+    if (isNaN(minVal) || isNaN(maxVal)) {
+      alert("Por favor, informe valores numéricos válidos para a faixa de calibração mínima e máxima.");
+      return;
+    }
+    if (minVal >= maxVal) {
+      alert("A faixa de calibração mínima deve ser menor que a máxima.");
+      return;
+    }
+    setBenchCalibrationRangeMin(minVal);
+    setBenchCalibrationRangeMax(maxVal);
+    const isCustom = minVal !== Number(activeInst.rangeMin) || maxVal !== Number(activeInst.rangeMax);
+    setIsCustomCalibrationRange(isCustom);
+
+    const pts = generatePointsForRange(minVal, maxVal, benchPointCount, selectedInstrumentType, activeInst);
+    setBenchPoints(pts);
+
+    const span = Math.abs(maxVal - minVal) || 1;
+    const txPercents = [0, 25, 50, 75, 100];
+    const txPts = txPercents.map((pct) => {
+      const nominalPv = Number((minVal + (span * pct) / 100).toFixed(2));
+      const expectedMa = Number((4.0 + (16.0 * pct) / 100).toFixed(3));
+      return {
+        percent: pct,
+        nominalPv,
+        expectedMa,
+        measuredMaAsc: "",
+        measuredMaDesc: "",
+      };
+    });
+    setBenchTransmitterPoints(txPts);
+
+    if (selectedInstrumentType !== "psv" && selectedInstrumentType !== "pcv") {
+      setBenchSetPoint(Number((minVal + span / 2).toFixed(2)));
+    }
+  };
+
+  const handleResetCalibrationRangeToNominal = () => {
+    if (!isUserAdmin) {
+      alert("A alteração da faixa de calibração é permitida exclusivamente para o perfil Administrador.");
+      return;
+    }
+    const activeInst = instruments.find((i) => i.id === selectedInstId);
+    if (!activeInst) return;
+    const origMin = Number(activeInst.rangeMin) || 0;
+    const origMax = Number(activeInst.rangeMax) || 0;
+    handleApplyCustomCalibrationRange(origMin, origMax);
+  };
 
   // Settings - Standards form state
   const [showStandardForm, setShowStandardForm] = useState<boolean>(false);
@@ -3341,8 +3471,17 @@ Status atual: ${e.status}.`,
           setBenchThermalMedium(inst.thermalMedium || "Bomba Comparativa");
         }
 
-        const min = Number(inst.rangeMin) || 0;
-        const max = Number(inst.rangeMax) || 0;
+        const nominalMin = Number(inst.rangeMin) || 0;
+        const nominalMax = Number(inst.rangeMax) || 0;
+        const initialCalMin = (inst as any).calibrationRangeMin !== undefined ? Number((inst as any).calibrationRangeMin) : nominalMin;
+        const initialCalMax = (inst as any).calibrationRangeMax !== undefined ? Number((inst as any).calibrationRangeMax) : nominalMax;
+        setBenchCalibrationRangeMin(initialCalMin);
+        setBenchCalibrationRangeMax(initialCalMax);
+        const isCustom = (inst as any).calibrationRangeMin !== undefined && (inst as any).calibrationRangeMax !== undefined && (initialCalMin !== nominalMin || initialCalMax !== nominalMax);
+        setIsCustomCalibrationRange(isCustom);
+
+        const min = initialCalMin;
+        const max = initialCalMax;
         const span = Math.abs(max - min) || 1;
         const midPoint = Number((min + span / 2).toFixed(2));
         setBenchSetPoint(
@@ -3428,70 +3567,7 @@ Status atual: ${e.status}.`,
         }
 
         // 1. Manômetro & Termômetro & Manovacuometro Points
-        let pts = [];
-        if (detectedType === "manovacuometro") {
-          // Vacuum points
-          const totalPointsToGenerate = benchPointCount + 1; // Since 0 is shared
-          const vacPointsCount = Math.floor(totalPointsToGenerate / 2);
-          const pressPointsCount = totalPointsToGenerate - vacPointsCount;
-
-          let vacStep =
-            vacPointsCount > 1
-              ? Math.abs(min) / (vacPointsCount - 1)
-              : Math.abs(min);
-          for (let i = 0; i < vacPointsCount; i++) {
-            pts.push({
-              nominal: Number((min + vacStep * i).toFixed(2)),
-              refAsc1: "",
-              refDesc1: "",
-              refAsc2: "",
-              refDesc2: "",
-            });
-          }
-
-          let pressStep =
-            pressPointsCount > 1 ? max / (pressPointsCount - 1) : max;
-          for (let i = 0; i < pressPointsCount; i++) {
-            pts.push({
-              nominal: Number((0 + pressStep * i).toFixed(2)),
-              refAsc1: "",
-              refDesc1: "",
-              refAsc2: "",
-              refDesc2: "",
-            });
-          }
-          // Sort points just in case and remove duplicates (like zero)
-          pts = pts.sort((a, b) => a.nominal - b.nominal);
-          pts = pts.filter(
-            (pt, index, self) =>
-              index === self.findIndex((t) => t.nominal === pt.nominal),
-          );
-
-          // if we removed duplicates and are short on points, add one to the end if possible
-          if (pts.length < benchPointCount && max > 0) {
-            // just keeping it simple
-          }
-        } else {
-          let pcts: number[] = [];
-          if (benchPointCount === 10) {
-            pcts = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-          } else if (benchPointCount === 5) {
-            pcts = [0, 25, 50, 75, 100];
-          } else {
-            const step = 100 / Math.max(1, benchPointCount - 1);
-            for (let i = 0; i < benchPointCount; i++) {
-              pcts.push(i * step);
-            }
-          }
-
-          pts = pcts.map((pct) => ({
-            nominal: Number((min + (span * pct) / 100).toFixed(2)),
-            refAsc1: "",
-            refDesc1: "",
-            refAsc2: "",
-            refDesc2: "",
-          }));
-        }
+        const pts = generatePointsForRange(min, max, benchPointCount, detectedType, inst);
         setBenchPoints(pts);
 
         // 2. Transmissor Points (0%, 25%, 50%, 75%, 100% Span)
@@ -6261,7 +6337,13 @@ Status atual: ${e.status}.`,
       const validation = await safeFetch<any>("/api/validate-calibration-standards", {
         method: "POST",
         maxRetries: 1,
-        body: JSON.stringify({ instrumentId: selectedInstId, standardSlots, standardIds }),
+        body: JSON.stringify({
+          instrumentId: selectedInstId,
+          standardSlots,
+          standardIds,
+          calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
+          calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
+        }),
       });
       standardRangeValidation = validation;
       if (!validation || validation.overallStatus !== "PASS") {
@@ -6344,6 +6426,9 @@ Status atual: ${e.status}.`,
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
           mpe: benchMpe,
+          calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
+          calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
+          isCustomCalibrationRange: isCustomCalibrationRange,
           points:
             selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
               ? []
@@ -6467,6 +6552,9 @@ Status atual: ${e.status}.`,
           setBenchStandardA("");
           setBenchStandardB("");
           setBenchStandardC("");
+          setBenchCalibrationRangeMin("");
+          setBenchCalibrationRangeMax("");
+          setIsCustomCalibrationRange(false);
           setBenchCalibrationDate(currentCalibrationDate());
           setActiveTab("instruments");
         }, 3000);
@@ -6674,6 +6762,9 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
           mpe: benchMpe,
+          calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
+          calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
+          isCustomCalibrationRange: isCustomCalibrationRange,
           points:
             selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
               ? []

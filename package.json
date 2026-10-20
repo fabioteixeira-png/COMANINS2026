@@ -14,11 +14,11 @@
     "dev": "tsx server.ts",
     "prebuild": "npm run internal-portal:generate",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node --check dist/server.cjs",
-    "postbuild": "npm run internal-portal:clean",
+    "postbuild": "npm run internal-portal:verify",
     "start": "node dist/server.cjs",
     "prelint": "npm run internal-portal:generate",
     "lint": "tsc --noEmit",
-    "postlint": "npm run internal-portal:clean"
+    "postlint": "npm run internal-portal:verify"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -1099,6 +1099,127 @@
                           </div>
                         </div>
 
+                        {/* FAIXA DE CALIBRAÇÃO (Range Efetivo de Ensaio vs Capacidade Total) */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                            <div className="flex items-center gap-2">
+                              <Sliders className="h-4 w-4 text-royal-blue" />
+                              <span className="font-bold text-slate-900 text-sm">
+                                Faixa de Calibração (Range Efetivo de Ensaio)
+                              </span>
+                              {isCustomCalibrationRange ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                  Faixa Reduzida / Customizada
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                                  Capacidade Total do Instrumento
+                                </span>
+                              )}
+                            </div>
+                            {isUserAdmin ? (
+                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                                <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                                Admin: Edição Liberada
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1">
+                                <Lock className="h-3 w-3 text-slate-400" />
+                                Edição restrita a Administrador
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                            <div>
+                              <label className="block text-slate-500 font-semibold mb-1 text-[11px]">
+                                Capacidade Nominal do Instrumento
+                              </label>
+                              <div className="bg-slate-100 border border-slate-300 rounded px-2.5 py-1.5 text-slate-700 font-mono font-bold">
+                                {activeInst.rangeMin} a {activeInst.rangeMax} {activeInst.unit}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-700 font-bold mb-1 text-[11px] flex items-center justify-between">
+                                <span>Faixa Calibração Mínima</span>
+                                <span className="text-slate-400 font-normal">({activeInst.unit})</span>
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                disabled={!isUserAdmin}
+                                value={benchCalibrationRangeMin}
+                                onChange={(e) => setBenchCalibrationRangeMin(e.target.value)}
+                                className={`w-full border rounded px-2.5 py-1.5 font-mono font-bold text-xs ${
+                                  isUserAdmin
+                                    ? "bg-white border-slate-300 text-slate-900 focus:ring-1 focus:ring-royal-blue focus:border-royal-blue"
+                                    : "bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed"
+                                }`}
+                                placeholder="Ex: -25"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-700 font-bold mb-1 text-[11px] flex items-center justify-between">
+                                <span>Faixa Calibração Máxima</span>
+                                <span className="text-slate-400 font-normal">({activeInst.unit})</span>
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                disabled={!isUserAdmin}
+                                value={benchCalibrationRangeMax}
+                                onChange={(e) => setBenchCalibrationRangeMax(e.target.value)}
+                                className={`w-full border rounded px-2.5 py-1.5 font-mono font-bold text-xs ${
+                                  isUserAdmin
+                                    ? "bg-white border-slate-300 text-slate-900 focus:ring-1 focus:ring-royal-blue focus:border-royal-blue"
+                                    : "bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed"
+                                }`}
+                                placeholder="Ex: 100"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {isUserAdmin && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyCustomCalibrationRange()}
+                                    className="flex-1 px-3 py-1.5 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded text-xs shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                    title="Recalcular pontos e aplicar nova faixa de calibração"
+                                  >
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                    <span>Aplicar Faixa</span>
+                                  </button>
+                                  {isCustomCalibrationRange && (
+                                    <button
+                                      type="button"
+                                      onClick={handleResetCalibrationRangeToNominal}
+                                      className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded text-xs transition-colors cursor-pointer"
+                                      title="Restaurar capacidade nominal original do cadastro"
+                                    >
+                                      Restaurar
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            {isUserAdmin ? (
+                              <>
+                                <strong>Regra de Calibração:</strong> Quando a capacidade do instrumento for superior à dos padrões disponíveis (ex: instrumento de -50 a 100 ºC calibrado até -25 ºC pelo padrão BPC-058-60BT-01), defina a faixa de calibração acima e clique em <em>Aplicar Faixa</em>. O sistema gerará os pontos de calibração proporcionalmente e utilizará a <strong>faixa de calibração</strong> como base para aprovar os certificados dos padrões.
+                              </>
+                            ) : (
+                              <>
+                                A verificação dos certificados padrão é realizada com base na <strong>faixa de calibração</strong>. Caso o instrumento tenha sido aferido em faixa parcial ou diferente da capacidade total, a alteração deve ser realizada por um Administrador.
+                              </>
+                            )}
+                          </p>
+                        </div>
+
                         <div className="space-y-4">
                           <h3 className="font-display font-bold text-sm text-slate-900 border-b border-slate-200 pb-2 flex items-center justify-between">
                             <span>
@@ -2138,11 +2259,18 @@
                         <div className="grid grid-cols-2 gap-2">
                           <div className="bg-slate-50 p-3 rounded border border-slate-200">
                             <p className="text-slate-500 uppercase text-[10px] font-bold">
-                              Range
+                              {isCustomCalibrationRange ? "Faixa Calibrada" : "Range Nominal"}
                             </p>
                             <p className="font-mono font-bold text-slate-900">
-                              {activeInst.rangeMin} a {activeInst.rangeMax}
+                              {benchCalibrationRangeMin !== "" && benchCalibrationRangeMax !== ""
+                                ? `${benchCalibrationRangeMin} a ${benchCalibrationRangeMax}`
+                                : `${activeInst.rangeMin} a ${activeInst.rangeMax}`}
                             </p>
+                            {isCustomCalibrationRange && (
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                Nominal: {activeInst.rangeMin} a {activeInst.rangeMax}
+                              </p>
+                            )}
                           </div>
                           <div className="bg-slate-50 p-3 rounded border border-slate-200">
                             <p className="text-slate-500 uppercase text-[10px] font-bold">
@@ -3200,13 +3328,20 @@
                                 ANALOGICO
                               </p>
                               <p>
-                                <span className="font-bold">Faixa:</span>{" "}
+                                <span className="font-bold">Faixa Nominal:</span>{" "}
                                 {inst.rangeMin}{" "}
                                 {inst.typeSpec === "manovacuometro" || (inst.description || "").toLowerCase().includes("manovacu")
                                   ? (inst.unitNegative || "mmHg")
                                   : ""}{" "}
                                 a {inst.rangeMax} {inst.unit}
                               </p>
+                              {((report?.calibrationRangeMin !== undefined && report?.calibrationRangeMax !== undefined && (report.calibrationRangeMin !== inst.rangeMin || report.calibrationRangeMax !== inst.rangeMax)) ||
+                                ((inst as any).calibrationRangeMin !== undefined && (inst as any).calibrationRangeMax !== undefined && ((inst as any).calibrationRangeMin !== inst.rangeMin || (inst as any).calibrationRangeMax !== inst.rangeMax))) && (
+                                <p className="font-bold text-slate-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 inline-block">
+                                  <span className="font-bold text-amber-900">Faixa Calibrada:</span>{" "}
+                                  {report?.calibrationRangeMin ?? (inst as any).calibrationRangeMin} a {report?.calibrationRangeMax ?? (inst as any).calibrationRangeMax} {inst.unit}
+                                </p>
+                              )}
                               <p>
                                 <span className="font-bold">
                                   Tolerância (MPE):

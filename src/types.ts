@@ -110,6 +110,10 @@ export interface Instrument {
   calibrationLabelPrintCount?: number;
   registrationSnapshot?: InstrumentRegistrationSnapshot;
   photoCalibratedAiValidation?: CalibrationPhotoValidation;
+  calibrationRangeMin?: number;
+  calibrationRangeMax?: number;
+  calibrationRange?: string;
+  isCustomCalibrationRange?: boolean;
 }
 
 export interface RncReport {
@@ -321,6 +325,10 @@ export interface CalibrationReport {
   deletedBy?: string;
   deletedByUid?: string;
   updatedAt?: string;
+  calibrationRangeMin?: number;
+  calibrationRangeMax?: number;
+  calibrationRange?: string;
+  isCustomCalibrationRange?: boolean;
 }
 
 export interface CalibrationAuditLog {

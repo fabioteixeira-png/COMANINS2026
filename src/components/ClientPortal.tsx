@@ -1175,8 +1175,13 @@ export default function ClientPortal({
                         <p><span className="font-bold">Marca:</span> {inst?.brand || 'Não Consta'}</p>
                         <p><span className="font-bold">Modelo:</span> {inst?.model || 'Não Consta'}</p>
                         <p><span className="font-bold">Nº Série:</span> {inst?.serialNumber || 'NAO CONSTA'}</p>
-                        <p><span className="font-bold">Tipo:</span> {isPsvCertificate ? 'PSV / VÁLVULA DE SEGURANÇA' : isPcvCertificate ? 'PCV / REGULADOR AUTO-OPERADO' : 'ANALÓGICO'}</p>
-                        <p><span className="font-bold">Faixa:</span> {inst?.rangeMin} {inst?.typeSpec === 'manovacuometro' || (inst?.description || '').toLowerCase().includes('manovacu') ? (inst?.unitNegative || 'mmHg') : ''} a {inst?.rangeMax} {inst?.unit}</p>
+                        <p><span className="font-bold">Faixa Nominal:</span> {inst?.rangeMin} {inst?.typeSpec === 'manovacuometro' || (inst?.description || '').toLowerCase().includes('manovacu') ? (inst?.unitNegative || 'mmHg') : ''} a {inst?.rangeMax} {inst?.unit}</p>
+                        {((selectedReport?.calibrationRangeMin !== undefined && selectedReport?.calibrationRangeMax !== undefined && (selectedReport.calibrationRangeMin !== inst?.rangeMin || selectedReport.calibrationRangeMax !== inst?.rangeMax)) ||
+                          ((inst as any)?.calibrationRangeMin !== undefined && (inst as any)?.calibrationRangeMax !== undefined && ((inst as any).calibrationRangeMin !== inst?.rangeMin || (inst as any).calibrationRangeMax !== inst?.rangeMax))) && (
+                          <p className="font-bold text-slate-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 inline-block">
+                            <span className="font-bold text-amber-900">Faixa Calibrada:</span> {selectedReport?.calibrationRangeMin ?? (inst as any)?.calibrationRangeMin} a {selectedReport?.calibrationRangeMax ?? (inst as any)?.calibrationRangeMax} {inst?.unit}
+                          </p>
+                        )}
                         <p><span className="font-bold">Tolerância (MPE):</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
                       </div>
                     </div>

@@ -1509,6 +1509,9 @@ export async function saveCalibrationDoc(data: {
   auditStartTime?: string;
   auditTechnicianName?: string;
   auditReferenceNumber?: string;
+  calibrationRangeMin?: number;
+  calibrationRangeMax?: number;
+  isCustomCalibrationRange?: boolean;
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
@@ -1833,7 +1836,17 @@ export async function saveCalibrationDoc(data: {
     referenceStandardIds: data.referenceStandardIds || [],
     referenceStandardSlots: data.referenceStandardSlots,
     referenceStandards: data.referenceStandards || [],
-    standardRangeValidation: data.standardRangeValidation
+    standardRangeValidation: data.standardRangeValidation,
+    calibrationRangeMin: data.calibrationRangeMin !== undefined && data.calibrationRangeMin !== null && !isNaN(Number(data.calibrationRangeMin))
+      ? Number(data.calibrationRangeMin)
+      : undefined,
+    calibrationRangeMax: data.calibrationRangeMax !== undefined && data.calibrationRangeMax !== null && !isNaN(Number(data.calibrationRangeMax))
+      ? Number(data.calibrationRangeMax)
+      : undefined,
+    calibrationRange: data.calibrationRangeMin !== undefined && data.calibrationRangeMax !== undefined && !isNaN(Number(data.calibrationRangeMin)) && !isNaN(Number(data.calibrationRangeMax))
+      ? `${Number(data.calibrationRangeMin)} a ${Number(data.calibrationRangeMax)} ${activeInst.unit}`
+      : undefined,
+    isCustomCalibrationRange: data.isCustomCalibrationRange === true ? true : undefined,
   };
 
   const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);
@@ -1862,7 +1875,11 @@ export async function saveCalibrationDoc(data: {
     ...(data.regulatorMode ? { regulatorMode: data.regulatorMode } : {}),
     ...(data.regulatorActuation ? { regulatorActuation: data.regulatorActuation } : {}),
     ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
-    ...(data.humidity !== undefined ? { humidity: data.humidity } : {})
+    ...(data.humidity !== undefined ? { humidity: data.humidity } : {}),
+    ...(report.calibrationRangeMin !== undefined ? { calibrationRangeMin: report.calibrationRangeMin } : {}),
+    ...(report.calibrationRangeMax !== undefined ? { calibrationRangeMax: report.calibrationRangeMax } : {}),
+    ...(report.calibrationRange !== undefined ? { calibrationRange: report.calibrationRange } : {}),
+    ...(report.isCustomCalibrationRange !== undefined ? { isCustomCalibrationRange: report.isCustomCalibrationRange } : {})
   };
 
   const instrumentUpdates = stripUndefinedDeep({
@@ -1886,6 +1903,10 @@ export async function saveCalibrationDoc(data: {
     mpe: data.mpe,
     temperature: data.temperature,
     humidity: data.humidity,
+    calibrationRangeMin: report.calibrationRangeMin,
+    calibrationRangeMax: report.calibrationRangeMax,
+    calibrationRange: report.calibrationRange,
+    isCustomCalibrationRange: report.isCustomCalibrationRange,
     updatedAt: new Date().toISOString(),
   });
   const cacheableInstrumentUpdates = { ...instrumentUpdates };
