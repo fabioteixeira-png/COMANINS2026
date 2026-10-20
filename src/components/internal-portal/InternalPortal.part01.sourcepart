@@ -6544,9 +6544,6 @@ Status atual: ${e.status}.`,
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
           mpe: benchMpe,
-          calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
-          calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
-          isCustomCalibrationRange: isCustomCalibrationRange,
           points:
             selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
               ? []
