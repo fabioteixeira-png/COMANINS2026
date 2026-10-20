@@ -114,6 +114,7 @@ export interface Instrument {
   calibrationRangeMax?: number;
   calibrationRange?: string;
   isCustomCalibrationRange?: boolean;
+  hasCustomCalibrationRange?: boolean;
 }
 
 export interface RncReport {
@@ -329,6 +330,7 @@ export interface CalibrationReport {
   calibrationRangeMax?: number;
   calibrationRange?: string;
   isCustomCalibrationRange?: boolean;
+  hasCustomCalibrationRange?: boolean;
 }
 
 export interface CalibrationAuditLog {

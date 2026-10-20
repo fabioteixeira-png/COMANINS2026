@@ -8837,22 +8837,41 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       return res.status(400).json({ error: `O Padrão ${inactiveSlot.slot} selecionado está arquivado/inativo.` });
     }
 
-    const rawCalMin = req.body?.calibrationRangeMin !== undefined && req.body?.calibrationRangeMin !== null && req.body?.calibrationRangeMin !== ''
-      ? Number(req.body.calibrationRangeMin)
-      : undefined;
-    const rawCalMax = req.body?.calibrationRangeMax !== undefined && req.body?.calibrationRangeMax !== null && req.body?.calibrationRangeMax !== ''
-      ? Number(req.body.calibrationRangeMax)
-      : undefined;
-    const hasCustomCalibrationRange = rawCalMin !== undefined && rawCalMax !== undefined && Number.isFinite(rawCalMin) && Number.isFinite(rawCalMax);
-
     const instrumentMin = Number(instrument.rangeMin);
     const instrumentMax = Number(instrument.rangeMax);
     const instrumentUnit = String(instrument.unit || '').trim();
 
-    // Quando o usuário define a faixa de calibração (ex: padrão BPC-058-60BT-01 atende a -25ºC enquanto instrumento é -50ºC),
-    // a verificação dos padrões de referência tem como base a faixa de calibração informada e não a capacidade total.
-    const effectiveMin = hasCustomCalibrationRange ? rawCalMin : instrumentMin;
-    const effectiveMax = hasCustomCalibrationRange ? rawCalMax : instrumentMax;
+    const isCustomOptionActive = Boolean(
+      req.body?.isCustomCalibrationRange ||
+      req.body?.hasCustomCalibrationRange ||
+      instrument?.isCustomCalibrationRange ||
+      instrument?.hasCustomCalibrationRange
+    );
+
+    const bodyCalMin = req.body?.calibrationRangeMin !== undefined && req.body?.calibrationRangeMin !== null && req.body?.calibrationRangeMin !== ''
+      ? Number(req.body.calibrationRangeMin)
+      : undefined;
+    const bodyCalMax = req.body?.calibrationRangeMax !== undefined && req.body?.calibrationRangeMax !== null && req.body?.calibrationRangeMax !== ''
+      ? Number(req.body.calibrationRangeMax)
+      : undefined;
+
+    const instCalMin = instrument?.calibrationRangeMin !== undefined && instrument?.calibrationRangeMin !== null && instrument?.calibrationRangeMin !== ''
+      ? Number(instrument.calibrationRangeMin)
+      : undefined;
+    const instCalMax = instrument?.calibrationRangeMax !== undefined && instrument?.calibrationRangeMax !== null && instrument?.calibrationRangeMax !== ''
+      ? Number(instrument.calibrationRangeMax)
+      : undefined;
+
+    const rawCalMin = bodyCalMin !== undefined && !isNaN(bodyCalMin) ? bodyCalMin : instCalMin;
+    const rawCalMax = bodyCalMax !== undefined && !isNaN(bodyCalMax) ? bodyCalMax : instCalMax;
+
+    // Quando ativada a especificação de faixa de calibração diferente do range nominal,
+    // o sistema verifica se os padrões cobrem essa faixa de calibração definida e NÃO a nominal.
+    const hasCustomCalibrationRange = (isCustomOptionActive || (rawCalMin !== undefined && rawCalMax !== undefined && (rawCalMin !== instrumentMin || rawCalMax !== instrumentMax))) &&
+      rawCalMin !== undefined && rawCalMax !== undefined && Number.isFinite(rawCalMin) && Number.isFinite(rawCalMax);
+
+    const effectiveMin = hasCustomCalibrationRange ? rawCalMin! : instrumentMin;
+    const effectiveMax = hasCustomCalibrationRange ? rawCalMax! : instrumentMax;
 
     const instrumentMinCanonical = toCanonicalValue(effectiveMin, instrumentUnit);
     const instrumentMaxCanonical = toCanonicalValue(effectiveMax, instrumentUnit);

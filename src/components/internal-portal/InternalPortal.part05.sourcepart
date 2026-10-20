@@ -2763,6 +2763,30 @@
                         ? Number(String(editingInstrumentData.rangeMax2).replace(",", "."))
                         : undefined,
                     unit2: editingInstrumentData.unit2 || "",
+                    calibrationRangeMin:
+                      editingInstrumentData.hasCustomCalibrationRange &&
+                      editingInstrumentData.calibrationRangeMin !== undefined &&
+                      editingInstrumentData.calibrationRangeMin !== "" &&
+                      !isNaN(Number(String(editingInstrumentData.calibrationRangeMin).replace(",", ".")))
+                        ? Number(String(editingInstrumentData.calibrationRangeMin).replace(",", "."))
+                        : undefined,
+                    calibrationRangeMax:
+                      editingInstrumentData.hasCustomCalibrationRange &&
+                      editingInstrumentData.calibrationRangeMax !== undefined &&
+                      editingInstrumentData.calibrationRangeMax !== "" &&
+                      !isNaN(Number(String(editingInstrumentData.calibrationRangeMax).replace(",", ".")))
+                        ? Number(String(editingInstrumentData.calibrationRangeMax).replace(",", "."))
+                        : undefined,
+                    calibrationRange:
+                      editingInstrumentData.hasCustomCalibrationRange &&
+                      editingInstrumentData.calibrationRangeMin !== undefined &&
+                      editingInstrumentData.calibrationRangeMax !== undefined &&
+                      editingInstrumentData.calibrationRangeMin !== "" &&
+                      editingInstrumentData.calibrationRangeMax !== ""
+                        ? `${String(editingInstrumentData.calibrationRangeMin).replace(",", ".")} a ${String(editingInstrumentData.calibrationRangeMax).replace(",", ".")} ${editingInstrumentData.unit || "bar"}`
+                        : undefined,
+                    isCustomCalibrationRange: Boolean(editingInstrumentData.hasCustomCalibrationRange),
+                    hasCustomCalibrationRange: Boolean(editingInstrumentData.hasCustomCalibrationRange),
                     accuracyClass: editingInstrumentData.accuracyClass || "A1",
                     mpe: Number(editingInstrumentData.mpe) || 0,
                     status:

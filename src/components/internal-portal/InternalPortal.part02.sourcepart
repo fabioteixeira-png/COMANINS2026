@@ -1635,6 +1635,83 @@
                         </select>
                       </div>
                     </div>
+
+                    {/* Opção para Administrador definir Faixa de Calibração Específica */}
+                    {isUserAdmin && (
+                      <div className="col-span-full bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 shadow-2xs space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={instHasCustomCalibrationRange}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setInstHasCustomCalibrationRange(checked);
+                                if (!checked) {
+                                  setInstCalibrationRangeMin("");
+                                  setInstCalibrationRangeMax("");
+                                } else {
+                                  if (instCalibrationRangeMin === "" && instRangeMin !== "") {
+                                    setInstCalibrationRangeMin(instRangeMin);
+                                  }
+                                  if (instCalibrationRangeMax === "" && instRangeMax !== "") {
+                                    setInstCalibrationRangeMax(instRangeMax);
+                                  }
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-royal-blue focus:ring-royal-blue"
+                            />
+                            <div>
+                              <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                                <span>Definir Faixa de Calibração Específica</span>
+                                <span className="bg-royal-blue/10 text-royal-blue text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase">
+                                  Administrador
+                                </span>
+                              </span>
+                              <p className="text-[11px] text-slate-500 font-normal mt-0.5 leading-snug">
+                                Marque quando o instrumento for calibrado em uma faixa diferente da capacidade total por incompatibilidade com padrões existentes (ex: instrumento -50 a 100 °C calibrado de -25 a 100 °C).
+                              </p>
+                            </div>
+                          </label>
+                        </div>
+
+                        {instHasCustomCalibrationRange && (
+                          <div className="bg-white border border-blue-300/80 rounded-lg p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
+                            <div>
+                              <label className="block text-slate-700 font-bold mb-1 text-[11px] flex items-center justify-between">
+                                <span>Faixa Calibração Mínima</span>
+                                <span className="text-slate-400 font-normal">({instUnit || "unidade"})</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Ex: -25"
+                                value={instCalibrationRangeMin}
+                                onChange={(e) => setInstCalibrationRangeMin(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold text-xs focus:ring-1 focus:ring-royal-blue text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-slate-700 font-bold mb-1 text-[11px] flex items-center justify-between">
+                                <span>Faixa Calibração Máxima</span>
+                                <span className="text-slate-400 font-normal">({instUnit || "unidade"})</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Ex: 100"
+                                value={instCalibrationRangeMax}
+                                onChange={(e) => setInstCalibrationRangeMax(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold text-xs focus:ring-1 focus:ring-royal-blue text-center"
+                              />
+                            </div>
+                            <div className="col-span-full">
+                              <p className="text-[11px] text-blue-700 font-medium">
+                                ✓ Na bancada de calibração, os 5 pontos serão calculados automaticamente sobre esta faixa, e o certificado exibirá a Faixa Nominal e a Faixa Calibrada.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -2328,6 +2405,22 @@
                                   rangeMin2: inst.rangeMin2 ?? "",
                                   rangeMax2: inst.rangeMax2 ?? "",
                                   unit2: inst.unit2 || "",
+                                  hasCustomCalibrationRange: Boolean(
+                                    (inst as any).isCustomCalibrationRange ||
+                                    (inst as any).hasCustomCalibrationRange ||
+                                    ((inst as any).calibrationRangeMin !== undefined &&
+                                      (inst as any).calibrationRangeMax !== undefined &&
+                                      (Number((inst as any).calibrationRangeMin) !== Number(inst.rangeMin) ||
+                                        Number((inst as any).calibrationRangeMax) !== Number(inst.rangeMax)))
+                                  ),
+                                  calibrationRangeMin:
+                                    (inst as any).calibrationRangeMin !== undefined
+                                      ? (inst as any).calibrationRangeMin
+                                      : "",
+                                  calibrationRangeMax:
+                                    (inst as any).calibrationRangeMax !== undefined
+                                      ? (inst as any).calibrationRangeMax
+                                      : "",
                                 });
                                 setShowEditInstrumentModal(true);
                               }}

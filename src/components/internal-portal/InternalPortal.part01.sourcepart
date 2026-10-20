@@ -1310,6 +1310,9 @@ export default function InternalPortal({
   const [instMaterialDeRetorno, setInstMaterialDeRetorno] =
     useState<any>("Não");
   const [instDataDeRetorno, setInstDataDeRetorno] = useState<any>("");
+  const [instHasCustomCalibrationRange, setInstHasCustomCalibrationRange] = useState<boolean>(false);
+  const [instCalibrationRangeMin, setInstCalibrationRangeMin] = useState<any>("");
+  const [instCalibrationRangeMax, setInstCalibrationRangeMax] = useState<any>("");
 
   const [intakeClientId, setIntakeClientId] = useState<any>("");
   const [intakeContact, setIntakeContact] = useState<any>("");
@@ -3591,12 +3594,24 @@ Status atual: ${e.status}.`,
 
         const nominalMin = Number(inst.rangeMin) || 0;
         const nominalMax = Number(inst.rangeMax) || 0;
-        const initialCalMin = (inst as any).calibrationRangeMin !== undefined ? Number((inst as any).calibrationRangeMin) : nominalMin;
-        const initialCalMax = (inst as any).calibrationRangeMax !== undefined ? Number((inst as any).calibrationRangeMax) : nominalMax;
+        const hasCustomCalibrationDefined = Boolean(
+          (inst as any).isCustomCalibrationRange ||
+          (inst as any).hasCustomCalibrationRange ||
+          ((inst as any).calibrationRangeMin !== undefined &&
+            (inst as any).calibrationRangeMax !== undefined &&
+            (Number((inst as any).calibrationRangeMin) !== nominalMin || Number((inst as any).calibrationRangeMax) !== nominalMax))
+        );
+        const initialCalMin =
+          hasCustomCalibrationDefined && (inst as any).calibrationRangeMin !== undefined
+            ? Number((inst as any).calibrationRangeMin)
+            : nominalMin;
+        const initialCalMax =
+          hasCustomCalibrationDefined && (inst as any).calibrationRangeMax !== undefined
+            ? Number((inst as any).calibrationRangeMax)
+            : nominalMax;
         setBenchCalibrationRangeMin(initialCalMin);
         setBenchCalibrationRangeMax(initialCalMax);
-        const isCustom = (inst as any).calibrationRangeMin !== undefined && (inst as any).calibrationRangeMax !== undefined && (initialCalMin !== nominalMin || initialCalMax !== nominalMax);
-        setIsCustomCalibrationRange(isCustom);
+        setIsCustomCalibrationRange(hasCustomCalibrationDefined);
 
         const min = initialCalMin;
         const max = initialCalMax;
@@ -5717,6 +5732,19 @@ Status atual: ${e.status}.`,
           ? { rangeMax2: Number(String(instRangeMax2).replace(",", ".")) }
           : {}),
         ...(instUnit2 ? { unit2: instUnit2 } : {}),
+        ...(instHasCustomCalibrationRange &&
+        instCalibrationRangeMin !== "" &&
+        instCalibrationRangeMax !== "" &&
+        !isNaN(Number(String(instCalibrationRangeMin).replace(",", "."))) &&
+        !isNaN(Number(String(instCalibrationRangeMax).replace(",", ".")))
+          ? {
+              calibrationRangeMin: Number(String(instCalibrationRangeMin).replace(",", ".")),
+              calibrationRangeMax: Number(String(instCalibrationRangeMax).replace(",", ".")),
+              calibrationRange: `${String(instCalibrationRangeMin).replace(",", ".")} a ${String(instCalibrationRangeMax).replace(",", ".")} ${instUnit || ""}`,
+              isCustomCalibrationRange: true,
+              hasCustomCalibrationRange: true,
+            }
+          : {}),
 
         dataEntrada:
           instDataDaEntrada || new Date().toISOString().split("T")[0],
@@ -5759,6 +5787,9 @@ Status atual: ${e.status}.`,
       setInstRangeMin2("");
       setInstRangeMax2("");
       setInstUnit2("");
+      setInstHasCustomCalibrationRange(false);
+      setInstCalibrationRangeMin("");
+      setInstCalibrationRangeMax("");
       setInstFormError("");
     } catch (err: any) {
       console.error(err);
@@ -6461,6 +6492,7 @@ Status atual: ${e.status}.`,
           standardIds,
           calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
           calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
+          isCustomCalibrationRange,
         }),
       });
       standardRangeValidation = validation;
