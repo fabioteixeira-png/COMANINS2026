@@ -529,11 +529,40 @@ export const detectInstrumentType = (
   }
 
   // Detect Manovacuometro first (since it might also match manometro logic)
+  const numMin = inst.rangeMin !== undefined && inst.rangeMin !== null && inst.rangeMin !== "" ? Number(inst.rangeMin) : NaN;
+  const numMax = inst.rangeMax !== undefined && inst.rangeMax !== null && inst.rangeMax !== "" ? Number(inst.rangeMax) : NaN;
+  const hasCompoundRange = !isNaN(numMin) && !isNaN(numMax) && numMin < 0 && numMax > 0;
+
+  const isTempIndication =
+    fullText.includes("termometro") ||
+    fullText.includes("termômetro") ||
+    fullText.includes("termostato") ||
+    fullText.includes("pt100") ||
+    fullText.includes("pt-100") ||
+    fullText.includes("pt1000") ||
+    fullText.includes("termopar") ||
+    fullText.includes("thermocouple") ||
+    fullText.includes("termoresistencia") ||
+    fullText.includes("termoresistência") ||
+    cat.includes("temp") ||
+    unit.includes("°c") ||
+    unit.includes("ºc") ||
+    unit.includes("degc") ||
+    unit.includes("°f") ||
+    unit.includes("ºf") ||
+    unit === "k" ||
+    tag.startsWith("ti") ||
+    tag.startsWith("te") ||
+    tag.startsWith("tw") ||
+    tag.startsWith("ts");
+
   if (
     fullText.includes("manovacu") ||
     fullText.includes("mano-vacu") ||
     fullText.includes("compound") ||
-    typeSpec === "manovacuometro"
+    typeSpec === "manovacuometro" ||
+    instType === "manovacuometro" ||
+    (hasCompoundRange && !isTempIndication && !fullText.includes("transmissor") && !fullText.includes("transmitter"))
   ) {
     return "manovacuometro";
   }
@@ -2206,43 +2235,132 @@ export default function InternalPortal({
     _inst?: any,
   ) => {
     let pts: any[] = [];
-    if (type === "manovacuometro") {
-      const totalPointsToGenerate = count + 1;
-      const vacPointsCount = Math.floor(totalPointsToGenerate / 2);
-      const pressPointsCount = totalPointsToGenerate - vacPointsCount;
+    const minVal = Number(cMin);
+    const maxVal = Number(cMax);
 
-      let vacStep =
-        vacPointsCount > 1
-          ? Math.abs(cMin) / (vacPointsCount - 1)
-          : Math.abs(cMin);
-      for (let i = 0; i < vacPointsCount; i++) {
-        pts.push({
-          nominal: Number((cMin + vacStep * i).toFixed(2)),
-          refAsc1: "",
-          refDesc1: "",
-          refAsc2: "",
-          refDesc2: "",
-        });
+    // Identificação de instrumento manovacuômetro ou escala composta de pressão (vácuo + pressão manométrica)
+    const isManovacuometro =
+      type === "manovacuometro" ||
+      ((type === "manometro" || !_inst?.unit || !String(_inst.unit).toLowerCase().includes("c")) && minVal < 0 && maxVal > 0);
+
+    // Identificação de instrumento térmico com faixa bipolar (temperaturas negativas e positivas, ex: -50 a +100 °C ou -25 a +100 °C)
+    const isBipolarTermometro =
+      (type === "termometro" || (String(_inst?.unit || "").toLowerCase().includes("c") && minVal < 0 && maxVal > 0)) &&
+      minVal < 0 &&
+      maxVal > 0;
+
+    if (isManovacuometro) {
+      // Metrologia ABNT NBR 14105-1:
+      // Um manovacuômetro possui duas escalas físicas acopladas:
+      // 1. Escala de vácuo (depressão): de cMin até 0 (ex: -760 mmHg a 0, ou -1 bar a 0)
+      // 2. Escala de pressão manométrica: de 0 até cMax (ex: 0 a 2 kgf/cm², ou 0 a 2 bar)
+      // O ponto ZERO (0) é o ponto de equilíbrio atmosférico e referência de transição OBRIGATÓRIO.
+      const nominalPoints: number[] = [];
+
+      if (count === 5) {
+        // Distribuição normativa equilibrada em 5 pontos (ABNT NBR 14105):
+        // 2 pontos na escala de vácuo (100% e 50% de vácuo)
+        // 1 ponto no zero (0)
+        // 2 pontos na escala de pressão positiva (50% e 100% de pressão)
+        // Exemplo: -760 mmHg a +2 kgf/cm² -> [-760, -380, 0, 1.0, 2.0]
+        // Exemplo: -1 bar a +2 bar -> [-1.0, -0.5, 0, 1.0, 2.0]
+        nominalPoints.push(Number(minVal.toFixed(2)));
+        nominalPoints.push(Number((minVal * 0.5).toFixed(2)));
+        nominalPoints.push(0);
+        nominalPoints.push(Number((maxVal * 0.5).toFixed(2)));
+        nominalPoints.push(Number(maxVal.toFixed(2)));
+      } else {
+        // Para 10 pontos (ABNT NBR 14105):
+        // 4 pontos na escala de vácuo (100%, 75%, 50%, 25%)
+        // 1 ponto no zero (0)
+        // 5 pontos na escala de pressão (20%, 40%, 60%, 80%, 100%)
+        nominalPoints.push(Number(minVal.toFixed(2)));
+        nominalPoints.push(Number((minVal * 0.75).toFixed(2)));
+        nominalPoints.push(Number((minVal * 0.5).toFixed(2)));
+        nominalPoints.push(Number((minVal * 0.25).toFixed(2)));
+        nominalPoints.push(0);
+        nominalPoints.push(Number((maxVal * 0.2).toFixed(2)));
+        nominalPoints.push(Number((maxVal * 0.4).toFixed(2)));
+        nominalPoints.push(Number((maxVal * 0.6).toFixed(2)));
+        nominalPoints.push(Number((maxVal * 0.8).toFixed(2)));
+        nominalPoints.push(Number(maxVal.toFixed(2)));
       }
 
-      let pressStep =
-        pressPointsCount > 1 ? cMax / (pressPointsCount - 1) : cMax;
-      for (let i = 0; i < pressPointsCount; i++) {
-        pts.push({
-          nominal: Number((0 + pressStep * i).toFixed(2)),
-          refAsc1: "",
-          refDesc1: "",
-          refAsc2: "",
-          refDesc2: "",
-        });
+      const uniqueNominals = Array.from(new Set(nominalPoints)).sort((a, b) => a - b);
+      pts = uniqueNominals.map((nom) => ({
+        nominal: nom,
+        refAsc1: "",
+        refDesc1: "",
+        refAsc2: "",
+        refDesc2: "",
+      }));
+    } else if (isBipolarTermometro) {
+      // Metrologia ABNT NBR 13881 / IEC 60751 / ITS-90 / DOQ-CGCRE-008:
+      // Em termometria, o ponto 0 °C (ponto do gelo / ponto triplo da água) é a referência
+      // primária fundamental e deve obrigatoriamente fazer parte da calibração bipolar.
+      const nominalPoints: number[] = [];
+
+      if (count === 5) {
+        // Se a faixa negativa for proporcionalmente grande (|minVal| >= 0.35 * maxVal, ex: -50 a +100 ou -30 a +50):
+        // 2 pontos negativos (mínimo e metade do negativo), zero, metade do positivo, máximo positivo.
+        // Ex: -50 a +100 °C -> [-50, -25, 0, 50, 100]
+        // Ex: -30 a +50 °C -> [-30, -15, 0, 25, 50]
+        if (Math.abs(minVal) >= 0.35 * maxVal) {
+          nominalPoints.push(Number(minVal.toFixed(2)));
+          nominalPoints.push(Number((minVal * 0.5).toFixed(2)));
+          nominalPoints.push(0);
+          nominalPoints.push(Number((maxVal * 0.5).toFixed(2)));
+          nominalPoints.push(Number(maxVal.toFixed(2)));
+        } else {
+          // Quando a faixa negativa for menor/assimétrica (ex: calibração reduzida com padrão BPC-058-60BT-01 de -25 a +100 °C):
+          // 1 ponto no limite negativo de calibração (-25 °C)
+          // 1 ponto fundamental em 0 °C
+          // 3 pontos distribuídos na faixa positiva (50%, 75% e 100% de maxVal)
+          // Ex: -25 a 100 °C -> [-25, 0, 50, 75, 100]
+          nominalPoints.push(Number(minVal.toFixed(2)));
+          nominalPoints.push(0);
+          nominalPoints.push(Number((maxVal * 0.5).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.75).toFixed(2)));
+          nominalPoints.push(Number(maxVal.toFixed(2)));
+        }
+      } else {
+        // Para 10 pontos em termometria bipolar:
+        if (Math.abs(minVal) >= 0.35 * maxVal) {
+          nominalPoints.push(Number(minVal.toFixed(2)));
+          nominalPoints.push(Number((minVal * 0.75).toFixed(2)));
+          nominalPoints.push(Number((minVal * 0.5).toFixed(2)));
+          nominalPoints.push(Number((minVal * 0.25).toFixed(2)));
+          nominalPoints.push(0);
+          nominalPoints.push(Number((maxVal * 0.2).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.4).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.6).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.8).toFixed(2)));
+          nominalPoints.push(Number(maxVal.toFixed(2)));
+        } else {
+          nominalPoints.push(Number(minVal.toFixed(2)));
+          nominalPoints.push(Number((minVal * 0.5).toFixed(2)));
+          nominalPoints.push(0);
+          nominalPoints.push(Number((maxVal * 0.15).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.3).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.45).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.6).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.75).toFixed(2)));
+          nominalPoints.push(Number((maxVal * 0.9).toFixed(2)));
+          nominalPoints.push(Number(maxVal.toFixed(2)));
+        }
       }
-      pts = pts.sort((a, b) => a.nominal - b.nominal);
-      pts = pts.filter(
-        (pt, index, self) =>
-          index === self.findIndex((t) => t.nominal === pt.nominal),
-      );
+
+      const uniqueNominals = Array.from(new Set(nominalPoints)).sort((a, b) => a - b);
+      pts = uniqueNominals.map((nom) => ({
+        nominal: nom,
+        refAsc1: "",
+        refDesc1: "",
+        refAsc2: "",
+        refDesc2: "",
+      }));
     } else {
-      const span = Math.abs(cMax - cMin) || 1;
+      // Escala unipolar convencional (ex: 0 a 10 bar, 0 a 100 °C, etc.):
+      const span = Math.abs(maxVal - minVal) || 1;
       let pcts: number[] = [];
       if (count === 10) {
         pcts = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -2256,7 +2374,7 @@ export default function InternalPortal({
       }
 
       pts = pcts.map((pct) => ({
-        nominal: Number((cMin + (span * pct) / 100).toFixed(2)),
+        nominal: Number((minVal + (span * pct) / 100).toFixed(2)),
         refAsc1: "",
         refDesc1: "",
         refAsc2: "",
@@ -6510,6 +6628,15 @@ Status atual: ${e.status}.`,
           calibrationDate: activeInst?.manualCalibrationDateAllowed
             ? benchCalibrationDate
             : undefined,
+          calibrationRangeMin:
+            benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
+          calibrationRangeMax:
+            benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
+          calibrationRange:
+            benchCalibrationRangeMin !== "" && benchCalibrationRangeMax !== ""
+              ? `${benchCalibrationRangeMin} a ${benchCalibrationRangeMax} ${activeInst?.unit || ""}`
+              : undefined,
+          isCustomCalibrationRange,
           auditStartTime: startInfo?.startTime || activeInst?.calibrationStartedAt,
           auditTechnicianName:
             startInfo?.technicianName || benchTechnician || currentUser?.name,
@@ -6764,6 +6891,10 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
           mpe: benchMpe,
           calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
           calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,
+          calibrationRange:
+            benchCalibrationRangeMin !== "" && benchCalibrationRangeMax !== ""
+              ? `${benchCalibrationRangeMin} a ${benchCalibrationRangeMax} ${activeInst?.unit || ""}`
+              : undefined,
           isCustomCalibrationRange: isCustomCalibrationRange,
           points:
             selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"

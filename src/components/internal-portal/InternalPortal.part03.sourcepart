@@ -1353,7 +1353,16 @@
                                       err = Number(
                                         (p.nominal - avg).toFixed(2),
                                       );
-                                      pass = Math.abs(err) <= benchMpe;
+                                      let pointMpe = benchMpe || 1.0;
+                                      if (selectedInstrumentType === "manovacuometro" && p.nominal < 0) {
+                                        const min = activeInst?.rangeMin || 0;
+                                        if (min <= -700) {
+                                          pointMpe = (benchMpe || 1.0) * 760;
+                                        } else if (min <= -25) {
+                                          pointMpe = (benchMpe || 1.0) * 29.92;
+                                        }
+                                      }
+                                      pass = Math.abs(err) <= pointMpe;
                                     }
 
                                     const numPts = benchPoints.length;

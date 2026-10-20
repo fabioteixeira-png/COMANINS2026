@@ -1600,7 +1600,16 @@ export async function saveCalibrationDoc(data: {
       const absErr = Math.abs(err);
       if (absErr > maxError) maxError = absErr;
       
-      const pass = absErr <= (data.mpe !== undefined ? data.mpe : (activeInst.mpe || 1.0));
+      let pointMpe = (data.mpe !== undefined ? data.mpe : (activeInst.mpe || 1.0));
+      if (activeInst.typeSpec === "manovacuometro" && p.nominal < 0) {
+        const min = Number(activeInst.rangeMin) || 0;
+        if (min <= -700) {
+          pointMpe = pointMpe * 760;
+        } else if (min <= -25) {
+          pointMpe = pointMpe * 29.92;
+        }
+      }
+      const pass = absErr <= pointMpe;
       return { ...p, pass };
     }
 
