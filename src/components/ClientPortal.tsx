@@ -1367,6 +1367,111 @@ export default function ClientPortal({
                             <p><span className="font-bold">Resultado geral:</span> {selectedReport?.approved ? 'APROVADO' : 'NÃO APROVADO'}</p>
                           </div>
                         </div>
+                      ) : (selectedReport?.instrumentType === 'transmissor' || inst?.typeSpec === 'transmissor' || (Array.isArray(selectedReport?.transmitterPoints) && selectedReport.transmitterPoints.length > 0)) ? (
+                        (() => {
+                          const sigStr = String(selectedReport?.outputSignal || inst?.outputSignal || '4 a 20 mA DC (HART)');
+                          const sigUnit = sigStr.includes('0 a 10') || sigStr.includes('1 a 5') ? 'V' : 'mA';
+                          const sigSpan = sigStr.includes('0 a 10') ? 10.0 : sigStr.includes('1 a 5') ? 4.0 : 16.0;
+                          const sigLabel = sigStr.includes('0 a 10')
+                            ? 'Zero = 0,000 V | Span = 10,000 V'
+                            : sigStr.includes('1 a 5')
+                              ? 'Zero = 1,000 V | Span = 5,000 V'
+                              : 'Zero = 4,000 mA | Span = 20,000 mA';
+                          const txPoints = Array.isArray(selectedReport?.transmitterPoints) ? selectedReport.transmitterPoints : [];
+                          return (
+                            <div className="space-y-3 text-[10px]">
+                              <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                                <p><span className="font-bold">Sinal de Saída:</span> {sigStr}</p>
+                                <p><span className="font-bold">Span Elétrico:</span> {sigLabel}</p>
+                                <p><span className="font-bold">Classe de Exatidão:</span> {selectedReport?.accuracyClass || inst?.accuracyClass || 'Classe 0.5 (Transmissor)'}</p>
+                                <p><span className="font-bold">Erro Máximo Admissível (EMA):</span> ±{selectedReport?.mpe ?? inst?.mpe ?? 0.5}% Span</p>
+                              </div>
+                              <table className="w-full text-center border-collapse text-[10px]">
+                                <thead>
+                                  <tr className="bg-slate-100 font-bold border border-slate-300">
+                                    <th className="p-1 border border-slate-300">% Faixa</th>
+                                    <th className="p-1 border border-slate-300">PV Nominal ({inst?.unit})</th>
+                                    <th className="p-1 border border-slate-300">Saída Esperada ({sigUnit})</th>
+                                    <th className="p-1 border border-slate-300">Saída Asc. ({sigUnit})</th>
+                                    <th className="p-1 border border-slate-300">Saída Desc. ({sigUnit})</th>
+                                    <th className="p-1 border border-slate-300">Média ({sigUnit})</th>
+                                    <th className="p-1 border border-slate-300">Erro ({sigUnit})</th>
+                                    <th className="p-1 border border-slate-300">Erro (% Span)</th>
+                                    <th className="p-1 border border-slate-300">Resultado</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {txPoints.map((tp: any, idx: number) => {
+                                    const a = Number(tp.measuredMaAsc);
+                                    const d = Number(tp.measuredMaDesc);
+                                    const hasA = tp.measuredMaAsc !== '' && tp.measuredMaAsc !== undefined && Number.isFinite(a);
+                                    const hasD = tp.measuredMaDesc !== '' && tp.measuredMaDesc !== undefined && Number.isFinite(d);
+                                    const avg = tp.avgMa !== undefined ? Number(tp.avgMa) : (hasA && hasD ? (a + d) / 2 : hasA ? a : hasD ? d : 0);
+                                    const err = tp.errMa !== undefined ? Number(tp.errMa) : Number((avg - Number(tp.expectedMa || 0)).toFixed(3));
+                                    const errPct = tp.errPercentSpan !== undefined ? Number(tp.errPercentSpan) : Number(((err / sigSpan) * 100).toFixed(2));
+                                    const pass = tp.pass !== undefined ? tp.pass : Math.abs(errPct) <= Number(selectedReport?.mpe ?? inst?.mpe ?? 0.5);
+                                    return (
+                                      <tr key={idx}>
+                                        <td className="p-1 border border-slate-300 font-bold">{tp.percent}%</td>
+                                        <td className="p-1 border border-slate-300 font-bold">{tp.nominalPv} {inst?.unit}</td>
+                                        <td className="p-1 border border-slate-300">{Number(tp.expectedMa || 0).toFixed(3)}</td>
+                                        <td className="p-1 border border-slate-300">{hasA ? a.toFixed(3) : '-'}</td>
+                                        <td className="p-1 border border-slate-300">{hasD ? d.toFixed(3) : '-'}</td>
+                                        <td className="p-1 border border-slate-300 font-bold">{hasA || hasD ? avg.toFixed(3) : '-'}</td>
+                                        <td className="p-1 border border-slate-300">{hasA || hasD ? `${err > 0 ? '+' : ''}${err.toFixed(3)}` : '-'}</td>
+                                        <td className="p-1 border border-slate-300 font-bold">{hasA || hasD ? `${errPct > 0 ? '+' : ''}${errPct.toFixed(2)}%` : '-'}</td>
+                                        <td className="p-1 border border-slate-300 font-bold">{pass === false ? 'NÃO CONFORME' : 'CONFORME'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })()
+                      ) : (selectedReport?.instrumentType === 'pressostato' || selectedReport?.instrumentType === 'termostato' || inst?.typeSpec === 'pressostato' || inst?.typeSpec === 'termostato' || (Array.isArray(selectedReport?.switchPoints) && selectedReport.switchPoints.length > 0)) ? (
+                        <div className="space-y-3 text-[10px]">
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                            <p><span className="font-bold">Set Point Nominal:</span> {selectedReport?.setPoint ?? inst?.setPoint ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Tolerância de Disparo (EMA):</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
+                            <p><span className="font-bold">Tipo de Contato:</span> {selectedReport?.contactType || inst?.contactType || 'SPDT'}</p>
+                            <p><span className="font-bold">Classe / Norma:</span> {selectedReport?.accuracyClass || inst?.accuracyClass || 'ABNT NBR IEC 60947-5-1'}</p>
+                          </div>
+                          <table className="w-full text-center border-collapse text-[10px]">
+                            <thead>
+                              <tr className="bg-slate-100 font-bold border border-slate-300">
+                                <th className="p-1 border border-slate-300">Ensaio Nº</th>
+                                <th className="p-1 border border-slate-300">Set Point ({inst?.unit})</th>
+                                <th className="p-1 border border-slate-300">Disparo / Atuação ({inst?.unit})</th>
+                                <th className="p-1 border border-slate-300">Desarme / Retorno ({inst?.unit})</th>
+                                <th className="p-1 border border-slate-300">Banda Morta / Diferencial ({inst?.unit})</th>
+                                <th className="p-1 border border-slate-300">Erro de Disparo ({inst?.unit})</th>
+                                <th className="p-1 border border-slate-300">Resultado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(selectedReport?.switchPoints || []).map((sp: any, idx: number) => {
+                                const spNom = Number(selectedReport?.setPoint ?? inst?.setPoint ?? 0);
+                                const trip = Number(sp.pSetAsc);
+                                const reset = Number(sp.pResetDesc);
+                                const deadband = sp.deadband !== undefined ? Number(sp.deadband) : Math.abs(Number((trip - reset).toFixed(2)));
+                                const tripErr = sp.tripError !== undefined ? Number(sp.tripError) : Number((trip - spNom).toFixed(2));
+                                const pass = sp.pass !== undefined ? sp.pass : Math.abs(tripErr) <= Number(selectedReport?.mpe ?? inst?.mpe ?? 1.0);
+                                return (
+                                  <tr key={idx}>
+                                    <td className="p-1 border border-slate-300 font-bold">{sp.repeat || idx + 1}º Ciclo</td>
+                                    <td className="p-1 border border-slate-300">{spNom} {inst?.unit}</td>
+                                    <td className="p-1 border border-slate-300 font-bold">{sp.pSetAsc} {inst?.unit}</td>
+                                    <td className="p-1 border border-slate-300">{sp.pResetDesc} {inst?.unit}</td>
+                                    <td className="p-1 border border-slate-300">{deadband.toFixed(2)} {inst?.unit}</td>
+                                    <td className="p-1 border border-slate-300 font-bold">{tripErr > 0 ? `+${tripErr.toFixed(2)}` : tripErr.toFixed(2)} {inst?.unit}</td>
+                                    <td className="p-1 border border-slate-300 font-bold">{pass === false ? 'NÃO CONFORME' : 'CONFORME'}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       ) : (
                         <>
                           <table className="w-full text-center border-collapse text-[10px]">

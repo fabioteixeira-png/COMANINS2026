@@ -1915,51 +1915,137 @@
             )}
 
             {/* Filters / Inventory Header */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center gap-4 text-xs">
-              <div className="flex items-center space-x-2 flex-grow w-full">
-                <Search className="h-4 w-4 text-slate-500" />
-                <input
-                  type="text"
-                  value={instrumentSearch}
-                  onChange={(e) => setInstrumentSearch(e.target.value)}
-                  placeholder="Pesquisar por Tag, descrição, ou número de série..."
-                  className="bg-transparent border-none text-xs text-slate-900 focus:outline-none w-full"
-                />
-              </div>
-
-              <div className="flex items-center space-x-4 w-full md:w-auto">
-                <div className="flex items-center space-x-1.5 whitespace-nowrap">
-                  <span className="text-slate-500 font-mono">Grandeza:</span>
-                  <select
-                    value={categoryFilter}
-                    onChange={(e) => setCategoryFilter(e.target.value as any)}
-                    className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-900 focus:ring-royal-blue focus:outline-none"
-                  >
-                    <option value="all">Todas</option>
-                    <option value="pressure">Pressão</option>
-                    <option value="temperature">Temperatura</option>
-                  </select>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 text-xs">
+              <div className="flex flex-col md:flex-row items-center gap-4">
+                <div className="flex items-center space-x-2 flex-grow w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+                  <Search className="h-4 w-4 text-slate-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={instrumentSearch}
+                    onChange={(e) => setInstrumentSearch(e.target.value)}
+                    placeholder="Pesquisar por Certificado, Tag, descrição, nº de série, cliente ou ordem de entrada..."
+                    className="bg-transparent border-none text-xs text-slate-900 focus:outline-none w-full"
+                  />
+                  {instrumentSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setInstrumentSearch("")}
+                      className="text-slate-400 hover:text-slate-600 text-[11px] font-bold px-1"
+                      title="Limpar pesquisa"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
-                <div className="flex items-center space-x-1.5 whitespace-nowrap">
-                  <span className="text-slate-500 font-mono">Status:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as any)}
-                    className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-900 focus:ring-royal-blue focus:outline-none"
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                  <div className="flex items-center space-x-1.5 whitespace-nowrap">
+                    <span className="text-slate-500 font-mono">Grandeza:</span>
+                    <select
+                      value={categoryFilter}
+                      onChange={(e) => setCategoryFilter(e.target.value as any)}
+                      className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-900 focus:ring-royal-blue focus:outline-none"
+                    >
+                      <option value="all">Todas</option>
+                      <option value="pressure">Pressão</option>
+                      <option value="temperature">Temperatura</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 whitespace-nowrap">
+                    <span className="text-slate-500 font-mono">Status:</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as any)}
+                      className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-900 focus:ring-royal-blue focus:outline-none"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="Aguardando Calibração">
+                        Aguardando Calibração
+                      </option>
+                      <option value="Em Calibração">Em Calibração</option>
+                      <option value="Calibrado">Calibrado</option>
+                      <option value="Aguardando Emissão de Certificado">
+                        Aguardando Emissão de Certificado
+                      </option>
+                      <option value="Disponível na Prateleira">Disponível na Prateleira</option>
+                      <option value="Entregue">Entregue</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 whitespace-nowrap">
+                    <span className="text-slate-500 font-mono">Itens/pág:</span>
+                    <select
+                      value={calibrationInventoryPageSize}
+                      onChange={(e) => {
+                        const nextSize = Number(e.target.value) || 25;
+                        setCalibrationInventoryPageSize(nextSize);
+                        try {
+                          localStorage.setItem("comanins_cal_page_size", String(nextSize));
+                        } catch {
+                          // ignore storage errors
+                        }
+                      }}
+                      className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-900 font-mono font-bold focus:ring-royal-blue focus:outline-none"
+                      title="Reduzir itens por página melhora o desempenho em computadores mais antigos"
+                    >
+                      <option value={15}>15 (Leve)</option>
+                      <option value={25}>25 (Padrão)</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCalibrationQuickQueueFilter("all")}
+                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
+                      calibrationQuickQueueFilter === "all"
+                        ? "bg-royal-blue text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
                   >
-                    <option value="all">Todos</option>
-                    <option value="Aguardando Calibração">
-                      Aguardando Calibração
-                    </option>
-                    <option value="Em Calibração">Em Calibração</option>
-                    <option value="Calibrado">Calibrado</option>
-                    <option value="Aguardando Emissão de Certificado">
-                      Aguardando Emissão de Certificado
-                    </option>
-                    <option value="Disponível na Prateleira">Disponível na Prateleira</option>
-                    <option value="Entregue">Entregue</option>
-                  </select>
+                    Todos ({instruments.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalibrationQuickQueueFilter("queue")}
+                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
+                      calibrationQuickQueueFilter === "queue"
+                        ? "bg-amber-600 text-white shadow-xs"
+                        : "bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
+                    }`}
+                  >
+                    Fila de Bancada ({countInCalibration})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalibrationQuickQueueFilter("finished")}
+                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
+                      calibrationQuickQueueFilter === "finished"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                    }`}
+                  >
+                    Concluídos / Calibrados ({countCompleted})
+                  </button>
+                </div>
+
+                <div className="text-[11px] text-slate-500 font-mono">
+                  {filteredAndSortedCalibrationInstruments.length === 0
+                    ? "0 instrumentos encontrados"
+                    : (() => {
+                        const total = filteredAndSortedCalibrationInstruments.length;
+                        const totalPages = Math.max(1, Math.ceil(total / calibrationInventoryPageSize));
+                        const safePage = Math.min(Math.max(1, calibrationInventoryPage), totalPages);
+                        const start = (safePage - 1) * calibrationInventoryPageSize + 1;
+                        const end = Math.min(total, start + calibrationInventoryPageSize - 1);
+                        return `Exibindo ${start}–${end} de ${total} instrumentos (Pág. ${safePage}/${totalPages})`;
+                      })()}
                 </div>
               </div>
             </div>
@@ -1981,95 +2067,32 @@
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {(() => {
-                      const filtered = instruments.filter((inst: any) => {
-                        const client = clients.find(
-                          (c: any) => c.id === inst.clientId,
-                        );
-                        const query = (instrumentSearch || "").trim().toLowerCase();
-                        const clientName = (client?.name || "").toLowerCase();
-
-                        const matchesSearch =
-                          !query ||
-                          (inst.tag || "").toLowerCase().includes(query) ||
-                          (inst.description || "").toLowerCase().includes(query) ||
-                          (inst.serialNumber || "").toLowerCase().includes(query) ||
-                          (inst.brand || "").toLowerCase().includes(query) ||
-                          (inst.model || "").toLowerCase().includes(query) ||
-                          (inst.certificateNumber || "").toLowerCase().includes(query) ||
-                          (inst.coma || "").toLowerCase().includes(query) ||
-                          (inst.numeroDaEntrada || "").toLowerCase().includes(query) ||
-                          clientName.includes(query);
-
-                        const matchesCategory =
-                          categoryFilter === "all" ||
-                          !categoryFilter ||
-                          inst.category === categoryFilter;
-
-                        const displayStatus =
-                          inst.status === "Aguardando Triagem"
-                            ? "Aguardando Calibração"
-                            : inst.status || "Aguardando Calibração";
-
-                        const matchesStatus =
-                          statusFilter === "all" ||
-                          !statusFilter ||
-                          inst.status === statusFilter ||
-                          displayStatus === statusFilter;
-
-                        return matchesSearch && matchesCategory && matchesStatus;
-                      });
-
-                      const sorted = [...filtered].sort((a: any, b: any) => {
-                        // Regra do inventário: o certificado numericamente/alfanumericamente
-                        // mais novo deve aparecer primeiro. Registros sem certificado ficam no fim.
-                        const certA = String(a.certificateNumber || a.coma || '').trim();
-                        const certB = String(b.certificateNumber || b.coma || '').trim();
-                        if (certA && certB) {
-                          const cmp = certB.localeCompare(certA, 'pt-BR', {
-                            numeric: true,
-                            sensitivity: 'base',
-                          });
-                          if (cmp !== 0) return cmp;
-                        } else if (certA && !certB) {
-                          return -1;
-                        } else if (!certA && certB) {
-                          return 1;
-                        }
-
-                        const createdA = Date.parse(String(a.createdAt || a.updatedAt || ''));
-                        const createdB = Date.parse(String(b.createdAt || b.updatedAt || ''));
-                        if (Number.isFinite(createdA) && Number.isFinite(createdB) && createdA !== createdB) {
-                          return createdB - createdA;
-                        }
-
-                        return String(b.id || '').localeCompare(String(a.id || ''), 'pt-BR', {
-                          numeric: true,
-                          sensitivity: 'base',
-                        });
-                      });
-
-                      if (sorted.length === 0) {
+                      const totalItems = filteredAndSortedCalibrationInstruments.length;
+                      if (totalItems === 0) {
                         return (
                           <tr>
                             <td colSpan={7} className="p-8 text-center text-slate-500 font-medium">
-                              Nenhum instrumento encontrado.
+                              Nenhum instrumento encontrado para os filtros selecionados.
                             </td>
                           </tr>
                         );
                       }
 
-                      return sorted.map((inst: any) => {
-                      const client = clients.find(
-                        (c: any) => c.id === inst.clientId,
+                      const totalPages = Math.max(1, Math.ceil(totalItems / calibrationInventoryPageSize));
+                      const safePage = Math.min(Math.max(1, calibrationInventoryPage), totalPages);
+                      const startIndex = (safePage - 1) * calibrationInventoryPageSize;
+                      const pageItems = filteredAndSortedCalibrationInstruments.slice(
+                        startIndex,
+                        startIndex + calibrationInventoryPageSize,
                       );
+
+                      return pageItems.map((inst: any) => {
+                      const client = clientsByIdMap.get(inst.clientId);
                       const isRncIssued =
                         inst.status === "Não Conforme" ||
-                        inst.hasRnc ||
-                        rncReports.some((r: any) => r.instrumentId === inst.id);
-                      const hasApprovedReport = reports.some(
-                        (r: any) =>
-                          r.instrumentId === inst.id && r.approved === true,
-                      );
+                        Boolean(inst.hasRnc) ||
+                        rncByInstrumentIdMap.has(inst.id);
+                      const hasApprovedReport = approvedInstrumentIdsSet.has(inst.id);
                       const calibrationLabelData = resolveCalibrationLabelData(
                         inst,
                         reports,
@@ -2146,7 +2169,14 @@
                             {client?.name || "Desconhecido"}
                           </td>
                           <td className="p-3 font-mono text-slate-600">
-                            {inst.rangeMin} a {inst.rangeMax} {inst.unit}
+                            <div>{inst.rangeMin} a {inst.rangeMax} {inst.unit}</div>
+                            {(inst.isCustomCalibrationRange || inst.hasCustomCalibrationRange) &&
+                              inst.calibrationRangeMin !== undefined &&
+                              inst.calibrationRangeMax !== undefined && (
+                                <div className="text-[10px] text-amber-700 font-semibold mt-0.5">
+                                  Cal: {inst.calibrationRangeMin} a {inst.calibrationRangeMax} {inst.unit}
+                                </div>
+                              )}
                           </td>
                           <td className="p-3 font-mono text-slate-700 font-semibold">
                             {inst.tag || "N/A"}
@@ -2272,11 +2302,7 @@
                                 setOpeningCalibrationInstrumentId(inst.id);
                                 try {
                                   let instrumentReady = inst;
-                                  const hasActiveCalibrationReport = reports.some(
-                                    (report: any) =>
-                                      report.instrumentId === inst.id &&
-                                      report.isDeleted !== true,
-                                  );
+                                  const hasActiveCalibrationReport = activeReportInstrumentIdsSet.has(inst.id);
 
                                   if (
                                     isUserAdmin &&
@@ -2577,16 +2603,10 @@
 
 
                             {/* RNC Button (Relatório de Não Conformidade) */}
-                            {(inst.status === "Não Conforme" ||
-                              inst.hasRnc ||
-                              rncReports.some(
-                                (r: any) => r.instrumentId === inst.id,
-                              )) && (
+                            {isRncIssued && (
                               <button
                                 onClick={() => {
-                                  const foundRnc = rncReports.find(
-                                    (r: any) => r.instrumentId === inst.id,
-                                  );
+                                  const foundRnc = rncByInstrumentIdMap.get(inst.id);
                                   const rnc: RncReport = foundRnc || {
                                     id: "rnc_" + inst.id,
                                     rncNumber:
@@ -2649,6 +2669,77 @@
                   </tbody>
                 </table>
               </div>
+
+              {filteredAndSortedCalibrationInstruments.length > calibrationInventoryPageSize && (() => {
+                const totalItems = filteredAndSortedCalibrationInstruments.length;
+                const totalPages = Math.max(1, Math.ceil(totalItems / calibrationInventoryPageSize));
+                const safePage = Math.min(Math.max(1, calibrationInventoryPage), totalPages);
+                const startItem = (safePage - 1) * calibrationInventoryPageSize + 1;
+                const endItem = Math.min(totalItems, startItem + calibrationInventoryPageSize - 1);
+
+                const pageNumbers: number[] = [];
+                const windowStart = Math.max(1, safePage - 2);
+                const windowEnd = Math.min(totalPages, windowStart + 4);
+                for (let p = Math.max(1, windowEnd - 4); p <= windowEnd; p++) {
+                  pageNumbers.push(p);
+                }
+
+                return (
+                  <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                    <div className="text-slate-600 font-mono">
+                      Mostrando <strong>{startItem}</strong> a <strong>{endItem}</strong> de <strong>{totalItems}</strong> instrumentos
+                    </div>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        disabled={safePage <= 1}
+                        onClick={() => setCalibrationInventoryPage(1)}
+                        className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-semibold cursor-pointer"
+                      >
+                        « Primeira
+                      </button>
+                      <button
+                        type="button"
+                        disabled={safePage <= 1}
+                        onClick={() => setCalibrationInventoryPage((p) => Math.max(1, p - 1))}
+                        className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-semibold cursor-pointer"
+                      >
+                        ‹ Anterior
+                      </button>
+                      {pageNumbers.map((pageNum) => (
+                        <button
+                          key={pageNum}
+                          type="button"
+                          onClick={() => setCalibrationInventoryPage(pageNum)}
+                          className={`px-2.5 py-1 rounded border font-mono font-bold cursor-pointer ${
+                            pageNum === safePage
+                              ? "bg-royal-blue text-white border-royal-blue"
+                              : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setCalibrationInventoryPage((p) => Math.min(totalPages, p + 1))}
+                        className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-semibold cursor-pointer"
+                      >
+                        Próxima ›
+                      </button>
+                      <button
+                        type="button"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setCalibrationInventoryPage(totalPages)}
+                        className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-semibold cursor-pointer"
+                      >
+                        Última »
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

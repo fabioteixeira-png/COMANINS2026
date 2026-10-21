@@ -384,44 +384,64 @@
                                     type="button"
                                     onClick={() => {
                                       setSelectedInstrumentType(t);
+                                      const nextSignal =
+                                        activeInst.outputSignal ||
+                                        info.defaultSignal;
                                       setBenchSensorType(
                                         activeInst.sensorType ||
                                           info.defaultSensor,
                                       );
-                                      setBenchOutputSignal(
-                                        activeInst.outputSignal ||
-                                          info.defaultSignal,
+                                      setBenchOutputSignal(nextSignal);
+                                      const effMin =
+                                        benchCalibrationRangeMin !== ""
+                                          ? Number(benchCalibrationRangeMin)
+                                          : Number(activeInst.rangeMin) || 0;
+                                      const effMax =
+                                        benchCalibrationRangeMax !== ""
+                                          ? Number(benchCalibrationRangeMax)
+                                          : Number(activeInst.rangeMax) || 0;
+                                      const resolvedAcc = resolveAccuracyAndMpeForType(
+                                        t,
+                                        activeInst,
+                                        effMin,
+                                        effMax,
                                       );
-                                      if (t === "psv" || t === "pcv") {
+                                      setBenchAccuracyClass(resolvedAcc.accuracyClass);
+                                      setBenchMpe(resolvedAcc.mpe);
+
+                                      if (t === "transmissor") {
+                                        const sigCfg = getTransmitterSignalConfig(nextSignal);
+                                        const span = Math.abs(effMax - effMin) || 1;
+                                        const txPercents = [0, 25, 50, 75, 100];
+                                        setBenchTransmitterPoints(
+                                          txPercents.map((pct, idx) => ({
+                                            percent: pct,
+                                            nominalPv: Number((effMin + (span * pct) / 100).toFixed(2)),
+                                            expectedMa: Number((sigCfg.zero + (sigCfg.span * pct) / 100).toFixed(3)),
+                                            measuredMaAsc: benchTransmitterPoints[idx]?.measuredMaAsc ?? "",
+                                            measuredMaDesc: benchTransmitterPoints[idx]?.measuredMaDesc ?? "",
+                                          })),
+                                        );
+                                      } else if (t === "psv" || t === "pcv") {
                                         setBenchSetPoint(activeInst.setPoint ?? "");
-                                        const savedTolerance = Number(activeInst.mpe);
-                                        setBenchMpe(
-                                          Number.isFinite(savedTolerance) && savedTolerance > 0
-                                            ? savedTolerance
-                                            : 0,
-                                        );
-                                        setBenchAccuracyClass(
-                                          t === "psv"
-                                            ? "Código de projeto / fabricante"
-                                            : "Especificação de processo / fabricante",
-                                        );
-                                        setBenchValveTestMedium(activeInst.valveTestMedium || "Ar / Nitrogênio");
-                                        setBenchSeatLeakageResult("Não avaliado");
+                                        setBenchValveTestMedium((activeInst as any).valveTestMedium || "Ar / Nitrogênio");
                                         setBenchSeatLeakageTestPressure("");
                                         setBenchSeatLeakageMeasured("");
                                         setBenchSeatLeakageLimit("");
                                         if (t === "psv") {
-                                          setBenchValveService(activeInst.valveService || "Gás / Vapor");
-                                          setBenchValveSeatType(activeInst.valveSeatType || "Metal-Metal");
-                                          setBenchAcceptanceCriterion(activeInst.acceptanceCriterion || "");
-                                          setBenchMaxBlowdownPct(activeInst.maxBlowdownPercent ?? "");
+                                          setBenchSeatLeakageResult((activeInst as any).seatLeakageResult || "Aprovado");
+                                          setBenchValveService((activeInst as any).valveService || "Gás / Vapor");
+                                          setBenchValveSeatType((activeInst as any).valveSeatType || "Metal-Metal");
+                                          setBenchAcceptanceCriterion((activeInst as any).acceptanceCriterion || "ASME Sec. VIII / API 527");
+                                          setBenchMaxBlowdownPct((activeInst as any).maxBlowdownPercent ?? "");
                                         } else {
+                                          setBenchSeatLeakageResult("Não avaliado");
                                           setBenchRegulatorMode(
-                                            activeInst.regulatorMode ||
+                                            (activeInst as any).regulatorMode ||
                                               "Redutora de Pressão (controle a jusante)",
                                           );
                                           const regulatorActuation =
-                                            activeInst.regulatorActuation ||
+                                            (activeInst as any).regulatorActuation ||
                                             "Auto-operada / Ação Direta";
                                           setBenchRegulatorActuation(regulatorActuation);
                                           setBenchDroopLimitPercent(
@@ -775,9 +795,19 @@
                                   </label>
                                   <select
                                     value={benchOutputSignal}
-                                    onChange={(e) =>
-                                      setBenchOutputSignal(e.target.value)
-                                    }
+                                    onChange={(e) => {
+                                      const newSig = e.target.value;
+                                      setBenchOutputSignal(newSig);
+                                      const sigCfg = getTransmitterSignalConfig(newSig);
+                                      setBenchTransmitterPoints((prev: any[]) =>
+                                        (prev || []).map((tp: any) => ({
+                                          ...tp,
+                                          expectedMa: Number(
+                                            (sigCfg.zero + (sigCfg.span * Number(tp.percent || 0)) / 100).toFixed(3),
+                                          ),
+                                        })),
+                                      );
+                                    }}
                                     className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono"
                                   >
                                     <option value="4 a 20 mA DC (HART)">
@@ -806,7 +836,7 @@
                                   </label>
                                   <input
                                     type="text"
-                                    value="Zero = 4,000 mA | Span = 20,000 mA"
+                                    value={getTransmitterSignalConfig(benchOutputSignal).label}
                                     readOnly
                                     className="w-full bg-slate-100 border border-slate-300 rounded px-2.5 py-1.5 text-slate-700 font-mono"
                                   />
@@ -935,16 +965,15 @@
                                     onChange={(e) => {
                                       const val = e.target.value;
                                       setBenchAccuracyClass(val);
-                                      const fe = activeInst
-                                        ? Math.max(
-                                            Math.abs(
-                                              Number(activeInst.rangeMax) || 0,
-                                            ),
-                                            Math.abs(
-                                              Number(activeInst.rangeMin) || 0,
-                                            ),
-                                          )
-                                        : 100;
+                                      const effMin =
+                                        benchCalibrationRangeMin !== ""
+                                          ? Number(benchCalibrationRangeMin)
+                                          : Number(activeInst?.rangeMin) || 0;
+                                      const effMax =
+                                        benchCalibrationRangeMax !== ""
+                                          ? Number(benchCalibrationRangeMax)
+                                          : Number(activeInst?.rangeMax) || 0;
+                                      const fe = Math.max(Math.abs(effMax), Math.abs(effMin)) || 10;
                                       let pct = 1.0;
                                       if (val.includes("0.5")) pct = 0.5;
                                       else if (val.includes("1.0")) pct = 1.0;
@@ -973,6 +1002,22 @@
                                       Classe 3.0 (±3.0%) - ABNT IEC 60947
                                     </option>
                                   </select>
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 font-bold mb-1">
+                                    MPE / Tolerância de Disparo ({activeInst.unit}) *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    required
+                                    value={benchMpe}
+                                    onChange={(e) =>
+                                      setBenchMpe(parseFloat(e.target.value) || 0.5)
+                                    }
+                                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 focus:ring-1 focus:ring-royal-blue font-mono font-bold"
+                                    placeholder="Ex: 0.5"
+                                  />
                                 </div>
                               </>
                             )}
@@ -1502,166 +1547,215 @@
                             </div>
                           )}
 
-                          {/* TABLE RENDER: 2. TRANSMISSOR (IEC 60770 - 4-20 mA) */}
-                          {selectedInstrumentType === "transmissor" && (
-                            <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                              <table className="w-full text-left text-[11px] border-collapse bg-white">
-                                <thead>
-                                  <tr className="bg-slate-50 text-slate-700 border-b border-slate-200 font-sans">
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      % Faixa
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      PV Nominal ({activeInst.unit})
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      I Esperada (mA)
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      I Medida Asc. (mA)
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      I Medida Desc. (mA)
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      I Média (mA)
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      Erro Direto (mA)
-                                    </th>
-                                    <th className="p-2 text-center border-r border-slate-200">
-                                      Erro (% Span)
-                                    </th>
-                                    <th className="p-2 text-center">Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 font-mono">
-                                  {benchTransmitterPoints.map(
-                                    (tp: any, index: number) => {
-                                      const hasData =
-                                        tp.measuredMaAsc !== "" ||
-                                        tp.measuredMaDesc !== "";
-                                      const a1 = Number(tp.measuredMaAsc) || 0;
-                                      const d1 = Number(tp.measuredMaDesc) || 0;
+                          {/* TABLE RENDER: 2. TRANSMISSOR (IEC 60770 - 4-20 mA / 0-10 VDC / 1-5 VDC) */}
+                          {selectedInstrumentType === "transmissor" && (() => {
+                            const sigCfg = getTransmitterSignalConfig(benchOutputSignal);
+                            const effectiveTxMpe = benchMpe > 0 ? benchMpe : 0.5;
+                            let allFilledTx = benchTransmitterPoints.length > 0;
+                            let maxErrPctTx = 0;
+                            let maxHystTx = 0;
 
-                                      let count = [
-                                        tp.measuredMaAsc,
-                                        tp.measuredMaDesc,
-                                      ].filter((x) => x !== "").length;
-                                      let avgMa =
-                                        count > 0
-                                          ? (a1 +
-                                              (tp.measuredMaDesc !== ""
-                                                ? d1
-                                                : a1)) /
-                                            count
-                                          : 0;
-                                      let errMa =
-                                        count > 0
-                                          ? Number(
-                                              (avgMa - tp.expectedMa).toFixed(
-                                                3,
-                                              ),
-                                            )
-                                          : 0;
-                                      let errPercentSpan =
-                                        count > 0
-                                          ? Number(
-                                              ((errMa / 16.0) * 100).toFixed(2),
-                                            )
-                                          : 0;
-                                      let pass =
-                                        Math.abs(errPercentSpan) <=
-                                        (benchMpe || 1.0);
+                            return (
+                              <div className="space-y-2">
+                                <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                                  <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                    <thead>
+                                      <tr className="bg-slate-50 text-slate-700 border-b border-slate-200 font-sans">
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          % Faixa
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          PV Nominal ({activeInst.unit})
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          Saída Esperada ({sigCfg.unit})
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          Saída Medida Asc. ({sigCfg.unit})
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          Saída Medida Desc. ({sigCfg.unit})
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          Saída Média ({sigCfg.unit})
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          Erro Direto ({sigCfg.unit})
+                                        </th>
+                                        <th className="p-2 text-center border-r border-slate-200">
+                                          Erro (% Span)
+                                        </th>
+                                        <th className="p-2 text-center">Status</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 font-mono">
+                                      {benchTransmitterPoints.map(
+                                        (tp: any, index: number) => {
+                                          const a1 = Number(tp.measuredMaAsc);
+                                          const d1 = Number(tp.measuredMaDesc);
+                                          const hasAsc =
+                                            tp.measuredMaAsc !== "" &&
+                                            tp.measuredMaAsc !== undefined &&
+                                            Number.isFinite(a1);
+                                          const hasDesc =
+                                            tp.measuredMaDesc !== "" &&
+                                            tp.measuredMaDesc !== undefined &&
+                                            Number.isFinite(d1);
+                                          const hasData = hasAsc || hasDesc;
+                                          if (!hasAsc || !hasDesc) {
+                                            allFilledTx = false;
+                                          }
 
-                                      return (
-                                        <tr
-                                          key={index}
-                                          className="hover:bg-slate-50 transition-colors"
-                                        >
-                                          <td className="p-2 text-center border-r border-slate-200 font-bold bg-purple-50 text-purple-900">
-                                            {tp.percent}%
-                                          </td>
-                                          <td className="p-2 text-center border-r border-slate-200 font-bold">
-                                            {tp.nominalPv}
-                                          </td>
-                                          <td className="p-2 text-center border-r border-slate-200 font-mono font-bold text-slate-600">
-                                            {tp.expectedMa.toFixed(3)}
-                                          </td>
-                                          <td className="p-2 border-r border-slate-200">
-                                            <input
-                                              type="number"
-                                              step="any"
-                                              placeholder="4.000"
-                                              value={tp.measuredMaAsc}
-                                              onChange={(e) => {
-                                                const newPts = [
-                                                  ...benchTransmitterPoints,
-                                                ];
-                                                newPts[index].measuredMaAsc =
-                                                  e.target.value;
-                                                setBenchTransmitterPoints(
-                                                  newPts,
-                                                );
-                                              }}
-                                              className="w-20 bg-white border border-slate-300 rounded px-1.5 py-1 text-slate-900 text-center focus:ring-1 focus:ring-purple-600"
-                                            />
-                                          </td>
-                                          <td className="p-2 border-r border-slate-200">
-                                            <input
-                                              type="number"
-                                              step="any"
-                                              placeholder="4.000"
-                                              value={tp.measuredMaDesc}
-                                              onChange={(e) => {
-                                                const newPts = [
-                                                  ...benchTransmitterPoints,
-                                                ];
-                                                newPts[index].measuredMaDesc =
-                                                  e.target.value;
-                                                setBenchTransmitterPoints(
-                                                  newPts,
-                                                );
-                                              }}
-                                              className="w-20 bg-white border border-slate-300 rounded px-1.5 py-1 text-slate-900 text-center focus:ring-1 focus:ring-purple-600"
-                                            />
-                                          </td>
-                                          <td className="p-2 text-center border-r border-slate-200 font-bold">
-                                            {hasData ? avgMa.toFixed(3) : "-"}
-                                          </td>
-                                          <td
-                                            className={`p-2 text-center border-r border-slate-200 font-bold ${!pass ? "text-rose-600" : "text-slate-800"}`}
-                                          >
-                                            {hasData
-                                              ? errMa > 0
-                                                ? `+${errMa.toFixed(3)}`
-                                                : errMa.toFixed(3)
-                                              : "-"}
-                                          </td>
-                                          <td
-                                            className={`p-2 text-center border-r border-slate-200 font-bold ${!pass ? "text-rose-600" : "text-slate-800"}`}
-                                          >
-                                            {hasData
-                                              ? `${errPercentSpan.toFixed(2)}%`
-                                              : "-"}
-                                          </td>
-                                          <td className="p-2 text-center">
-                                            {hasData && (
-                                              <span
-                                                className={`px-2 py-0.5 rounded font-bold text-[9px] ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
+                                          const avgMa =
+                                            hasAsc && hasDesc
+                                              ? (a1 + d1) / 2
+                                              : hasAsc
+                                                ? a1
+                                                : hasDesc
+                                                  ? d1
+                                                  : 0;
+                                          const errMa = hasData
+                                            ? Number((avgMa - tp.expectedMa).toFixed(3))
+                                            : 0;
+                                          const errPercentSpan = hasData
+                                            ? Number(((errMa / sigCfg.span) * 100).toFixed(2))
+                                            : 0;
+                                          const hyst =
+                                            hasAsc && hasDesc
+                                              ? Math.abs(Number((a1 - d1).toFixed(3)))
+                                              : 0;
+
+                                          if (hasData) {
+                                            if (Math.abs(errPercentSpan) > maxErrPctTx) {
+                                              maxErrPctTx = Math.abs(errPercentSpan);
+                                            }
+                                            if (hyst > maxHystTx) {
+                                              maxHystTx = hyst;
+                                            }
+                                          }
+
+                                          const pass =
+                                            Math.abs(errPercentSpan) <= effectiveTxMpe;
+
+                                          return (
+                                            <tr
+                                              key={index}
+                                              className="hover:bg-slate-50 transition-colors"
+                                            >
+                                              <td className="p-2 text-center border-r border-slate-200 font-bold bg-purple-50 text-purple-900">
+                                                {tp.percent}%
+                                              </td>
+                                              <td className="p-2 text-center border-r border-slate-200 font-bold">
+                                                {tp.nominalPv}
+                                              </td>
+                                              <td className="p-2 text-center border-r border-slate-200 font-mono font-bold text-slate-600">
+                                                {Number(tp.expectedMa).toFixed(3)}
+                                              </td>
+                                              <td className="p-2 border-r border-slate-200 text-center">
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  placeholder={Number(tp.expectedMa).toFixed(3)}
+                                                  value={tp.measuredMaAsc}
+                                                  onChange={(e) => {
+                                                    const newPts = [
+                                                      ...benchTransmitterPoints,
+                                                    ];
+                                                    newPts[index] = {
+                                                      ...newPts[index],
+                                                      measuredMaAsc: e.target.value,
+                                                    };
+                                                    setBenchTransmitterPoints(
+                                                      newPts,
+                                                    );
+                                                  }}
+                                                  className="w-24 bg-white border border-slate-300 rounded px-1.5 py-1 text-slate-900 text-center focus:ring-1 focus:ring-purple-600"
+                                                />
+                                              </td>
+                                              <td className="p-2 border-r border-slate-200 text-center">
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  placeholder={Number(tp.expectedMa).toFixed(3)}
+                                                  value={tp.measuredMaDesc}
+                                                  onChange={(e) => {
+                                                    const newPts = [
+                                                      ...benchTransmitterPoints,
+                                                    ];
+                                                    newPts[index] = {
+                                                      ...newPts[index],
+                                                      measuredMaDesc: e.target.value,
+                                                    };
+                                                    setBenchTransmitterPoints(
+                                                      newPts,
+                                                    );
+                                                  }}
+                                                  className="w-24 bg-white border border-slate-300 rounded px-1.5 py-1 text-slate-900 text-center focus:ring-1 focus:ring-purple-600"
+                                                />
+                                              </td>
+                                              <td className="p-2 text-center border-r border-slate-200 font-bold">
+                                                {hasData ? avgMa.toFixed(3) : "-"}
+                                              </td>
+                                              <td
+                                                className={`p-2 text-center border-r border-slate-200 font-bold ${!pass ? "text-rose-600" : "text-slate-800"}`}
                                               >
-                                                {pass ? "OK" : "EXCEDE MPE"}
-                                              </span>
-                                            )}
-                                          </td>
-                                        </tr>
-                                      );
-                                    },
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                                                {hasData
+                                                  ? errMa > 0
+                                                    ? `+${errMa.toFixed(3)}`
+                                                    : errMa.toFixed(3)
+                                                  : "-"}
+                                              </td>
+                                              <td
+                                                className={`p-2 text-center border-r border-slate-200 font-bold ${!pass ? "text-rose-600" : "text-slate-800"}`}
+                                              >
+                                                {hasData
+                                                  ? `${errPercentSpan > 0 ? "+" : ""}${errPercentSpan.toFixed(2)}%`
+                                                  : "-"}
+                                              </td>
+                                              <td className="p-2 text-center">
+                                                {hasData && (
+                                                  <span
+                                                    className={`px-2 py-0.5 rounded font-bold text-[9px] ${pass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
+                                                  >
+                                                    {pass ? "OK" : "EXCEDE MPE"}
+                                                  </span>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          );
+                                        },
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                                  <div className="flex flex-wrap items-center gap-4 text-slate-700 font-mono">
+                                    <span>
+                                      <strong>Maior Erro:</strong> {maxErrPctTx.toFixed(2)}% Span (Limite: ±{effectiveTxMpe}% Span)
+                                    </span>
+                                    <span>
+                                      <strong>Maior Histerese:</strong> {maxHystTx.toFixed(3)} {sigCfg.unit}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    {!allFilledTx ? (
+                                      <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px]">
+                                        Preencha todas as leituras Ascendentes e Descendentes
+                                      </span>
+                                    ) : maxErrPctTx <= effectiveTxMpe ? (
+                                      <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                                        APROVADO — Todos os pontos dentro de ±{effectiveTxMpe}% Span
+                                      </span>
+                                    ) : (
+                                      <span className="px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px]">
+                                        REPROVADO — Erro máximo ({maxErrPctTx.toFixed(2)}% Span) excede ±{effectiveTxMpe}% Span
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* TABLE RENDER: 3. PRESSOSTATO & TERMOSTATO (NBR IEC 60947-5-1 / DIN 3440) */}
                           {(selectedInstrumentType === "pressostato" ||
@@ -3628,6 +3722,104 @@
                                   <p><span className="font-bold">Resultado do droop:</span> {report?.flowPerformanceTested ? (report?.droopPass === false ? "NÃO CONFORME" : "CONFORME") : "Não aplicável ao ensaio estático"}</p>
                                   <p><span className="font-bold">Resultado geral:</span> {report?.approved ? "APROVADO" : "NÃO APROVADO"}</p>
                                 </div>
+                              </div>
+                            ) : certificateInstrumentType === "transmissor" || (Array.isArray(report?.transmitterPoints) && report.transmitterPoints.length > 0) ? (
+                              (() => {
+                                const sigCfg = getTransmitterSignalConfig(report?.outputSignal || inst.outputSignal);
+                                const txPoints = Array.isArray(report?.transmitterPoints) ? report.transmitterPoints : [];
+                                return (
+                                  <div className="space-y-3 text-[10px]">
+                                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                                      <p><span className="font-bold">Sinal de Saída:</span> {report?.outputSignal || inst.outputSignal || "4 a 20 mA DC (HART)"}</p>
+                                      <p><span className="font-bold">Span Elétrico:</span> {sigCfg.label}</p>
+                                      <p><span className="font-bold">Classe de Exatidão:</span> {report?.accuracyClass || inst.accuracyClass || "Classe 0.5 (Transmissor)"}</p>
+                                      <p><span className="font-bold">Erro Máximo Admissível (EMA):</span> ±{report?.mpe ?? inst.mpe ?? 0.5}% Span</p>
+                                    </div>
+                                    <table className="w-full text-center border-collapse text-[10px]">
+                                      <thead>
+                                        <tr className="bg-slate-100 font-bold border border-slate-300">
+                                          <th className="p-1 border border-slate-300">% Faixa</th>
+                                          <th className="p-1 border border-slate-300">PV Nominal ({inst.unit})</th>
+                                          <th className="p-1 border border-slate-300">Saída Esperada ({sigCfg.unit})</th>
+                                          <th className="p-1 border border-slate-300">Saída Asc. ({sigCfg.unit})</th>
+                                          <th className="p-1 border border-slate-300">Saída Desc. ({sigCfg.unit})</th>
+                                          <th className="p-1 border border-slate-300">Média ({sigCfg.unit})</th>
+                                          <th className="p-1 border border-slate-300">Erro ({sigCfg.unit})</th>
+                                          <th className="p-1 border border-slate-300">Erro (% Span)</th>
+                                          <th className="p-1 border border-slate-300">Resultado</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {txPoints.map((tp: any, idx: number) => {
+                                          const a = Number(tp.measuredMaAsc);
+                                          const d = Number(tp.measuredMaDesc);
+                                          const hasA = tp.measuredMaAsc !== "" && tp.measuredMaAsc !== undefined && Number.isFinite(a);
+                                          const hasD = tp.measuredMaDesc !== "" && tp.measuredMaDesc !== undefined && Number.isFinite(d);
+                                          const avg = tp.avgMa !== undefined ? Number(tp.avgMa) : (hasA && hasD ? (a + d) / 2 : hasA ? a : hasD ? d : 0);
+                                          const err = tp.errMa !== undefined ? Number(tp.errMa) : Number((avg - Number(tp.expectedMa || 0)).toFixed(3));
+                                          const errPct = tp.errPercentSpan !== undefined ? Number(tp.errPercentSpan) : Number(((err / sigCfg.span) * 100).toFixed(2));
+                                          const pass = tp.pass !== undefined ? tp.pass : Math.abs(errPct) <= Number(report?.mpe ?? inst.mpe ?? 0.5);
+                                          return (
+                                            <tr key={idx}>
+                                              <td className="p-1 border border-slate-300 font-bold">{tp.percent}%</td>
+                                              <td className="p-1 border border-slate-300 font-bold">{tp.nominalPv} {inst.unit}</td>
+                                              <td className="p-1 border border-slate-300">{Number(tp.expectedMa || 0).toFixed(3)}</td>
+                                              <td className="p-1 border border-slate-300">{hasA ? a.toFixed(3) : "-"}</td>
+                                              <td className="p-1 border border-slate-300">{hasD ? d.toFixed(3) : "-"}</td>
+                                              <td className="p-1 border border-slate-300 font-bold">{hasA || hasD ? avg.toFixed(3) : "-"}</td>
+                                              <td className="p-1 border border-slate-300">{hasA || hasD ? `${err > 0 ? "+" : ""}${err.toFixed(3)}` : "-"}</td>
+                                              <td className="p-1 border border-slate-300 font-bold">{hasA || hasD ? `${errPct > 0 ? "+" : ""}${errPct.toFixed(2)}%` : "-"}</td>
+                                              <td className="p-1 border border-slate-300 font-bold">{pass === false ? "NÃO CONFORME" : "CONFORME"}</td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                );
+                              })()
+                            ) : certificateInstrumentType === "pressostato" || certificateInstrumentType === "termostato" || (Array.isArray(report?.switchPoints) && report.switchPoints.length > 0) ? (
+                              <div className="space-y-3 text-[10px]">
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
+                                  <p><span className="font-bold">Set Point Nominal:</span> {report?.setPoint ?? inst.setPoint ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Tolerância de Disparo (EMA):</span> ±{report?.mpe ?? inst.mpe ?? "—"} {inst.unit}</p>
+                                  <p><span className="font-bold">Tipo de Contato:</span> {report?.contactType || inst.contactType || "SPDT"}</p>
+                                  <p><span className="font-bold">Classe / Norma:</span> {report?.accuracyClass || inst.accuracyClass || "ABNT NBR IEC 60947-5-1"}</p>
+                                </div>
+                                <table className="w-full text-center border-collapse text-[10px]">
+                                  <thead>
+                                    <tr className="bg-slate-100 font-bold border border-slate-300">
+                                      <th className="p-1 border border-slate-300">Ensaio Nº</th>
+                                      <th className="p-1 border border-slate-300">Set Point ({inst.unit})</th>
+                                      <th className="p-1 border border-slate-300">Disparo / Atuação ({inst.unit})</th>
+                                      <th className="p-1 border border-slate-300">Desarme / Retorno ({inst.unit})</th>
+                                      <th className="p-1 border border-slate-300">Banda Morta / Diferencial ({inst.unit})</th>
+                                      <th className="p-1 border border-slate-300">Erro de Disparo ({inst.unit})</th>
+                                      <th className="p-1 border border-slate-300">Resultado</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(report?.switchPoints || []).map((sp: any, idx: number) => {
+                                      const spNom = Number(report?.setPoint ?? inst.setPoint ?? 0);
+                                      const trip = Number(sp.pSetAsc);
+                                      const reset = Number(sp.pResetDesc);
+                                      const deadband = sp.deadband !== undefined ? Number(sp.deadband) : Math.abs(Number((trip - reset).toFixed(2)));
+                                      const tripErr = sp.tripError !== undefined ? Number(sp.tripError) : Number((trip - spNom).toFixed(2));
+                                      const pass = sp.pass !== undefined ? sp.pass : Math.abs(tripErr) <= Number(report?.mpe ?? inst.mpe ?? 1.0);
+                                      return (
+                                        <tr key={idx}>
+                                          <td className="p-1 border border-slate-300 font-bold">{sp.repeat || idx + 1}º Ciclo</td>
+                                          <td className="p-1 border border-slate-300">{spNom} {inst.unit}</td>
+                                          <td className="p-1 border border-slate-300 font-bold">{sp.pSetAsc} {inst.unit}</td>
+                                          <td className="p-1 border border-slate-300">{sp.pResetDesc} {inst.unit}</td>
+                                          <td className="p-1 border border-slate-300">{deadband.toFixed(2)} {inst.unit}</td>
+                                          <td className="p-1 border border-slate-300 font-bold">{tripErr > 0 ? `+${tripErr.toFixed(2)}` : tripErr.toFixed(2)} {inst.unit}</td>
+                                          <td className="p-1 border border-slate-300 font-bold">{pass === false ? "NÃO CONFORME" : "CONFORME"}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
                               </div>
                             ) : (
                               <>

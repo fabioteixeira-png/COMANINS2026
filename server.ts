@@ -8521,7 +8521,7 @@ function extractMeasurementUnitFromRange(raw: string): { unit: string; matchedTe
     { regex: /\bk\s*ohm\b|\bk[Ωω]\b/i, unit: 'kohm' },
     { regex: /\bm\s*ohm\b/i, unit: 'mohm' },
     { regex: /\bohm\b|[Ωω]/i, unit: 'ohm' },
-    { regex: /(?<![a-z])volt(?:s)?(?![a-z])|(?<![a-z])v(?![a-z])/i, unit: 'v' },
+    { regex: /(?<![a-z])volt(?:s)?(?![a-z])|(?<![a-z])v(?:dc|ac|cc|ca)?(?![a-z])/i, unit: 'v' },
     { regex: /(?<![a-z])amp(?:ere)?s?(?![a-z])/i, unit: 'a' },
     { regex: /(?<![A-Za-z])A(?![A-Za-z])/, unit: 'a' },
     { regex: /(?<![a-z])kelvin(?![a-z])|(?<![a-z])k(?![a-z])/i, unit: 'k' },
@@ -8887,7 +8887,14 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
     const requiredPrimaryMax = Math.max(instrumentMinCanonical.value, instrumentMaxCanonical.value);
     const primaryCanonicalUnit = instrumentMinCanonical.unit;
 
-    const outputSignal = String(instrument.outputSignal || '').trim();
+    const isTransmitterInst =
+      String(req.body?.instrumentType || instrument.typeSpec || '').toLowerCase() === 'transmissor' ||
+      /transmissor|transmitter/i.test(`${instrument.description || ''} ${instrument.category || ''} ${instrument.tag || ''}`);
+    const outputSignal = String(
+      req.body?.outputSignal ||
+      instrument.outputSignal ||
+      (isTransmitterInst ? '4 a 20 mA' : '')
+    ).trim();
     const parsedOutputSignal = outputSignal ? parseRangeText(outputSignal) : null;
     const hasOutputRange = Boolean(
       parsedOutputSignal &&

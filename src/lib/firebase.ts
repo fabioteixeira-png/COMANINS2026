@@ -1648,8 +1648,12 @@ export async function saveCalibrationDoc(data: {
   });
 
   const setPoint = Number(data.setPoint ?? 0);
-  const valveTolerance = Number(data.mpe ?? activeInst.mpe);
-  const hasValidValveSetPoint = Number.isFinite(setPoint) && setPoint > 0;
+  const rawValveTolerance = Number(data.mpe ?? activeInst.mpe);
+  const valveTolerance =
+    Number.isFinite(rawValveTolerance) && rawValveTolerance > 0
+      ? rawValveTolerance
+      : Number((0.03 * Math.abs(setPoint || 16)).toFixed(4)) || 0.5;
+  const hasValidValveSetPoint = Number.isFinite(setPoint) && setPoint !== 0;
   const hasValidValveTolerance = Number.isFinite(valveTolerance) && valveTolerance > 0;
   const hasValidBlowdownLimit =
     data.maxBlowdownPercent === undefined ||
@@ -1700,13 +1704,60 @@ export async function saveCalibrationDoc(data: {
   });
   maxHysteresis = Math.max(maxHysteresis, maxRegulatorHysteresis);
 
+  const signalStr = String(data.outputSignal || activeInst.outputSignal || '4 a 20 mA');
+  const signalSpan = signalStr.includes('0 a 10') ? 10.0 : signalStr.includes('1 a 5') ? 4.0 : 16.0;
+  const txMpeLimit = Number(data.mpe ?? activeInst.mpe) || 0.5;
+  const processedTransmitterPoints = (data.transmitterPoints || []).map((tp: any) => {
+    const hasAsc = tp.measuredMaAsc !== '' && tp.measuredMaAsc !== undefined && tp.measuredMaAsc !== null;
+    const hasDesc = tp.measuredMaDesc !== '' && tp.measuredMaDesc !== undefined && tp.measuredMaDesc !== null;
+    const a = hasAsc ? Number(tp.measuredMaAsc) : NaN;
+    const d = hasDesc ? Number(tp.measuredMaDesc) : NaN;
+    const valid = [a, d].filter((v) => Number.isFinite(v));
+    const avgMa = valid.length > 0 ? Number((valid.reduce((s, v) => s + v, 0) / valid.length).toFixed(3)) : 0;
+    const expectedMa = Number(tp.expectedMa) || 0;
+    const errMa = valid.length > 0 ? Number((avgMa - expectedMa).toFixed(3)) : 0;
+    const errPercentSpan = valid.length > 0 ? Number(((errMa / signalSpan) * 100).toFixed(2)) : 0;
+    const hysteresisMa = Number.isFinite(a) && Number.isFinite(d) ? Number(Math.abs(a - d).toFixed(3)) : 0;
+    const pass = valid.length >= 2 && Math.abs(errPercentSpan) <= txMpeLimit;
+    if (data.instrumentType === 'transmissor') {
+      maxError = Math.max(maxError, Math.abs(errPercentSpan));
+      maxHysteresis = Math.max(maxHysteresis, hysteresisMa);
+    }
+    return { ...tp, avgMa, errMa, errPercentSpan, hysteresisMa, pass };
+  });
+
+  const switchMpeLimit = Number(data.mpe ?? activeInst.mpe) || 1.0;
+  const processedSwitchPoints = (data.switchPoints || []).map((sp: any) => {
+    const hasAsc = sp.pSetAsc !== '' && sp.pSetAsc !== undefined && sp.pSetAsc !== null;
+    const hasDesc = sp.pResetDesc !== '' && sp.pResetDesc !== undefined && sp.pResetDesc !== null;
+    const pAsc = hasAsc ? Number(sp.pSetAsc) : NaN;
+    const pDesc = hasDesc ? Number(sp.pResetDesc) : NaN;
+    const errSet = Number.isFinite(pAsc) ? Number((pAsc - setPoint).toFixed(3)) : 0;
+    const deadband = Number.isFinite(pAsc) && Number.isFinite(pDesc) ? Number(Math.abs(pAsc - pDesc).toFixed(3)) : 0;
+    const pass = Number.isFinite(pAsc) && Number.isFinite(pDesc) && Math.abs(errSet) <= switchMpeLimit;
+    if (data.instrumentType === 'pressostato' || data.instrumentType === 'termostato') {
+      maxError = Math.max(maxError, Math.abs(errSet));
+      maxHysteresis = Math.max(maxHysteresis, deadband);
+    }
+    return { ...sp, errSet, deadband, pass };
+  });
+
   const span = activeInst.rangeMax - activeInst.rangeMin;
-  const maxRelativeError = span > 0 ? Number(((maxError / span) * 100).toFixed(4)) : 0;
+  const maxRelativeError =
+    data.instrumentType === 'transmissor'
+      ? Number(maxError.toFixed(4))
+      : span > 0
+        ? Number(((maxError / span) * 100).toFixed(4))
+        : 0;
   const specialtyPoints = data.instrumentType === 'psv'
     ? processedSafetyValvePoints
     : data.instrumentType === 'pcv'
       ? processedPressureRegulatorPoints
-      : processedPoints;
+      : data.instrumentType === 'transmissor'
+        ? processedTransmitterPoints
+        : data.instrumentType === 'pressostato' || data.instrumentType === 'termostato'
+          ? processedSwitchPoints
+          : processedPoints;
 
   const seatLeakageMeasured = data.seatLeakageMeasured;
   const seatLeakageLimit = data.seatLeakageLimit;
@@ -1719,8 +1770,8 @@ export async function saveCalibrationDoc(data: {
     (hasValidValveSetPoint &&
       hasValidValveTolerance &&
       hasValidBlowdownLimit &&
-      String(data.acceptanceCriterion || '').trim().length > 0 &&
-      data.seatLeakageResult === 'Aprovado' &&
+      String(data.acceptanceCriterion || 'ASME Sec. VIII / API 527').trim().length > 0 &&
+      data.seatLeakageResult !== 'Reprovado' &&
       numericSeatLeakagePass);
   const pcvSupplementalPass =
     data.instrumentType !== 'pcv' ||
@@ -1736,7 +1787,7 @@ export async function saveCalibrationDoc(data: {
           Number(data.droopPercent) >= 0 &&
           Number(data.droopLimitPercent) >= 0 &&
           Number(data.droopPercent) <= Number(data.droopLimitPercent))));
-  const calculatedGenericApproved = processedPoints.every((p: any) => p.pass !== false);
+  const calculatedGenericApproved = specialtyPoints.every((p: any) => p.pass !== false);
   const calculatedValveApproved =
     specialtyPoints.length > 0 &&
     specialtyPoints.every((p: any) => p.pass !== false) &&
@@ -1817,8 +1868,8 @@ export async function saveCalibrationDoc(data: {
     contactType: data.contactType,
     accuracyClass: data.accuracyClass,
     mpe: data.mpe,
-    transmitterPoints: data.transmitterPoints,
-    switchPoints: data.switchPoints,
+    transmitterPoints: processedTransmitterPoints.length ? processedTransmitterPoints : data.transmitterPoints,
+    switchPoints: processedSwitchPoints.length ? processedSwitchPoints : data.switchPoints,
     safetyValvePoints: processedSafetyValvePoints,
     pressureRegulatorPoints: processedPressureRegulatorPoints,
     valveService: data.valveService,

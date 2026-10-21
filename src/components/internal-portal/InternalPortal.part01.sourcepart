@@ -2054,6 +2054,130 @@ export default function InternalPortal({
     return map;
   }, [instruments]);
 
+  const clientsByIdMap = React.useMemo(() => {
+    const map = new Map<string, Client>();
+    for (const c of clients) {
+      if (c?.id) map.set(c.id, c);
+      if (c?.name) map.set(c.name, c);
+    }
+    return map;
+  }, [clients]);
+
+  const rncByInstrumentIdMap = React.useMemo(() => {
+    const map = new Map<string, RncReport>();
+    for (const r of rncReports) {
+      if (r?.instrumentId && !map.has(r.instrumentId)) {
+        map.set(r.instrumentId, r);
+      }
+    }
+    return map;
+  }, [rncReports]);
+
+  const { approvedInstrumentIdsSet, activeReportInstrumentIdsSet } = React.useMemo(() => {
+    const approvedSet = new Set<string>();
+    const activeSet = new Set<string>();
+    for (const r of reports) {
+      if (!r?.instrumentId) continue;
+      if ((r as any).isDeleted !== true) {
+        activeSet.add(r.instrumentId);
+      }
+      if (r.approved === true && (r as any).isDeleted !== true) {
+        approvedSet.add(r.instrumentId);
+      }
+    }
+    return { approvedInstrumentIdsSet: approvedSet, activeReportInstrumentIdsSet: activeSet };
+  }, [reports]);
+
+  const [calibrationInventoryPage, setCalibrationInventoryPage] = useState<number>(1);
+  const [calibrationInventoryPageSize, setCalibrationInventoryPageSize] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem("comanins_cal_page_size"));
+      return [15, 25, 50, 100].includes(saved) ? saved : 25;
+    } catch {
+      return 25;
+    }
+  });
+  const [calibrationQuickQueueFilter, setCalibrationQuickQueueFilter] = useState<"all" | "queue" | "finished">("all");
+
+  React.useEffect(() => {
+    setCalibrationInventoryPage(1);
+  }, [instrumentSearch, categoryFilter, statusFilter, calibrationQuickQueueFilter, calibrationInventoryPageSize]);
+
+  const filteredAndSortedCalibrationInstruments = React.useMemo(() => {
+    const query = (instrumentSearch || "").trim().toLowerCase();
+    const filtered = instruments.filter((inst: any) => {
+      if (query) {
+        const client = clientsByIdMap.get(inst.clientId);
+        const clientName = (client?.name || "").toLowerCase();
+        const matchesSearch =
+          (inst.tag || "").toLowerCase().includes(query) ||
+          (inst.description || "").toLowerCase().includes(query) ||
+          (inst.serialNumber || "").toLowerCase().includes(query) ||
+          (inst.brand || "").toLowerCase().includes(query) ||
+          (inst.model || "").toLowerCase().includes(query) ||
+          (inst.certificateNumber || "").toLowerCase().includes(query) ||
+          (inst.coma || "").toLowerCase().includes(query) ||
+          (inst.numeroDaEntrada || "").toLowerCase().includes(query) ||
+          clientName.includes(query);
+        if (!matchesSearch) return false;
+      }
+
+      if (categoryFilter && categoryFilter !== "all" && inst.category !== categoryFilter) {
+        return false;
+      }
+
+      const displayStatus =
+        inst.status === "Aguardando Triagem"
+          ? "Aguardando Calibração"
+          : inst.status || "Aguardando Calibração";
+
+      if (
+        statusFilter &&
+        statusFilter !== "all" &&
+        inst.status !== statusFilter &&
+        displayStatus !== statusFilter
+      ) {
+        return false;
+      }
+
+      if (calibrationQuickQueueFilter === "queue") {
+        const isQueue =
+          displayStatus === "Aguardando Calibração" ||
+          displayStatus === "Em Calibração";
+        if (!isQueue) return false;
+      } else if (calibrationQuickQueueFilter === "finished") {
+        const isFinished =
+          displayStatus !== "Aguardando Calibração" &&
+          displayStatus !== "Em Calibração";
+        if (!isFinished) return false;
+      }
+
+      return true;
+    });
+
+    const collator = new Intl.Collator("pt-BR", { numeric: true, sensitivity: "base" });
+    return filtered.sort((a: any, b: any) => {
+      const certA = String(a.certificateNumber || a.coma || "").trim();
+      const certB = String(b.certificateNumber || b.coma || "").trim();
+      if (certA && certB) {
+        const cmp = collator.compare(certB, certA);
+        if (cmp !== 0) return cmp;
+      } else if (certA && !certB) {
+        return -1;
+      } else if (!certA && certB) {
+        return 1;
+      }
+
+      const createdA = Date.parse(String(a.createdAt || a.updatedAt || ""));
+      const createdB = Date.parse(String(b.createdAt || b.updatedAt || ""));
+      if (Number.isFinite(createdA) && Number.isFinite(createdB) && createdA !== createdB) {
+        return createdB - createdA;
+      }
+
+      return collator.compare(String(b.id || ""), String(a.id || ""));
+    });
+  }, [instruments, clientsByIdMap, instrumentSearch, categoryFilter, statusFilter, calibrationQuickQueueFilter]);
+
   const dashboardCounts = React.useMemo(() => {
     let completed = 0;
     let inCalibration = 0;
@@ -2387,6 +2511,178 @@ export default function InternalPortal({
     return pts;
   };
 
+  const getTransmitterSignalConfig = (signal?: string) => {
+    const s = String(signal || "4 a 20 mA DC (HART)");
+    if (s.includes("0 a 10")) {
+      return {
+        zero: 0.0,
+        full: 10.0,
+        span: 10.0,
+        unit: "V",
+        label: "Zero = 0,000 V | Span = 10,000 V",
+      };
+    }
+    if (s.includes("1 a 5")) {
+      return {
+        zero: 1.0,
+        full: 5.0,
+        span: 4.0,
+        unit: "V",
+        label: "Zero = 1,000 V | Span = 5,000 V",
+      };
+    }
+    return {
+      zero: 4.0,
+      full: 20.0,
+      span: 16.0,
+      unit: "mA",
+      label: "Zero = 4,000 mA | Span = 20,000 mA",
+    };
+  };
+
+  const resolveAccuracyAndMpeForType = (
+    type: InstrumentType,
+    inst: any,
+    minVal: number,
+    maxVal: number,
+  ): { accuracyClass: string; mpe: number } => {
+    const savedClass = String(inst?.accuracyClass || "").trim();
+    const savedMpe = Number(inst?.mpe);
+
+    let fe = Math.max(Math.abs(maxVal), Math.abs(minVal));
+    if (type === "manovacuometro") {
+      let minInMaxUnit = Math.abs(minVal);
+      if (minVal <= -700) minInMaxUnit = Math.abs(minVal) / 760;
+      else if (minVal <= -25) minInMaxUnit = Math.abs(minVal) / 29.92;
+      fe = minInMaxUnit + Math.abs(maxVal);
+    } else if (minVal < 0 && maxVal > 0) {
+      fe = Math.abs(maxVal - minVal);
+    }
+
+    if (type === "psv" || type === "pcv") {
+      const defaultValveMpe =
+        Number((0.03 * Math.abs(Number(inst?.setPoint) || minVal || maxVal || 16)).toFixed(3)) || 0.5;
+      return {
+        accuracyClass:
+          type === "psv"
+            ? "Código de projeto / fabricante"
+            : "Especificação de processo / fabricante",
+        mpe: Number.isFinite(savedMpe) && savedMpe > 0 ? savedMpe : defaultValveMpe,
+      };
+    }
+
+    if (type === "transmissor") {
+      const validTxClasses = [
+        "Classe 0.075 (Transmissor)",
+        "Classe 0.1 (Transmissor)",
+        "Classe 0.2 (Transmissor)",
+        "Classe 0.25 (Transmissor)",
+        "Classe 0.5 (Transmissor)",
+        "Classe 1.0 (Transmissor)",
+      ];
+      const txClass = validTxClasses.includes(savedClass)
+        ? savedClass
+        : "Classe 0.5 (Transmissor)";
+      let pct = 0.5;
+      if (txClass.includes("0.075")) pct = 0.075;
+      else if (txClass.includes("0.1")) pct = 0.1;
+      else if (txClass.includes("0.20") || txClass.includes("0.2 ")) pct = 0.2;
+      else if (txClass.includes("0.25")) pct = 0.25;
+      else if (txClass.includes("0.5")) pct = 0.5;
+      else if (txClass.includes("1.0")) pct = 1.0;
+
+      // Se o instrumento já tinha classe de transmissor salva, usa o MPE (% Span) salvo; caso contrário, usa o pct da classe
+      const mpe =
+        validTxClasses.includes(savedClass) && Number.isFinite(savedMpe) && savedMpe > 0 && savedMpe <= 5
+          ? savedMpe
+          : pct;
+      return { accuracyClass: txClass, mpe };
+    }
+
+    if (type === "termometro") {
+      const validThermoClasses = [
+        "Classe AA (Pt100)",
+        "Classe A (Pt100)",
+        "Classe B (Pt100)",
+        "Classe C (Pt100)",
+        "Classe 1 (Termopar)",
+        "Classe 2 (Termopar)",
+        "Classe 3 (Termopar)",
+        "Classe 1.0 (Bimetálico)",
+        "Classe 1.5 (Bimetálico)",
+        "Classe 2.0 (Bimetálico)",
+      ];
+      const descLower = String(inst?.description || "").toLowerCase();
+      const defaultThermoClass =
+        descLower.includes("pt100") || descLower.includes("pt-100") || descLower.includes("rtd")
+          ? "Classe A (Pt100)"
+          : descLower.includes("termopar")
+            ? "Classe 1 (Termopar)"
+            : "Classe 1.0 (Bimetálico)";
+      const thClass = validThermoClasses.includes(savedClass) ? savedClass : defaultThermoClass;
+      let pct = 1.0;
+      if (thClass.includes("AA")) pct = 0.1;
+      else if (thClass.includes("Classe A")) pct = 0.25;
+      else if (thClass.includes("Classe B")) pct = 0.5;
+      else if (thClass.includes("Classe C")) pct = 1.0;
+      else if (thClass.includes("Classe 1 (")) pct = 1.0;
+      else if (thClass.includes("Classe 2 (")) pct = 1.5;
+      else if (thClass.includes("Classe 3 (")) pct = 2.0;
+      else if (thClass.includes("1.0")) pct = 1.0;
+      else if (thClass.includes("1.5")) pct = 1.5;
+      else if (thClass.includes("2.0")) pct = 2.0;
+      const calcMpe = Number(((pct / 100) * (fe || 100)).toFixed(4)) || 1.0;
+      return {
+        accuracyClass: thClass,
+        mpe: validThermoClasses.includes(savedClass) && Number.isFinite(savedMpe) && savedMpe > 0 ? savedMpe : calcMpe,
+      };
+    }
+
+    if (type === "pressostato" || type === "termostato") {
+      const validSwitchClasses = [
+        "Classe 0.5 (Chave)",
+        "Classe 1.0 (Chave)",
+        "Classe 1.5 (Chave)",
+        "Classe 2.0 (Chave)",
+        "Classe 3.0 (Chave)",
+      ];
+      const swClass = validSwitchClasses.includes(savedClass) ? savedClass : "Classe 1.0 (Chave)";
+      let pct = 1.0;
+      if (swClass.includes("0.5")) pct = 0.5;
+      else if (swClass.includes("1.0")) pct = 1.0;
+      else if (swClass.includes("1.5")) pct = 1.5;
+      else if (swClass.includes("2.0")) pct = 2.0;
+      else if (swClass.includes("3.0")) pct = 3.0;
+      const calcMpe = Number(((pct / 100) * (fe || 10)).toFixed(4)) || 0.5;
+      return {
+        accuracyClass: swClass,
+        mpe: validSwitchClasses.includes(savedClass) && Number.isFinite(savedMpe) && savedMpe > 0 ? savedMpe : calcMpe,
+      };
+    }
+
+    // manometro & manovacuometro
+    const validManoClasses = ["A4", "A3", "A2", "A1", "A", "B", "C", "D"];
+    const manoClass = validManoClasses.includes(savedClass) ? savedClass : "A1";
+    let pct = 1.0;
+    if (manoClass === "A4") pct = 0.1;
+    else if (manoClass === "A3") pct = 0.25;
+    else if (manoClass === "A2") pct = 0.5;
+    else if (manoClass === "A1" || manoClass === "A") pct = 1.0;
+    else if (manoClass === "B") pct = 2.0;
+    else if (manoClass === "C") pct = 3.0;
+    else if (manoClass === "D") pct = 4.0;
+    const calcMpe = Number(((pct / 100) * (fe || 10)).toFixed(4)) || 0.1;
+    const useSavedMpe =
+      validManoClasses.includes(savedClass) &&
+      Number.isFinite(savedMpe) &&
+      savedMpe > 0 &&
+      !(savedClass === "A1" && savedMpe === 1.0 && calcMpe !== 1.0);
+    return {
+      accuracyClass: manoClass,
+      mpe: useSavedMpe ? savedMpe : calcMpe,
+    };
+  };
+
   const handleApplyCustomCalibrationRange = (newMinVal?: string | number, newMaxVal?: string | number) => {
     if (!isUserAdmin) {
       alert("A alteração da faixa de calibração é permitida exclusivamente para o perfil Administrador.");
@@ -2415,10 +2711,11 @@ export default function InternalPortal({
     setBenchPoints(pts);
 
     const span = Math.abs(maxVal - minVal) || 1;
+    const sigCfg = getTransmitterSignalConfig(benchOutputSignal);
     const txPercents = [0, 25, 50, 75, 100];
     const txPts = txPercents.map((pct) => {
       const nominalPv = Number((minVal + (span * pct) / 100).toFixed(2));
-      const expectedMa = Number((4.0 + (16.0 * pct) / 100).toFixed(3));
+      const expectedMa = Number((sigCfg.zero + (sigCfg.span * pct) / 100).toFixed(3));
       return {
         percent: pct,
         nominalPv,
@@ -3625,89 +3922,20 @@ Status atual: ${e.status}.`,
               : midPoint,
         );
 
-        const initialAccuracyClass = inst.accuracyClass || "A1";
-        setBenchAccuracyClass(initialAccuracyClass);
-
-        let fe = Math.max(Math.abs(max), Math.abs(min));
-        if (detectedType === "manovacuometro") {
-          let minInMaxUnit = Math.abs(min);
-          if (min <= -700) {
-            minInMaxUnit = Math.abs(min) / 760;
-          } // mmHg to kgf/cm2
-          else if (min <= -25) {
-            minInMaxUnit = Math.abs(min) / 29.92;
-          } // inHg to bar
-          fe = minInMaxUnit + Math.abs(max);
-        }
-
-        let pct = 1.0;
-        if (initialAccuracyClass === "A4") pct = 0.1;
-        else if (initialAccuracyClass === "A3") pct = 0.25;
-        else if (initialAccuracyClass === "A2") pct = 0.5;
-        else if (initialAccuracyClass === "A1") pct = 1.0;
-        else if (initialAccuracyClass === "A") pct = 1.0;
-        else if (initialAccuracyClass === "B") pct = 2.0;
-        else if (initialAccuracyClass === "C") pct = 3.0;
-        else if (initialAccuracyClass === "D") pct = 4.0;
-        else if (initialAccuracyClass.includes("0.075")) pct = 0.075;
-        else if (initialAccuracyClass.includes("AA")) pct = 0.1;
-        else if (initialAccuracyClass.includes("0.1")) pct = 0.1;
-        else if (
-          initialAccuracyClass.includes("0.20") ||
-          initialAccuracyClass.includes("0.2")
-        )
-          pct = 0.2;
-        else if (
-          initialAccuracyClass.includes("Classe A") ||
-          initialAccuracyClass.includes("0.25")
-        )
-          pct = 0.25;
-        else if (
-          initialAccuracyClass.includes("Classe B") ||
-          initialAccuracyClass.includes("0.5")
-        )
-          pct = 0.5;
-        else if (
-          initialAccuracyClass.includes("Classe 1") ||
-          initialAccuracyClass.includes("1.0")
-        )
-          pct = 1.0;
-        else if (
-          initialAccuracyClass.includes("Classe 2") ||
-          initialAccuracyClass.includes("1.5")
-        )
-          pct = 1.5;
-        else if (initialAccuracyClass.includes("2.0")) pct = 2.0;
-        else if (initialAccuracyClass.includes("3.0")) pct = 3.0;
-
-        const genericMpe = Number(((pct / 100) * fe).toFixed(4));
-        const registeredMpe = Number(inst.mpe);
-        if (detectedType === "psv" || detectedType === "pcv") {
-          // Default PSV/PCV tolerance: if inst.mpe registered, use it; else default to 3% of Set Point or 0.5
-          const defaultValveMpe = Number((0.03 * (Number(inst.setPoint) || min || max || 16)).toFixed(3)) || 0.5;
-          setBenchMpe(
-            Number.isFinite(registeredMpe) && registeredMpe > 0
-              ? registeredMpe
-              : defaultValveMpe,
-          );
-          setBenchAccuracyClass(
-            detectedType === "psv"
-              ? "Código de projeto / fabricante"
-              : "Especificação de processo / fabricante",
-          );
-        } else {
-          setBenchMpe(Number(inst.mpe ?? genericMpe));
-        }
+        const resolvedAcc = resolveAccuracyAndMpeForType(detectedType, inst, min, max);
+        setBenchAccuracyClass(resolvedAcc.accuracyClass);
+        setBenchMpe(resolvedAcc.mpe);
 
         // 1. Manômetro & Termômetro & Manovacuometro Points
         const pts = generatePointsForRange(min, max, benchPointCount, detectedType, inst);
         setBenchPoints(pts);
 
         // 2. Transmissor Points (0%, 25%, 50%, 75%, 100% Span)
+        const sigCfg = getTransmitterSignalConfig(inst.outputSignal || normInfo.defaultSignal);
         const txPercents = [0, 25, 50, 75, 100];
         const txPts = txPercents.map((pct) => {
           const nominalPv = Number((min + (span * pct) / 100).toFixed(2));
-          const expectedMa = Number((4.0 + (16.0 * pct) / 100).toFixed(3));
+          const expectedMa = Number((sigCfg.zero + (sigCfg.span * pct) / 100).toFixed(3));
           return {
             percent: pct,
             nominalPv,
@@ -6276,8 +6504,11 @@ Status atual: ${e.status}.`,
         }
       }
     } else if (selectedInstrumentType === "transmissor") {
+      const sigCfg = getTransmitterSignalConfig(benchOutputSignal);
+      const effectiveTxMpe = benchMpe > 0 ? benchMpe : 0.5;
       if (!benchTransmitterPoints || benchTransmitterPoints.length === 0) {
         isAllFilled = false;
+        specificValidationErrorMessage = "Não há pontos de calibração gerados para o transmissor.";
       } else {
         for (const tp of benchTransmitterPoints) {
           const a =
@@ -6290,15 +6521,17 @@ Status atual: ${e.status}.`,
               : NaN;
           if (isNaN(a) || isNaN(d)) {
             isAllFilled = false;
+            specificValidationErrorMessage = `Preencha as leituras de saída Ascendente e Descendente (${sigCfg.unit}) em todos os 5 pontos do transmissor.`;
             break;
           }
           const avgMa = (a + d) / 2;
           const errMa = Number((avgMa - tp.expectedMa).toFixed(3));
           const errPercentSpan = Math.abs(
-            Number(((errMa / 16.0) * 100).toFixed(2)),
+            Number(((errMa / sigCfg.span) * 100).toFixed(2)),
           );
-          if (errPercentSpan > (benchMpe || 1.0)) {
+          if (errPercentSpan > effectiveTxMpe) {
             isAllOk = false;
+            specificValidationErrorMessage = `O ponto ${tp.percent}% Span apresentou erro de ${errPercentSpan.toFixed(2)}% Span, acima do Erro Máximo Admissível (±${effectiveTxMpe}% Span).`;
           }
         }
       }
@@ -6505,6 +6738,8 @@ Status atual: ${e.status}.`,
         maxRetries: 1,
         body: JSON.stringify({
           instrumentId: selectedInstId,
+          instrumentType: selectedInstrumentType,
+          outputSignal: selectedInstrumentType === "transmissor" ? benchOutputSignal : undefined,
           standardSlots,
           standardIds,
           calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
