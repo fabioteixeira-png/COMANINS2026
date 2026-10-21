@@ -8350,6 +8350,7 @@ function parseGeminiJson(text: string): Record<string, any> {
 function normalizeIdentifier(value: unknown): string {
   return String(value || '')
     .toUpperCase()
+    .replace(/^(?:CERT(?:IFICADO)?|N[º°O]?|RELAT[ÓO]RIO|ID|COMA)[-\s.:#]*/gi, '')
     .replace(/^COMA[-\s]*/i, '')
     .replace(/[^A-Z0-9]/g, '');
 }
@@ -9159,6 +9160,170 @@ app.get("/api/ai/status", requireAuth, requireInternalAccount, async (_req: Auth
   });
 });
 
+function resolveServerInstrumentType(
+  inst: Record<string, any> | null | undefined,
+  latestReport?: Record<string, any> | null,
+  bodyInstrumentType?: unknown,
+): string {
+  if (!inst) return 'manometro';
+
+  const validTypes = new Set([
+    'manometro',
+    'manovacuometro',
+    'termometro',
+    'transmissor',
+    'pressostato',
+    'termostato',
+    'psv',
+    'pcv',
+  ]);
+
+  const explicitCandidates = [
+    String(bodyInstrumentType || '').trim().toLowerCase(),
+    String(latestReport?.instrumentType || '').trim().toLowerCase(),
+    String(inst.typeSpec || '').trim().toLowerCase(),
+    String(inst.instrumentType || inst.type || '').trim().toLowerCase(),
+  ];
+
+  for (const candidate of explicitCandidates) {
+    if (candidate && candidate !== 'manometro' && validTypes.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  const desc = String(inst.description || '').toLowerCase();
+  const tag = String(inst.tag || '').toLowerCase();
+  const model = String(inst.model || '').toLowerCase();
+  const brand = String(inst.brand || '').toLowerCase();
+  const cat = String(inst.category || '').toLowerCase();
+  const typeSpec = String(inst.typeSpec || '').toLowerCase();
+  const instType = String(inst.instrumentType || inst.type || '').toLowerCase();
+  const sensor = String(inst.sensorType || '').toLowerCase();
+  const unit = String(inst.unit || '').toLowerCase();
+  const signal = String(inst.outputSignal || latestReport?.outputSignal || '').toLowerCase();
+
+  const fullText = `${desc} ${tag} ${model} ${brand} ${cat} ${typeSpec} ${instType} ${sensor} ${unit} ${signal}`;
+
+  if (
+    /(^|[^a-z0-9])psv([^a-z0-9]|$)/i.test(fullText) ||
+    fullText.includes('válvula de segurança') ||
+    fullText.includes('valvula de seguranca') ||
+    fullText.includes('válvula de alívio') ||
+    fullText.includes('valvula de alivio') ||
+    fullText.includes('safety valve') ||
+    fullText.includes('safety relief') ||
+    fullText.includes('relief valve')
+  ) {
+    return 'psv';
+  }
+
+  if (
+    /(^|[^a-z0-9])pcv([^a-z0-9]|$)/i.test(fullText) ||
+    fullText.includes('válvula auto operada') ||
+    fullText.includes('valvula auto operada') ||
+    fullText.includes('auto-operada') ||
+    fullText.includes('self-operated') ||
+    fullText.includes('self acting') ||
+    fullText.includes('pressure regulator') ||
+    fullText.includes('reguladora de pressão') ||
+    fullText.includes('reguladora de pressao') ||
+    fullText.includes('back pressure regulator') ||
+    fullText.includes('blanketing')
+  ) {
+    return 'pcv';
+  }
+
+  if (
+    fullText.includes('pressostato') ||
+    fullText.includes('pressure switch') ||
+    fullText.includes('p-switch') ||
+    fullText.includes('pswitch') ||
+    tag.startsWith('ps') ||
+    tag.startsWith('psw')
+  ) {
+    return 'pressostato';
+  }
+
+  if (
+    fullText.includes('termostato') ||
+    fullText.includes('temp switch') ||
+    fullText.includes('temperature switch') ||
+    fullText.includes('t-switch') ||
+    fullText.includes('tswitch') ||
+    tag.startsWith('ts') ||
+    tag.startsWith('tsw')
+  ) {
+    return 'termostato';
+  }
+
+  if (
+    fullText.includes('transmissor') ||
+    fullText.includes('transmitter') ||
+    fullText.includes('transdutor') ||
+    fullText.includes('transducer') ||
+    fullText.includes('4-20') ||
+    fullText.includes('hart') ||
+    fullText.includes('profibus') ||
+    signal.includes('ma') ||
+    signal.includes('4-20') ||
+    signal.includes('vdc') ||
+    tag.startsWith('pt') ||
+    tag.startsWith('tt') ||
+    tag.startsWith('pit') ||
+    tag.startsWith('tit') ||
+    tag.startsWith('lt') ||
+    tag.startsWith('lit') ||
+    tag.startsWith('ft') ||
+    tag.startsWith('fit') ||
+    tag.startsWith('dpt') ||
+    tag.startsWith('dpit')
+  ) {
+    return 'transmissor';
+  }
+
+  const numMin = inst.rangeMin !== undefined && inst.rangeMin !== null && inst.rangeMin !== '' ? Number(inst.rangeMin) : NaN;
+  const numMax = inst.rangeMax !== undefined && inst.rangeMax !== null && inst.rangeMax !== '' ? Number(inst.rangeMax) : NaN;
+  const hasCompoundRange = !isNaN(numMin) && !isNaN(numMax) && numMin < 0 && numMax > 0;
+
+  const isTempIndication =
+    fullText.includes('termometro') ||
+    fullText.includes('termômetro') ||
+    fullText.includes('pt100') ||
+    fullText.includes('pt-100') ||
+    fullText.includes('pt1000') ||
+    fullText.includes('termopar') ||
+    fullText.includes('thermocouple') ||
+    fullText.includes('termoresistencia') ||
+    fullText.includes('termoresistência') ||
+    fullText.includes('bimetalico') ||
+    fullText.includes('bimetálico') ||
+    cat.includes('temp') ||
+    unit.includes('°c') ||
+    unit.includes('ºc') ||
+    unit.includes('degc') ||
+    unit.includes('°f') ||
+    unit.includes('ºf') ||
+    unit === 'k' ||
+    tag.startsWith('ti') ||
+    tag.startsWith('te') ||
+    tag.startsWith('tw');
+
+  if (
+    fullText.includes('manovacu') ||
+    fullText.includes('mano-vacu') ||
+    fullText.includes('compound') ||
+    (hasCompoundRange && !isTempIndication)
+  ) {
+    return 'manovacuometro';
+  }
+
+  if (isTempIndication) {
+    return 'termometro';
+  }
+
+  return 'manometro';
+}
+
 // Quality gate: inspect the post-laboratory photo before it is accepted.
 app.post("/api/validate-calibration-photo", requireAuth, requireInternalAccount, aiApiRateLimit, async (req: AuthRequest, res) => {
   const instrumentId = asLimitedString(req.body?.instrumentId, 180);
@@ -9187,6 +9352,19 @@ app.post("/api/validate-calibration-photo", requireAuth, requireInternalAccount,
       String(instrument.coma || '').replace(/^COMA[-\s]*/i, ''),
     ].map(normalizeIdentifier).filter(Boolean)));
 
+    const detectedInstrumentType = resolveServerInstrumentType(
+      instrument,
+      latestReport,
+      req.body?.instrumentType,
+    );
+    // Regra metrológica: apenas Manômetros (incluindo Manovacuômetros) e Termômetros possuem
+    // mostrador/escala graduada exigida na foto. Transmissores, PSV, PCV, Pressostatos e Termostatos
+    // são validados exclusivamente pela etiqueta de calibração e número do certificado.
+    const requireRangeVerification =
+      detectedInstrumentType === 'manometro' ||
+      detectedInstrumentType === 'manovacuometro' ||
+      detectedInstrumentType === 'termometro';
+
     const gemini = getGeminiClient();
     if (!gemini) {
       return res.status(503).json({
@@ -9195,11 +9373,13 @@ app.post("/api/validate-calibration-photo", requireAuth, requireInternalAccount,
       });
     }
 
-    const prompt = `Você atua como inspetor visual de qualidade de um laboratório de calibração.
+    const prompt = requireRangeVerification
+      ? `Você atua como inspetor visual de qualidade de um laboratório de calibração.
 Analise a fotografia pós-laboratório anexada e compare SOMENTE o que estiver realmente visível com os dados cadastrados abaixo.
 
 DADOS ESPERADOS DO INSTRUMENTO:
 ${JSON.stringify({
+  instrumentType: detectedInstrumentType,
   tag: instrument.tag,
   description: instrument.description,
   brand: instrument.brand,
@@ -9242,6 +9422,50 @@ FORMATO:
   "confidence": 0.0,
   "issues": ["..."],
   "summary": "resumo curto"
+}`
+      : `Você atua como inspetor visual de qualidade de um laboratório de calibração.
+Este equipamento é do tipo "${detectedInstrumentType}" (ex.: transmissor, PSV, PCV, pressostato ou termostato), que NÃO possui mostrador graduado de escala como manômetros ou termômetros.
+Portanto, NÃO EXIJA e NÃO VERIFIQUE faixa de medição (range/escala) na fotografia.
+
+DADOS ESPERADOS DO INSTRUMENTO:
+${JSON.stringify({
+  instrumentType: detectedInstrumentType,
+  tag: instrument.tag,
+  description: instrument.description,
+  brand: instrument.brand,
+  model: instrument.model,
+  serialNumber: instrument.serialNumber,
+  certificateNumber: expectedCertificateNumber,
+  coma: instrument.coma,
+  status: instrument.status,
+  calibrationLabelRequired: requireCalibrationLabel,
+  rangeVerificationRequired: false,
+}, null, 2)}
+
+OBJETIVOS OBRIGATÓRIOS (EXCEÇÃO PARA ${detectedInstrumentType.toUpperCase()} — SEM VERIFICAÇÃO DE FAIXA/RANGE):
+1. Confirmar que a fotografia mostra o instrumento/equipamento (${detectedInstrumentType}).
+2. NÃO procure nem exija faixa de medição (range/escala). Defina sempre "rangeVisible": true e "rangeMatches": true.
+3. Se calibrationLabelRequired=true, localizar a etiqueta de calibração COMANINS fixada no instrumento ou lacre, verificar se ela está visível e ler o número do certificado impresso na etiqueta ("detectedLabelNumber"). O número deve ser compatível com o certificado/COMA cadastrado (${expectedCertificateNumber}). O prefixo "COMA-" pode estar omitido na etiqueta (ex.: apenas a numeração do certificado).
+4. Se calibrationLabelRequired=false (instrumento Não Conforme/RNC), NÃO exija etiqueta "CALIBRADO"; basta confirmar que o instrumento está visível na foto.
+5. Se calibrationLabelRequired=true e a etiqueta de calibração não estiver presente ou o número do certificado na etiqueta estiver ilegível/cortado/desfocado, retorne "REVIEW" explicando que a etiqueta de calibração precisa estar legível.
+6. Se o número do certificado lido na etiqueta for claramente divergente do certificado cadastrado (${expectedCertificateNumber}), retorne "BLOCK".
+7. Retorne "PASS" quando o instrumento estiver visível e o número do certificado na etiqueta de calibração corresponder ao cadastro.
+8. Responda apenas JSON válido, sem markdown.
+
+FORMATO:
+{
+  "overallStatus": "PASS|BLOCK|REVIEW",
+  "instrumentVisible": true,
+  "rangeVisible": true,
+  "detectedRange": "Dispensado (instrumento sem escala graduada)",
+  "rangeMatches": true,
+  "calibrationLabelPresent": true,
+  "labelVisible": true,
+  "detectedLabelNumber": "número do certificado lido na etiqueta",
+  "labelMatches": true,
+  "confidence": 0.0,
+  "issues": ["..."],
+  "summary": "resumo curto"
 }`;
 
     const { response, model: visionModel } = await generateVisionContentWithModelFallback(
@@ -9255,27 +9479,43 @@ FORMATO:
     let labelMatches: boolean | null = typeof parsed.labelMatches === 'boolean' ? parsed.labelMatches : null;
     if (detectedLabelNumber) {
       const detectedNormalized = normalizeIdentifier(detectedLabelNumber);
-      labelMatches = expectedIdentifiers.some((expected) => expected === detectedNormalized);
+      if (detectedNormalized) {
+        labelMatches = expectedIdentifiers.some(
+          (expected) =>
+            expected === detectedNormalized ||
+            expected.replace(/^0+/, '') === detectedNormalized.replace(/^0+/, ''),
+        );
+      }
     }
     if (!requireCalibrationLabel) labelMatches = null;
 
     const instrumentVisible = parsed.instrumentVisible === true;
-    const rangeVisible = parsed.rangeVisible === true;
-    const rangeMatches = typeof parsed.rangeMatches === 'boolean' ? parsed.rangeMatches : null;
+    const rangeVisible = requireRangeVerification ? parsed.rangeVisible === true : true;
+    const rangeMatches: boolean | null = requireRangeVerification
+      ? (typeof parsed.rangeMatches === 'boolean' ? parsed.rangeMatches : null)
+      : true;
     const calibrationLabelPresent = parsed.calibrationLabelPresent === true;
     const labelVisible = parsed.labelVisible === true;
     const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
-    const issues = Array.isArray(parsed.issues)
-      ? parsed.issues.map((item: unknown) => asLimitedString(item, 700)).filter(Boolean).slice(0, 8)
+    const rawIssues = Array.isArray(parsed.issues)
+      ? parsed.issues.map((item: unknown) => asLimitedString(item, 700)).filter(Boolean)
       : [];
+    // Caso seja instrumento isento de escala, filtra eventuais mensagens residuais sobre faixa/range
+    const issues = (
+      requireRangeVerification
+        ? rawIssues
+        : rawIssues.filter((msg) => !/\b(faixa|range|escala|mostrador)\b/i.test(msg))
+    ).slice(0, 8);
 
     let overallStatus: CalibrationAiStatus = 'PASS';
-    if (rangeMatches === false || (requireCalibrationLabel && labelMatches === false)) {
+    if (
+      (requireRangeVerification && rangeMatches === false) ||
+      (requireCalibrationLabel && labelMatches === false)
+    ) {
       overallStatus = 'BLOCK';
     } else if (
       !instrumentVisible ||
-      !rangeVisible ||
-      rangeMatches !== true ||
+      (requireRangeVerification && (!rangeVisible || rangeMatches !== true)) ||
       confidence < 0.65 ||
       (requireCalibrationLabel && (!calibrationLabelPresent || !labelVisible || labelMatches !== true))
     ) {
@@ -9286,9 +9526,13 @@ FORMATO:
       overallStatus,
       analyzedAt: new Date().toISOString(),
       model: visionModel,
+      instrumentType: detectedInstrumentType,
+      requireRangeVerification,
       instrumentVisible,
       rangeVisible,
-      detectedRange: asLimitedString(parsed.detectedRange, 240),
+      detectedRange: requireRangeVerification
+        ? asLimitedString(parsed.detectedRange, 240)
+        : 'Dispensado (verificação exclusiva de etiqueta/certificado)',
       rangeMatches,
       calibrationLabelPresent: requireCalibrationLabel ? calibrationLabelPresent : false,
       labelVisible: requireCalibrationLabel ? labelVisible : false,

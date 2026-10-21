@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PART_DIR = resolve(ROOT, "src/components/internal-portal");
 const GENERATED = resolve(PART_DIR, "InternalPortal.generated.tsx");
-const EXPECTED_SHA256 = "a10566ffbe1aef36c6cc90eff549419f63973420a5ba24b42ee954b22ca9214d";
+const EXPECTED_SHA256 = "c2fe76f0d20bdc1dbe2c199ddf8e89ba7e86f1231f254f0c68cb1611de7174ce";
 const ACCEPTED_HASHES = new Set([
   EXPECTED_SHA256,
+  "a10566ffbe1aef36c6cc90eff549419f63973420a5ba24b42ee954b22ca9214d",
   "99f08e5469f5ee319791f75efc12f11791639505f7dee5272974dbb2de06f737",
   "029d235532caed23a8650796a4e09ea780d6a9e94d6679136d8bd0b8bf0790cc",
   "4324f98a805534f96aa6aada65d06b34c1ced8b875ddad0c985300292188ec95",

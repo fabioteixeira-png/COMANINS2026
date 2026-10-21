@@ -5726,12 +5726,18 @@ Status atual: ${e.status}.`,
 
       let photoAiValidation: any = undefined;
       if (photoModalType === "calibrated") {
+        const detectedPhotoInstType = detectInstrumentType(photoModalInstrument);
+        const isScaleInstrument =
+          detectedPhotoInstType === "manometro" ||
+          detectedPhotoInstType === "manovacuometro" ||
+          detectedPhotoInstType === "termometro";
         try {
           const validation = await safeFetch<any>("/api/validate-calibration-photo", {
             method: "POST",
             maxRetries: 1,
             body: JSON.stringify({
               instrumentId: photoModalInstrument.id,
+              instrumentType: detectedPhotoInstType,
               imageBase64: photoDataUrl,
             }),
           });
@@ -5742,7 +5748,10 @@ Status atual: ${e.status}.`,
             const headline = validation?.overallStatus === "BLOCK"
               ? "A IA identificou divergência na Foto Após Laboratório."
               : "A IA não conseguiu confirmar a Foto Após Laboratório com segurança.";
-            alert(`${headline}\n\n${validation?.summary || "Refaça a foto mostrando claramente a faixa do instrumento e a etiqueta de calibração."}${issues}\n\nA foto não foi salva.`);
+            const fallbackSummary = isScaleInstrument
+              ? "Refaça a foto mostrando claramente a faixa do instrumento e a etiqueta de calibração."
+              : "Refaça a foto mostrando claramente o instrumento e a etiqueta de calibração com o número do certificado legível.";
+            alert(`${headline}\n\n${validation?.summary || fallbackSummary}${issues}\n\nA foto não foi salva.`);
             return;
           }
           photoAiValidation = validation;

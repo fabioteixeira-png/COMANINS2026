@@ -2202,14 +2202,31 @@
                     </span>
                   </p>
                 ) : (
-                  <p>
-                    <strong className="text-slate-800">Instrução:</strong> Anexe
-                    a foto do instrumento após a finalização no laboratório.{" "}
-                    <span className="text-amber-800 font-semibold">
-                      Esta foto é obrigatória para abrir e emitir o certificado
-                      ou imprimir o RNC.
-                    </span>
-                  </p>
+                  (() => {
+                    const modalInstType = detectInstrumentType(photoModalInstrument);
+                    const requiresScaleInPhoto =
+                      modalInstType === "manometro" ||
+                      modalInstType === "manovacuometro" ||
+                      modalInstType === "termometro";
+                    return (
+                      <div className="space-y-1.5">
+                        <p>
+                          <strong className="text-slate-800">Instrução:</strong> Anexe
+                          a foto do instrumento após a finalização no laboratório.{" "}
+                          <span className="text-amber-800 font-semibold">
+                            Esta foto é obrigatória para abrir e emitir o certificado
+                            ou imprimir o RNC.
+                          </span>
+                        </p>
+                        <p className="text-[11px] text-slate-600 pt-1 border-t border-slate-200/80">
+                          <strong className="text-blue-800">Validação IA:</strong>{" "}
+                          {requiresScaleInPhoto
+                            ? "Para Manômetros e Termômetros, a IA verifica a faixa/escala do mostrador e o nº do certificado na etiqueta de calibração."
+                            : "Exceção ativa (Transmissor / PSV / PCV / Pressostato / Termostato): a IA verifica apenas a presença da etiqueta de calibração e a compatibilidade do nº do certificado com o cadastro (sem exigência de escala/range)."}
+                        </p>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
 
