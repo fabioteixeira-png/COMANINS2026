@@ -3999,6 +3999,7 @@ Status atual: ${e.status}.`,
     let calibratingCount = 0;
     let calibratedCount = 0;
     let availableCount = 0;
+    let deliveredCount = 0;
     for (const i of matching) {
       if (i.status === "Em Calibração") calibratingCount++;
       if (
@@ -4012,6 +4013,9 @@ Status atual: ${e.status}.`,
       }
       if (i.status === "Disponível para Retirada" || i.status === "Entregue" || i.status === "Não Conforme") {
         availableCount++;
+      }
+      if (i.status === "Entregue") {
+        deliveredCount++;
       }
     }
 
@@ -4049,10 +4053,6 @@ Status atual: ${e.status}.`,
         totalAllowed,
       };
     }
-
-    const deliveredCount = matching.filter(
-      (i) => i.status === "Entregue",
-    ).length;
 
     if (deliveredCount >= totalAllowed && totalAllowed > 0) {
       return {
@@ -7670,56 +7670,200 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
 
   const triggerQuickPrompt = (...args: any[]) => {};
  
+  const [intakeFilterStatus, setIntakeFilterStatus] = useState<string>("all");
+  const [intakeQuickQueueFilter, setIntakeQuickQueueFilter] = useState<
+    "all" | "pending_reg" | "in_lab" | "ready" | "delivered"
+  >("all");
+  const [intakePage, setIntakePage] = useState<number>(1);
+  const [intakePageSize, setIntakePageSize] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem("comanins_intake_page_size"));
+      return [15, 25, 50, 100].includes(saved) ? saved : 25;
+    } catch {
+      return 25;
+    }
+  });
+
+  React.useEffect(() => {
+    setIntakePage(1);
+  }, [
+    intakeSearchTerm,
+    intakeFilterClient,
+    intakeFilterMonth,
+    intakeFilterYear,
+    intakeFilterStatus,
+    intakeQuickQueueFilter,
+    intakePageSize,
+  ]);
+
+  const { intakeMetaByIdMap, intakeQueueCounts } = React.useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        client: Client | undefined;
+        summary: string;
+        totalEquips: number;
+        statusInfo: ReturnType<typeof getIntakeStatus>;
+        searchableText: string;
+      }
+    >();
+    let pendingReg = 0;
+    let inLab = 0;
+    let ready = 0;
+    let delivered = 0;
+
+    for (const intake of savedIntakes) {
+      const client = clientsByIdMap.get(intake.clientId);
+      const rows = Array.isArray(intake.rows) ? intake.rows : [];
+      const summary = getIntakeSummary(rows);
+      let totalEquips = 0;
+      const rowTokens: string[] = [];
+      for (const r of rows) {
+        totalEquips += Number(r?.quant) || 0;
+        if (r?.descricao || r?.desc) rowTokens.push(String(r.descricao || r.desc));
+        if (r?.obs) rowTokens.push(String(r.obs));
+        if (r?.escala) rowTokens.push(String(r.escala));
+      }
+      const statusInfo = getIntakeStatus(intake, instruments);
+      const lbl = statusInfo.label;
+      if (lbl === "Aguardando Cadastro" || lbl === "Instrumento sendo lançado") {
+        pendingReg++;
+      } else if (
+        lbl === "Aguardando calibração" ||
+        lbl === "Em calibração" ||
+        lbl === "Calibrado"
+      ) {
+        inLab++;
+      } else if (lbl === "Disponível para Retirada") {
+        ready++;
+      } else if (lbl === "Entregue") {
+        delivered++;
+      }
+
+      const searchableText = [
+        intake.numEntrada || "",
+        client?.name || "",
+        client?.cnpj || "",
+        intake.contato || "",
+        intake.dataEntrada || "",
+        ...rowTokens,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      map.set(String(intake.id), {
+        client,
+        summary,
+        totalEquips,
+        statusInfo,
+        searchableText,
+      });
+    }
+
+    return {
+      intakeMetaByIdMap: map,
+      intakeQueueCounts: {
+        total: savedIntakes.length,
+        pendingReg,
+        inLab,
+        ready,
+        delivered,
+      },
+    };
+  }, [savedIntakes, clientsByIdMap, instrumentsByIntake, instruments]);
+
   const filteredIntakes = React.useMemo(() => {
-    let filtered = [...savedIntakes];
+    const query = (intakeSearchTerm || "").trim().toLowerCase();
 
-    // Reverse chronological sort (by ID/timestamp, which works as long as ID is Date.now())
-    filtered.sort((a, b) => Number(b.id) - Number(a.id));
-
-    if (intakeFilterClient) {
-      filtered = filtered.filter(
-        (item) => item.clientId === intakeFilterClient,
-      );
-    }
-
-    if (intakeFilterMonth || intakeFilterYear) {
-      filtered = filtered.filter((item) => {
-        if (!item.dataEntrada) return false;
-        // Assume format DD/MM/YYYY
-        const parts = item.dataEntrada.split("/");
-        if (parts.length === 3) {
-          const m = parts[1];
-          const y = parts[2];
-
-          let pass = true;
-          if (intakeFilterMonth && m !== intakeFilterMonth) pass = false;
-          if (intakeFilterYear && y !== intakeFilterYear) pass = false;
-
-          return pass;
-        }
+    const filtered = savedIntakes.filter((item) => {
+      if (intakeFilterClient && item.clientId !== intakeFilterClient) {
         return false;
-      });
-    }
+      }
 
-    if (intakeSearchTerm) {
-      const term = intakeSearchTerm.toLowerCase();
-      filtered = filtered.filter((item) => {
-        const client = clients.find((c) => c.id === item.clientId);
-        return (
-          item.numEntrada.toLowerCase().includes(term) ||
-          (client && client.name.toLowerCase().includes(term))
-        );
-      });
-    }
+      if (intakeFilterMonth || intakeFilterYear) {
+        if (!item.dataEntrada) return false;
+        const parts = String(item.dataEntrada).split("/");
+        if (parts.length !== 3) return false;
+        const m = parts[1];
+        const y = parts[2];
+        if (intakeFilterMonth && m !== intakeFilterMonth) return false;
+        if (intakeFilterYear && y !== intakeFilterYear) return false;
+      }
 
-    return filtered;
+      const meta = intakeMetaByIdMap.get(String(item.id));
+      const statusLabel = meta?.statusInfo.label || getIntakeStatus(item, instruments).label;
+
+      if (intakeFilterStatus && intakeFilterStatus !== "all") {
+        if (statusLabel !== intakeFilterStatus) return false;
+      }
+
+      if (intakeQuickQueueFilter === "pending_reg") {
+        if (
+          statusLabel !== "Aguardando Cadastro" &&
+          statusLabel !== "Instrumento sendo lançado"
+        ) {
+          return false;
+        }
+      } else if (intakeQuickQueueFilter === "in_lab") {
+        if (
+          statusLabel !== "Aguardando calibração" &&
+          statusLabel !== "Em calibração" &&
+          statusLabel !== "Calibrado"
+        ) {
+          return false;
+        }
+      } else if (intakeQuickQueueFilter === "ready") {
+        if (statusLabel !== "Disponível para Retirada") return false;
+      } else if (intakeQuickQueueFilter === "delivered") {
+        if (statusLabel !== "Entregue") return false;
+      }
+
+      if (query) {
+        if (meta) {
+          if (!meta.searchableText.includes(query)) return false;
+        } else {
+          const client = clientsByIdMap.get(item.clientId);
+          const matchFallback =
+            (item.numEntrada || "").toLowerCase().includes(query) ||
+            (client?.name || "").toLowerCase().includes(query) ||
+            (item.contato || "").toLowerCase().includes(query);
+          if (!matchFallback) return false;
+        }
+      }
+
+      return true;
+    });
+
+    const collator = new Intl.Collator("pt-BR", {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+    return filtered.sort((a, b) => {
+      const numA = String(a.numEntrada || "").trim();
+      const numB = String(b.numEntrada || "").trim();
+      if (numA && numB) {
+        const cmp = collator.compare(numB, numA);
+        if (cmp !== 0) return cmp;
+      }
+      const idNumA = Number(a.id);
+      const idNumB = Number(b.id);
+      if (Number.isFinite(idNumA) && Number.isFinite(idNumB) && idNumA !== idNumB) {
+        return idNumB - idNumA;
+      }
+      return collator.compare(String(b.id || ""), String(a.id || ""));
+    });
   }, [
     savedIntakes,
     intakeFilterClient,
     intakeFilterMonth,
     intakeFilterYear,
+    intakeFilterStatus,
+    intakeQuickQueueFilter,
     intakeSearchTerm,
-    clients,
+    intakeMetaByIdMap,
+    clientsByIdMap,
+    instruments,
   ]);
 
   return (
