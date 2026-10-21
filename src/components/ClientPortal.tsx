@@ -1367,7 +1367,7 @@ export default function ClientPortal({
                             <p><span className="font-bold">Resultado geral:</span> {selectedReport?.approved ? 'APROVADO' : 'NÃO APROVADO'}</p>
                           </div>
                         </div>
-                      ) : (selectedReport?.instrumentType === 'transmissor' || inst?.typeSpec === 'transmissor' || (Array.isArray(selectedReport?.transmitterPoints) && selectedReport.transmitterPoints.length > 0)) ? (
+                      ) : clientInstrumentType === 'transmissor' ? (
                         (() => {
                           const sigStr = String(selectedReport?.outputSignal || inst?.outputSignal || '4 a 20 mA DC (HART)');
                           const sigUnit = sigStr.includes('0 a 10') || sigStr.includes('1 a 5') ? 'V' : 'mA';
@@ -1429,7 +1429,7 @@ export default function ClientPortal({
                             </div>
                           );
                         })()
-                      ) : (selectedReport?.instrumentType === 'pressostato' || selectedReport?.instrumentType === 'termostato' || inst?.typeSpec === 'pressostato' || inst?.typeSpec === 'termostato' || (Array.isArray(selectedReport?.switchPoints) && selectedReport.switchPoints.length > 0)) ? (
+                      ) : (clientInstrumentType === 'pressostato' || clientInstrumentType === 'termostato') ? (
                         <div className="space-y-3 text-[10px]">
                           <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
                             <p><span className="font-bold">Set Point Nominal:</span> {selectedReport?.setPoint ?? inst?.setPoint ?? '—'} {inst?.unit}</p>

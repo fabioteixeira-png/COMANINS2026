@@ -1868,10 +1868,16 @@ export async function saveCalibrationDoc(data: {
     contactType: data.contactType,
     accuracyClass: data.accuracyClass,
     mpe: data.mpe,
-    transmitterPoints: processedTransmitterPoints.length ? processedTransmitterPoints : data.transmitterPoints,
-    switchPoints: processedSwitchPoints.length ? processedSwitchPoints : data.switchPoints,
-    safetyValvePoints: processedSafetyValvePoints,
-    pressureRegulatorPoints: processedPressureRegulatorPoints,
+    transmitterPoints:
+      data.instrumentType === 'transmissor'
+        ? (processedTransmitterPoints.length ? processedTransmitterPoints : data.transmitterPoints)
+        : undefined,
+    switchPoints:
+      data.instrumentType === 'pressostato' || data.instrumentType === 'termostato'
+        ? (processedSwitchPoints.length ? processedSwitchPoints : data.switchPoints)
+        : undefined,
+    safetyValvePoints: data.instrumentType === 'psv' ? processedSafetyValvePoints : undefined,
+    pressureRegulatorPoints: data.instrumentType === 'pcv' ? processedPressureRegulatorPoints : undefined,
     valveService: data.valveService,
     valveTestMedium: data.valveTestMedium,
     valveSeatType: data.valveSeatType,

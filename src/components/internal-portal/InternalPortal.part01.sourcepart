@@ -6838,13 +6838,22 @@ Status atual: ${e.status}.`,
           accuracyClass: benchAccuracyClass,
           mpe: benchMpe,
           points:
-            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
-              ? []
-              : benchPoints,
-          transmitterPoints: benchTransmitterPoints,
-          switchPoints: benchSwitchPoints,
-          safetyValvePoints: benchSafetyValvePoints,
-          pressureRegulatorPoints: benchPressureRegulatorPoints,
+            selectedInstrumentType === "manometro" ||
+            selectedInstrumentType === "manovacuometro" ||
+            selectedInstrumentType === "termometro"
+              ? benchPoints
+              : [],
+          transmitterPoints:
+            selectedInstrumentType === "transmissor" ? benchTransmitterPoints : [],
+          switchPoints:
+            selectedInstrumentType === "pressostato" ||
+            selectedInstrumentType === "termostato"
+              ? benchSwitchPoints
+              : [],
+          safetyValvePoints:
+            selectedInstrumentType === "psv" ? benchSafetyValvePoints : [],
+          pressureRegulatorPoints:
+            selectedInstrumentType === "pcv" ? benchPressureRegulatorPoints : [],
           valveService: selectedInstrumentType === "psv" ? benchValveService : undefined,
           valveTestMedium:
             selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
@@ -7187,13 +7196,22 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
               : undefined,
           isCustomCalibrationRange: isCustomCalibrationRange,
           points:
-            selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"
-              ? []
-              : benchPoints,
-          transmitterPoints: benchTransmitterPoints,
-          switchPoints: benchSwitchPoints,
-          safetyValvePoints: benchSafetyValvePoints,
-          pressureRegulatorPoints: benchPressureRegulatorPoints,
+            selectedInstrumentType === "manometro" ||
+            selectedInstrumentType === "manovacuometro" ||
+            selectedInstrumentType === "termometro"
+              ? benchPoints
+              : [],
+          transmitterPoints:
+            selectedInstrumentType === "transmissor" ? benchTransmitterPoints : [],
+          switchPoints:
+            selectedInstrumentType === "pressostato" ||
+            selectedInstrumentType === "termostato"
+              ? benchSwitchPoints
+              : [],
+          safetyValvePoints:
+            selectedInstrumentType === "psv" ? benchSafetyValvePoints : [],
+          pressureRegulatorPoints:
+            selectedInstrumentType === "pcv" ? benchPressureRegulatorPoints : [],
           valveService: selectedInstrumentType === "psv" ? benchValveService : undefined,
           valveTestMedium:
             selectedInstrumentType === "psv" || selectedInstrumentType === "pcv"

@@ -3723,7 +3723,7 @@
                                   <p><span className="font-bold">Resultado geral:</span> {report?.approved ? "APROVADO" : "NÃO APROVADO"}</p>
                                 </div>
                               </div>
-                            ) : certificateInstrumentType === "transmissor" || (Array.isArray(report?.transmitterPoints) && report.transmitterPoints.length > 0) ? (
+                            ) : certificateInstrumentType === "transmissor" ? (
                               (() => {
                                 const sigCfg = getTransmitterSignalConfig(report?.outputSignal || inst.outputSignal);
                                 const txPoints = Array.isArray(report?.transmitterPoints) ? report.transmitterPoints : [];
@@ -3778,7 +3778,7 @@
                                   </div>
                                 );
                               })()
-                            ) : certificateInstrumentType === "pressostato" || certificateInstrumentType === "termostato" || (Array.isArray(report?.switchPoints) && report.switchPoints.length > 0) ? (
+                            ) : certificateInstrumentType === "pressostato" || certificateInstrumentType === "termostato" ? (
                               <div className="space-y-3 text-[10px]">
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 border border-slate-300 p-2">
                                   <p><span className="font-bold">Set Point Nominal:</span> {report?.setPoint ?? inst.setPoint ?? "—"} {inst.unit}</p>
