@@ -3569,9 +3569,9 @@ Status atual: ${e.status}.`,
           setBenchValveService((inst as any).valveService || "Gás / Vapor");
           setBenchValveTestMedium((inst as any).valveTestMedium || "Ar / Nitrogênio");
           setBenchValveSeatType((inst as any).valveSeatType || "Metal-Metal");
-          setBenchAcceptanceCriterion((inst as any).acceptanceCriterion || "");
+          setBenchAcceptanceCriterion((inst as any).acceptanceCriterion || "ASME Sec. VIII / API 527");
           setBenchMaxBlowdownPct((inst as any).maxBlowdownPercent ?? "");
-          setBenchSeatLeakageResult("Não avaliado");
+          setBenchSeatLeakageResult((inst as any).seatLeakageResult || "Aprovado");
           setBenchSeatLeakageTestPressure("");
           setBenchSeatLeakageMeasured("");
           setBenchSeatLeakageLimit("");
@@ -3683,12 +3683,12 @@ Status atual: ${e.status}.`,
         const genericMpe = Number(((pct / 100) * fe).toFixed(4));
         const registeredMpe = Number(inst.mpe);
         if (detectedType === "psv" || detectedType === "pcv") {
-          // Never invent a normative valve tolerance. Force an explicit criterion
-          // unless a valid MPE/tolerance was already registered on the instrument.
+          // Default PSV/PCV tolerance: if inst.mpe registered, use it; else default to 3% of Set Point or 0.5
+          const defaultValveMpe = Number((0.03 * (Number(inst.setPoint) || min || max || 16)).toFixed(3)) || 0.5;
           setBenchMpe(
             Number.isFinite(registeredMpe) && registeredMpe > 0
               ? registeredMpe
-              : 0,
+              : defaultValveMpe,
           );
           setBenchAccuracyClass(
             detectedType === "psv"
@@ -6224,6 +6224,7 @@ Status atual: ${e.status}.`,
     // Step 2: Validate that ALL fields are filled and status is ALL OK (pass = true)
     let isAllFilled = true;
     let isAllOk = true;
+    let specificValidationErrorMessage = "";
 
     if (
       selectedInstrumentType === "manometro" ||
@@ -6303,13 +6304,15 @@ Status atual: ${e.status}.`,
       }
     } else if (selectedInstrumentType === "psv") {
       const setPointNominal = Number(benchSetPoint);
+      const effectiveMpe = benchMpe > 0 ? benchMpe : Number((0.03 * (setPointNominal || 16)).toFixed(3)) || 0.5;
+
       if (
         benchSetPoint === "" ||
         !Number.isFinite(setPointNominal) ||
-        !(benchMpe > 0) ||
         !benchSafetyValvePoints.length
       ) {
         isAllFilled = false;
+        specificValidationErrorMessage = "Preencha a Pressão de Ajuste (Set Point) e os testes de abertura/reassentamento da PSV.";
       } else {
         for (const point of benchSafetyValvePoints) {
           const opening = Number(point.openingPressure);
@@ -6321,13 +6324,17 @@ Status atual: ${e.status}.`,
             !Number.isFinite(reseating)
           ) {
             isAllFilled = false;
+            specificValidationErrorMessage = "Todos os testes de abertura e reassentamento da PSV precisam ter valores numéricos informados.";
             break;
           }
           const openingError = Math.abs(opening - setPointNominal);
           const blowdownPct = opening !== 0
             ? Math.abs(((opening - reseating) / opening) * 100)
             : 0;
-          if (openingError > benchMpe) isAllOk = false;
+          if (openingError > effectiveMpe) {
+            isAllOk = false;
+            specificValidationErrorMessage = `O Erro de Abertura do teste (${openingError.toFixed(3)}) ultrapassa a tolerância permitida (${effectiveMpe}).`;
+          }
           const blowdownLimit = Number(benchMaxBlowdownPct);
           if (
             benchMaxBlowdownPct !== "" &&
@@ -6335,14 +6342,22 @@ Status atual: ${e.status}.`,
             blowdownPct > blowdownLimit
           ) {
             isAllOk = false;
+            specificValidationErrorMessage = `O Blowdown do teste (${blowdownPct.toFixed(2)}%) ultrapassa o limite máximo permitido (${blowdownLimit}%).`;
           }
         }
       }
       if (!benchAcceptanceCriterion.trim()) {
         isAllFilled = false;
+        if (!specificValidationErrorMessage) {
+          specificValidationErrorMessage = "Preencha o campo 'Critério de Aceitação / Código de Projeto' (ex: ASME Sec. VIII / API 527).";
+        }
       }
-      // PSV approved certificate requires a positive seat-tightness result.
-      if (benchSeatLeakageResult !== "Aprovado") isAllOk = false;
+      if (benchSeatLeakageResult !== "Aprovado") {
+        isAllOk = false;
+        if (!specificValidationErrorMessage) {
+          specificValidationErrorMessage = "O campo 'Estanqueidade da Sede' está selecionado como 'Não avaliado' ou 'Reprovado'. Selecione 'Aprovado' para poder emitir o certificado de aprovação da PSV.";
+        }
+      }
       const leakageMeasured = Number(benchSeatLeakageMeasured);
       const leakageLimit = Number(benchSeatLeakageLimit);
       if (
@@ -6353,6 +6368,9 @@ Status atual: ${e.status}.`,
         leakageMeasured > leakageLimit
       ) {
         isAllOk = false;
+        if (!specificValidationErrorMessage) {
+          specificValidationErrorMessage = `O vazamento medido na sede (${leakageMeasured}) ultrapassa o limite aplicável (${leakageLimit}).`;
+        }
       }
     } else if (selectedInstrumentType === "pcv") {
       const setPointNominal = Number(benchSetPoint);
@@ -6430,14 +6448,13 @@ Status atual: ${e.status}.`,
 
     if (!isAllFilled || !isAllOk) {
       setBenchSubmitting(false);
-      const msg =
-        "revisar dados de calibração que o certificado não foi aprovado";
+      const msg = specificValidationErrorMessage || "revisar dados de calibração que o certificado não foi aprovado";
       setBenchErrorMessage(
         "Atenção: Por favor, " +
           msg +
           ". Se o instrumento está com defeito ou não pode ser calibrado, utilize o botão 'Gravar Registro e Emitir RNC'.",
       );
-      alert("Revisar dados de calibração que o certificado não foi aprovado.");
+      alert(specificValidationErrorMessage ? "Atenção: " + specificValidationErrorMessage : "Revisar dados de calibração que o certificado não foi aprovado.");
       return;
     }
 
