@@ -1028,7 +1028,18 @@ export default function ClientPortal({
                   ? Number(inst.mpe) 
                   : 0;
 
-              const formattedPoints = points.map((p: any) => {
+                             const rawSubdivVal = inst?.subdivision ?? selectedReport?.subdivision;
+               const parsedSubdiv = Number(
+                 String(rawSubdivVal ?? '').replace(',', '.')
+               );
+               const hasSubdivision =
+                 rawSubdivVal !== undefined &&
+                 rawSubdivVal !== null &&
+                 String(rawSubdivVal).trim() !== '' &&
+                 Number.isFinite(parsedSubdiv) &&
+                 parsedSubdiv > 0;
+
+               const formattedPoints = points.map((p: any) => {
                  const nominal = p.nominal !== undefined ? p.nominal : p.nominalValue;
                  const rawA1 = p.refAsc1 !== undefined ? p.refAsc1 : (p.instrumentAscending !== undefined ? p.instrumentAscending : p.instrumentValue);
                  const rawD1 = p.refDesc1 !== undefined ? p.refDesc1 : (p.instrumentDescending !== undefined ? p.instrumentDescending : (p.standardValue !== undefined ? p.standardValue : p.instrumentValue));
@@ -1114,19 +1125,17 @@ export default function ClientPortal({
                    }
                  }
 
-                 const rawSubdiv = Number(String(inst?.subdivision ?? selectedReport?.subdivision ?? '').replace(',', '.'));
-                 const decimals = String(nominal).includes('.') ? String(nominal).split('.')[1].length : 2;
-                 const fallbackRes = Math.pow(10, -Math.max(1, Math.min(decimals, 3)));
-                 const res = Number.isFinite(rawSubdiv) && rawSubdiv > 0 ? rawSubdiv : fallbackRes;
-                 const uB_res = (res / 2) / Math.sqrt(3);
-
-                 const uB_hist = normalizedLocalHyst / (2 * Math.sqrt(3));
-
-                 const stdErrorOrMpe = mpeVal > 0 ? ((mpeVal * span / 100) / 4) : (span * 0.0025);
-                 const uB_std = stdErrorOrMpe / 2;
-
-                 const uc = Math.sqrt(Math.pow(normalizedUA, 2) + Math.pow(uB_res, 2) + Math.pow(uB_hist, 2) + Math.pow(uB_std, 2));
-                 const expandedUncertainty = count > 0 ? Number((uc * 2.00).toFixed(2)) : 0.05;
+                 // --- CÁLCULO DA INCERTEZA EXPANDIDA (ABNT NBR ISO/IEC 17025 & GUM) ---
+                  // Incerteza só é calculada com base na subdivisão real informada
+                  let expandedUncertainty = 0;
+                  if (hasSubdivision && count > 0) {
+                     const uB_res = (parsedSubdiv / 2) / Math.sqrt(3);
+                     const uB_hist = normalizedLocalHyst / (2 * Math.sqrt(3));
+                     const stdErrorOrMpe = mpeVal > 0 ? ((mpeVal * span / 100) / 4) : (span * 0.0025);
+                     const uB_std = stdErrorOrMpe / 2;
+                     const uc = Math.sqrt(Math.pow(normalizedUA, 2) + Math.pow(uB_res, 2) + Math.pow(uB_hist, 2) + Math.pow(uB_std, 2));
+                     expandedUncertainty = Number((uc * 2.00).toFixed(2));
+                  }
 
                  return { nominal, avg, err, a1: a1 ?? 0, d1: d1 ?? 0, a2: a2 ?? 0, d2: d2 ?? 0, count, expandedUncertainty, refAsc1: p.refAsc1, refDesc1: p.refDesc1, refAsc2: p.refAsc2, refDesc2: p.refDesc2 };
               });
@@ -1134,10 +1143,10 @@ export default function ClientPortal({
               const classPct = span > 0 ? (maxAbsError / span) * 100 : 0;
               const hysteresisPct = span > 0 ? (maxHysteresis / span) * 100 : 0;
               const repPct = span > 0 ? (maxRepeatability / span) * 100 : 0;
-              const maxExpandedUncertainty = formattedPoints.length > 0
+              const maxExpandedUncertainty = hasSubdivision && formattedPoints.length > 0
                 ? Math.max(...formattedPoints.map((fp: any) => Number(fp.expandedUncertainty) || 0))
                 : 0;
-              const uncertaintyPct = span > 0 ? (maxExpandedUncertainty / span) * 100 : 0;
+              const uncertaintyPct = hasSubdivision && span > 0 ? (maxExpandedUncertainty / span) * 100 : 0;
 
               return (
                 <div className="space-y-6">
@@ -1202,12 +1211,10 @@ export default function ClientPortal({
                           </p>
                         )}
                         <p><span className="font-bold">Tolerância (MPE):</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
-                        {(!isPsvCertificate && !isPcvCertificate && clientInstrumentType !== 'transmissor' && clientInstrumentType !== 'pressostato' && clientInstrumentType !== 'termostato') && (
+                        {hasSubdivision && (
                           <p>
                             <span className="font-bold">Subdivisão:</span>{' '}
-                            {(inst?.subdivision ?? selectedReport?.subdivision)
-                              ? `${inst?.subdivision ?? selectedReport?.subdivision} ${inst?.unit}`
-                              : 'Não informada'}
+                            {rawSubdivVal} {inst?.unit}
                           </p>
                         )}
                       </div>
@@ -1541,7 +1548,9 @@ export default function ClientPortal({
                             <p>Índice de Classe (%): {classPct.toFixed(2)}</p>
                             <p>Repetitividade (%): {repPct.toFixed(3)}</p>
                             <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
-                            <p>Incerteza de Medição (U): ± {maxExpandedUncertainty.toFixed(2)} {inst?.unit} ({uncertaintyPct.toFixed(2)} %) (k = 2,00; 95,45%)</p>
+                            {hasSubdivision && (
+                              <p>Incerteza de Medição (U): ± {maxExpandedUncertainty.toFixed(2)} {inst?.unit} ({uncertaintyPct.toFixed(2)} %) (k = 2,00; 95,45%)</p>
+                            )}
                           </div>
                         </>
                       )}
