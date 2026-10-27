@@ -2297,12 +2297,15 @@ app.post('/api/rentals/contracts/:id/dispatch', requireAuth, requireInternalAcco
         currentRentalId: rentalId,
       }));
 
+      const dispatchDueDate = rentalAddDays(dispatchDate, RENTAL_BILLING_DAYS) || rental.firstDueDate;
       rentalResult = {
         id: rentalId,
         ...rental,
         items: nextItems,
         status: 'ativo',
         dispatchAt: dispatchDate,
+        firstDueDate: dispatchDueDate,
+        nextDueDate: dispatchDueDate,
         dispatchResponsible: actorName,
         dispatchResponsibleUid: actorUid,
         updatedAt: nowIso,
@@ -2313,6 +2316,8 @@ app.post('/api/rentals/contracts/:id/dispatch', requireAuth, requireInternalAcco
         items: nextItems,
         status: 'ativo',
         dispatchAt: dispatchDate,
+        firstDueDate: dispatchDueDate,
+        nextDueDate: dispatchDueDate,
         dispatchResponsible: actorName,
         dispatchResponsibleUid: actorUid,
         updatedAt: nowIso,
@@ -2756,12 +2761,13 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
   const manualIssueDate = rentalDate(req.body.issueDate);
   const issueDate = manualIssueDate || nowIso.slice(0, 10);
   const manualDueDate = rentalDate(req.body.dueDate);
-  const dueDate = manualDueDate || rentalAddDays(rentalForCycle.firstDueDate, cycleIndex * RENTAL_BILLING_DAYS);
+  const dueDate = manualDueDate || rentalAddDays(issueDate, RENTAL_BILLING_DAYS);
   const manualPeriodStart = rentalDate(req.body.periodStart);
-  const defaultPeriodStart = rentalAddDays(rentalForCycle.startDate, cycleIndex * RENTAL_BILLING_DAYS);
+  const baseEntryDate = rentalDate(rentalForCycle.dispatchAt || rentalForCycle.startDate) || issueDate;
+  const defaultPeriodStart = cycleIndex > 0 ? issueDate : baseEntryDate;
   const periodStart = manualPeriodStart || defaultPeriodStart;
   const manualPeriodEnd = rentalDate(req.body.periodEnd);
-  const periodEnd = manualPeriodEnd || rentalAddDays(periodStart, RENTAL_BILLING_DAYS - 1);
+  const periodEnd = manualPeriodEnd || rentalAddDays(periodStart, RENTAL_BILLING_DAYS);
   if (!dueDate || !periodStart || !periodEnd || !issueDate) return res.status(409).json({ error: 'INVALID_RENTAL_DATA' });
 
   const baseDocId = rentalInvoiceDocId(rentalId, dueDate);
@@ -2945,6 +2951,17 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
       transaction.create(invoiceRef, invoiceResult);
       transaction.create(financeRef, financeData);
 
+      const nextDueFromEmission = rentalAddDays(issueDate, RENTAL_BILLING_DAYS) || dueDate;
+      const baseContractUpdate: Record<string, any> = {
+        lastInvoiceIssueDate: issueDate,
+        lastInvoiceDueDate: dueDate,
+        nextDueDate: nextDueFromEmission,
+        ...(cycleIndex === 0 ? { firstDueDate: nextDueFromEmission } : {}),
+        updatedAt: nowIso,
+        updatedBy: actorName,
+        updatedByUid: actorUid,
+      };
+
       if (updateContractDefaults) {
         const updatedItems = allItems.map((item: any) => {
           const override = lineOverrideMap.get(String(item.assetId));
@@ -2957,6 +2974,7 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
           };
         });
         transaction.update(rentalRef, {
+          ...baseContractUpdate,
           quotationRefs,
           purchaseOrder,
           processNumber,
@@ -2965,10 +2983,9 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
           paymentMethod,
           billingNotes,
           items: updatedItems,
-          updatedAt: nowIso,
-          updatedBy: actorName,
-          updatedByUid: actorUid,
         });
+      } else {
+        transaction.update(rentalRef, baseContractUpdate);
       }
 
       transaction.set(settingsRef, {
@@ -3023,7 +3040,7 @@ app.patch('/api/rentals/invoices/:id', requireAuth, requireInternalAccount, requ
       const rentalId = asLimitedString(current.rentalId, 180);
       const rentalRef = rentalId ? firestoreDb!.collection('rentalContracts').doc(rentalId) : null;
       const updateContractDefaults = Boolean(req.body?.updateContractDefaults);
-      const rentalSnap = (updateContractDefaults && rentalRef) ? await transaction.get(rentalRef) : null;
+      const rentalSnap = rentalRef ? await transaction.get(rentalRef) : null;
 
       const invoiceNumber = req.body?.invoiceNumber !== undefined ? asLimitedString(req.body.invoiceNumber, 180) : String(current.invoiceNumber || '');
       if (!invoiceNumber) {
@@ -3135,32 +3152,44 @@ app.patch('/api/rentals/invoices/:id', requireAuth, requireInternalAccount, requ
         });
       }
 
-      if (updateContractDefaults && rentalRef && rentalSnap?.exists) {
-        const rentalData: any = rentalSnap.data() || {};
-        const existingItems = Array.isArray(rentalData.items) ? rentalData.items : [];
-        const updatedItems = existingItems.map((item: any) => {
-          const override = lineOverrideMap.get(String(item.assetId));
-          if (!override) return item;
-          return {
-            ...item,
-            ...(override.serviceId ? { serviceId: override.serviceId } : {}),
-            ...(override.serviceName ? { serviceName: override.serviceName } : {}),
-            ...(override.monthlyPrice !== undefined ? { monthlyPrice: override.monthlyPrice, renewalPrice: override.monthlyPrice } : {}),
-          };
-        });
-        transaction.update(rentalRef, {
-          quotationRefs,
-          purchaseOrder,
-          processNumber,
-          project,
-          responsibles,
-          paymentMethod,
-          billingNotes,
-          items: updatedItems,
+      if (rentalRef && rentalSnap?.exists) {
+        const nextDueFromEmission = rentalAddDays(issueDate, RENTAL_BILLING_DAYS) || dueDate;
+        const baseContractUpdate: Record<string, any> = {
+          lastInvoiceIssueDate: issueDate,
+          lastInvoiceDueDate: dueDate,
+          nextDueDate: nextDueFromEmission,
+          ...(Number(current.cycleIndex || 0) === 0 ? { firstDueDate: nextDueFromEmission } : {}),
           updatedAt: nowIso,
           updatedBy: actorName,
           updatedByUid: actorUid,
-        });
+        };
+        if (updateContractDefaults) {
+          const rentalData: any = rentalSnap.data() || {};
+          const existingItems = Array.isArray(rentalData.items) ? rentalData.items : [];
+          const updatedItems = existingItems.map((item: any) => {
+            const override = lineOverrideMap.get(String(item.assetId));
+            if (!override) return item;
+            return {
+              ...item,
+              ...(override.serviceId ? { serviceId: override.serviceId } : {}),
+              ...(override.serviceName ? { serviceName: override.serviceName } : {}),
+              ...(override.monthlyPrice !== undefined ? { monthlyPrice: override.monthlyPrice, renewalPrice: override.monthlyPrice } : {}),
+            };
+          });
+          transaction.update(rentalRef, {
+            ...baseContractUpdate,
+            quotationRefs,
+            purchaseOrder,
+            processNumber,
+            project,
+            responsibles,
+            paymentMethod,
+            billingNotes,
+            items: updatedItems,
+          });
+        } else {
+          transaction.update(rentalRef, baseContractUpdate);
+        }
       }
 
       transaction.set(auditRef, {
@@ -6511,15 +6540,18 @@ async function runRentalDueNotifications() {
 
     for (const docSnap of snapshot.docs) {
       const rental: any = docSnap.data() || {};
-      const firstDueDate = rentalDate(rental.firstDueDate);
-      const startDate = rentalDate(rental.startDate);
-      if (!firstDueDate || !startDate) continue;
-      const diff = rentalDiffDays(firstDueDate, targetDueDate);
+      const lastIssue = rentalDate(rental.lastInvoiceIssueDate);
+      const baseStart = rentalDate(rental.dispatchAt || rental.startDate);
+      const effectiveFirstDue = lastIssue
+        ? rentalAddDays(lastIssue, RENTAL_BILLING_DAYS)
+        : (baseStart ? rentalAddDays(baseStart, RENTAL_BILLING_DAYS) : rentalDate(rental.firstDueDate));
+      if (!effectiveFirstDue || !baseStart) continue;
+      const diff = rentalDiffDays(effectiveFirstDue, targetDueDate);
       if (diff === null || diff < 0 || diff % RENTAL_BILLING_DAYS !== 0) continue;
 
       const cycleIndex = diff / RENTAL_BILLING_DAYS;
-      const periodStart = rentalAddDays(startDate, cycleIndex * RENTAL_BILLING_DAYS);
-      const periodEnd = rentalAddDays(periodStart, RENTAL_BILLING_DAYS - 1);
+      const periodStart = lastIssue || rentalAddDays(baseStart, cycleIndex * RENTAL_BILLING_DAYS);
+      const periodEnd = rentalAddDays(periodStart, RENTAL_BILLING_DAYS);
       const invoiceId = rentalInvoiceDocId(docSnap.id, targetDueDate);
       const invoiceSnap = await firestoreDb.collection('rentalInvoices').doc(invoiceId).get();
       const invoice = invoiceSnap.exists ? { id: invoiceSnap.id, ...invoiceSnap.data() } : null;

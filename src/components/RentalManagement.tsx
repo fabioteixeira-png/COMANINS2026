@@ -160,14 +160,35 @@ const formatDate = (value?: string) => {
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 
-const nextDueDate = (rental: RentalContract, reference = todayIso()) => {
-  const first = dateFromIso(rental.firstDueDate);
-  const ref = dateFromIso(reference);
-  if (!first || !ref) return rental.firstDueDate;
-  const diffDays = Math.floor((ref.getTime() - first.getTime()) / 86_400_000);
-  if (diffDays <= 0) return rental.firstDueDate;
-  const cycleIndex = Math.ceil(diffDays / 30);
-  return addDaysIso(rental.firstDueDate, cycleIndex * 30);
+const nextDueDate = (rental: RentalContract, invoicesOrRef: RentalInvoice[] | string = []) => {
+  if (Array.isArray(invoicesOrRef)) {
+    const rentalInvoices = invoicesOrRef
+      .filter((invoice) => invoice.rentalId === rental.id && invoice.status !== 'cancelada')
+      .sort((a, b) => {
+        const cycleDiff = Number(a.cycleIndex || 0) - Number(b.cycleIndex || 0);
+        if (cycleDiff !== 0) return cycleDiff;
+        return String(a.issueDate || '').localeCompare(String(b.issueDate || ''));
+      });
+    const lastInvoice = rentalInvoices.length > 0 ? rentalInvoices[rentalInvoices.length - 1] : null;
+    if (lastInvoice) {
+      const lastIssueIso = String(lastInvoice.issueDate || '').slice(0, 10);
+      if (lastIssueIso) {
+        return addDaysIso(lastIssueIso, 30) || lastInvoice.dueDate;
+      }
+      if (lastInvoice.dueDate) return lastInvoice.dueDate;
+    }
+  }
+
+  const contractLastIssue = String((rental as any).lastInvoiceIssueDate || '').slice(0, 10);
+  if (contractLastIssue) {
+    return addDaysIso(contractLastIssue, 30);
+  }
+
+  const baseEmissionDate = String(rental.dispatchAt || rental.startDate || '').slice(0, 10);
+  if (baseEmissionDate) {
+    return addDaysIso(baseEmissionDate, 30) || rental.firstDueDate;
+  }
+  return rental.firstDueDate;
 };
 
 const rangeText = (asset: RentalAsset) => {
@@ -177,7 +198,7 @@ const rangeText = (asset: RentalAsset) => {
 
 const activeRentalItems = (rental: RentalContract) => rental.items.filter((item) => !item.returnedAt);
 
-const nextUninvoicedCycle = (rental: RentalContract, invoices: RentalInvoice[]) => {
+const nextUninvoicedCycle = (rental: RentalContract, invoices: RentalInvoice[], issueDateRef = todayIso()) => {
   const rentalInvoices = invoices
     .filter((invoice) => invoice.rentalId === rental.id && invoice.status !== 'cancelada')
     .sort((a, b) => Number(a.cycleIndex || 0) - Number(b.cycleIndex || 0));
@@ -190,15 +211,13 @@ const nextUninvoicedCycle = (rental: RentalContract, invoices: RentalInvoice[]) 
   while (occupied.has(cycleIndex) && cycleIndex < 600) cycleIndex += 1;
   if (cycleIndex >= 600) return null;
 
-  const lastInvoice = rentalInvoices.length > 0 ? rentalInvoices[rentalInvoices.length - 1] : null;
-  const periodStart = lastInvoice?.periodEnd
-    ? addDaysIso(lastInvoice.periodEnd, 1)
-    : addDaysIso(rental.startDate, cycleIndex * 30);
-  const periodEnd = addDaysIso(periodStart, 29);
-  const dueDate = lastInvoice?.dueDate
-    ? addDaysIso(lastInvoice.dueDate, 30)
-    : addDaysIso(rental.firstDueDate, cycleIndex * 30);
-  if (!periodStart || !periodEnd) return null;
+  const emissionIso = String(issueDateRef || todayIso()).slice(0, 10);
+  const entryIso = String(rental.dispatchAt || rental.startDate || emissionIso).slice(0, 10);
+  const isRenewal = cycleIndex > 0;
+  const periodStart = isRenewal ? emissionIso : entryIso;
+  const periodEnd = addDaysIso(periodStart, 30);
+  const dueDate = addDaysIso(emissionIso, 30);
+  if (!periodStart || !periodEnd || !dueDate) return null;
 
   const hasActiveOrBillableItems = rental.items.some((item) => {
     if (!item.returnedAt) return true;
@@ -455,12 +474,14 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
   const openIssueInvoiceModal = (rental: RentalContract) => {
     clearMessages();
     if (!ensureEditable()) return;
-    const pendingCycle = nextUninvoicedCycle(rental, invoices);
+    const issueDate = todayIso();
+    const pendingCycle = nextUninvoicedCycle(rental, invoices, issueDate);
     const cycleIndex = pendingCycle ? pendingCycle.cycleIndex : 0;
     const isRenewal = cycleIndex > 0;
-    const periodStart = pendingCycle?.periodStart || todayIso();
-    const periodEnd = pendingCycle?.periodEnd || addDaysIso(periodStart, 29);
-    const dueDate = pendingCycle?.dueDate || nextDueDate(rental, periodStart) || addDaysIso(periodStart, 30);
+    const baseEntryIso = String(rental.dispatchAt || rental.startDate || issueDate).slice(0, 10);
+    const periodStart = isRenewal ? issueDate : (pendingCycle?.periodStart || baseEntryIso);
+    const periodEnd = addDaysIso(periodStart, 30) || pendingCycle?.periodEnd || issueDate;
+    const dueDate = addDaysIso(issueDate, 30) || addDaysIso(periodStart, 30);
 
     const billableSource = rental.items.filter((item) => {
       if (!item.returnedAt) return true;
@@ -1313,15 +1334,23 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                   type="button"
                   onClick={() => {
                     setInvoiceModal((prev) => {
-                      if (!prev || !prev.periodStart) return prev;
-                      const calcEnd = addDaysIso(prev.periodStart, 29);
-                      const calcDue = addDaysIso(prev.periodStart, 30);
-                      return { ...prev, periodEnd: calcEnd || prev.periodEnd, dueDate: calcDue || prev.dueDate };
+                      if (!prev) return prev;
+                      const refEmission = prev.issueDate || prev.periodStart;
+                      if (!refEmission) return prev;
+                      const calcStart = prev.isRenewal ? refEmission : (prev.periodStart || refEmission);
+                      const calcEnd = addDaysIso(calcStart, 30);
+                      const calcDue = addDaysIso(refEmission, 30);
+                      return {
+                        ...prev,
+                        periodStart: calcStart,
+                        periodEnd: calcEnd || prev.periodEnd,
+                        dueDate: calcDue || prev.dueDate,
+                      };
                     });
                   }}
                   className="px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold shrink-0"
                 >
-                  Recalcular Fim (+29d) e Vencimento (+30d) a partir do Início
+                  Recalcular Período e Vencimento (+30d da Emissão)
                 </button>
               </div>
 
@@ -1350,7 +1379,20 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                     required
                     type="date"
                     value={invoiceModal.issueDate}
-                    onChange={(e) => setInvoiceModal({ ...invoiceModal, issueDate: e.target.value })}
+                    onChange={(e) => {
+                      const nextIssue = e.target.value;
+                      const autoDue = addDaysIso(nextIssue, 30);
+                      const shouldSyncStart = invoiceModal.isRenewal || invoiceModal.periodStart === invoiceModal.issueDate;
+                      const nextStart = shouldSyncStart && nextIssue ? nextIssue : invoiceModal.periodStart;
+                      const autoEnd = nextStart ? addDaysIso(nextStart, 30) : '';
+                      setInvoiceModal({
+                        ...invoiceModal,
+                        issueDate: nextIssue,
+                        ...(shouldSyncStart && nextIssue ? { periodStart: nextIssue } : {}),
+                        ...(shouldSyncStart && autoEnd ? { periodEnd: autoEnd } : {}),
+                        ...(autoDue ? { dueDate: autoDue } : {}),
+                      });
+                    }}
                     className="input-rental"
                   />
                 </Field>
@@ -1361,7 +1403,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                     value={invoiceModal.periodStart}
                     onChange={(e) => {
                       const nextStart = e.target.value;
-                      const autoEnd = addDaysIso(nextStart, 29);
+                      const autoEnd = addDaysIso(nextStart, 30);
                       setInvoiceModal({
                         ...invoiceModal,
                         periodStart: nextStart,
@@ -1380,7 +1422,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                     className="input-rental"
                   />
                 </Field>
-                <Field label="Data de Vencimento *">
+                <Field label="Data de Vencimento (30 dias após emissão) *">
                   <input
                     required
                     type="date"
@@ -1700,7 +1742,7 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               {filteredRentals.map((rental) => {
                 const activeItems = activeRentalItems(rental);
-                const due = nextDueDate(rental);
+                const due = nextDueDate(rental, invoices);
                 const pendingCycle = nextUninvoicedCycle(rental, invoices);
                 const canGenerateInvoice = canEdit && ['ativo', 'encerrado'].includes(rental.status) && !!pendingCycle;
                 const isRenewalNext = (pendingCycle?.cycleIndex || 0) > 0;
@@ -1729,8 +1771,8 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
                       </div>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div><span className="block text-slate-400 font-bold">Início</span>{formatDate(rental.startDate)}</div>
-                      <div><span className="block text-slate-400 font-bold">Próx. vencimento</span>{formatDate(pendingCycle?.dueDate || due)}</div>
+                      <div><span className="block text-slate-400 font-bold">Início</span>{formatDate(String(rental.dispatchAt || rental.startDate || '').slice(0, 10))}</div>
+                      <div><span className="block text-slate-400 font-bold">Próx. vencimento</span>{formatDate(due)}</div>
                       <div><span className="block text-slate-400 font-bold">Ativos</span>{activeItems.length} item(ns)</div>
                       <div><span className="block text-slate-400 font-bold">Ciclo</span>30 dias fixos</div>
                     </div>
