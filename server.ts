@@ -2731,20 +2731,55 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
   while (occupiedCycles.has(cycleIndex) && cycleIndex < 600) cycleIndex += 1;
   if (cycleIndex >= 600) return res.status(409).json({ error: 'RENTAL_BILLING_LIMIT_REACHED' });
 
-  const manualDueDate = asLimitedString(req.body.dueDate, 10);
+  const nowIso = new Date().toISOString();
+  const manualIssueDate = rentalDate(req.body.issueDate);
+  const issueDate = manualIssueDate || nowIso.slice(0, 10);
+  const manualDueDate = rentalDate(req.body.dueDate);
   const dueDate = manualDueDate || rentalAddDays(rentalForCycle.firstDueDate, cycleIndex * RENTAL_BILLING_DAYS);
-  const periodStart = rentalAddDays(rentalForCycle.startDate, cycleIndex * RENTAL_BILLING_DAYS);
-  const periodEnd = rentalAddDays(periodStart, RENTAL_BILLING_DAYS - 1);
-  if (!dueDate || !periodStart || !periodEnd) return res.status(409).json({ error: 'INVALID_RENTAL_DATA' });
+  const manualPeriodStart = rentalDate(req.body.periodStart);
+  const defaultPeriodStart = rentalAddDays(rentalForCycle.startDate, cycleIndex * RENTAL_BILLING_DAYS);
+  const periodStart = manualPeriodStart || defaultPeriodStart;
+  const manualPeriodEnd = rentalDate(req.body.periodEnd);
+  const periodEnd = manualPeriodEnd || rentalAddDays(periodStart, RENTAL_BILLING_DAYS - 1);
+  if (!dueDate || !periodStart || !periodEnd || !issueDate) return res.status(409).json({ error: 'INVALID_RENTAL_DATA' });
 
-  const invoiceRef = firestoreDb.collection('rentalInvoices').doc(rentalInvoiceDocId(rentalId, dueDate));
+  const baseDocId = rentalInvoiceDocId(rentalId, dueDate);
+  const existingDocCheck = await firestoreDb.collection('rentalInvoices').doc(baseDocId).get();
+  const invoiceDocId = existingDocCheck.exists
+    ? `${baseDocId}_c${cycleIndex}_${Date.now().toString(36)}`
+    : baseDocId;
+
+  const invoiceRef = firestoreDb.collection('rentalInvoices').doc(invoiceDocId);
   const financeRef = firestoreDb.collection('financeTransactions').doc(`rental_${invoiceRef.id}`);
   const settingsRef = firestoreDb.collection('systemSettings').doc('rentalBilling');
   const auditRef = firestoreDb.collection('systemAuditLogs').doc();
   const { actorName, actorUid, actorRole } = rentalActor(req);
-  const nowIso = new Date().toISOString();
-  const issueDate = nowIso.slice(0, 10);
-  if (periodStart > issueDate) return res.status(409).json({ error: 'RENTAL_BILLING_CYCLE_NOT_STARTED' });
+
+  const rawLineOverrides = Array.isArray(req.body?.lineOverrides) ? req.body.lineOverrides.slice(0, 200) : [];
+  const lineOverrideMap = new Map<string, {
+    serviceId?: string;
+    serviceName?: string;
+    monthlyPrice?: number;
+    renewalPrice?: number;
+    description?: string;
+    baseIdentification?: string;
+  }>();
+  for (const rawLine of rawLineOverrides) {
+    const assetId = asLimitedString(rawLine?.assetId, 180);
+    if (!assetId) continue;
+    const priceNum = Number(rawLine?.monthlyPrice);
+    const renewalNum = rawLine?.renewalPrice !== undefined ? Number(rawLine?.renewalPrice) : undefined;
+    lineOverrideMap.set(assetId, {
+      serviceId: rawLine?.serviceId !== undefined ? asLimitedString(rawLine.serviceId, 180) : undefined,
+      serviceName: rawLine?.serviceName !== undefined ? asLimitedString(rawLine.serviceName, 240) : undefined,
+      monthlyPrice: Number.isFinite(priceNum) && priceNum >= 0 ? Number(priceNum.toFixed(2)) : undefined,
+      renewalPrice: renewalNum !== undefined && Number.isFinite(renewalNum) && renewalNum >= 0 ? Number(renewalNum.toFixed(2)) : undefined,
+      description: rawLine?.description !== undefined ? asLimitedString(rawLine.description, 240) : undefined,
+      baseIdentification: rawLine?.baseIdentification !== undefined ? asLimitedString(rawLine.baseIdentification, 120) : undefined,
+    });
+  }
+
+  const updateContractDefaults = Boolean(req.body?.updateContractDefaults);
   let invoiceResult: any = null;
 
   try {
@@ -2764,23 +2799,41 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
         const error: any = new Error('RENTAL_INVOICE_SEQUENCE_NOT_CONFIGURED'); error.code = 'RENTAL_INVOICE_SEQUENCE_NOT_CONFIGURED'; throw error;
       }
 
-      const billableItems = (Array.isArray(rental.items) ? rental.items : []).filter((item: any) => {
+      const allItems = Array.isArray(rental.items) ? rental.items : [];
+      let billableItems = allItems.filter((item: any) => {
+        if (lineOverrideMap.has(String(item.assetId))) return true;
         const dispatchedAt = rentalDate(item.dispatchedAt || rental.dispatchAt || rental.startDate);
         const returnedAt = rentalDate(item.returnedAt);
         return !!dispatchedAt && dispatchedAt <= periodEnd && (!returnedAt || returnedAt >= periodStart);
       });
       if (billableItems.length === 0) {
+        billableItems = allItems.filter((item: any) => !item.returnedAt);
+      }
+      if (billableItems.length === 0) {
         const error: any = new Error('RENTAL_NO_ACTIVE_ITEMS'); error.code = 'RENTAL_NO_ACTIVE_ITEMS'; throw error;
       }
-      const lines = billableItems.map((item: any) => ({
-        assetId: asLimitedString(item.assetId, 180),
-        assetCode: asLimitedString(item.assetCode, 120),
-        description: asLimitedString(item.description || 'Manômetro com base', 240),
-        baseIdentification: asLimitedString(item.baseIdentification, 120),
-        serviceId: asLimitedString(item.serviceId, 180),
-        serviceName: asLimitedString(item.serviceName, 240),
-        monthlyPrice: Number(Number(cycleIndex > 0 ? ((item.renewalPrice ?? item.monthlyPrice) || 0) : (item.monthlyPrice || 0)).toFixed(2)),
-      }));
+
+      const isRenewal = req.body?.isRenewal !== undefined ? Boolean(req.body.isRenewal) : cycleIndex > 0;
+      const lines = billableItems.map((item: any) => {
+        const assetId = asLimitedString(item.assetId, 180);
+        const override = lineOverrideMap.get(assetId);
+        const defaultUnitPrice = Number(isRenewal ? ((item.renewalPrice ?? item.monthlyPrice) || 0) : (item.monthlyPrice || 0));
+        const finalMonthlyPrice = override?.monthlyPrice !== undefined ? override.monthlyPrice : Number(defaultUnitPrice.toFixed(2));
+        return {
+          assetId,
+          assetCode: asLimitedString(item.assetCode, 120),
+          description: override?.description || asLimitedString(item.description || 'Manômetro com base', 240),
+          baseIdentification: override?.baseIdentification !== undefined ? override.baseIdentification : asLimitedString(item.baseIdentification, 120),
+          serviceId: override?.serviceId || asLimitedString(item.serviceId, 180),
+          serviceName: override?.serviceName || asLimitedString(item.serviceName, 240),
+          monthlyPrice: Number(finalMonthlyPrice.toFixed(2)),
+          ...(override?.renewalPrice !== undefined
+            ? { renewalPrice: override.renewalPrice }
+            : item.renewalPrice !== undefined
+              ? { renewalPrice: Number(item.renewalPrice) }
+              : {}),
+        };
+      });
       const total = Number(lines.reduce((sum: number, line: any) => sum + Number(line.monthlyPrice || 0), 0).toFixed(2));
       if (total <= 0) {
         const error: any = new Error('RENTAL_NO_ACTIVE_ITEMS'); error.code = 'RENTAL_NO_ACTIVE_ITEMS'; throw error;
@@ -2788,7 +2841,19 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
 
       const sequenceNumber = currentSettings.nextInvoiceNumber;
       const invoiceNumber = manualInvoiceNumber;
-      const paymentMethod = asLimitedString(rental.paymentMethod, 120) || currentSettings.paymentMethod;
+      const quotationRefs = req.body?.quotationRefs !== undefined ? asLimitedString(req.body.quotationRefs, 1000) : String(rental.quotationRefs || '');
+      const purchaseOrder = req.body?.purchaseOrder !== undefined ? asLimitedString(req.body.purchaseOrder, 500) : String(rental.purchaseOrder || '');
+      const processNumber = req.body?.processNumber !== undefined ? asLimitedString(req.body.processNumber, 500) : String(rental.processNumber || '');
+      const project = req.body?.project !== undefined ? asLimitedString(req.body.project, 500) : String(rental.project || '');
+      const responsibles = req.body?.responsibles !== undefined ? asLimitedString(req.body.responsibles, 1000) : String(rental.responsibles || '');
+      const paymentMethod = (req.body?.paymentMethod !== undefined ? asLimitedString(req.body.paymentMethod, 120) : '') || asLimitedString(rental.paymentMethod, 120) || currentSettings.paymentMethod;
+      const billingNotes = req.body?.billingNotes !== undefined ? asLimitedString(req.body.billingNotes, 3000) : String(rental.billingNotes || '');
+      const bankInstructions = req.body?.bankInstructions !== undefined ? asLimitedString(req.body.bankInstructions, 2000) : currentSettings.bankInstructions;
+      const taxNotes = req.body?.taxNotes !== undefined ? asLimitedString(req.body.taxNotes, 3000) : currentSettings.taxNotes;
+      const cnaeCode = req.body?.cnaeCode !== undefined ? asLimitedString(req.body.cnaeCode, 80) : currentSettings.cnaeCode;
+      const cnaeDescription = req.body?.cnaeDescription !== undefined ? asLimitedString(req.body.cnaeDescription, 1000) : currentSettings.cnaeDescription;
+      const clientAddress = req.body?.clientAddress !== undefined ? asLimitedString(req.body.clientAddress, 600) : String(rental.clientAddress || '');
+
       invoiceResult = {
         id: invoiceRef.id,
         invoiceNumber,
@@ -2796,10 +2861,11 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
         rentalId,
         rentalNumber: rental.rentalNumber,
         cycleIndex,
+        isRenewal,
         clientId: rental.clientId,
         clientName: rental.clientName,
         clientCnpj: rental.clientCnpj,
-        clientAddress: rental.clientAddress || '',
+        clientAddress,
         issueDate,
         periodStart,
         periodEnd,
@@ -2807,17 +2873,17 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
         lines,
         total,
         status: 'emitida',
-        quotationRefs: rental.quotationRefs || '',
-        purchaseOrder: rental.purchaseOrder || '',
-        processNumber: rental.processNumber || '',
-        project: rental.project || '',
-        responsibles: rental.responsibles || '',
+        quotationRefs,
+        purchaseOrder,
+        processNumber,
+        project,
+        responsibles,
         paymentMethod,
-        cnaeCode: currentSettings.cnaeCode,
-        cnaeDescription: currentSettings.cnaeDescription,
-        bankInstructions: currentSettings.bankInstructions,
-        taxNotes: currentSettings.taxNotes,
-        billingNotes: rental.billingNotes || '',
+        cnaeCode,
+        cnaeDescription,
+        bankInstructions,
+        taxNotes,
+        billingNotes,
         financeTransactionId: financeRef.id,
         createdAt: nowIso,
         createdBy: actorName,
@@ -2827,7 +2893,7 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
       const financeStatus = dueDate < issueDate ? 'atrasado' : 'pendente';
       const financeData = {
         type: 'receita',
-        description: `Locação mensal ${rental.rentalNumber} - ${rental.clientName}`,
+        description: `Locação mensal${isRenewal ? ' (Renovação)' : ''} ${rental.rentalNumber} - ${rental.clientName}`,
         amount: total,
         grossAmount: total,
         retentions: 0,
@@ -2842,12 +2908,12 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
         contractId: rentalId,
         contractNumber: rental.rentalNumber,
         contractClientName: rental.clientName,
-        bankAccount: currentSettings.bankInstructions,
+        bankAccount: bankInstructions,
         paymentMethod,
         contactName: rental.clientName,
         contactDocument: rental.clientCnpj,
         documentNumber: invoiceNumber,
-        notes: `Fatura de locação ${invoiceNumber}. Período ${periodStart} a ${periodEnd}.`,
+        notes: `Fatura de locação ${invoiceNumber}${isRenewal ? ' (Renovação)' : ''}. Período ${periodStart} a ${periodEnd}.`,
         createdAt: nowIso,
         updatedAt: nowIso,
         createdBy: actorName,
@@ -2857,6 +2923,33 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
 
       transaction.create(invoiceRef, invoiceResult);
       transaction.create(financeRef, financeData);
+
+      if (updateContractDefaults) {
+        const updatedItems = allItems.map((item: any) => {
+          const override = lineOverrideMap.get(String(item.assetId));
+          if (!override) return item;
+          return {
+            ...item,
+            ...(override.serviceId ? { serviceId: override.serviceId } : {}),
+            ...(override.serviceName ? { serviceName: override.serviceName } : {}),
+            ...(override.monthlyPrice !== undefined ? { monthlyPrice: override.monthlyPrice, renewalPrice: override.monthlyPrice } : {}),
+          };
+        });
+        transaction.update(rentalRef, {
+          quotationRefs,
+          purchaseOrder,
+          processNumber,
+          project,
+          responsibles,
+          paymentMethod,
+          billingNotes,
+          items: updatedItems,
+          updatedAt: nowIso,
+          updatedBy: actorName,
+          updatedByUid: actorUid,
+        });
+      }
+
       transaction.set(settingsRef, {
         ...currentSettings,
         nextInvoiceNumber: sequenceNumber + 1,
@@ -2867,8 +2960,8 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
       transaction.set(auditRef, {
         action: 'RENTAL_INVOICE_ISSUED', entityType: 'rentalInvoice', entityId: invoiceRef.id,
         actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
-        summary: `Fatura ${invoiceNumber} emitida para ${rental.clientName}`,
-        metadata: { rentalId, rentalNumber: rental.rentalNumber, cycleIndex, periodStart, periodEnd, dueDate, total, financeTransactionId: financeRef.id },
+        summary: `Fatura ${invoiceNumber}${isRenewal ? ' (Renovação)' : ''} emitida para ${rental.clientName}`,
+        metadata: { rentalId, rentalNumber: rental.rentalNumber, cycleIndex, isRenewal, periodStart, periodEnd, dueDate, total, financeTransactionId: financeRef.id },
       });
     });
 
@@ -2880,6 +2973,193 @@ app.post('/api/rentals/contracts/:id/invoices', requireAuth, requireInternalAcco
     if (code.includes('RENTAL_NO_ACTIVE_ITEMS')) return res.status(409).json({ error: 'RENTAL_NO_ACTIVE_ITEMS' });
     if (code.includes('RENTAL_NOT_ACTIVE')) return res.status(409).json({ error: 'RENTAL_NOT_ACTIVE' });
     console.error('Rental invoice generation failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.patch('/api/rentals/invoices/:id', requireAuth, requireInternalAccount, requireEditModule('rental'), writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+  const invoiceId = asLimitedString(req.params.id, 180);
+  if (!invoiceId) return res.status(400).json({ error: 'INVALID_INVOICE_ID' });
+
+  const invoiceRef = firestoreDb.collection('rentalInvoices').doc(invoiceId);
+  const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+  const { actorName, actorUid, actorRole } = rentalActor(req);
+  const nowIso = new Date().toISOString();
+  let updatedInvoice: any = null;
+
+  try {
+    await firestoreDb.runTransaction(async (transaction) => {
+      const invoiceSnap = await transaction.get(invoiceRef);
+      if (!invoiceSnap.exists) {
+        const error: any = new Error('INVOICE_NOT_FOUND'); error.code = 'INVOICE_NOT_FOUND'; throw error;
+      }
+      const current: any = invoiceSnap.data() || {};
+      const financeTransactionId = asLimitedString(current.financeTransactionId, 180);
+      const financeRef = financeTransactionId ? firestoreDb!.collection('financeTransactions').doc(financeTransactionId) : null;
+      const financeSnap = financeRef ? await transaction.get(financeRef) : null;
+
+      const rentalId = asLimitedString(current.rentalId, 180);
+      const rentalRef = rentalId ? firestoreDb!.collection('rentalContracts').doc(rentalId) : null;
+      const updateContractDefaults = Boolean(req.body?.updateContractDefaults);
+      const rentalSnap = (updateContractDefaults && rentalRef) ? await transaction.get(rentalRef) : null;
+
+      const invoiceNumber = req.body?.invoiceNumber !== undefined ? asLimitedString(req.body.invoiceNumber, 180) : String(current.invoiceNumber || '');
+      if (!invoiceNumber) {
+        const error: any = new Error('INVOICE_NUMBER_REQUIRED'); error.code = 'INVOICE_NUMBER_REQUIRED'; throw error;
+      }
+      const issueDate = req.body?.issueDate !== undefined ? rentalDate(req.body.issueDate) : String(current.issueDate || '');
+      const periodStart = req.body?.periodStart !== undefined ? rentalDate(req.body.periodStart) : String(current.periodStart || '');
+      const periodEnd = req.body?.periodEnd !== undefined ? rentalDate(req.body.periodEnd) : String(current.periodEnd || '');
+      const dueDate = req.body?.dueDate !== undefined ? rentalDate(req.body.dueDate) : String(current.dueDate || '');
+      if (!issueDate || !periodStart || !periodEnd || !dueDate) {
+        const error: any = new Error('INVALID_RENTAL_DATA'); error.code = 'INVALID_RENTAL_DATA'; throw error;
+      }
+
+      const rawLineOverrides = Array.isArray(req.body?.lineOverrides) ? req.body.lineOverrides.slice(0, 200) : [];
+      const lineOverrideMap = new Map<string, any>();
+      for (const rawLine of rawLineOverrides) {
+        const assetId = asLimitedString(rawLine?.assetId, 180);
+        if (!assetId) continue;
+        const priceNum = Number(rawLine?.monthlyPrice);
+        lineOverrideMap.set(assetId, {
+          serviceId: rawLine?.serviceId !== undefined ? asLimitedString(rawLine.serviceId, 180) : undefined,
+          serviceName: rawLine?.serviceName !== undefined ? asLimitedString(rawLine.serviceName, 240) : undefined,
+          monthlyPrice: Number.isFinite(priceNum) && priceNum >= 0 ? Number(priceNum.toFixed(2)) : undefined,
+          description: rawLine?.description !== undefined ? asLimitedString(rawLine.description, 240) : undefined,
+          baseIdentification: rawLine?.baseIdentification !== undefined ? asLimitedString(rawLine.baseIdentification, 120) : undefined,
+        });
+      }
+
+      const currentLines = Array.isArray(current.lines) ? current.lines : [];
+      const nextLines = currentLines.map((line: any) => {
+        const override = lineOverrideMap.get(String(line.assetId));
+        if (!override) return line;
+        return {
+          ...line,
+          ...(override.serviceId ? { serviceId: override.serviceId } : {}),
+          ...(override.serviceName ? { serviceName: override.serviceName } : {}),
+          ...(override.description ? { description: override.description } : {}),
+          ...(override.baseIdentification !== undefined ? { baseIdentification: override.baseIdentification } : {}),
+          ...(override.monthlyPrice !== undefined ? { monthlyPrice: override.monthlyPrice } : {}),
+        };
+      });
+      const total = Number(nextLines.reduce((sum: number, line: any) => sum + Number(line.monthlyPrice || 0), 0).toFixed(2));
+      if (total <= 0) {
+        const error: any = new Error('RENTAL_NO_ACTIVE_ITEMS'); error.code = 'RENTAL_NO_ACTIVE_ITEMS'; throw error;
+      }
+
+      const isRenewal = req.body?.isRenewal !== undefined ? Boolean(req.body.isRenewal) : (current.isRenewal ?? (Number(current.cycleIndex || 0) > 0));
+      const quotationRefs = req.body?.quotationRefs !== undefined ? asLimitedString(req.body.quotationRefs, 1000) : String(current.quotationRefs || '');
+      const purchaseOrder = req.body?.purchaseOrder !== undefined ? asLimitedString(req.body.purchaseOrder, 500) : String(current.purchaseOrder || '');
+      const processNumber = req.body?.processNumber !== undefined ? asLimitedString(req.body.processNumber, 500) : String(current.processNumber || '');
+      const project = req.body?.project !== undefined ? asLimitedString(req.body.project, 500) : String(current.project || '');
+      const responsibles = req.body?.responsibles !== undefined ? asLimitedString(req.body.responsibles, 1000) : String(current.responsibles || '');
+      const paymentMethod = req.body?.paymentMethod !== undefined ? asLimitedString(req.body.paymentMethod, 120) : String(current.paymentMethod || '');
+      const billingNotes = req.body?.billingNotes !== undefined ? asLimitedString(req.body.billingNotes, 3000) : String(current.billingNotes || '');
+      const bankInstructions = req.body?.bankInstructions !== undefined ? asLimitedString(req.body.bankInstructions, 2000) : String(current.bankInstructions || '');
+      const taxNotes = req.body?.taxNotes !== undefined ? asLimitedString(req.body.taxNotes, 3000) : String(current.taxNotes || '');
+      const cnaeCode = req.body?.cnaeCode !== undefined ? asLimitedString(req.body.cnaeCode, 80) : String(current.cnaeCode || '');
+      const cnaeDescription = req.body?.cnaeDescription !== undefined ? asLimitedString(req.body.cnaeDescription, 1000) : String(current.cnaeDescription || '');
+      const clientAddress = req.body?.clientAddress !== undefined ? asLimitedString(req.body.clientAddress, 600) : String(current.clientAddress || '');
+
+      const invoiceUpdates = {
+        invoiceNumber,
+        isRenewal,
+        clientAddress,
+        issueDate,
+        periodStart,
+        periodEnd,
+        dueDate,
+        lines: nextLines,
+        total,
+        quotationRefs,
+        purchaseOrder,
+        processNumber,
+        project,
+        responsibles,
+        paymentMethod,
+        billingNotes,
+        bankInstructions,
+        taxNotes,
+        cnaeCode,
+        cnaeDescription,
+        updatedAt: nowIso,
+        updatedBy: actorName,
+        updatedByUid: actorUid,
+      };
+
+      transaction.update(invoiceRef, invoiceUpdates);
+      updatedInvoice = { id: invoiceId, ...current, ...invoiceUpdates };
+
+      if (financeRef && financeSnap?.exists) {
+        const finData: any = financeSnap.data() || {};
+        const paidAmount = Number(finData.paidAmount || 0);
+        const retentions = Number(finData.retentions || 0);
+        const nextOpenBalance = Math.max(0, Number((total - paidAmount - retentions).toFixed(2)));
+        transaction.update(financeRef, {
+          description: `Locação mensal${isRenewal ? ' (Renovação)' : ''} ${current.rentalNumber || ''} - ${current.clientName || ''}`,
+          amount: total,
+          grossAmount: total,
+          openBalance: nextOpenBalance,
+          date: issueDate,
+          dueDate,
+          bankAccount: bankInstructions,
+          paymentMethod,
+          documentNumber: invoiceNumber,
+          notes: `Fatura de locação ${invoiceNumber}${isRenewal ? ' (Renovação)' : ''}. Período ${periodStart} a ${periodEnd}.`,
+          updatedAt: nowIso,
+          updatedBy: actorName,
+          updatedByUid: actorUid,
+        });
+      }
+
+      if (updateContractDefaults && rentalRef && rentalSnap?.exists) {
+        const rentalData: any = rentalSnap.data() || {};
+        const existingItems = Array.isArray(rentalData.items) ? rentalData.items : [];
+        const updatedItems = existingItems.map((item: any) => {
+          const override = lineOverrideMap.get(String(item.assetId));
+          if (!override) return item;
+          return {
+            ...item,
+            ...(override.serviceId ? { serviceId: override.serviceId } : {}),
+            ...(override.serviceName ? { serviceName: override.serviceName } : {}),
+            ...(override.monthlyPrice !== undefined ? { monthlyPrice: override.monthlyPrice, renewalPrice: override.monthlyPrice } : {}),
+          };
+        });
+        transaction.update(rentalRef, {
+          quotationRefs,
+          purchaseOrder,
+          processNumber,
+          project,
+          responsibles,
+          paymentMethod,
+          billingNotes,
+          items: updatedItems,
+          updatedAt: nowIso,
+          updatedBy: actorName,
+          updatedByUid: actorUid,
+        });
+      }
+
+      transaction.set(auditRef, {
+        action: 'RENTAL_INVOICE_UPDATED',
+        entityType: 'rentalInvoice',
+        entityId: invoiceId,
+        actorUid, actorName, actorRole, createdAt: nowIso, immutable: true,
+        summary: `Fatura ${invoiceNumber} atualizada`,
+        metadata: { invoiceId, invoiceNumber, rentalId, periodStart, periodEnd, dueDate, total, isRenewal },
+      });
+    });
+
+    return res.json({ success: true, invoice: updatedInvoice });
+  } catch (error: any) {
+    const code = String(error?.code || error?.message || '');
+    if (code.includes('INVOICE_NOT_FOUND')) return res.status(404).json({ error: 'INVOICE_NOT_FOUND' });
+    if (code.includes('INVOICE_NUMBER_REQUIRED')) return res.status(400).json({ error: 'INVOICE_NUMBER_REQUIRED' });
+    if (code.includes('INVALID_RENTAL_DATA')) return res.status(400).json({ error: 'INVALID_RENTAL_DATA' });
+    if (code.includes('RENTAL_NO_ACTIVE_ITEMS')) return res.status(409).json({ error: 'RENTAL_NO_ACTIVE_ITEMS' });
+    console.error('Rental invoice update failed:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });

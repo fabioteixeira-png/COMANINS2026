@@ -3858,12 +3858,57 @@ export const returnRentalItems = async (
   return { rental: result.rental, movement: result.movement };
 };
 
-export const generateRentalInvoice = async (id: string, payload: { invoiceNumber?: string; dueDate?: string } = {}): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
+export interface RentalInvoiceGenerationPayload {
+  invoiceNumber?: string;
+  issueDate?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  dueDate?: string;
+  isRenewal?: boolean;
+  quotationRefs?: string;
+  purchaseOrder?: string;
+  processNumber?: string;
+  project?: string;
+  responsibles?: string;
+  paymentMethod?: string;
+  billingNotes?: string;
+  bankInstructions?: string;
+  taxNotes?: string;
+  cnaeCode?: string;
+  cnaeDescription?: string;
+  clientAddress?: string;
+  updateContractDefaults?: boolean;
+  lineOverrides?: Array<{
+    assetId: string;
+    serviceId?: string;
+    serviceName?: string;
+    monthlyPrice: number;
+    renewalPrice?: number;
+    description?: string;
+    baseIdentification?: string;
+  }>;
+}
+
+export const generateRentalInvoice = async (
+  id: string,
+  payload: RentalInvoiceGenerationPayload = {},
+): Promise<{ invoice: RentalInvoice; financeTransactionId: string }> => {
   const result = await rentalApiRequest<{ success: true; invoice: RentalInvoice; financeTransactionId: string }>(`/api/rentals/contracts/${encodeURIComponent(id)}/invoices`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
   return { invoice: result.invoice, financeTransactionId: result.financeTransactionId };
+};
+
+export const updateRentalInvoice = async (
+  id: string,
+  payload: RentalInvoiceGenerationPayload,
+): Promise<{ invoice: RentalInvoice }> => {
+  const result = await rentalApiRequest<{ success: true; invoice: RentalInvoice }>(`/api/rentals/invoices/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  return { invoice: result.invoice };
 };
 
 export const deleteRentalAsset = async (id: string, reason: string): Promise<void> => {

@@ -585,6 +585,7 @@ export interface RentalInvoice {
   rentalId: string;
   rentalNumber: string;
   cycleIndex: number;
+  isRenewal?: boolean;
   clientId: string;
   clientName: string;
   clientCnpj: string;
