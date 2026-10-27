@@ -1114,7 +1114,7 @@ export default function ClientPortal({
                    }
                  }
 
-                 const rawSubdiv = Number(String(selectedReport?.subdivision ?? inst?.subdivision ?? '').replace(',', '.'));
+                 const rawSubdiv = Number(String(inst?.subdivision ?? selectedReport?.subdivision ?? '').replace(',', '.'));
                  const decimals = String(nominal).includes('.') ? String(nominal).split('.')[1].length : 2;
                  const fallbackRes = Math.pow(10, -Math.max(1, Math.min(decimals, 3)));
                  const res = Number.isFinite(rawSubdiv) && rawSubdiv > 0 ? rawSubdiv : fallbackRes;
@@ -1205,8 +1205,8 @@ export default function ClientPortal({
                         {(!isPsvCertificate && !isPcvCertificate && clientInstrumentType !== 'transmissor' && clientInstrumentType !== 'pressostato' && clientInstrumentType !== 'termostato') && (
                           <p>
                             <span className="font-bold">Subdivisão:</span>{' '}
-                            {(selectedReport?.subdivision ?? inst?.subdivision)
-                              ? `${selectedReport?.subdivision ?? inst?.subdivision} ${inst?.unit}`
+                            {(inst?.subdivision ?? selectedReport?.subdivision)
+                              ? `${inst?.subdivision ?? selectedReport?.subdivision} ${inst?.unit}`
                               : 'Não informada'}
                           </p>
                         )}

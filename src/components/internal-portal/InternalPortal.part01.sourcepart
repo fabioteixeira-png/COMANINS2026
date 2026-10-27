@@ -911,6 +911,7 @@ const INSTRUMENT_SHEET_FIELDS: Array<{ key: string; label: string }> = [
   { key: 'rangeMax2', label: '2ª Faixa Máxima' },
   { key: 'unit2', label: '2ª Unidade' },
   { key: 'accuracyClass', label: 'Classe de Exatidão' },
+  { key: 'subdivision', label: 'Subdivisão (Menor Divisão de Escala)' },
   { key: 'escala', label: 'Escala' },
   { key: 'escala2', label: '2ª Escala' },
   { key: 'unidade2', label: 'Unidade da 2ª Escala' },
@@ -1883,6 +1884,13 @@ export default function InternalPortal({
       conexao: instrument.conexao || "",
       diametro: instrument.diametro || "",
       unit: instrument.unit || "",
+      subdivision:
+        instrument.subdivision !== undefined && instrument.subdivision !== null
+          ? String(instrument.subdivision)
+          : instrument.registrationSnapshot?.data?.subdivision !== undefined &&
+              instrument.registrationSnapshot?.data?.subdivision !== null
+            ? String(instrument.registrationSnapshot.data.subdivision)
+            : "",
       observacoes: instrument.observacoes || "",
       photoRegistration: instrument.photoRegistration || "",
       photoRegistrationPath: instrument.photoRegistrationPath || "",
@@ -1989,6 +1997,14 @@ export default function InternalPortal({
   const handleSaveAdminInstrumentCorrection = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!adminCorrectionTarget || !adminCorrectionForm || adminCorrectionSaving) return;
+    const rawSubdiv = String(adminCorrectionForm.subdivision ?? "").trim();
+    if (rawSubdiv !== "") {
+      const parsedSubdiv = Number(rawSubdiv.replace(",", "."));
+      if (!Number.isFinite(parsedSubdiv) || parsedSubdiv <= 0) {
+        setAdminCorrectionError("Informe um valor numérico maior que zero para a subdivisão.");
+        return;
+      }
+    }
     setAdminCorrectionSaving(true);
     setAdminCorrectionError("");
     try {
@@ -2002,6 +2018,7 @@ export default function InternalPortal({
         conexao: String(adminCorrectionForm.conexao || ""),
         diametro: String(adminCorrectionForm.diametro || ""),
         unit: String(adminCorrectionForm.unit || ""),
+        subdivision: rawSubdiv,
         observacoes: String(adminCorrectionForm.observacoes || ""),
         photoRegistration: String(adminCorrectionForm.photoRegistration || ""),
         photoRegistrationPath: String(adminCorrectionForm.photoRegistrationPath || ""),
@@ -2024,7 +2041,12 @@ export default function InternalPortal({
       if (!response.ok || payload?.success !== true) {
         throw new Error(payload?.message || payload?.error || "Não foi possível salvar a correção administrativa.");
       }
-      alert("Correção administrativa salva. Os dados metrológicos e a ficha de calibração permaneceram inalterados.");
+      if (payload?.instrument) {
+        setInstrumentSheetInstrument((prev) =>
+          prev && prev.id === payload.instrument.id ? { ...prev, ...payload.instrument } : prev,
+        );
+      }
+      alert("Correção administrativa salva com sucesso.");
       closeAdminInstrumentCorrection();
     } catch (error: any) {
       setAdminCorrectionError(error?.message || "Não foi possível salvar a correção administrativa.");

@@ -4107,6 +4107,7 @@ const ADMIN_INSTRUMENT_CORRECTION_FIELDS = new Set([
   'conexao',
   'diametro',
   'unit',
+  'subdivision',
   'observacoes',
   'photoRegistration',
   'photoRegistrationPath',
@@ -4124,6 +4125,7 @@ const ADMIN_INSTRUMENT_CORRECTION_LABELS: Record<string, string> = {
   conexao: 'Conexão',
   diametro: 'Diâmetro',
   unit: 'Unidade',
+  subdivision: 'Subdivisão (Menor Divisão de Escala)',
   observacoes: 'Observações cadastrais',
   photoRegistration: 'Foto de cadastro',
   photoRegistrationPath: 'Arquivo da foto de cadastro',
@@ -4184,6 +4186,22 @@ app.post(
       const normalizedChanges: Record<string, any> = {};
       for (const [key, value] of Object.entries(rawChanges)) {
         if (!ADMIN_INSTRUMENT_CORRECTION_FIELDS.has(key)) continue;
+        if (key === 'subdivision') {
+          const rawSub = value == null ? '' : String(value).trim();
+          if (rawSub === '') {
+            normalizedChanges.subdivision = null;
+          } else {
+            const parsedSub = Number(rawSub.replace(',', '.'));
+            if (!Number.isFinite(parsedSub) || parsedSub <= 0) {
+              return res.status(400).json({
+                error: 'INVALID_SUBDIVISION',
+                message: 'Informe um valor numérico maior que zero para a subdivisão.',
+              });
+            }
+            normalizedChanges.subdivision = parsedSub;
+          }
+          continue;
+        }
         let nextValue = value == null ? '' : String(value);
         if (key === 'tag' || key === 'model' || key === 'serialNumber') nextValue = nextValue.trim().toUpperCase();
         else nextValue = nextValue.trim();
@@ -4191,6 +4209,7 @@ app.post(
       }
 
       const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+      const reportQuery = firestoreDb.collection('calibrationReports').where('instrumentId', '==', instrumentId);
       const auditRef = firestoreDb.collection('systemAuditLogs').doc();
       const nowIso = new Date().toISOString();
       const actorName = asLimitedString(
@@ -4202,7 +4221,10 @@ app.post(
       let updatedInstrument: any = null;
 
       await firestoreDb.runTransaction(async (transaction) => {
-        const snapshot = await transaction.get(instrumentRef);
+        const [snapshot, reportsSnapshot] = await Promise.all([
+          transaction.get(instrumentRef),
+          transaction.get(reportQuery),
+        ]);
         if (!snapshot.exists) {
           const error: any = new Error('INSTRUMENT_NOT_FOUND');
           error.code = 'INSTRUMENT_NOT_FOUND';
@@ -4235,6 +4257,36 @@ app.post(
           return;
         }
 
+        let registrationSnapshotModified = false;
+        if (
+          Object.prototype.hasOwnProperty.call(effectiveChanges, 'subdivision') &&
+          before.registrationSnapshot &&
+          typeof before.registrationSnapshot === 'object' &&
+          before.registrationSnapshot.data &&
+          typeof before.registrationSnapshot.data === 'object'
+        ) {
+          effectiveChanges.registrationSnapshot = {
+            ...before.registrationSnapshot,
+            data: {
+              ...before.registrationSnapshot.data,
+              subdivision: effectiveChanges.subdivision,
+            },
+          };
+          registrationSnapshotModified = true;
+        }
+
+        let calibrationReportsModified = false;
+        if (Object.prototype.hasOwnProperty.call(effectiveChanges, 'subdivision')) {
+          const activeReports = reportsSnapshot.docs.filter((docSnapshot) => docSnapshot.data()?.isDeleted !== true);
+          for (const reportDoc of activeReports) {
+            transaction.update(reportDoc.ref, {
+              subdivision: effectiveChanges.subdivision,
+              updatedAt: nowIso,
+            });
+            calibrationReportsModified = true;
+          }
+        }
+
         transaction.update(instrumentRef, { ...effectiveChanges, updatedAt: nowIso });
         transaction.set(auditRef, {
           action: 'INSTRUMENT_ADMIN_CORRECTION',
@@ -4251,8 +4303,8 @@ app.post(
             certificateNumber: asLimitedString(before.certificateNumber || before.coma, 180),
             instrumentStatus: asLimitedString(before.status, 120),
             calibrationPreserved: true,
-            calibrationReportsModified: false,
-            registrationSnapshotModified: false,
+            calibrationReportsModified,
+            registrationSnapshotModified,
             changedFields: auditChanges,
           },
         });
