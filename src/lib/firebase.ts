@@ -103,7 +103,12 @@ const safeStorageSegment = (value: string): string =>
 
 
 const uploadOperationalImageViaBackend = async (
-  purpose: 'instrument-registration' | 'instrument-calibrated' | 'intake-entry',
+  purpose:
+    | 'instrument-registration'
+    | 'instrument-calibrated'
+    | 'intake-entry'
+    | 'employee-photo'
+    | 'site-asset',
   entityId: string,
   imageDataUrl: string,
   sequence = 0,
@@ -125,6 +130,42 @@ const uploadOperationalImageViaBackend = async (
   }
   return { url: String(data.url), path: String(data.path) };
 };
+
+export async function persistInlineImageToStorage(
+  purpose: 'employee-photo' | 'site-asset',
+  entityId: string,
+  urlOrDataUrl: string,
+  sequence = 0,
+): Promise<string> {
+  const normalized = String(urlOrDataUrl || '').trim();
+  if (!normalized.startsWith('data:image/')) {
+    return normalized;
+  }
+  try {
+    const uploaded = await uploadOperationalImageViaBackend(purpose, entityId, normalized, sequence);
+    return uploaded.url;
+  } catch (backendErr) {
+    try {
+      const blob = await dataUrlToBlob(normalized);
+      const ext = extensionFromContentType(blob.type);
+      const folder = purpose === 'employee-photo' ? 'employee-photos' : 'site-assets';
+      const storagePath = `${folder}/${safeStorageSegment(entityId)}/${Date.now()}_${sequence}.${ext}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' });
+      return await getDownloadURL(storageRef);
+    } catch (fallbackErr) {
+      console.warn(`Fallback inline image retention for ${purpose}/${entityId}:`, fallbackErr || backendErr);
+      return normalized;
+    }
+  }
+}
+
+export async function uploadEmployeePhotoToStorage(
+  dataUrl: string,
+  employeeIdentifier = 'colaborador',
+): Promise<string> {
+  return persistInlineImageToStorage('employee-photo', employeeIdentifier, dataUrl, 0);
+}
 
 
 export type CorporateFilePurpose =
@@ -598,9 +639,40 @@ export function getLocalCache<T>(key: string, fallback: T): T {
   return fallback;
 }
 
+export function safeSetLocalStorageItem(storageKey: string, serializedValue: string): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    localStorage.setItem(storageKey, serializedValue);
+  } catch (err) {
+    try {
+      const legacyHeavyKeys = [
+        'comanins_site_photos',
+        'comanins_custom_logo',
+        'comanins_header_logo',
+        'comanins_calibration_logo',
+        'comanins_box_label_logo',
+      ];
+      for (const heavyKey of legacyHeavyKeys) {
+        if (heavyKey !== storageKey) {
+          localStorage.removeItem(heavyKey);
+        }
+      }
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('comanins_cache_') && k !== storageKey) {
+          localStorage.removeItem(k);
+        }
+      }
+      localStorage.setItem(storageKey, serializedValue);
+    } catch {
+      // Never break execution if localStorage quota is exhausted on older machines
+    }
+  }
+}
+
 export function setLocalCache<T>(key: string, data: T): void {
   try {
-    localStorage.setItem(`comanins_cache_${key}`, JSON.stringify(data));
+    safeSetLocalStorageItem(`comanins_cache_${key}`, JSON.stringify(data));
   } catch (e) {}
 }
 
@@ -2918,13 +2990,30 @@ export async function syncPortalUsers(callback: (users: PortalUser[]) => void) {
 
 export async function addPortalUserDoc(user: Omit<PortalUser, 'id'>): Promise<PortalUser> {
   const newId = 'user_' + Date.now();
-  const fullUser: PortalUser = { ...user, id: newId };
+  const resolvedPhotoUrl =
+    user.photoUrl && user.photoUrl.startsWith('data:image/')
+      ? await persistInlineImageToStorage('employee-photo', user.username || newId, user.photoUrl, 0)
+      : user.photoUrl;
+  const fullUser: PortalUser = {
+    ...user,
+    ...(resolvedPhotoUrl !== undefined ? { photoUrl: resolvedPhotoUrl } : {}),
+    id: newId,
+  };
   await setDoc(doc(db, 'portalUsers', newId), fullUser);
   return fullUser;
 }
 
 export async function updatePortalUserDoc(id: string, updates: Partial<PortalUser>): Promise<void> {
-  await updateDoc(doc(db, 'portalUsers', id), updates);
+  const nextUpdates: Partial<PortalUser> = { ...updates };
+  if (typeof nextUpdates.photoUrl === 'string' && nextUpdates.photoUrl.startsWith('data:image/')) {
+    nextUpdates.photoUrl = await persistInlineImageToStorage(
+      'employee-photo',
+      nextUpdates.username || id,
+      nextUpdates.photoUrl,
+      0,
+    );
+  }
+  await updateDoc(doc(db, 'portalUsers', id), nextUpdates);
 }
 
 export async function uploadSignatureImage(file: File, userId: string, version: number): Promise<string> {
@@ -3076,12 +3165,20 @@ export async function syncCustomLogo(callback: (logoUrl: string) => void) {
   });
 }
 
-export async function saveCustomLogoConfig(url: string): Promise<void> {
+export async function saveCustomLogoConfig(url: string): Promise<string> {
   try {
+    const normalizedUrl = String(url || '').trim();
+    const finalUrl = normalizedUrl.startsWith('data:image/')
+      ? await persistInlineImageToStorage('site-asset', 'customLogo', normalizedUrl, 0)
+      : normalizedUrl;
     const docRef = doc(db, 'systemSettings', 'customLogo');
-    await setDoc(docRef, { url });
+    await setDoc(docRef, { url: finalUrl, updatedAt: new Date().toISOString() }, { merge: true });
+    if (finalUrl) safeSetLocalStorageItem('comanins_custom_logo', finalUrl);
+    else if (typeof window !== 'undefined') localStorage.removeItem('comanins_custom_logo');
+    return finalUrl;
   } catch (err) {
     console.error('Error saving customLogo config:', err);
+    return url;
   }
 }
 
@@ -3117,9 +3214,7 @@ export async function syncCalibrationLogoConfig(callback: (url: string) => void)
   });
 }
 
-
-
-export async function saveCalibrationLogoConfig(url: string): Promise<void> {
+export async function saveCalibrationLogoConfig(url: string): Promise<string> {
   const normalizedUrl = String(url || '').trim();
   const isAcceptedSource =
     normalizedUrl === '' ||
@@ -3131,12 +3226,23 @@ export async function saveCalibrationLogoConfig(url: string): Promise<void> {
     throw new Error('A logomarca deve ser uma imagem enviada ou uma URL HTTPS válida.');
   }
 
-  if (normalizedUrl.length > 750_000) {
+  if (normalizedUrl.length > 4_500_000) {
+    throw new Error('A logomarca ficou muito grande. Selecione uma imagem menor.');
+  }
+
+  const finalUrl = normalizedUrl.startsWith('data:image/')
+    ? await persistInlineImageToStorage('site-asset', 'calibrationLogo', normalizedUrl, 0)
+    : normalizedUrl;
+
+  if (finalUrl.startsWith('data:image/') && finalUrl.length > 750_000) {
     throw new Error('A logomarca ficou muito grande. Selecione uma imagem menor.');
   }
 
   const docRef = doc(db, 'systemSettings', 'calibrationLogo');
-  await setDoc(docRef, { url: normalizedUrl });
+  await setDoc(docRef, { url: finalUrl, updatedAt: new Date().toISOString() }, { merge: true });
+  if (finalUrl) safeSetLocalStorageItem('comanins_calibration_logo', finalUrl);
+  else if (typeof window !== 'undefined') localStorage.removeItem('comanins_calibration_logo');
+  return finalUrl;
 }
 
 export async function syncBoxLabelLogoConfig(callback: (url: string) => void) {
@@ -3158,7 +3264,7 @@ export async function syncBoxLabelLogoConfig(callback: (url: string) => void) {
   });
 }
 
-export async function saveBoxLabelLogoConfig(url: string): Promise<void> {
+export async function saveBoxLabelLogoConfig(url: string): Promise<string> {
   const normalizedUrl = String(url || '').trim();
   const isAcceptedSource =
     normalizedUrl === '' ||
@@ -3170,20 +3276,39 @@ export async function saveBoxLabelLogoConfig(url: string): Promise<void> {
     throw new Error('A logomarca deve ser uma imagem enviada ou uma URL HTTPS válida.');
   }
 
-  if (normalizedUrl.length > 750_000) {
+  if (normalizedUrl.length > 4_500_000) {
+    throw new Error('A logomarca ficou muito grande. Selecione uma imagem menor.');
+  }
+
+  const finalUrl = normalizedUrl.startsWith('data:image/')
+    ? await persistInlineImageToStorage('site-asset', 'boxLabelLogo', normalizedUrl, 0)
+    : normalizedUrl;
+
+  if (finalUrl.startsWith('data:image/') && finalUrl.length > 750_000) {
     throw new Error('A logomarca ficou muito grande. Selecione uma imagem menor.');
   }
 
   const docRef = doc(db, 'systemSettings', 'boxLabelLogo');
-  await setDoc(docRef, { url: normalizedUrl });
+  await setDoc(docRef, { url: finalUrl, updatedAt: new Date().toISOString() }, { merge: true });
+  if (finalUrl) safeSetLocalStorageItem('comanins_box_label_logo', finalUrl);
+  else if (typeof window !== 'undefined') localStorage.removeItem('comanins_box_label_logo');
+  return finalUrl;
 }
 
-export async function saveHeaderLogoConfig(url: string): Promise<void> {
+export async function saveHeaderLogoConfig(url: string): Promise<string> {
   try {
+    const normalizedUrl = String(url || '').trim();
+    const finalUrl = normalizedUrl.startsWith('data:image/')
+      ? await persistInlineImageToStorage('site-asset', 'headerLogo', normalizedUrl, 0)
+      : normalizedUrl;
     const docRef = doc(db, 'systemSettings', 'headerLogo');
-    await setDoc(docRef, { url });
+    await setDoc(docRef, { url: finalUrl, updatedAt: new Date().toISOString() }, { merge: true });
+    if (finalUrl) safeSetLocalStorageItem('comanins_header_logo', finalUrl);
+    else if (typeof window !== 'undefined') localStorage.removeItem('comanins_header_logo');
+    return finalUrl;
   } catch (err) {
     console.error('Error saving headerLogo config:', err);
+    return url;
   }
 }
 
@@ -3250,20 +3375,27 @@ export async function syncSitePhotosConfig(callback: (photos: any[]) => void) {
 
 export async function saveSitePhotosConfig(list: any[]): Promise<void> {
   const errors: any[] = [];
+  const resolvedList: any[] = [];
   try {
     for (let i = 0; i < list.length; i++) {
       try {
-        const item = list[i];
+        const item = list[i] || {};
         const photoId = item.id || `photo${i + 1}`;
-        const photoRef = doc(db, 'sitePhotos', photoId);
-        await setDoc(photoRef, {
+        const rawImageUrl = String(item.imageUrl || '').trim();
+        const resolvedImageUrl = rawImageUrl.startsWith('data:image/')
+          ? await persistInlineImageToStorage('site-asset', `sitePhoto_${photoId}`, rawImageUrl, i)
+          : rawImageUrl;
+        const resolvedItem = {
           id: photoId,
           title: item.title || '',
           badge: item.badge || '',
-          imageUrl: item.imageUrl || '',
+          imageUrl: resolvedImageUrl,
           description: item.description || '',
-          order: i
-        }, { merge: true });
+          order: i,
+        };
+        resolvedList.push(resolvedItem);
+        const photoRef = doc(db, 'sitePhotos', photoId);
+        await setDoc(photoRef, resolvedItem, { merge: true });
       } catch (err) {
         console.error(`Error saving photo ${i}:`, err);
         errors.push(err);
@@ -3272,11 +3404,12 @@ export async function saveSitePhotosConfig(list: any[]): Promise<void> {
 
     try {
       const docRef = doc(db, 'systemSettings', 'sitePhotos');
-      await setDoc(docRef, { list, updatedAt: new Date().toISOString() });
+      await setDoc(docRef, { list: resolvedList, updatedAt: new Date().toISOString() });
+      safeSetLocalStorageItem('comanins_site_photos', JSON.stringify(resolvedList));
     } catch (e) {
       // Ignore single doc 1MB limit error if it happens
     }
-    
+
     if (errors.length > 0) {
       throw new Error('Some photos failed to save. They might be too large.');
     }

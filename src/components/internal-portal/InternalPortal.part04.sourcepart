@@ -172,9 +172,9 @@
                                 if (!uploadedUrl) {
                                   throw new Error("Selecione uma imagem ou informe uma URL HTTPS antes de salvar.");
                                 }
-                                await saveCalibrationLogoConfig(uploadedUrl);
-                                setCalibrationLogo(uploadedUrl);
-                                setCalibrationLogoPreview(uploadedUrl);
+                                const savedUrl = await saveCalibrationLogoConfig(uploadedUrl);
+                                setCalibrationLogo(savedUrl);
+                                setCalibrationLogoPreview(savedUrl);
                                 setCalibrationLogoSuccessMsg(
                                   "✓ Logo da etiqueta salva e aplicada!",
                                 );
@@ -384,9 +384,9 @@
                               if (!uploadedUrl) {
                                 throw new Error("Selecione uma imagem ou informe uma URL HTTPS antes de salvar.");
                               }
-                              await saveBoxLabelLogoConfig(uploadedUrl);
-                              setBoxLabelLogo(uploadedUrl);
-                              setBoxLabelLogoPreview(uploadedUrl);
+                              const savedUrl = await saveBoxLabelLogoConfig(uploadedUrl);
+                              setBoxLabelLogo(savedUrl);
+                              setBoxLabelLogoPreview(savedUrl);
                               setBoxLabelLogoSuccessMsg(
                                 "✓ Logo da Etiqueta Caixa salva e aplicada em todo o sistema!",
                               );
@@ -728,10 +728,6 @@
                     type="button"
                     onClick={async () => {
                       setSitePhotos(DEFAULT_SITE_PHOTOS);
-                      localStorage.setItem(
-                        "comanins_site_photos",
-                        JSON.stringify(DEFAULT_SITE_PHOTOS),
-                      );
                       await saveSitePhotosConfig(DEFAULT_SITE_PHOTOS);
                       setPhotosSuccessMsg(
                         "✓ Fotos restauradas para o padrão COMANINS!",
@@ -755,10 +751,6 @@
                           updated.push(p);
                         }
                         setSitePhotos(updated);
-                        localStorage.setItem(
-                          "comanins_site_photos",
-                          JSON.stringify(updated),
-                        );
                         await saveSitePhotosConfig(updated);
                         setPhotosSuccessMsg(
                           "✓ Galeria de fotos do site institucional salva com sucesso!",

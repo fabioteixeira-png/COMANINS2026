@@ -287,7 +287,15 @@ service cloud.firestore {
       allow read: if isInternalAccount() || documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos'];
 
       // Operational counters are written by normal internal workflows.
-      allow write: if (documentId == 'certSequence' && hasEditModule('calibration')) ||
+      allow write: if (
+          documentId == 'certSequence' &&
+          hasEditModule('calibration') && (
+            isAdministrator() ||
+            resource == null ||
+            request.resource.data.get('nextNumber', 0) >= resource.data.get('nextNumber', 0) ||
+            request.resource.data.get('year', 0) > resource.data.get('year', 0)
+          )
+        ) ||
         (documentId == 'intakeSequence' && hasEditModule('material_intake')) ||
         (documentId == 'examTypes' && canEditRh()) ||
         (documentId in ['customLogo', 'headerLogo', 'companyInfo', 'sitePhotos', 'dropdownOptions', 'calibrationLogo', 'boxLabelLogo'] && isAdministrator());
@@ -855,17 +863,52 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     match /internal_tickets/{document=**} {
-      allow read: if hasModule('internal_communication') || hasModule('internal_communication_management') || isInternalAccount();
+      allow read: if isAdministrator()
+        || hasModule('internal_communication_management')
+        || canManageRh()
+        || (
+          isInternalAccount() && (
+            resource.data.get('authorId', '') == request.auth.uid ||
+            resource.data.get('authorId', '') == request.auth.token.get('portalUserId', '') ||
+            resource.data.get('authorId', '') == request.auth.token.get('username', '') ||
+            resource.data.get('authorUsername', '') == request.auth.token.get('username', '')
+          )
+        );
       allow create: if (hasEditModule('internal_communication') || isInternalAccount()) && archiveFieldsAbsentOnCreate();
-      allow update: if (hasEditModule('internal_communication') || hasEditModule('internal_communication_management') || isInternalAccount())
-        && archiveFieldsUntouched();
+      allow update: if archiveFieldsUntouched() && (
+        isAdministrator() ||
+        hasEditModule('internal_communication_management') ||
+        hasModule('internal_communication_management') ||
+        canManageRh() ||
+        (
+          isInternalAccount() && (
+            resource.data.get('authorId', '') == request.auth.uid ||
+            resource.data.get('authorId', '') == request.auth.token.get('portalUserId', '') ||
+            resource.data.get('authorId', '') == request.auth.token.get('username', '') ||
+            resource.data.get('authorUsername', '') == request.auth.token.get('username', '')
+          )
+        )
+      );
       allow delete: if false;
     }
     match /company_communications/{document=**} {
       allow read: if isInternalAccount();
       allow create: if (hasEditModule('internal_communication') || hasModule('internal_communication_management') || isAdministrator())
         && archiveFieldsAbsentOnCreate();
-      allow update: if isInternalAccount() && archiveFieldsUntouched();
+      allow update: if archiveFieldsUntouched() && (
+        isAdministrator() ||
+        hasEditModule('internal_communication_management') ||
+        hasModule('internal_communication_management') ||
+        hasEditModule('internal_communication') ||
+        (
+          isInternalAccount() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'readBy',
+            'readReceipts',
+            'updatedAt'
+          ])
+        )
+      );
       allow delete: if false;
     }
     match /accessAuditLogs/{document=**} {
@@ -886,7 +929,12 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /employeeTrainings/{document=**} {
-      allow read: if isInternalAccount();
+      allow read: if isOwnEmployeeResource()
+        || canManageRh()
+        || hasModule('employees')
+        || hasModule('field_service')
+        || hasModule('calibration')
+        || hasModule('audit');
       allow create: if canEditRh();
       allow update: if canEditRh() && archiveFieldsUntouched();
       allow delete: if false;

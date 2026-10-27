@@ -223,11 +223,23 @@ const sanitizeClientForInternalDirectory = (value: any) => {
 
 const decodeOperationalDataUrl = (value: unknown): { buffer: Buffer; contentType: string; extension: string } => {
   const raw = String(value || '');
-  const match = raw.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  const match = raw.match(/^data:image\/(png|jpe?g|webp|svg\+xml);base64,([A-Za-z0-9+/=\r\n]+)$/i);
   if (!match) throw new Error('INVALID_IMAGE_DATA');
   const format = match[1].toLowerCase();
-  const contentType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
-  const extension = format === 'jpeg' ? 'jpg' : format;
+  const contentType =
+    format === 'png'
+      ? 'image/png'
+      : format === 'webp'
+        ? 'image/webp'
+        : format === 'svg+xml'
+          ? 'image/svg+xml'
+          : 'image/jpeg';
+  const extension =
+    format === 'jpeg' || format === 'jpg'
+      ? 'jpg'
+      : format === 'svg+xml'
+        ? 'svg'
+        : format;
   const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
   if (!buffer.length || buffer.length > 5 * 1024 * 1024) throw new Error('IMAGE_TOO_LARGE');
   return { buffer, contentType, extension };
@@ -7812,31 +7824,52 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     const purpose = String(req.body?.purpose || '').trim();
     const entityId = safeStorageSegmentServer(req.body?.entityId);
     const sequence = Math.max(0, Math.min(9999, Number(req.body?.sequence || 0) || 0));
-    const allowed = new Set(['instrument-registration', 'instrument-calibrated', 'intake-entry']);
+    const allowed = new Set([
+      'instrument-registration',
+      'instrument-calibrated',
+      'intake-entry',
+      'employee-photo',
+      'site-asset',
+    ]);
     if (!allowed.has(purpose)) return res.status(400).json({ error: 'INVALID_UPLOAD_PURPOSE' });
-    const requiredModule: AccessModuleId = purpose === 'intake-entry'
-      ? 'material_intake'
-      : 'calibration';
+    const requiredModule: AccessModuleId =
+      purpose === 'intake-entry'
+        ? 'material_intake'
+        : purpose === 'employee-photo'
+          ? 'hr'
+          : 'calibration';
     const isStandardRequester =
-      requesterProfile?.accessProfileId === 'standard' ||
-      requesterProfile?.permissionLevel === 'Padrão' ||
-      requesterProfile?.permissionLevel === 'Padrao' ||
-      req.user?.accessProfileId === 'standard' ||
-      (req.user as any)?.permissionLevel === 'Padrão' ||
-      (req.user as any)?.permissionLevel === 'Padrao';
+      (purpose === 'instrument-registration' || purpose === 'instrument-calibrated' || purpose === 'intake-entry') &&
+      (requesterProfile?.accessProfileId === 'standard' ||
+        requesterProfile?.permissionLevel === 'Padrão' ||
+        requesterProfile?.permissionLevel === 'Padrao' ||
+        req.user?.accessProfileId === 'standard' ||
+        (req.user as any)?.permissionLevel === 'Padrão' ||
+        (req.user as any)?.permissionLevel === 'Padrao');
     const canEdit =
-      isStandardRequester ||
-      userCanEditModule(requesterProfile as any, requiredModule) ||
-      userCanEditModule(req.user as any, requiredModule);
+      purpose === 'site-asset'
+        ? isAdministratorProfile(requesterProfile)
+        : isAdministratorProfile(requesterProfile) ||
+          isStandardRequester ||
+          userCanEditModule(requesterProfile as any, requiredModule) ||
+          userCanEditModule(req.user as any, requiredModule);
     if (!canEdit) {
-      return res.status(403).json({ error: 'MODULE_EDIT_DENIED', moduleId: requiredModule });
+      return res.status(403).json({
+        error: purpose === 'site-asset' ? 'ADMIN_REQUIRED' : 'MODULE_EDIT_DENIED',
+        moduleId: purpose === 'site-asset' ? 'settings' : requiredModule,
+      });
     }
 
     const { buffer, contentType, extension } = decodeOperationalDataUrl(req.body?.imageDataUrl);
     const timestamp = Date.now();
-    const path = purpose === 'intake-entry'
-      ? `intake-entry-photos/${entityId}/${timestamp}_${sequence}.${extension}`
-      : `instrument-photos/${entityId}/${purpose === 'instrument-registration' ? 'registration' : 'calibrated'}/${timestamp}.${extension}`;
+    const path =
+      purpose === 'intake-entry'
+        ? `intake-entry-photos/${entityId}/${timestamp}_${sequence}.${extension}`
+        : purpose === 'employee-photo'
+          ? `employee-photos/${entityId}/${timestamp}_${sequence}.${extension}`
+          : purpose === 'site-asset'
+            ? `site-assets/${entityId}/${timestamp}_${sequence}.${extension}`
+            : `instrument-photos/${entityId}/${purpose === 'instrument-registration' ? 'registration' : 'calibrated'}/${timestamp}.${extension}`;
 
     const bucket = adminStorage.bucket(adminStorageBucketName);
     const file = bucket.file(path);
@@ -7862,6 +7895,156 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     if (error?.message === 'IMAGE_TOO_LARGE') return res.status(413).json({ error: 'IMAGE_TOO_LARGE' });
     console.error('Operational image upload error:', error);
     return res.status(500).json({ error: 'UPLOAD_FAILED' });
+  }
+});
+
+app.post('/api/admin/migrate-legacy-inline-images', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !firestoreDb || !adminStorage || !adminStorageBucketName) {
+      return res.status(503).json({ error: 'STORAGE_SERVICE_UNAVAILABLE' });
+    }
+    const requesterProfile = await requireInternalPortalRequester(req.user);
+    if (!isAdministratorProfile(requesterProfile)) {
+      return res.status(403).json({ error: 'ADMIN_REQUIRED' });
+    }
+
+    const bucket = adminStorage.bucket(adminStorageBucketName);
+    const nowIso = new Date().toISOString();
+    const uploadInlineToBucket = async (dataUrl: string, storagePathPrefix: string): Promise<{ url: string; path: string }> => {
+      const { buffer, contentType, extension } = decodeOperationalDataUrl(dataUrl);
+      const path = `${storagePathPrefix}_${Date.now()}.${extension}`;
+      const file = bucket.file(path);
+      const downloadToken = randomBytes(16).toString('hex');
+      await file.save(buffer, {
+        resumable: false,
+        validation: 'crc32c',
+        metadata: {
+          contentType,
+          cacheControl: 'private,max-age=3600',
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken,
+            migratedByUid: req.user!.uid,
+            migratedAt: nowIso,
+          },
+        },
+      });
+      const url = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(path)}?alt=media&token=${downloadToken}`;
+      return { url, path };
+    };
+
+    let migratedEmployeePhotos = 0;
+    let migratedLogos = 0;
+    let migratedSitePhotos = 0;
+
+    // 1. Migrate portalUsers.photoUrl
+    const usersSnap = await firestoreDb.collection('portalUsers').get();
+    for (const userDoc of usersSnap.docs) {
+      const data = userDoc.data() || {};
+      const photoUrl = String(data.photoUrl || '').trim();
+      if (photoUrl.startsWith('data:image/')) {
+        try {
+          const uploaded = await uploadInlineToBucket(photoUrl, `employee-photos/${safeStorageSegmentServer(userDoc.id)}/migrated`);
+          await userDoc.ref.set(
+            {
+              photoUrl: uploaded.url,
+              photoStoragePath: uploaded.path,
+              legacyPhotoMigratedAt: nowIso,
+            },
+            { merge: true },
+          );
+          migratedEmployeePhotos += 1;
+        } catch (err) {
+          console.warn(`Skipping inline photo migration for portalUsers/${userDoc.id}:`, err);
+        }
+      }
+    }
+
+    // 2. Migrate systemSettings logos
+    const logoDocIds = ['headerLogo', 'customLogo', 'calibrationLogo', 'boxLabelLogo'];
+    for (const logoDocId of logoDocIds) {
+      const logoSnap = await firestoreDb.collection('systemSettings').doc(logoDocId).get();
+      if (!logoSnap.exists) continue;
+      const data = logoSnap.data() || {};
+      const rawUrl = String(data.url || '').trim();
+      if (rawUrl.startsWith('data:image/')) {
+        try {
+          const uploaded = await uploadInlineToBucket(rawUrl, `site-assets/${safeStorageSegmentServer(logoDocId)}/migrated`);
+          await logoSnap.ref.set(
+            {
+              url: uploaded.url,
+              storagePath: uploaded.path,
+              legacyLogoMigratedAt: nowIso,
+            },
+            { merge: true },
+          );
+          migratedLogos += 1;
+        } catch (err) {
+          console.warn(`Skipping inline logo migration for systemSettings/${logoDocId}:`, err);
+        }
+      }
+    }
+
+    // 3. Migrate sitePhotos collection and systemSettings/sitePhotos
+    const sitePhotosSnap = await firestoreDb.collection('sitePhotos').get();
+    for (const photoDoc of sitePhotosSnap.docs) {
+      const data = photoDoc.data() || {};
+      const imageUrl = String(data.imageUrl || '').trim();
+      if (imageUrl.startsWith('data:image/')) {
+        try {
+          const uploaded = await uploadInlineToBucket(imageUrl, `site-assets/site-photos/${safeStorageSegmentServer(photoDoc.id)}_migrated`);
+          await photoDoc.ref.set(
+            {
+              imageUrl: uploaded.url,
+              storagePath: uploaded.path,
+              legacyPhotoMigratedAt: nowIso,
+            },
+            { merge: true },
+          );
+          migratedSitePhotos += 1;
+        } catch (err) {
+          console.warn(`Skipping inline sitePhoto migration for sitePhotos/${photoDoc.id}:`, err);
+        }
+      }
+    }
+
+    const sitePhotosSettingsRef = firestoreDb.collection('systemSettings').doc('sitePhotos');
+    const sitePhotosSettingsSnap = await sitePhotosSettingsRef.get();
+    if (sitePhotosSettingsSnap.exists) {
+      const settingsData = sitePhotosSettingsSnap.data() || {};
+      if (Array.isArray(settingsData.list)) {
+        let changed = false;
+        const nextList = [];
+        for (let i = 0; i < settingsData.list.length; i++) {
+          const item = { ...(settingsData.list[i] || {}) };
+          const rawImg = String(item.imageUrl || '').trim();
+          if (rawImg.startsWith('data:image/')) {
+            try {
+              const photoId = safeStorageSegmentServer(item.id || `photo${i + 1}`);
+              const uploaded = await uploadInlineToBucket(rawImg, `site-assets/site-photos/${photoId}_settings_migrated`);
+              item.imageUrl = uploaded.url;
+              item.storagePath = uploaded.path;
+              changed = true;
+            } catch (err) {
+              console.warn(`Skipping inline systemSettings/sitePhotos[${i}] migration:`, err);
+            }
+          }
+          nextList.push(item);
+        }
+        if (changed) {
+          await sitePhotosSettingsRef.set({ list: nextList, updatedAt: nowIso }, { merge: true });
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      migratedEmployeePhotos,
+      migratedLogos,
+      migratedSitePhotos,
+    });
+  } catch (error) {
+    console.error('Legacy inline image migration error:', error);
+    return res.status(500).json({ error: 'MIGRATION_FAILED' });
   }
 });
 

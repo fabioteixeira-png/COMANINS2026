@@ -10,7 +10,7 @@ import {
 import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc,
   addEmployeeAsoDoc,
   deleteEmployeeAsoDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument,
-  uploadCorporateFile, uploadCorporateDataUrl, openCorporateFile, downloadCorporateFile } from '../lib/firebase';
+  uploadCorporateFile, uploadCorporateDataUrl, openCorporateFile, downloadCorporateFile, uploadEmployeePhotoToStorage } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
 import { verifyCurrentAdminPassword } from '../utils/authApi';
@@ -1235,21 +1235,34 @@ export default function EmployeeManagement({
                             accept="image/*,.heic,.heif"
                             capture="environment"
                             className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
+                            onChange={async (e) => {
+                              const input = e.currentTarget;
+                              const file = input.files?.[0];
                               if (file) {
-                                compressImageToWebResolution(file)
-                                  .then((compressed) => {
-                                    setFormData(prev => ({ ...prev, photoUrl: compressed }));
-                                  })
-                                  .catch(err => {
-                                    console.error('Error compressing employee photo:', err);
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => {
-                                      setFormData(prev => ({ ...prev, photoUrl: reader.result as string }));
-                                    };
-                                    reader.readAsDataURL(file);
-                                  });
+                                try {
+                                  const compressed = await compressImageToWebResolution(file);
+                                  // Show instant preview while uploading to Firebase Storage
+                                  setFormData(prev => ({ ...prev, photoUrl: compressed }));
+                                  const identifier = formData.username || (formData as any).id || formData.cpf || 'colaborador';
+                                  const storageUrl = await uploadEmployeePhotoToStorage(compressed, identifier);
+                                  setFormData(prev => ({ ...prev, photoUrl: storageUrl }));
+                                } catch (err) {
+                                  console.error('Error processing employee photo:', err);
+                                  const reader = new FileReader();
+                                  reader.onloadend = async () => {
+                                    const rawDataUrl = String(reader.result || '');
+                                    if (!rawDataUrl) return;
+                                    setFormData(prev => ({ ...prev, photoUrl: rawDataUrl }));
+                                    try {
+                                      const identifier = formData.username || (formData as any).id || formData.cpf || 'colaborador';
+                                      const storageUrl = await uploadEmployeePhotoToStorage(rawDataUrl, identifier);
+                                      setFormData(prev => ({ ...prev, photoUrl: storageUrl }));
+                                    } catch {}
+                                  };
+                                  reader.readAsDataURL(file);
+                                } finally {
+                                  input.value = '';
+                                }
                               }
                             }}
                           />

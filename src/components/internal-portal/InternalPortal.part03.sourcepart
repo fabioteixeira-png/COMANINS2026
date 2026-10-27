@@ -4643,20 +4643,14 @@
                           onClick={async () => {
                             try {
                               const uploadedUrl = siteHeaderLogoPreview;
-                              setSiteHeaderLogo(uploadedUrl);
-                              setLogoPreview(uploadedUrl);
-                              localStorage.setItem(
-                                "comanins_header_logo",
-                                uploadedUrl,
-                              );
-                              localStorage.setItem(
-                                "comanins_custom_logo",
-                                uploadedUrl,
-                              );
-                              await saveHeaderLogoConfig(uploadedUrl);
-                              await saveCustomLogoConfig(uploadedUrl);
+                              const savedHeaderUrl = await saveHeaderLogoConfig(uploadedUrl);
+                              const savedCustomUrl = await saveCustomLogoConfig(savedHeaderUrl);
+                              const finalLogoUrl = savedCustomUrl || savedHeaderUrl;
+                              setSiteHeaderLogo(finalLogoUrl);
+                              setSiteHeaderLogoPreview(finalLogoUrl);
+                              setLogoPreview(finalLogoUrl);
                               if (onSaveCustomLogo)
-                                await onSaveCustomLogo(uploadedUrl);
+                                await onSaveCustomLogo(finalLogoUrl);
                               setHeaderLogoSuccessMsg(
                                 "✓ Logo do cabeçalho salva e aplicada em todo o sistema!",
                               );

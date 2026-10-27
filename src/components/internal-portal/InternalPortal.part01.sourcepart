@@ -6048,15 +6048,13 @@ Status atual: ${e.status}.`,
           0.75,
           file.type === 'image/png' // preserve transparency
         );
-        const uploadedUrl = compressedDataUrl;
-        setLogoPreview(uploadedUrl);
-        setSiteHeaderLogoPreview(uploadedUrl);
-        setSiteHeaderLogo(uploadedUrl);
-        localStorage.setItem("comanins_header_logo", uploadedUrl);
-        localStorage.setItem("comanins_custom_logo", uploadedUrl);
-        await saveHeaderLogoConfig(uploadedUrl);
-        await saveCustomLogoConfig(uploadedUrl);
-        if (onSaveCustomLogo) await onSaveCustomLogo(uploadedUrl);
+        const savedHeaderUrl = await saveHeaderLogoConfig(compressedDataUrl);
+        const savedCustomUrl = await saveCustomLogoConfig(savedHeaderUrl);
+        const finalLogoUrl = savedCustomUrl || savedHeaderUrl;
+        setLogoPreview(finalLogoUrl);
+        setSiteHeaderLogoPreview(finalLogoUrl);
+        setSiteHeaderLogo(finalLogoUrl);
+        if (onSaveCustomLogo) await onSaveCustomLogo(finalLogoUrl);
         setLogoSuccessMsg(
           "✓ Logomarca oficial otimizada e atualizada com sucesso em todo o sistema!",
         );

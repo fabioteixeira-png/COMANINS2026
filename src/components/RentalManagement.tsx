@@ -954,121 +954,117 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
     }
   };
 
-  const confirmAdministratorPassword = async (actionDescription: string): Promise<boolean> => {
-    if (!isAdmin || !currentUser?.username) {
-      setError('Somente o perfil Administrador pode executar esta exclusão.');
-      return false;
-    }
-    const password = window.prompt(`Digite a senha do administrador logado (${currentUser.username}) para confirmar ${actionDescription}:`);
-    if (password === null) return false;
-    if (!password.trim()) {
-      setError('Informe a senha do administrador para continuar.');
-      return false;
-    }
-    try {
-      const valid = await verifyCurrentAdminPassword(password);
-      if (!valid) {
-        setError('Credencial administrativa inválida.');
-        return false;
-      }
-      return true;
-    } catch (error: any) {
-      setError(error?.message || 'Não foi possível validar a autorização administrativa.');
-      return false;
-    }
-  };
+  const [adminDeleteModal, setAdminDeleteModal] = useState<
+    | { kind: 'asset'; asset: RentalAsset; label: string }
+    | { kind: 'invoice'; invoice: RentalInvoice; label: string }
+    | { kind: 'rental'; rental: RentalContract; label: string }
+    | null
+  >(null);
+  const [adminDeletePassword, setAdminDeletePassword] = useState('');
+  const [adminDeleteReason, setAdminDeleteReason] = useState('');
+  const [adminDeleteError, setAdminDeleteError] = useState('');
 
-  const requireDeletionReason = (entityLabel: string) => {
-    const confirmed = window.confirm(
-      `Excluir ${entityLabel}? Esta ação é restrita ao Administrador e não poderá ser desfeita.`,
-    );
-    if (!confirmed) return null;
-    const reason = window.prompt('Informe o motivo da exclusão para o registro de auditoria:')?.trim() || '';
-    if (!reason) {
-      setError('A exclusão administrativa exige a informação do motivo.');
-      return null;
-    }
-    return reason;
+  const openAdminDeleteModal = (
+    target:
+      | { kind: 'asset'; asset: RentalAsset; label: string }
+      | { kind: 'invoice'; invoice: RentalInvoice; label: string }
+      | { kind: 'rental'; rental: RentalContract; label: string },
+  ) => {
+    setAdminDeletePassword('');
+    setAdminDeleteReason('');
+    setAdminDeleteError('');
+    setAdminDeleteModal(target);
   };
 
   const removeAsset = async (asset: RentalAsset) => {
     clearMessages();
-    if (!isAdmin) {
+    if (!isAdmin || !currentUser?.username) {
       setError('Somente o perfil Administrador pode excluir equipamentos locáveis.');
       return;
     }
-    const authorized = await confirmAdministratorPassword('a exclusão deste equipamento locável');
-    if (!authorized) return;
     if (asset.status === 'locado' || asset.currentRentalId) {
       setError('Este equipamento está vinculado a uma locação ativa e não pode ser excluído.');
       return;
     }
     const label = asset.assetCode || asset.calibrationCertificateNumber || asset.id;
-    const reason = requireDeletionReason(`o equipamento locável ${label}`);
-    if (!reason) return;
-    setBusy(true);
-    try {
-      await deleteRentalAsset(asset.id, reason);
-      if (assetDraft.id === asset.id) {
-        setAssetDraft({ description: 'Manômetro com base', status: 'disponivel' });
-        setShowAssetForm(false);
-      }
-      setRentalItemDrafts((current) => current.filter((item) => item.assetId !== asset.id));
-      setNotice(`Equipamento locável ${label} excluído pelo Administrador.`);
-    } catch (e: any) {
-      setError(e?.message || 'Não foi possível excluir o equipamento locável.');
-    } finally {
-      setBusy(false);
-    }
+    openAdminDeleteModal({ kind: 'asset', asset, label });
   };
 
   const removeInvoice = async (invoice: RentalInvoice) => {
     clearMessages();
-    if (!isAdmin) {
+    if (!isAdmin || !currentUser?.username) {
       setError('Somente o perfil Administrador pode excluir faturas de locação.');
       return;
     }
-    const authorized = await confirmAdministratorPassword('a exclusão desta fatura de locação');
-    if (!authorized) return;
-    const reason = requireDeletionReason(`a fatura ${invoice.invoiceNumber}`);
-    if (!reason) return;
-    setBusy(true);
-    try {
-      await deleteRentalInvoice(invoice.id, reason);
-      if (printDocument?.kind === 'invoice' && printDocument.invoice.id === invoice.id) setPrintDocument(null);
-      if (invoiceModal?.invoiceId === invoice.id) setInvoiceModal(null);
-      setNotice(`Fatura ${invoice.invoiceNumber} excluída. O lançamento financeiro vinculado também foi removido.`);
-    } catch (e: any) {
-      setError(e?.message || 'Não foi possível excluir a fatura.');
-    } finally {
-      setBusy(false);
-    }
+    openAdminDeleteModal({ kind: 'invoice', invoice, label: invoice.invoiceNumber });
   };
 
   const removeRental = async (rental: RentalContract) => {
     clearMessages();
-    if (!isAdmin) {
+    if (!isAdmin || !currentUser?.username) {
       setError('Somente o perfil Administrador pode excluir locações.');
       return;
     }
-    const authorized = await confirmAdministratorPassword('a exclusão desta locação');
-    if (!authorized) return;
-    const reason = requireDeletionReason(`a locação ${rental.rentalNumber}`);
-    if (!reason) return;
-    const cascadeConfirmed = window.confirm(
-      'A exclusão da locação removerá também as faturas, lançamentos financeiros e comprovantes vinculados. Equipamentos ainda vinculados a esta locação serão liberados. Deseja continuar?',
-    );
-    if (!cascadeConfirmed) return;
+    openAdminDeleteModal({ kind: 'rental', rental, label: rental.rentalNumber });
+  };
+
+  const confirmAdminDeleteModal = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!adminDeleteModal) return;
+    setAdminDeleteError('');
+    if (!isAdmin || !currentUser?.username) {
+      setAdminDeleteError('Somente o perfil Administrador pode executar esta exclusão.');
+      return;
+    }
+    const password = adminDeletePassword.trim();
+    if (!password) {
+      setAdminDeleteError('Informe a senha do administrador para continuar.');
+      return;
+    }
+    const reason = adminDeleteReason.trim();
+    if (!reason) {
+      setAdminDeleteError('A exclusão administrativa exige a informação do motivo para auditoria.');
+      return;
+    }
+
     setBusy(true);
     try {
-      const result = await deleteRentalContract(rental.id, reason);
-      if (printDocument?.rental?.id === rental.id) setPrintDocument(null);
-      if (invoiceModal?.rentalId === rental.id) setInvoiceModal(null);
-      setNotice(
-        `Locação ${rental.rentalNumber} excluída com correção dos vínculos: ${result.deletedInvoices} fatura(s), ${result.deletedFinanceTransactions} lançamento(s) financeiro(s) e ${result.deletedMovements} comprovante(s).`,
-      );
+      const valid = await verifyCurrentAdminPassword(password);
+      if (!valid) {
+        setAdminDeleteError('Credencial administrativa inválida.');
+        setBusy(false);
+        return;
+      }
+
+      if (adminDeleteModal.kind === 'asset') {
+        const { asset, label } = adminDeleteModal;
+        await deleteRentalAsset(asset.id, reason);
+        if (assetDraft.id === asset.id) {
+          setAssetDraft({ description: 'Manômetro com base', status: 'disponivel' });
+          setShowAssetForm(false);
+        }
+        setRentalItemDrafts((current) => current.filter((item) => item.assetId !== asset.id));
+        setNotice(`Equipamento locável ${label} excluído pelo Administrador.`);
+      } else if (adminDeleteModal.kind === 'invoice') {
+        const { invoice } = adminDeleteModal;
+        await deleteRentalInvoice(invoice.id, reason);
+        if (printDocument?.kind === 'invoice' && printDocument.invoice.id === invoice.id) setPrintDocument(null);
+        if (invoiceModal?.invoiceId === invoice.id) setInvoiceModal(null);
+        setNotice(`Fatura ${invoice.invoiceNumber} excluída. O lançamento financeiro vinculado também foi removido.`);
+      } else if (adminDeleteModal.kind === 'rental') {
+        const { rental } = adminDeleteModal;
+        const result = await deleteRentalContract(rental.id, reason);
+        if (printDocument?.rental?.id === rental.id) setPrintDocument(null);
+        if (invoiceModal?.rentalId === rental.id) setInvoiceModal(null);
+        setNotice(
+          `Locação ${rental.rentalNumber} excluída com correção dos vínculos: ${result.deletedInvoices} fatura(s), ${result.deletedFinanceTransactions} lançamento(s) financeiro(s) e ${result.deletedMovements} comprovante(s).`,
+        );
+      }
+      setAdminDeleteModal(null);
+      setAdminDeletePassword('');
+      setAdminDeleteReason('');
     } catch (e: any) {
-      setError(e?.message || 'Não foi possível excluir a locação.');
+      setAdminDeleteError(e?.message || 'Não foi possível concluir a exclusão administrativa.');
     } finally {
       setBusy(false);
     }
@@ -2404,6 +2400,87 @@ export default function RentalManagement({ clients, currentUser, canEdit, compan
             </div>
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">Itens marcados <b>Com avaria</b> serão enviados automaticamente para status <b>Manutenção</b>. Itens conformes retornam para <b>Disponível</b>. A devolução pode ser parcial.</div>
             <button disabled={busy} className="w-full py-2.5 bg-slate-800 text-white rounded-lg font-bold disabled:opacity-50">Confirmar Recebimento e Gerar Comprovante</button>
+          </form>
+        </Modal>
+      )}
+
+      {adminDeleteModal && (
+        <Modal
+          title={
+            adminDeleteModal.kind === 'asset'
+              ? `Excluir Equipamento Locável — ${adminDeleteModal.label}`
+              : adminDeleteModal.kind === 'invoice'
+                ? `Excluir Fatura de Locação — ${adminDeleteModal.label}`
+                : `Excluir Contrato de Locação — ${adminDeleteModal.label}`
+          }
+          onClose={() => !busy && setAdminDeleteModal(null)}
+        >
+          <form onSubmit={confirmAdminDeleteModal} className="space-y-4 text-sm">
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3.5 text-xs text-rose-900 space-y-1">
+              <p className="font-bold">Confirmação de Segurança Administrativa</p>
+              <p>
+                Você está prestes a excluir{' '}
+                <b>
+                  {adminDeleteModal.kind === 'asset'
+                    ? `o equipamento locável ${adminDeleteModal.label}`
+                    : adminDeleteModal.kind === 'invoice'
+                      ? `a fatura ${adminDeleteModal.label}`
+                      : `a locação ${adminDeleteModal.label}`}
+                </b>
+                . Esta ação é restrita ao Administrador ({currentUser?.username}) e ficará registrada na trilha de auditoria.
+              </p>
+              {adminDeleteModal.kind === 'rental' && (
+                <p className="pt-1 font-semibold text-rose-800">
+                  Atenção: A exclusão da locação removerá também as faturas, lançamentos financeiros e comprovantes vinculados, liberando automaticamente os equipamentos associados.
+                </p>
+              )}
+            </div>
+
+            {adminDeleteError && (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-xs font-bold text-red-700">
+                {adminDeleteError}
+              </div>
+            )}
+
+            <Field label={`Senha do Administrador (${currentUser?.username}) *`}>
+              <input
+                type="password"
+                required
+                autoFocus
+                value={adminDeletePassword}
+                onChange={(e) => setAdminDeletePassword(e.target.value)}
+                className="input-rental"
+                placeholder="Digite sua senha administrativa"
+              />
+            </Field>
+
+            <Field label="Motivo da Exclusão (Auditoria) *">
+              <textarea
+                required
+                value={adminDeleteReason}
+                onChange={(e) => setAdminDeleteReason(e.target.value)}
+                className="input-rental min-h-20"
+                placeholder="Descreva o motivo técnico/administrativo para o registro de auditoria..."
+              />
+            </Field>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setAdminDeleteModal(null)}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={busy}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs disabled:opacity-50"
+              >
+                {busy ? 'Validando e Excluindo...' : 'Confirmar Exclusão Administrativa'}
+              </button>
+            </div>
           </form>
         </Modal>
       )}
