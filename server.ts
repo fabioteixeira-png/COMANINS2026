@@ -75,10 +75,20 @@ const isInternalDecodedToken = (decoded: any): boolean => {
   return accountType === 'internal' && email.endsWith('@comanins.internal');
 };
 
-const requireInternalAccount = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (!req.user || !isInternalDecodedToken(req.user)) {
-    return res.status(403).json({ error: 'FORBIDDEN' });
+const requireInternalAccount = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) return res.status(403).json({ error: 'FORBIDDEN' });
+  if (!isInternalDecodedToken(req.user)) {
+    const email = String(req.user?.email || '').trim().toLowerCase();
+    if (email.endsWith('@comanins.internal')) {
+      try {
+        const healed = await syncInternalAuthProfile(req.user);
+        if (healed) req.user = { ...req.user, ...buildInternalClaims(healed) };
+      } catch (err) {
+        console.warn('[AUTH] Auto-heal internal claims failed:', err);
+      }
+    }
   }
+  if (!isInternalDecodedToken(req.user)) return res.status(403).json({ error: 'FORBIDDEN' });
   next();
 };
 
@@ -335,28 +345,36 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
 
   const email = String(decoded.email || '').trim().toLowerCase();
 
-  // Legacy username linking is allowed only for Firebase accounts that were
-  // already marked as internal by the trusted Admin SDK. A public Firebase
-  // sign-up cannot set custom claims, so it cannot claim an unlinked employee.
-  if (normalizeAccessValue(decoded?.accountType) !== 'internal') return null;
-
-  const username = email.endsWith('@comanins.internal')
-    ? email.slice(0, -'@comanins.internal'.length)
-    : '';
-
+  if (!email.endsWith('@comanins.internal')) return null;
+  const username = email.slice(0, -'@comanins.internal'.length).trim().toLowerCase();
   if (!username) return null;
 
   const snapshot = await usersRef.get();
-  const match = snapshot.docs.find((doc) =>
-    String(doc.data()?.username || '').trim().toLowerCase() === username
-  );
+  const match = snapshot.docs.find((doc) => {
+    const d = doc.data();
+    return (
+      String(d?.username || '').trim().toLowerCase() === username ||
+      String(d?.authEmail || '').trim().toLowerCase() === email
+    );
+  });
 
   if (!match) return null;
 
   const data = match.data();
   const existingAuthUid = String(data?.authUid || '').trim();
   if (existingAuthUid && existingAuthUid !== decoded.uid) {
-    throw new Error('AUTH_UID_CONFLICT');
+    let allowRebind = false;
+    if (adminAuth) {
+      try {
+        const oldUser = await adminAuth.getUser(existingAuthUid);
+        if (String(oldUser.email || '').trim().toLowerCase() === email) allowRebind = true;
+      } catch (err: any) {
+        if (err?.code === 'auth/user-not-found') allowRebind = true;
+      }
+    }
+    if (!allowRebind) throw new Error('AUTH_UID_CONFLICT');
+    await usersRef.doc(match.id).update({ authUid: decoded.uid, authEmail: email });
+    return { id: match.id, ...data, authUid: decoded.uid, authEmail: email };
   }
 
   return { id: match.id, ...data };
@@ -481,11 +499,14 @@ const resolveAccessProfileForUser = async (
     requestedProfileId || user?.accessProfileId || resolveLegacyAccessProfileId(user),
   ).trim();
   const resolved = await getAccessProfileById(profileId);
-  if (resolved?.active !== false) return resolved;
+  if (resolved && resolved.active !== false) return resolved;
 
-  const fallbackId = isAdministratorAccess(user) ? 'administrator' : 'limited';
+  const legacyId = resolveLegacyAccessProfileId(user);
+  const fallbackId = isAdministratorAccess(user)
+    ? 'administrator'
+    : (legacyId && getDefaultAccessProfile(legacyId) ? legacyId : 'limited');
   return (await getAccessProfileById(fallbackId)) || cloneDefaultAccessProfile(
-    getDefaultAccessProfile(fallbackId)!,
+    getDefaultAccessProfile(fallbackId) || getDefaultAccessProfile('limited')!,
   );
 };
 
@@ -9935,8 +9956,44 @@ Escreva em Português do Brasil, em texto técnico pronto para integrar o relat�
   }
 });
 
-// Endpoint to send contact emails
-// Generic email endpoint
+const INTERNAL_TICKET_MANAGEMENT_RECIPIENTS =
+  "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br";
+
+const sendPortalEmailHelper = async (to: string, subject: string, html: string): Promise<{ emailSent: boolean; error?: string }> => {
+  const smtpHost = String(process.env.SMTP_HOST || '').trim();
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = String(process.env.SMTP_USER || '').trim();
+  const smtpPass = String(process.env.SMTP_PASS || '').trim();
+  if (!smtpUser || !smtpPass) {
+    console.log("[EMAIL] SMTP não configurado. Dados:", { to, subject });
+    return { emailSent: false, error: "SMTP_NOT_CONFIGURED" };
+  }
+  try {
+    const transporter = smtpHost
+      ? nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: { user: smtpUser, pass: smtpPass },
+          tls: { rejectUnauthorized: false },
+        })
+      : nodemailer.createTransport({
+          service: 'gmail',
+          auth: { user: smtpUser, pass: smtpPass },
+        });
+    await transporter.sendMail({
+      from: `"COMANINS Portal" <${smtpUser}>`,
+      to,
+      subject,
+      html,
+    });
+    return { emailSent: true };
+  } catch (err) {
+    console.error("[EMAIL] Erro ao enviar e-mail via SMTP:", err);
+    return { emailSent: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
 app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLimit, async (req: AuthRequest, res) => {
   const to = asLimitedString(req.body?.to, 2000);
   const subject = asLimitedString(req.body?.subject, 200);
@@ -9945,34 +10002,184 @@ app.post("/api/send-email", requireAuth, requireInternalAccount, emailApiRateLim
   if (!subject || !html || html.length > 200000 || recipients.length === 0 || recipients.length > 20 || !recipients.every(isValidEmailAddress)) {
     return res.status(400).json({ error: "Dados inválidos para envio de e-mail." });
   }
+  const result = await sendPortalEmailHelper(recipients.join(", "), subject, html);
+  if (result.emailSent) return res.json({ success: true, emailSent: true });
+  if (result.error === "SMTP_NOT_CONFIGURED") return res.json({ success: true, emailSent: false, smtpNotConfigured: true });
+  return res.json({ success: false, emailSent: false, error: result.error });
+});
 
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+app.get("/api/internal-tickets", requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: "FIREBASE_ADMIN_NOT_CONFIGURED" });
+  try {
+    const profile = await findPortalUserForAuth(req.user).catch(() => null);
+    const hydrated = profile ? await hydrateUserAccess(profile) : req.user;
+    const isManager =
+      isAdministratorProfile(hydrated) ||
+      userHasAccessModule(hydrated as any, 'internal_communication_management') ||
+      userHasAccessModule(hydrated as any, 'hr');
 
-  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: SMTP_USER,
-          pass: SMTP_PASS
-        }
-      });
+    const snapshot = await firestoreDb.collection('internal_tickets').get();
+    const userEmail = String(req.user?.email || '').trim().toLowerCase();
+    const usernameFromEmail = userEmail.endsWith('@comanins.internal')
+      ? userEmail.slice(0, -'@comanins.internal'.length).trim().toLowerCase()
+      : '';
+    const profileUsername = String(profile?.username || usernameFromEmail || '').trim().toLowerCase();
+    const profileName = String(profile?.name || '').trim().toLowerCase();
+    const profileId = String(profile?.id || req.user?.portalUserId || '').trim().toLowerCase();
 
-      await transporter.sendMail({
-        from: `"COMANINS Portal" <${SMTP_USER}>`,
-        to: to,
-        subject: subject,
-        html: html
-      });
+    const items = snapshot.docs
+      .map((doc) => ({ ...doc.data(), id: doc.id } as any))
+      .filter((t) => t.isDeleted !== true)
+      .filter((t) => {
+        if (isManager) return true;
+        const cId = String(t.creatorId || '').trim().toLowerCase();
+        const cName = String(t.creatorName || '').trim().toLowerCase();
+        const cEmail = String(t.creatorEmail || '').trim().toLowerCase();
+        return (
+          (profileUsername && (cId === profileUsername || cName === profileUsername || cEmail.startsWith(profileUsername + '@'))) ||
+          (profileName && (cId === profileName || cName === profileName)) ||
+          (profileId && cId === profileId)
+        );
+      })
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-      return res.json({ success: true, emailSent: true });
-    } catch (err) {
-      console.error("[EMAIL] Erro ao enviar e-mail via SMTP:", err);
-      return res.json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    return res.json({ success: true, items });
+  } catch (error: any) {
+    console.error("[INTERNAL-TICKETS] Erro ao listar chamados:", error);
+    return res.status(500).json({ error: error?.message || "INTERNAL_TICKETS_LIST_FAILED" });
+  }
+});
+
+app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: "FIREBASE_ADMIN_NOT_CONFIGURED" });
+  try {
+    const rawTicket = req.body?.ticket || req.body;
+    const ticketId = asLimitedString(rawTicket?.id, 120);
+    const title = asLimitedString(rawTicket?.title, 300);
+    const description = String(rawTicket?.description || '').trim();
+    if (!ticketId || !title || !description) {
+      return res.status(400).json({ error: "INVALID_TICKET_PAYLOAD" });
     }
-  } else {
-    console.log("[EMAIL] SMTP não configurado. Dados:", { to, subject });
-    return res.json({ success: true, emailSent: false, smtpNotConfigured: true });
+
+    const profile = await findPortalUserForAuth(req.user).catch(() => null);
+    const userEmail = String(req.user?.email || '').trim().toLowerCase();
+    const usernameFromEmail = userEmail.endsWith('@comanins.internal')
+      ? userEmail.slice(0, -'@comanins.internal'.length).trim()
+      : '';
+
+    const docRef = firestoreDb.collection('internal_tickets').doc(ticketId);
+    const existingSnap = await docRef.get();
+    const existingData = existingSnap.exists ? existingSnap.data() : null;
+
+    const creatorId = String(
+      existingData?.creatorId || rawTicket?.creatorId || profile?.username || profile?.name || usernameFromEmail || 'colaborador'
+    ).trim();
+    const creatorName = String(
+      existingData?.creatorName || rawTicket?.creatorName || profile?.name || profile?.username || usernameFromEmail || creatorId
+    ).trim();
+    const creatorEmail = String(
+      existingData?.creatorEmail ||
+      rawTicket?.creatorEmail ||
+      profile?.workEmail ||
+      profile?.personalEmail ||
+      profile?.email ||
+      (usernameFromEmail ? `${usernameFromEmail}@comanins.com.br` : `${creatorId}@comanins.com.br`)
+    ).trim();
+
+    const nowIso = new Date().toISOString();
+    const ticketToSave: Record<string, any> = {
+      id: ticketId,
+      creatorId,
+      creatorName,
+      creatorEmail,
+      title,
+      description,
+      status: ['aberto', 'respondido', 'finalizado'].includes(rawTicket?.status) ? rawTicket.status : (existingData?.status || 'aberto'),
+      createdAt: existingData?.createdAt || rawTicket?.createdAt || nowIso,
+      updatedAt: rawTicket?.updatedAt || nowIso,
+      attachments: Array.isArray(rawTicket?.attachments) ? rawTicket.attachments : (existingData?.attachments || []),
+      messages: Array.isArray(rawTicket?.messages) ? rawTicket.messages : (existingData?.messages || []),
+    };
+
+    const notifyEmail = req.body?.notifyEmail !== false;
+    const emailMode: 'new_ticket' | 'reply' | 'none' =
+      req.body?.emailMode || (!existingSnap.exists ? 'new_ticket' : 'none');
+
+    let emailSent = false;
+    if (notifyEmail && emailMode === 'new_ticket' && !existingData?.notificationSentAt) {
+      const emailRes = await sendPortalEmailHelper(
+        INTERNAL_TICKET_MANAGEMENT_RECIPIENTS,
+        `[NOVO CHAMADO] ${ticketToSave.title} - ${ticketToSave.creatorName}`,
+        `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+            <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
+            <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+          </div>
+          <p>Um novo chamado foi aberto no portal:</p>
+          <p><b>Colaborador:</b> ${ticketToSave.creatorName} (${ticketToSave.creatorEmail})</p>
+          <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+            <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticketToSave.title}</p>
+            <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticketToSave.description}</p>
+          </div>
+          <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
+        </div>`
+      );
+      emailSent = emailRes.emailSent;
+      if (emailSent) ticketToSave.notificationSentAt = nowIso;
+    } else if (notifyEmail && emailMode === 'reply') {
+      const latestMessage = req.body?.latestMessage || ticketToSave.messages[ticketToSave.messages.length - 1];
+      const hydrated = profile ? await hydrateUserAccess(profile) : req.user;
+      const isManager =
+        isAdministratorProfile(hydrated) ||
+        userHasAccessModule(hydrated as any, 'internal_communication_management') ||
+        userHasAccessModule(hydrated as any, 'hr');
+
+      if (isManager && latestMessage) {
+        let recipientEmail = ticketToSave.creatorEmail;
+        if (!recipientEmail || !recipientEmail.includes('@')) {
+          const cId = ticketToSave.creatorId || ticketToSave.creatorName;
+          recipientEmail = cId && cId.includes('@') ? cId : `${cId}@comanins.com.br`;
+        }
+        if (isValidEmailAddress(recipientEmail)) {
+          const emailRes = await sendPortalEmailHelper(
+            recipientEmail,
+            `[COMANINS] Resposta ao Chamado: ${ticketToSave.title}`,
+            `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+              <h2 style="color: #1e40af; margin: 0 0 12px 0;">💬 Seu Chamado foi Respondido</h2>
+              <p>Olá, <b>${ticketToSave.creatorName}</b>!</p>
+              <p>A equipe do Portal COMANINS respondeu ao seu chamado <b>"${ticketToSave.title}"</b>:</p>
+              <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; margin: 16px 0;">
+                <p style="margin: 0; font-size: 14px; color: #1e293b; white-space: pre-wrap;">${latestMessage.text || '(Novo arquivo anexado)'}</p>
+              </div>
+            </div>`
+          );
+          emailSent = emailRes.emailSent;
+        }
+      } else if (!isManager && latestMessage) {
+        const emailRes = await sendPortalEmailHelper(
+          INTERNAL_TICKET_MANAGEMENT_RECIPIENTS,
+          `[NOVA INTERAÇÃO NO CHAMADO] ${ticketToSave.title} - ${ticketToSave.creatorName}`,
+          `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+            <h2 style="color: #1e40af; margin: 0 0 12px 0;">💬 Nova Mensagem no Chamado</h2>
+            <p>O colaborador <b>${ticketToSave.creatorName}</b> enviou uma nova mensagem no chamado <b>"${ticketToSave.title}"</b>:</p>
+            <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; margin: 16px 0;">
+              <p style="margin: 0; font-size: 14px; color: #1e293b; white-space: pre-wrap;">${latestMessage.text || '(Novo arquivo anexado)'}</p>
+            </div>
+          </div>`
+        );
+        emailSent = emailRes.emailSent;
+      }
+    }
+
+    if (existingData?.notificationSentAt && !ticketToSave.notificationSentAt) {
+      ticketToSave.notificationSentAt = existingData.notificationSentAt;
+    }
+
+    await docRef.set(ticketToSave, { merge: true });
+    return res.json({ success: true, ticket: ticketToSave, emailSent });
+  } catch (error: any) {
+    console.error("[INTERNAL-TICKETS] Erro ao salvar chamado:", error);
+    return res.status(500).json({ error: error?.message || "INTERNAL_TICKET_SAVE_FAILED" });
   }
 });
 
@@ -10485,7 +10692,65 @@ REGRAS DE QUALIDADE:
 
   // Start server. Security cleanups/migrations run asynchronously and never
   // block the public site from listening.
+  const healInternalPortalUsersAndClaims = async () => {
+    if (!firestoreDb || !adminAuth) return;
+    try {
+      const snapshot = await firestoreDb.collection('portalUsers').get();
+      for (const docSnap of snapshot.docs) {
+        try {
+          const data = docSnap.data();
+          if (!data || data.isDeleted === true) continue;
+          const rawUsername = String(data.username || '').trim().toLowerCase();
+          if (!rawUsername) continue;
+          const expectedEmail = rawUsername.includes('@') ? rawUsername : `${rawUsername}@comanins.internal`;
+          let authUid = String(data.authUid || '').trim();
+          let authUser: any = null;
+          if (authUid) {
+            try { authUser = await adminAuth.getUser(authUid); } catch (e: any) { if (e?.code === 'auth/user-not-found') authUid = ''; }
+          }
+          if (!authUser) {
+            try { authUser = await adminAuth.getUserByEmail(expectedEmail); authUid = authUser.uid; } catch {}
+          }
+          const hydrated = await hydrateUserAccess({
+            id: docSnap.id,
+            ...data,
+            username: rawUsername,
+            authUid: authUid || data.authUid,
+            authEmail: expectedEmail,
+          });
+          const updates: Record<string, any> = {};
+          if (data.username !== rawUsername) updates.username = rawUsername;
+          if (authUid && data.authUid !== authUid) updates.authUid = authUid;
+          if (data.authEmail !== expectedEmail) updates.authEmail = expectedEmail;
+          if (
+            JSON.stringify(data.allowedModules || []) !== JSON.stringify(hydrated.allowedModules || []) ||
+            JSON.stringify(data.editableModules || []) !== JSON.stringify(hydrated.editableModules || []) ||
+            data.accessProfileId !== hydrated.accessProfileId
+          ) {
+            updates.accessProfileId = hydrated.accessProfileId;
+            updates.accessProfileName = hydrated.accessProfileName;
+            updates.accessProfileVersion = hydrated.accessProfileVersion;
+            updates.allowedModules = hydrated.allowedModules;
+            updates.editableModules = hydrated.editableModules;
+          }
+          if (Object.keys(updates).length > 0) await docSnap.ref.update(updates);
+          if (authUser && authUid) {
+            await adminAuth.setCustomUserClaims(authUid, {
+              ...(authUser.customClaims || {}),
+              ...buildInternalClaims(hydrated),
+            });
+          }
+        } catch (userErr) {
+          console.warn(`[AUTH-HEAL] Falha ao sincronizar colaborador ${docSnap.id}:`, userErr);
+        }
+      }
+    } catch (err) {
+      console.warn('[AUTH-HEAL] Erro ao verificar portalUsers:', err);
+    }
+  };
+
   void scrubLegacyInternalPasswordFields();
+  void healInternalPortalUsersAndClaims();
   void backfillClientLinks();
   void backfillFieldServiceClientLinks();
 

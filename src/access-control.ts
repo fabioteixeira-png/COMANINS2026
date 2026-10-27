@@ -237,6 +237,11 @@ export const resolveUserAccessModules = (user?: AccessAwareUser | null): AccessM
     allowed = legacyProfile ? [...legacyProfile.modules] : [];
   }
 
+  const baseModules: AccessModuleId[] = ["dashboard", "personal_documents", "internal_communication"];
+  for (const mod of baseModules) {
+    if (!allowed.includes(mod)) allowed.push(mod);
+  }
+
   if (profileId === "standard" || normalize(user?.permissionLevel) === "padrão" || normalize(user?.permissionLevel) === "padrao") {
     if (!allowed.includes("material_intake")) allowed.push("material_intake");
     if (!allowed.includes("calibration")) allowed.push("calibration");
@@ -258,6 +263,11 @@ export const resolveUserEditableModules = (user?: AccessAwareUser | null): Acces
   } else {
     const legacyProfile = getDefaultAccessProfile(profileId);
     editable = legacyProfile ? editableModulesFromPermissions(legacyProfile.modulePermissions) : [];
+  }
+
+  const baseEditableModules: AccessModuleId[] = ["dashboard", "personal_documents", "internal_communication"];
+  for (const mod of baseEditableModules) {
+    if (!editable.includes(mod)) editable.push(mod);
   }
 
   // Garantia para o perfil Padrão (standard): os módulos operacionais essenciais (incluindo material_intake)

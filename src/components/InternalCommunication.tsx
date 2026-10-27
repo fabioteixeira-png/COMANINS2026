@@ -311,6 +311,7 @@ export default function InternalCommunication({
   const [selectedTicket, setSelectedTicket] = useState<InternalTicket | null>(null);
   const [messageText, setMessageText] = useState("");
   const [messageAttachments, setMessageAttachments] = useState<string[]>([]);
+  const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   
   // Shared Preview Modal
   const [previewAttachment, setPreviewAttachment] = useState<ParsedAttachment | null>(null);
@@ -578,111 +579,176 @@ export default function InternalCommunication({
     setCommAttachments(prev => [...prev, ...newAtts]);
   };
 
+  const handleAddTicketAttachments = async (
+    files: FileList | null,
+    setter: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    if (!files || files.length === 0) return;
+    const processed: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.type.startsWith("image/") && file.size > 700 * 1024) {
+        showToast(`⚠️ O arquivo ${file.name} excede 700 KB para anexo direto em chamado.`);
+        continue;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        showToast(`⚠️ O arquivo ${file.name} excede o limite de 8 MB.`);
+        continue;
+      }
+      try {
+        if (file.type.startsWith("image/")) {
+          const compressed = await compressImageToWebResolution(file);
+          processed.push(JSON.stringify({ name: file.name, type: file.type, url: compressed }));
+        } else {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
+            reader.readAsDataURL(file);
+          });
+          processed.push(JSON.stringify({ name: file.name, type: file.type, url: dataUrl }));
+        }
+      } catch (err) {
+        console.error("Erro ao processar anexo do chamado:", err);
+      }
+    }
+    if (processed.length > 0) {
+      setter(prev => [...prev, ...processed]);
+    }
+  };
+
   // Ticket handlers
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !newDescription.trim() || !currentUser) return;
-    
-    const resolvedEmail = resolveEmployeeEmail(currentUser) || `${currentUser.username}@comanins.com.br`;
+    if (!newTitle.trim() || !newDescription.trim() || !currentUser || isSubmittingTicket) return;
 
-    const ticket: InternalTicket = {
-      id: "ticket_" + Date.now().toString() + "_" + Math.random().toString(36).substring(2, 9),
-      creatorId: currentUser.username || currentUser.name,
-      creatorName: currentUser.name || currentUser.username,
-      creatorEmail: resolvedEmail,
-      title: newTitle,
-      description: newDescription,
-      status: "aberto",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attachments: newAttachments,
-      messages: []
-    };
-    
-    await saveInternalTicket(ticket);
-    
-    safeFetch("/api/send-email", {
-      method: "POST",
-      body: JSON.stringify({
-        to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
-        subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
-            <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
-              <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
-              <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
-            </div>
-            <p>Um novo chamado foi aberto no portal:</p>
-            <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
-            <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
-              <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticket.title}</p>
-              <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticket.description}</p>
-            </div>
-            <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
-          </div>
-        `
-      })
-    }).catch(console.error);
+    setIsSubmittingTicket(true);
+    try {
+      const cleanUsername = String(currentUser.username || currentUser.name || "").trim();
+      const resolvedEmail = resolveEmployeeEmail(currentUser) || `${cleanUsername.toLowerCase()}@comanins.com.br`;
 
-    setShowNewTicketModal(false);
-    setNewTitle("");
-    setNewDescription("");
-    setNewAttachments([]);
-    showToast("✅ Chamado aberto com sucesso!");
+      const ticket: InternalTicket = {
+        id: "ticket_" + Date.now().toString() + "_" + Math.random().toString(36).substring(2, 9),
+        creatorId: cleanUsername,
+        creatorName: String(currentUser.name || currentUser.username || cleanUsername).trim(),
+        creatorEmail: resolvedEmail,
+        title: newTitle.trim(),
+        description: newDescription.trim(),
+        status: "aberto",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        attachments: newAttachments,
+        messages: []
+      };
+
+      const saveResult = await saveInternalTicket(ticket, {
+        notifyEmail: true,
+        emailMode: "new_ticket",
+      });
+
+      if (!saveResult?.emailSent) {
+        safeFetch("/api/send-email", {
+          method: "POST",
+          body: JSON.stringify({
+            to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
+            subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+                <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+                  <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
+                  <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+                </div>
+                <p>Um novo chamado foi aberto no portal:</p>
+                <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
+                <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+                  <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticket.title}</p>
+                  <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticket.description}</p>
+                </div>
+                <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
+              </div>
+            `
+          })
+        }).catch(console.error);
+      }
+
+      setTickets(prev => {
+        const filtered = prev.filter(t => t.id !== ticket.id);
+        return [ticket, ...filtered];
+      });
+      setShowNewTicketModal(false);
+      setNewTitle("");
+      setNewDescription("");
+      setNewAttachments([]);
+      showToast("✅ Chamado aberto com sucesso!");
+    } catch (error: any) {
+      console.error("Erro ao abrir chamado:", error);
+      showToast("❌ Não foi possível registrar o chamado. Verifique sua conexão e tente novamente.");
+    } finally {
+      setIsSubmittingTicket(false);
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageText.trim() && messageAttachments.length === 0) return;
     if (!selectedTicket || !currentUser) return;
-    
-    const newMessage: TicketMessage = {
-      id: "msg_" + Date.now().toString(),
-      senderId: currentUser.username || currentUser.id,
-      senderName: currentUser.name || currentUser.username || currentUser.id,
-      text: messageText,
-      createdAt: new Date().toISOString(),
-      attachments: messageAttachments
-    };
-    
-    const updatedTicket = {
-      ...selectedTicket,
-      messages: [...selectedTicket.messages, newMessage],
-      updatedAt: new Date().toISOString(),
-      status: isFinanceOrAdmin ? "respondido" : "aberto"
-    } as InternalTicket;
-    
-    await saveInternalTicket(updatedTicket);
-    setSelectedTicket(updatedTicket);
-    
-    if (isFinanceOrAdmin) {
-      let recipientEmail = updatedTicket.creatorEmail;
-      if (!recipientEmail || !recipientEmail.includes('@')) {
-        const cId = updatedTicket.creatorId || updatedTicket.creatorName;
-        recipientEmail = cId && cId.includes('@') ? cId : `${cId}@comanins.com.br`;
+
+    try {
+      const newMessage: TicketMessage = {
+        id: "msg_" + Date.now().toString(),
+        senderId: currentUser.username || currentUser.id,
+        senderName: currentUser.name || currentUser.username || currentUser.id,
+        text: messageText,
+        createdAt: new Date().toISOString(),
+        attachments: messageAttachments
+      };
+
+      const updatedTicket = {
+        ...selectedTicket,
+        messages: [...selectedTicket.messages, newMessage],
+        updatedAt: new Date().toISOString(),
+        status: isFinanceOrAdmin ? "respondido" : "aberto"
+      } as InternalTicket;
+
+      const saveResult = await saveInternalTicket(updatedTicket, {
+        notifyEmail: true,
+        emailMode: "reply",
+        latestMessage: newMessage,
+      });
+      setSelectedTicket(updatedTicket);
+
+      if (isFinanceOrAdmin && !saveResult?.emailSent) {
+        let recipientEmail = updatedTicket.creatorEmail;
+        if (!recipientEmail || !recipientEmail.includes('@')) {
+          const cId = updatedTicket.creatorId || updatedTicket.creatorName;
+          recipientEmail = cId && cId.includes('@') ? cId : `${cId}@comanins.com.br`;
+        }
+
+        safeFetch("/api/send-email", {
+          method: "POST",
+          body: JSON.stringify({
+            to: recipientEmail,
+            subject: `[COMANINS] Resposta ao Chamado: ${updatedTicket.title}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+                <h2 style="color: #1e40af; margin: 0 0 12px 0;">💬 Seu Chamado foi Respondido</h2>
+                <p>Olá, <b>${updatedTicket.creatorName}</b>!</p>
+                <p>A equipe do Portal COMANINS respondeu ao seu chamado <b>"${updatedTicket.title}"</b>:</p>
+                <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; margin: 16px 0;">
+                  <p style="margin: 0; font-size: 14px; color: #1e293b; white-space: pre-wrap;">${newMessage.text || '(Novo arquivo anexado)'}</p>
+                </div>
+              </div>
+            `
+          })
+        }).catch(console.error);
       }
 
-      safeFetch("/api/send-email", {
-        method: "POST",
-        body: JSON.stringify({
-          to: recipientEmail,
-          subject: `[COMANINS] Resposta ao Chamado: ${updatedTicket.title}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
-              <h2 style="color: #1e40af; margin: 0 0 12px 0;">💬 Seu Chamado foi Respondido</h2>
-              <p>Olá, <b>${updatedTicket.creatorName}</b>!</p>
-              <p>A equipe do Portal COMANINS respondeu ao seu chamado <b>"${updatedTicket.title}"</b>:</p>
-              <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; margin: 16px 0;">
-                <p style="margin: 0; font-size: 14px; color: #1e293b; white-space: pre-wrap;">${newMessage.text || '(Novo arquivo anexado)'}</p>
-              </div>
-            </div>
-          `
-        })
-      }).catch(console.error);
+      setMessageText("");
+      setMessageAttachments([]);
+    } catch (error) {
+      console.error("Erro ao enviar mensagem no chamado:", error);
+      showToast("❌ Não foi possível enviar a mensagem. Tente novamente.");
     }
-    
-    setMessageText("");
-    setMessageAttachments([]);
   };
 
   const handleUpdateStatus = async (status: "aberto" | "respondido" | "finalizado") => {
@@ -732,12 +798,24 @@ export default function InternalCommunication({
   };
 
   const filteredTickets = tickets.filter(t => {
-    const matchSearch = t.title.toLowerCase().includes(ticketSearch.toLowerCase()) || 
-      t.description.toLowerCase().includes(ticketSearch.toLowerCase()) ||
-      t.creatorName.toLowerCase().includes(ticketSearch.toLowerCase());
-    
+    const q = ticketSearch.toLowerCase();
+    const matchSearch =
+      String(t.title || "").toLowerCase().includes(q) ||
+      String(t.description || "").toLowerCase().includes(q) ||
+      String(t.creatorName || "").toLowerCase().includes(q);
+
     const matchStatus = filterTicketStatus === "todos" || t.status === filterTicketStatus;
-    const matchUser = isFinanceOrAdmin || t.creatorId === (currentUser?.username || currentUser?.name);
+    if (isFinanceOrAdmin) return matchSearch && matchStatus;
+
+    const myUsername = String(currentUser?.username || "").trim().toLowerCase();
+    const myName = String(currentUser?.name || "").trim().toLowerCase();
+    const myId = String(currentUser?.id || "").trim().toLowerCase();
+    const tCreatorId = String(t.creatorId || "").trim().toLowerCase();
+    const tCreatorName = String(t.creatorName || "").trim().toLowerCase();
+    const matchUser =
+      (myUsername && (tCreatorId === myUsername || tCreatorName === myUsername)) ||
+      (myName && (tCreatorId === myName || tCreatorName === myName)) ||
+      (myId && tCreatorId === myId);
     return matchSearch && matchStatus && matchUser;
   });
 
@@ -1365,20 +1443,8 @@ export default function InternalCommunication({
                         multiple
                         className="hidden"
                         onChange={async (e) => {
-                          const files = e.target.files;
-                          if (!files) return;
-                          for (let i = 0; i < files.length; i++) {
-                            const file = files[i];
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              setMessageAttachments(prev => [...prev, JSON.stringify({
-                                name: file.name,
-                                type: file.type,
-                                url: reader.result as string
-                              })]);
-                            };
-                            reader.readAsDataURL(file);
-                          }
+                          await handleAddTicketAttachments(e.target.files, setMessageAttachments);
+                          e.target.value = "";
                         }}
                       />
                     </label>
@@ -1823,20 +1889,8 @@ export default function InternalCommunication({
                     multiple
                     className="hidden"
                     onChange={async (e) => {
-                      const files = e.target.files;
-                      if (!files) return;
-                      for (let i = 0; i < files.length; i++) {
-                        const file = files[i];
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          setNewAttachments(prev => [...prev, JSON.stringify({
-                            name: file.name,
-                            type: file.type,
-                            url: reader.result as string
-                          })]);
-                        };
-                        reader.readAsDataURL(file);
-                      }
+                      await handleAddTicketAttachments(e.target.files, setNewAttachments);
+                      e.target.value = "";
                     }}
                   />
                 </label>
@@ -1865,9 +1919,10 @@ export default function InternalCommunication({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold rounded-xl transition"
+                  disabled={isSubmittingTicket}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-extrabold rounded-xl transition"
                 >
-                  Abrir Chamado
+                  {isSubmittingTicket ? "Enviando..." : "Abrir Chamado"}
                 </button>
               </div>
             </form>
