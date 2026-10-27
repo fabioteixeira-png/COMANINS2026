@@ -55,6 +55,7 @@ export interface Instrument {
   rangeMax2?: number;
   unit2?: string;
   accuracyClass?: string;
+  subdivision?: number;
   escala?: string;
   escala2?: string;
   unidade2?: string;
@@ -275,6 +276,7 @@ export interface CalibrationReport {
   setPoint?: number;
   contactType?: string;
   accuracyClass?: string;
+  subdivision?: number;
   mpe?: number;
   points: CalibrationPoint[];
   switchPoints?: SwitchCalibrationPoint[];
@@ -302,6 +304,8 @@ export interface CalibrationReport {
   maxRelativeError: number;
   maxHysteresis?: number;
   maxDeadband?: number;
+  maxExpandedUncertainty?: number;
+  expandedUncertaintyPct?: number;
   approved: boolean;
   observations: string;
   temperature?: number;

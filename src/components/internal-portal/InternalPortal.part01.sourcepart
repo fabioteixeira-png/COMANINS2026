@@ -1294,6 +1294,7 @@ export default function InternalPortal({
   const [instCertNumber, setInstCertNumber] = useState<any>("");
   const [instFormError, setInstFormError] = useState<string>("");
   const [instAccuracyClass, setInstAccuracyClass] = useState<any>("A1");
+  const [instSubdivision, setInstSubdivision] = useState<any>("");
   const [instTypeSpec, setInstTypeSpec] = useState<any>("manometro");
   const [instRangeMin2, setInstRangeMin2] = useState<any>("");
   const [instRangeMax2, setInstRangeMax2] = useState<any>("");
@@ -2348,6 +2349,7 @@ export default function InternalPortal({
   const [benchDroopPercent, setBenchDroopPercent] = useState<string | number>("");
   const [benchDroopLimitPercent, setBenchDroopLimitPercent] = useState<number>(15);
   const [benchAccuracyClass, setBenchAccuracyClass] = useState<string>("A1");
+  const [benchSubdivision, setBenchSubdivision] = useState<string | number>("");
   const [benchMpe, setBenchMpe] = useState<number>(1.0);
   const [benchCalibrationRangeMin, setBenchCalibrationRangeMin] = useState<string | number>("");
   const [benchCalibrationRangeMax, setBenchCalibrationRangeMax] = useState<string | number>("");
@@ -3925,6 +3927,11 @@ Status atual: ${e.status}.`,
         const resolvedAcc = resolveAccuracyAndMpeForType(detectedType, inst, min, max);
         setBenchAccuracyClass(resolvedAcc.accuracyClass);
         setBenchMpe(resolvedAcc.mpe);
+        setBenchSubdivision(
+          inst.subdivision !== undefined && inst.subdivision !== null && Number(inst.subdivision) > 0
+            ? String(inst.subdivision)
+            : "",
+        );
 
         // 1. Manômetro & Termômetro & Manovacuometro Points
         const pts = generatePointsForRange(min, max, benchPointCount, detectedType, inst);
@@ -5928,6 +5935,23 @@ Status atual: ${e.status}.`,
         unit: instUnit,
         typeSpec: instTypeSpec !== "manometro" ? instTypeSpec : undefined,
       });
+      const isSubdivisionMandatoryForNew =
+        detectedTypeForNew === "manometro" ||
+        detectedTypeForNew === "manovacuometro" ||
+        detectedTypeForNew === "termometro";
+      const parsedNewSubdivision =
+        instSubdivision !== "" && instSubdivision !== null && instSubdivision !== undefined
+          ? Number(String(instSubdivision).replace(",", "."))
+          : NaN;
+      if (
+        isSubdivisionMandatoryForNew &&
+        (isNaN(parsedNewSubdivision) || parsedNewSubdivision <= 0)
+      ) {
+        setInstFormError(
+          "O campo Subdivisão (menor divisão de escala) é obrigatório e deve ser maior que zero para Manômetro, Manovacuômetro e Termômetro.",
+        );
+        return;
+      }
       const newInst = await onAddInstrument({
         clientId: instClientId,
         category: instCategory as any,
@@ -5939,6 +5963,9 @@ Status atual: ${e.status}.`,
         model: instModel,
         serialNumber: instSerial,
         accuracyClass: instAccuracyClass || "A1",
+        ...(parsedNewSubdivision > 0 && !isNaN(parsedNewSubdivision)
+          ? { subdivision: parsedNewSubdivision }
+          : {}),
         typeSpec: detectedTypeForNew,
         mpe: Number(instMpe) || 1.0,
         rangeMin:
@@ -6027,6 +6054,7 @@ Status atual: ${e.status}.`,
       setInstHasCustomCalibrationRange(false);
       setInstCalibrationRangeMin("");
       setInstCalibrationRangeMax("");
+      setInstSubdivision("");
       setInstFormError("");
     } catch (err: any) {
       console.error(err);
@@ -6461,12 +6489,23 @@ Status atual: ${e.status}.`,
     let isAllOk = true;
     let specificValidationErrorMessage = "";
 
+    const rawBenchSubdivStr = String(
+      benchSubdivision !== "" && benchSubdivision !== undefined && benchSubdivision !== null
+        ? benchSubdivision
+        : activeInst?.subdivision ?? "",
+    ).replace(",", ".");
+    const parsedBenchSubdiv = Number(rawBenchSubdivStr);
+
     if (
       selectedInstrumentType === "manometro" ||
       selectedInstrumentType === "termometro" ||
       selectedInstrumentType === "manovacuometro"
     ) {
-      if (!benchPoints || benchPoints.length === 0) {
+      if (!rawBenchSubdivStr.trim() || isNaN(parsedBenchSubdiv) || parsedBenchSubdiv <= 0) {
+        isAllFilled = false;
+        specificValidationErrorMessage =
+          "Preencha o campo Subdivisão (menor divisão de escala) do instrumento com um valor maior que zero.";
+      } else if (!benchPoints || benchPoints.length === 0) {
         isAllFilled = false;
       } else {
         for (const p of benchPoints) {
@@ -6817,6 +6856,77 @@ Status atual: ${e.status}.`,
           return;
         }
 
+        let computedMaxExpandedUncertainty: number | undefined = undefined;
+        let computedExpandedUncertaintyPct: number | undefined = undefined;
+        if (
+          (selectedInstrumentType === "manometro" ||
+            selectedInstrumentType === "manovacuometro" ||
+            selectedInstrumentType === "termometro") &&
+          benchPoints &&
+          benchPoints.length > 0
+        ) {
+          const minRaw =
+            benchCalibrationRangeMin !== "" && !isNaN(Number(benchCalibrationRangeMin))
+              ? Number(benchCalibrationRangeMin)
+              : Number(activeInst?.rangeMin) || 0;
+          const maxRaw =
+            benchCalibrationRangeMax !== "" && !isNaN(Number(benchCalibrationRangeMax))
+              ? Number(benchCalibrationRangeMax)
+              : Number(activeInst?.rangeMax) || 0;
+          const spanRaw = Math.abs((Number(activeInst?.rangeMax) || 0) - (Number(activeInst?.rangeMin) || 0)) || 1;
+          const mpeRaw = benchMpe !== undefined && benchMpe !== null ? Number(benchMpe) : Number(activeInst?.mpe) || 0;
+          const stdErrorOrMpe = mpeRaw > 0 ? (mpeRaw * spanRaw) / 100 / 4 : spanRaw * 0.0025;
+          const uB_std = stdErrorOrMpe / 2;
+          const res =
+            !isNaN(parsedBenchSubdiv) && parsedBenchSubdiv > 0
+              ? parsedBenchSubdiv
+              : 0.1;
+          const uB_res = res / (2 * Math.sqrt(3));
+          const pointUncertainties = benchPoints.map((p: any) => {
+            const vals = [
+              Number(p.refAsc1) || 0,
+              Number(p.refDesc1) || 0,
+              Number(p.refAsc2) || 0,
+              Number(p.refDesc2) || 0,
+            ];
+            const avg = vals.reduce((s, v) => s + v, 0) / 4;
+            const variance =
+              vals.reduce((acc, v) => acc + Math.pow(v - avg, 2), 0) / 3;
+            const stdDev = Math.sqrt(variance);
+            let uA = stdDev / 2;
+            let localHyst = Math.max(
+              Math.abs(vals[0] - vals[1]),
+              Math.abs(vals[2] - vals[3]),
+            );
+            if (selectedInstrumentType === "manovacuometro" && Number(p.nominal) < 0) {
+              const scaleDiv = minRaw <= -700 ? 760 : minRaw <= -25 ? 29.92 : 1;
+              uA = uA / scaleDiv;
+              localHyst = localHyst / scaleDiv;
+            }
+            const uB_hyst = localHyst / (2 * Math.sqrt(3));
+            const uc = Math.sqrt(
+              Math.pow(uA, 2) +
+                Math.pow(uB_std, 2) +
+                Math.pow(uB_res, 2) +
+                Math.pow(uB_hyst, 2),
+            );
+            return Number((uc * 2.0).toFixed(2));
+          });
+          computedMaxExpandedUncertainty =
+            pointUncertainties.length > 0 ? Math.max(...pointUncertainties) : 0;
+          const effSpan =
+            selectedInstrumentType === "manovacuometro" && minRaw < 0
+              ? (minRaw <= -700
+                  ? Math.abs(minRaw) / 760
+                  : minRaw <= -25
+                    ? Math.abs(minRaw) / 29.92
+                    : Math.abs(minRaw)) + Math.abs(maxRaw) || 100
+              : Math.abs(maxRaw - minRaw) || 100;
+          computedExpandedUncertaintyPct = Number(
+            ((computedMaxExpandedUncertainty / effSpan) * 100).toFixed(2),
+          );
+        }
+
         const startInfo =
           calibrationStartTimes[selectedInstId] ||
           (await recordCalibrationStart(selectedInstId));
@@ -6834,7 +6944,13 @@ Status atual: ${e.status}.`,
           setPoint: Number(benchSetPoint) || 0,
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
+          subdivision:
+            !isNaN(parsedBenchSubdiv) && parsedBenchSubdiv > 0
+              ? parsedBenchSubdiv
+              : undefined,
           mpe: benchMpe,
+          maxExpandedUncertainty: computedMaxExpandedUncertainty,
+          expandedUncertaintyPct: computedExpandedUncertaintyPct,
           points:
             selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro" ||
@@ -6978,6 +7094,7 @@ Status atual: ${e.status}.`,
           setBenchStandardC("");
           setBenchCalibrationRangeMin("");
           setBenchCalibrationRangeMax("");
+          setBenchSubdivision("");
           setIsCustomCalibrationRange(false);
           setBenchCalibrationDate(currentCalibrationDate());
           setActiveTab("instruments");
@@ -7185,6 +7302,12 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
           setPoint: Number(benchSetPoint) || 0,
           contactType: benchContactType,
           accuracyClass: benchAccuracyClass,
+          subdivision:
+            benchSubdivision !== "" &&
+            !isNaN(Number(String(benchSubdivision).replace(",", "."))) &&
+            Number(String(benchSubdivision).replace(",", ".")) > 0
+              ? Number(String(benchSubdivision).replace(",", "."))
+              : activeInst.subdivision,
           mpe: benchMpe,
           calibrationRangeMin: benchCalibrationRangeMin !== "" ? Number(benchCalibrationRangeMin) : undefined,
           calibrationRangeMax: benchCalibrationRangeMax !== "" ? Number(benchCalibrationRangeMax) : undefined,

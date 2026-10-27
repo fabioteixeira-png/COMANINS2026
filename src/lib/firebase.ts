@@ -1538,7 +1538,10 @@ export async function saveCalibrationDoc(data: {
   signaturePath?: string;
   emitterUser?: string;
   accuracyClass?: string;
+  subdivision?: number;
   mpe?: number;
+  maxExpandedUncertainty?: number;
+  expandedUncertaintyPct?: number;
   points: any[];
   observations: string;
   curveCount?: number;
@@ -1915,6 +1918,14 @@ export async function saveCalibrationDoc(data: {
     maxError,
     maxRelativeError,
     maxHysteresis,
+    maxExpandedUncertainty:
+      data.maxExpandedUncertainty !== undefined && !isNaN(Number(data.maxExpandedUncertainty))
+        ? Number(data.maxExpandedUncertainty)
+        : undefined,
+    expandedUncertaintyPct:
+      data.expandedUncertaintyPct !== undefined && !isNaN(Number(data.expandedUncertaintyPct))
+        ? Number(data.expandedUncertaintyPct)
+        : undefined,
     approved:
       data.instrumentType === 'psv' || data.instrumentType === 'pcv'
         ? data.approved === false
@@ -1939,6 +1950,12 @@ export async function saveCalibrationDoc(data: {
     setPoint: data.setPoint,
     contactType: data.contactType,
     accuracyClass: data.accuracyClass,
+    subdivision:
+      data.subdivision !== undefined && !isNaN(Number(data.subdivision)) && Number(data.subdivision) > 0
+        ? Number(data.subdivision)
+        : activeInst.subdivision !== undefined && !isNaN(Number(activeInst.subdivision)) && Number(activeInst.subdivision) > 0
+          ? Number(activeInst.subdivision)
+          : undefined,
     mpe: data.mpe,
     transmitterPoints:
       data.instrumentType === 'transmissor'
@@ -2014,6 +2031,7 @@ export async function saveCalibrationDoc(data: {
     ...(data.regulatorActuation ? { regulatorActuation: data.regulatorActuation } : {}),
     ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
     ...(data.humidity !== undefined ? { humidity: data.humidity } : {}),
+    ...(report.subdivision !== undefined ? { subdivision: report.subdivision } : {}),
     ...(report.calibrationRangeMin !== undefined ? { calibrationRangeMin: report.calibrationRangeMin } : {}),
     ...(report.calibrationRangeMax !== undefined ? { calibrationRangeMax: report.calibrationRangeMax } : {}),
     ...(report.calibrationRange !== undefined ? { calibrationRange: report.calibrationRange } : {}),
@@ -2038,6 +2056,7 @@ export async function saveCalibrationDoc(data: {
     regulatorMode: data.regulatorMode,
     regulatorActuation: data.regulatorActuation,
     accuracyClass: data.accuracyClass,
+    subdivision: report.subdivision,
     mpe: data.mpe,
     temperature: data.temperature,
     humidity: data.humidity,

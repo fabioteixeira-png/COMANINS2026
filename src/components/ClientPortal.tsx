@@ -1101,16 +1101,31 @@ export default function ClientPortal({
                    uA = Math.sqrt(variance) / Math.sqrt(count);
                  }
 
+                 let normalizedUA = uA;
+                 let normalizedLocalHyst = localHyst;
+                 if (inst?.typeSpec === 'manovacuometro' && nominal < 0) {
+                   const minVal = inst?.rangeMin || 0;
+                   if (minVal <= -700) {
+                     normalizedUA = uA / 760;
+                     normalizedLocalHyst = localHyst / 760;
+                   } else if (minVal <= -25) {
+                     normalizedUA = uA / 29.92;
+                     normalizedLocalHyst = localHyst / 29.92;
+                   }
+                 }
+
+                 const rawSubdiv = Number(String(selectedReport?.subdivision ?? inst?.subdivision ?? '').replace(',', '.'));
                  const decimals = String(nominal).includes('.') ? String(nominal).split('.')[1].length : 2;
-                 const res = Math.pow(10, -Math.max(1, Math.min(decimals, 3)));
+                 const fallbackRes = Math.pow(10, -Math.max(1, Math.min(decimals, 3)));
+                 const res = Number.isFinite(rawSubdiv) && rawSubdiv > 0 ? rawSubdiv : fallbackRes;
                  const uB_res = (res / 2) / Math.sqrt(3);
 
-                 const uB_hist = localHyst / (2 * Math.sqrt(3));
+                 const uB_hist = normalizedLocalHyst / (2 * Math.sqrt(3));
 
                  const stdErrorOrMpe = mpeVal > 0 ? ((mpeVal * span / 100) / 4) : (span * 0.0025);
                  const uB_std = stdErrorOrMpe / 2;
 
-                 const uc = Math.sqrt(Math.pow(uA, 2) + Math.pow(uB_res, 2) + Math.pow(uB_hist, 2) + Math.pow(uB_std, 2));
+                 const uc = Math.sqrt(Math.pow(normalizedUA, 2) + Math.pow(uB_res, 2) + Math.pow(uB_hist, 2) + Math.pow(uB_std, 2));
                  const expandedUncertainty = count > 0 ? Number((uc * 2.00).toFixed(2)) : 0.05;
 
                  return { nominal, avg, err, a1: a1 ?? 0, d1: d1 ?? 0, a2: a2 ?? 0, d2: d2 ?? 0, count, expandedUncertainty, refAsc1: p.refAsc1, refDesc1: p.refDesc1, refAsc2: p.refAsc2, refDesc2: p.refDesc2 };
@@ -1119,6 +1134,10 @@ export default function ClientPortal({
               const classPct = span > 0 ? (maxAbsError / span) * 100 : 0;
               const hysteresisPct = span > 0 ? (maxHysteresis / span) * 100 : 0;
               const repPct = span > 0 ? (maxRepeatability / span) * 100 : 0;
+              const maxExpandedUncertainty = formattedPoints.length > 0
+                ? Math.max(...formattedPoints.map((fp: any) => Number(fp.expandedUncertainty) || 0))
+                : 0;
+              const uncertaintyPct = span > 0 ? (maxExpandedUncertainty / span) * 100 : 0;
 
               return (
                 <div className="space-y-6">
@@ -1183,6 +1202,14 @@ export default function ClientPortal({
                           </p>
                         )}
                         <p><span className="font-bold">Tolerância (MPE):</span> ±{selectedReport?.mpe ?? inst?.mpe ?? '—'} {inst?.unit}</p>
+                        {(!isPsvCertificate && !isPcvCertificate && clientInstrumentType !== 'transmissor' && clientInstrumentType !== 'pressostato' && clientInstrumentType !== 'termostato') && (
+                          <p>
+                            <span className="font-bold">Subdivisão:</span>{' '}
+                            {(selectedReport?.subdivision ?? inst?.subdivision)
+                              ? `${selectedReport?.subdivision ?? inst?.subdivision} ${inst?.unit}`
+                              : 'Não informada'}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1514,6 +1541,7 @@ export default function ClientPortal({
                             <p>Índice de Classe (%): {classPct.toFixed(2)}</p>
                             <p>Repetitividade (%): {repPct.toFixed(3)}</p>
                             <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
+                            <p>Incerteza de Medição (U): ± {maxExpandedUncertainty.toFixed(2)} {inst?.unit} ({uncertaintyPct.toFixed(2)} %) (k = 2,00; 95,45%)</p>
                           </div>
                         </>
                       )}

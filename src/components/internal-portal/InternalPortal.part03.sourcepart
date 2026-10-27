@@ -621,6 +621,21 @@
                                       placeholder="Ex: 0.1"
                                     />
                                   </div>
+                                  <div className="col-span-2">
+                                    <label className="block text-slate-600 font-bold mb-1">
+                                      Subdivisão / Menor Divisão de Escala ({activeInst?.unit || "Unid."}) *
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      min="0.0001"
+                                      required
+                                      value={benchSubdivision}
+                                      onChange={(e) => setBenchSubdivision(e.target.value)}
+                                      className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 focus:ring-1 focus:ring-royal-blue font-mono"
+                                      placeholder="Ex: 0.1, 0.2, 0.5, 1"
+                                    />
+                                  </div>
                                 </div>
                               </>
                             )}
@@ -781,6 +796,21 @@
                                       }
                                       className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 focus:ring-1 focus:ring-royal-blue font-mono"
                                       placeholder="Ex: 0.5"
+                                    />
+                                  </div>
+                                  <div className="col-span-2">
+                                    <label className="block text-slate-600 font-bold mb-1">
+                                      Subdivisão / Menor Divisão de Escala ({activeInst?.unit || "°C"}) *
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      min="0.0001"
+                                      required
+                                      value={benchSubdivision}
+                                      onChange={(e) => setBenchSubdivision(e.target.value)}
+                                      className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 focus:ring-1 focus:ring-royal-blue font-mono"
+                                      placeholder="Ex: 0.1, 0.5, 1, 2"
                                     />
                                   </div>
                                 </div>
@@ -1539,13 +1569,244 @@
                                             </span>
                                           )}
                                         </td>
-                                      </tr>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                                {(() => {
+                                  const spanBench =
+                                    Math.abs(
+                                      (activeInst?.rangeMax || 0) -
+                                        (activeInst?.rangeMin || 0),
+                                    ) || 1;
+                                  const mpeBench =
+                                    benchMpe !== undefined && benchMpe !== null
+                                      ? Number(benchMpe)
+                                      : Number(activeInst?.mpe) || 0;
+                                  const rawSubdivBench = Number(
+                                    String(
+                                      benchSubdivision !== "" &&
+                                        benchSubdivision !== undefined &&
+                                        benchSubdivision !== null
+                                        ? benchSubdivision
+                                        : activeInst?.subdivision ?? "",
+                                    ).replace(",", "."),
+                                  );
+                                  let maxAbsErrBench = 0;
+                                  let maxHystBench = 0;
+                                  let maxRepBench = 0;
+                                  let maxExpandedUncBench = 0;
+
+                                  (benchPoints || []).forEach((p: any) => {
+                                    const a1 =
+                                      p.refAsc1 !== "" && p.refAsc1 !== undefined
+                                        ? Number(p.refAsc1)
+                                        : null;
+                                    const d1 =
+                                      p.refDesc1 !== "" && p.refDesc1 !== undefined
+                                        ? Number(p.refDesc1)
+                                        : null;
+                                    const a2 =
+                                      p.refAsc2 !== "" && p.refAsc2 !== undefined
+                                        ? Number(p.refAsc2)
+                                        : null;
+                                    const d2 =
+                                      p.refDesc2 !== "" && p.refDesc2 !== undefined
+                                        ? Number(p.refDesc2)
+                                        : null;
+                                    const validVals = [a1, d1, a2, d2].filter(
+                                      (v): v is number => v !== null && !isNaN(v),
                                     );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                                    const count = validVals.length;
+                                    if (count === 0) return;
+                                    const avg =
+                                      validVals.reduce((s, v) => s + v, 0) / count;
+                                    let absErr = Math.abs(p.nominal - avg);
+                                    if (
+                                      selectedInstrumentType === "manovacuometro" &&
+                                      p.nominal < 0
+                                    ) {
+                                      const minVal = activeInst?.rangeMin || 0;
+                                      if (minVal <= -700) absErr = absErr / 760;
+                                      else if (minVal <= -25)
+                                        absErr = absErr / 29.92;
+                                    }
+                                    if (absErr > maxAbsErrBench)
+                                      maxAbsErrBench = absErr;
+
+                                    let localHyst = 0;
+                                    if (a1 !== null && d1 !== null) {
+                                      const h1 = Math.abs(d1 - a1);
+                                      let nh1 = h1;
+                                      if (
+                                        selectedInstrumentType ===
+                                          "manovacuometro" &&
+                                        p.nominal < 0
+                                      ) {
+                                        const minVal = activeInst?.rangeMin || 0;
+                                        if (minVal <= -700) nh1 = h1 / 760;
+                                        else if (minVal <= -25) nh1 = h1 / 29.92;
+                                      }
+                                      if (nh1 > maxHystBench) maxHystBench = nh1;
+                                      localHyst = Math.max(localHyst, h1);
+                                    }
+                                    if (a2 !== null && d2 !== null) {
+                                      const h2 = Math.abs(d2 - a2);
+                                      let nh2 = h2;
+                                      if (
+                                        selectedInstrumentType ===
+                                          "manovacuometro" &&
+                                        p.nominal < 0
+                                      ) {
+                                        const minVal = activeInst?.rangeMin || 0;
+                                        if (minVal <= -700) nh2 = h2 / 760;
+                                        else if (minVal <= -25) nh2 = h2 / 29.92;
+                                      }
+                                      if (nh2 > maxHystBench) maxHystBench = nh2;
+                                      localHyst = Math.max(localHyst, h2);
+                                    }
+                                    if (a1 !== null && a2 !== null) {
+                                      let r1 = Math.abs(a2 - a1);
+                                      if (
+                                        selectedInstrumentType ===
+                                          "manovacuometro" &&
+                                        p.nominal < 0
+                                      ) {
+                                        const minVal = activeInst?.rangeMin || 0;
+                                        if (minVal <= -700) r1 = r1 / 760;
+                                        else if (minVal <= -25) r1 = r1 / 29.92;
+                                      }
+                                      if (r1 > maxRepBench) maxRepBench = r1;
+                                    }
+                                    if (d1 !== null && d2 !== null) {
+                                      let r2 = Math.abs(d2 - d1);
+                                      if (
+                                        selectedInstrumentType ===
+                                          "manovacuometro" &&
+                                        p.nominal < 0
+                                      ) {
+                                        const minVal = activeInst?.rangeMin || 0;
+                                        if (minVal <= -700) r2 = r2 / 760;
+                                        else if (minVal <= -25) r2 = r2 / 29.92;
+                                      }
+                                      if (r2 > maxRepBench) maxRepBench = r2;
+                                    }
+
+                                    let uA = 0;
+                                    if (count > 1) {
+                                      const variance =
+                                        validVals.reduce(
+                                          (acc, val) => acc + Math.pow(val - avg, 2),
+                                          0,
+                                        ) /
+                                        (count - 1);
+                                      uA = Math.sqrt(variance) / Math.sqrt(count);
+                                    }
+                                    let normalizedUA = uA;
+                                    let normalizedLocalHyst = localHyst;
+                                    if (
+                                      selectedInstrumentType === "manovacuometro" &&
+                                      p.nominal < 0
+                                    ) {
+                                      const minVal = activeInst?.rangeMin || 0;
+                                      if (minVal <= -700) {
+                                        normalizedUA = uA / 760;
+                                        normalizedLocalHyst = localHyst / 760;
+                                      } else if (minVal <= -25) {
+                                        normalizedUA = uA / 29.92;
+                                        normalizedLocalHyst = localHyst / 29.92;
+                                      }
+                                    }
+                                    const decimals = String(p.nominal).includes(".")
+                                      ? String(p.nominal).split(".")[1].length
+                                      : 2;
+                                    const fallbackRes = Math.pow(
+                                      10,
+                                      -Math.max(1, Math.min(decimals, 3)),
+                                    );
+                                    const res =
+                                      Number.isFinite(rawSubdivBench) &&
+                                      rawSubdivBench > 0
+                                        ? rawSubdivBench
+                                        : fallbackRes;
+                                    const uB_res = res / 2 / Math.sqrt(3);
+                                    const uB_hist =
+                                      normalizedLocalHyst / (2 * Math.sqrt(3));
+                                    const stdErrorOrMpe =
+                                      mpeBench > 0
+                                        ? (mpeBench * spanBench) / 100 / 4
+                                        : spanBench * 0.0025;
+                                    const uB_std = stdErrorOrMpe / 2;
+                                    const uc = Math.sqrt(
+                                      Math.pow(normalizedUA, 2) +
+                                        Math.pow(uB_res, 2) +
+                                        Math.pow(uB_hist, 2) +
+                                        Math.pow(uB_std, 2),
+                                    );
+                                    const expU = Number((uc * 2.0).toFixed(2));
+                                    if (expU > maxExpandedUncBench) {
+                                      maxExpandedUncBench = expU;
+                                    }
+                                  });
+
+                                  const classPctBench =
+                                    spanBench > 0
+                                      ? (maxAbsErrBench / spanBench) * 100
+                                      : 0;
+                                  const repPctBench =
+                                    spanBench > 0
+                                      ? (maxRepBench / spanBench) * 100
+                                      : 0;
+                                  const hystPctBench =
+                                    spanBench > 0
+                                      ? (maxHystBench / spanBench) * 100
+                                      : 0;
+                                  const uncPctBench =
+                                    spanBench > 0
+                                      ? (maxExpandedUncBench / spanBench) * 100
+                                      : 0;
+
+                                  return (
+                                    <div className="bg-slate-50 border-t border-slate-200 px-3 py-2.5 text-[11px] font-mono text-slate-700 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                                      <div>
+                                        <span className="font-bold text-slate-500 block text-[10px]">
+                                          ÍNDICE DE CLASSE (%)
+                                        </span>
+                                        <span className="font-bold text-slate-900">
+                                          {classPctBench.toFixed(2)} %
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-slate-500 block text-[10px]">
+                                          REPETITIVIDADE (%)
+                                        </span>
+                                        <span className="font-bold text-slate-900">
+                                          {repPctBench.toFixed(3)} %
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-slate-500 block text-[10px]">
+                                          HISTERESE (%)
+                                        </span>
+                                        <span className="font-bold text-slate-900">
+                                          {hystPctBench.toFixed(2)} %
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-slate-500 block text-[10px]">
+                                          INCERTEZA DE MEDIÇÃO (U)
+                                        </span>
+                                        <span className="font-bold text-royal-blue">
+                                          ± {maxExpandedUncBench.toFixed(2)}{" "}
+                                          {activeInst?.unit} ({uncPctBench.toFixed(2)} %)
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            )}
 
                           {/* TABLE RENDER: 2. TRANSMISSOR (IEC 60770 - 4-20 mA / 0-10 VDC / 1-5 VDC) */}
                           {selectedInstrumentType === "transmissor" && (() => {
@@ -2383,6 +2644,24 @@
                               ± {benchMpe} {activeInst.unit}
                             </p>
                           </div>
+                          {(selectedInstrumentType === "manometro" ||
+                            selectedInstrumentType === "manovacuometro" ||
+                            selectedInstrumentType === "termometro" ||
+                            benchSubdivision !== "" ||
+                            activeInst.subdivision !== undefined) && (
+                            <div className="bg-slate-50 p-3 rounded border border-slate-200 col-span-2">
+                              <p className="text-slate-500 uppercase text-[10px] font-bold">
+                                Subdivisão (Menor Divisão de Escala)
+                              </p>
+                              <p className="font-mono font-bold text-slate-900">
+                                {benchSubdivision !== ""
+                                  ? `${benchSubdivision} ${activeInst.unit}`
+                                  : activeInst.subdivision
+                                    ? `${activeInst.subdivision} ${activeInst.unit}`
+                                    : "Não informada"}
+                              </p>
+                            </div>
+                          )}
                         </div>
                         <div className="bg-slate-50 p-3 rounded border border-slate-200">
                           <p className="text-slate-500 uppercase text-[10px] font-bold">
@@ -3200,18 +3479,40 @@
                         uA = Math.sqrt(variance) / Math.sqrt(count);
                       }
 
-                      // 2. Tipo B - Resolução do instrumento (uB_res)
+                      let normalizedUA = uA;
+                      let normalizedLocalHyst = localHyst;
+                      if (inst.typeSpec === "manovacuometro" && p.nominal < 0) {
+                        const minVal = inst.rangeMin || 0;
+                        if (minVal <= -700) {
+                          normalizedUA = uA / 760;
+                          normalizedLocalHyst = localHyst / 760;
+                        } else if (minVal <= -25) {
+                          normalizedUA = uA / 29.92;
+                          normalizedLocalHyst = localHyst / 29.92;
+                        }
+                      }
+
+                      // 2. Tipo B - Resolução / Subdivisão do instrumento (uB_res)
+                      const rawSubdiv = Number(
+                        String(
+                          report?.subdivision ?? inst?.subdivision ?? "",
+                        ).replace(",", "."),
+                      );
                       const decimals = String(p.nominal).includes(".")
                         ? String(p.nominal).split(".")[1].length
                         : 2;
-                      const res = Math.pow(
+                      const fallbackRes = Math.pow(
                         10,
                         -Math.max(1, Math.min(decimals, 3)),
                       );
+                      const res =
+                        Number.isFinite(rawSubdiv) && rawSubdiv > 0
+                          ? rawSubdiv
+                          : fallbackRes;
                       const uB_res = res / 2 / Math.sqrt(3);
 
                       // 3. Tipo B - Histerese no ponto (uB_hist)
-                      const uB_hist = localHyst / (2 * Math.sqrt(3));
+                      const uB_hist = normalizedLocalHyst / (2 * Math.sqrt(3));
 
                       // 4. Tipo B - Padrão de Referência (uB_std)
                       const stdErrorOrMpe =
@@ -3220,7 +3521,7 @@
 
                       // Incerteza Combinada (uc) e Incerteza Expandida U (k = 2.00, nível de confiança de ~95.45%)
                       const uc = Math.sqrt(
-                        Math.pow(uA, 2) +
+                        Math.pow(normalizedUA, 2) +
                           Math.pow(uB_res, 2) +
                           Math.pow(uB_hist, 2) +
                           Math.pow(uB_std, 2),
@@ -3246,6 +3547,16 @@
                       span > 0 ? (maxHysteresis / span) * 100 : 0;
                     const repPct =
                       span > 0 ? (maxRepeatability / span) * 100 : 0;
+                    const maxExpandedUncertainty =
+                      formattedPoints.length > 0
+                        ? Math.max(
+                            ...formattedPoints.map(
+                              (fp: any) => Number(fp.expandedUncertainty) || 0,
+                            ),
+                          )
+                        : 0;
+                    const uncertaintyPct =
+                      span > 0 ? (maxExpandedUncertainty / span) * 100 : 0;
 
                     return (
                       <div className="space-y-6">
@@ -3451,6 +3762,18 @@
                                 </span>{" "}
                                 ±{inst.mpe} {inst.unit}
                               </p>
+                              {(certificateInstrumentType === "manometro" ||
+                                certificateInstrumentType === "manovacuometro" ||
+                                certificateInstrumentType === "termometro" ||
+                                report?.subdivision !== undefined ||
+                                inst.subdivision !== undefined) && (
+                                <p>
+                                  <span className="font-bold">Subdivisão:</span>{" "}
+                                  {report?.subdivision ?? inst.subdivision
+                                    ? `${report?.subdivision ?? inst.subdivision} ${inst.unit}`
+                                    : "Não informada"}
+                                </p>
+                              )}
                             </div>
                           </div>
 
@@ -3926,6 +4249,11 @@
                               <p>Índice de Classe (%): {classPct.toFixed(2)}</p>
                               <p>Repetitividade (%): {repPct.toFixed(3)}</p>
                               <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
+                              <p>
+                                Incerteza de Medição (U): ±{" "}
+                                {maxExpandedUncertainty.toFixed(2)} {inst.unit} (
+                                {uncertaintyPct.toFixed(2)} %) (k = 2,00; 95,45%)
+                              </p>
                             </div>
                               </>
                             )}

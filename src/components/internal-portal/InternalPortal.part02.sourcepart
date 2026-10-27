@@ -1548,6 +1548,51 @@
                           ))}
                         </select>
                       </div>
+                      <div className="col-span-3">
+                        {(() => {
+                          const currentDetectedType = detectInstrumentType({
+                            description: instDesc,
+                            category: instCategory,
+                            tag: instTag,
+                            model: instModel,
+                            unit: instUnit,
+                            typeSpec: instTypeSpec !== "manometro" ? instTypeSpec : undefined,
+                          });
+                          const isSubdivReq =
+                            currentDetectedType === "manometro" ||
+                            currentDetectedType === "manovacuometro" ||
+                            currentDetectedType === "termometro";
+                          return (
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                              <label className="block text-slate-700 font-bold mb-1 text-xs">
+                                Subdivisão / Menor Divisão de Escala ({instUnit || "Unid."}){" "}
+                                {isSubdivReq ? (
+                                  <span className="text-rose-600">* (Obrigatório)</span>
+                                ) : (
+                                  <span className="text-slate-400 font-normal">(Opcional)</span>
+                                )}
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0.0001"
+                                  required={isSubdivReq}
+                                  placeholder="Ex: 0.1, 0.2, 0.5, 1"
+                                  value={instSubdivision}
+                                  onChange={(e) => setInstSubdivision(e.target.value)}
+                                  className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:ring-1 focus:ring-royal-blue font-mono"
+                                />
+                                {instUnit && (
+                                  <span className="text-xs font-mono font-bold text-slate-600 bg-slate-200/70 px-2.5 py-1.5 rounded border border-slate-300 shrink-0">
+                                    {instUnit}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     {((instDesc || "").toLowerCase().includes("manovacu") ||

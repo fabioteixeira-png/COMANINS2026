@@ -2743,6 +2743,26 @@
                     typeSpec: editingInstrumentData.typeSpec,
                   });
 
+                  const isSubdivReqOnEdit =
+                    detectedTypeOnEdit === "manometro" ||
+                    detectedTypeOnEdit === "manovacuometro" ||
+                    detectedTypeOnEdit === "termometro";
+                  const parsedEditSubdiv =
+                    editingInstrumentData.subdivision !== undefined &&
+                    editingInstrumentData.subdivision !== "" &&
+                    editingInstrumentData.subdivision !== null
+                      ? Number(String(editingInstrumentData.subdivision).replace(",", "."))
+                      : NaN;
+                  if (
+                    isSubdivReqOnEdit &&
+                    (isNaN(parsedEditSubdiv) || parsedEditSubdiv <= 0)
+                  ) {
+                    alert(
+                      "O campo Subdivisão (menor divisão de escala) é obrigatório e deve ser maior que zero para Manômetro, Manovacuômetro e Termômetro.",
+                    );
+                    return;
+                  }
+
                   await updateInstrumentDoc(editingInstrumentData.id, {
                     tag: editingInstrumentData.tag || "",
                     certificateNumber:
@@ -2805,6 +2825,9 @@
                     isCustomCalibrationRange: Boolean(editingInstrumentData.hasCustomCalibrationRange),
                     hasCustomCalibrationRange: Boolean(editingInstrumentData.hasCustomCalibrationRange),
                     accuracyClass: editingInstrumentData.accuracyClass || "A1",
+                    ...(parsedEditSubdiv > 0 && !isNaN(parsedEditSubdiv)
+                      ? { subdivision: parsedEditSubdiv }
+                      : {}),
                     mpe: Number(editingInstrumentData.mpe) || 0,
                     status:
                       editingInstrumentData.status || "Aguardando Calibração",
@@ -3103,6 +3126,57 @@
                             </option>
                           ))}
                         </select>
+                      </div>
+                      <div className="col-span-3">
+                        {(() => {
+                          const currentEditDetectedType = detectInstrumentType({
+                            ...editingInstrumentData,
+                            typeSpec: editingInstrumentData.typeSpec,
+                          });
+                          const isSubdivReq =
+                            currentEditDetectedType === "manometro" ||
+                            currentEditDetectedType === "manovacuometro" ||
+                            currentEditDetectedType === "termometro";
+                          return (
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                              <label className="block text-slate-700 font-bold mb-1 text-xs">
+                                Subdivisão / Menor Divisão de Escala ({editingInstrumentData.unit || "Unid."}){" "}
+                                {isSubdivReq ? (
+                                  <span className="text-rose-600">* (Obrigatório)</span>
+                                ) : (
+                                  <span className="text-slate-400 font-normal">(Opcional)</span>
+                                )}
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0.0001"
+                                  required={isSubdivReq}
+                                  placeholder="Ex: 0.1, 0.2, 0.5, 1"
+                                  value={
+                                    editingInstrumentData.subdivision !== undefined &&
+                                    editingInstrumentData.subdivision !== null
+                                      ? editingInstrumentData.subdivision
+                                      : ""
+                                  }
+                                  onChange={(e) =>
+                                    setEditingInstrumentData({
+                                      ...editingInstrumentData,
+                                      subdivision: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 text-slate-900 font-mono focus:ring-1 focus:ring-royal-blue"
+                                />
+                                {editingInstrumentData.unit && (
+                                  <span className="text-xs font-mono font-bold text-slate-600 bg-slate-200/70 px-2.5 py-1.5 rounded border border-slate-300 shrink-0">
+                                    {editingInstrumentData.unit}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
