@@ -74,9 +74,15 @@ export default function NotificationBellPopover({
   const isUnreadByMe = (c: CompanyCommunication) => {
     if (!currentUser) return false;
     if (!c.readBy) return true;
-    const userKey = currentUser.username || currentUser.id || '';
-    const idKey = currentUser.id || '';
-    return !c.readBy[userKey] && !c.readBy[idKey];
+    const userKey = String(currentUser.username || currentUser.id || '').trim();
+    const safeUserKey = userKey.replace(/[.#$/[\]]/g, '_');
+    const idKey = String(currentUser.id || '').trim();
+    const safeIdKey = idKey.replace(/[.#$/[\]]/g, '_');
+    return (
+      !c.readBy[userKey] &&
+      !c.readBy[safeUserKey] &&
+      !(idKey && (c.readBy[idKey] || c.readBy[safeIdKey]))
+    );
   };
 
   const unreadList = useMemo(() => {

@@ -46,6 +46,7 @@ import {
   saveCompanyCommunication,
   markCompanyCommunicationAsRead,
   deleteCompanyCommunication,
+  uploadCommunicationAttachment,
   PortalUser 
 } from "../lib/firebase";
 import { compressImageToWebResolution } from "../lib/imageCompressor";
@@ -312,6 +313,7 @@ export default function InternalCommunication({
   const [messageText, setMessageText] = useState("");
   const [messageAttachments, setMessageAttachments] = useState<string[]>([]);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   
   // Shared Preview Modal
   const [previewAttachment, setPreviewAttachment] = useState<ParsedAttachment | null>(null);
@@ -371,13 +373,45 @@ export default function InternalCommunication({
     setTimeout(() => setToastMessage(null), 5000);
   };
 
+  const normalizeReadReceiptsMap = (
+    rawReadBy?: Record<string, any>
+  ): Record<string, { readAt: string; userName: string; userId?: string }> => {
+    if (!rawReadBy || typeof rawReadBy !== "object") return {};
+    const flat: Record<string, { readAt: string; userName: string; userId?: string }> = {};
+    const visit = (obj: Record<string, any>, prefix = "") => {
+      for (const [k, val] of Object.entries(obj)) {
+        const nextKey = prefix ? `${prefix}_${k}` : k;
+        if (val && typeof val === "object" && typeof val.readAt === "string") {
+          flat[nextKey] = val;
+          flat[nextKey.replace(/[.#$/[\]]/g, "_")] = val;
+        } else if (val && typeof val === "object") {
+          visit(val, nextKey);
+        }
+      }
+    };
+    visit(rawReadBy);
+    return flat;
+  };
+
+  const getMyReadReceipt = (c: CompanyCommunication) => {
+    if (!currentUser || !c.readBy) return null;
+    const map = normalizeReadReceiptsMap(c.readBy);
+    const userKey = String(currentUser.username || currentUser.id || "").trim();
+    const safeUserKey = userKey.replace(/[.#$/[\]]/g, "_");
+    const idKey = String(currentUser.id || "").trim();
+    const safeIdKey = idKey.replace(/[.#$/[\]]/g, "_");
+    return (
+      map[userKey] ||
+      map[safeUserKey] ||
+      (idKey ? map[idKey] || map[safeIdKey] : null) ||
+      null
+    );
+  };
+
   // Check if a communication is unread by the current user
   const isCommUnread = (c: CompanyCommunication) => {
     if (!currentUser) return false;
-    if (!c.readBy) return true;
-    const userKey = currentUser.username || currentUser.id || '';
-    const idKey = currentUser.id || '';
-    return !c.readBy[userKey] && !c.readBy[idKey];
+    return !getMyReadReceipt(c);
   };
 
   // Filter communications relevant to this user
@@ -538,45 +572,84 @@ export default function InternalCommunication({
     }
   };
 
-  // Handle file attachment for new communication
-  const handleAddCommAttachment = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const newAtts: string[] = [];
+  const dataUrlToUploadBlob = async (dataUrl: string): Promise<Blob> => {
+    const res = await fetch(dataUrl);
+    if (!res.ok) throw new Error("Falha ao converter imagem otimizada.");
+    return await res.blob();
+  };
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (file.size > 8 * 1024 * 1024) {
-        alert(`O arquivo ${file.name} excede o limite de 8 MB.`);
-        continue;
-      }
+  const isLikelyImageFile = (file: File): boolean => {
+    const mime = String(file.type || "").toLowerCase();
+    if (mime.startsWith("image/")) return true;
+    const ext = String(file.name || "").toLowerCase();
+    if (/\.(jpg|jpeg|png|webp|gif|bmp|heic|heif|jfif)$/i.test(ext)) return true;
+    // Some Android cameras return empty MIME type for captured photos
+    if (!mime && !/\.(pdf|doc|docx|xls|xlsx|csv|txt|zip|rar)$/i.test(ext)) return true;
+    return false;
+  };
 
+  const prepareAndUploadAttachment = async (
+    file: File,
+    scope: "tickets" | "mural",
+    entityId: string
+  ): Promise<string> => {
+    const isImage = isLikelyImageFile(file);
+    let blobToUpload: File | Blob = file;
+    let uploadName = file.name || `evidencia_${Date.now()}.jpg`;
+    let uploadType = file.type || (isImage ? "image/jpeg" : "application/octet-stream");
+
+    if (isImage) {
       try {
-        if (file.type.startsWith("image/")) {
-          const compressed = await compressImageToWebResolution(file);
-          newAtts.push(JSON.stringify({
-            name: file.name,
-            type: file.type,
-            url: compressed
-          }));
-        } else {
-          // Convert to data URL
-          const reader = new FileReader();
-          const dataUrl = await new Promise<string>((resolve) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(file);
-          });
-          newAtts.push(JSON.stringify({
-            name: file.name,
-            type: file.type,
-            url: dataUrl
-          }));
+        const compressedDataUrl = await compressImageToWebResolution(file);
+        blobToUpload = await dataUrlToUploadBlob(compressedDataUrl);
+        uploadType = "image/jpeg";
+        if (!/\.(jpg|jpeg)$/i.test(uploadName)) {
+          uploadName = uploadName.replace(/\.[^.]+$/, "") + ".jpg";
         }
-      } catch (err) {
-        console.error("Erro ao processar anexo:", err);
+      } catch {
+        // If browser cannot decode raw camera format (e.g. HEIC on desktop/Android), upload original file directly to Storage
+        blobToUpload = file;
       }
     }
 
-    setCommAttachments(prev => [...prev, ...newAtts]);
+    const uploaded = await uploadCommunicationAttachment(
+      blobToUpload,
+      scope,
+      entityId,
+      uploadName,
+      uploadType
+    );
+    return JSON.stringify(uploaded);
+  };
+
+  // Handle file attachment for new communication
+  const handleAddCommAttachment = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setIsUploadingAttachment(true);
+    const newAtts: string[] = [];
+    const entityId = String(currentUser?.username || currentUser?.id || "mural");
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.size > 20 * 1024 * 1024) {
+          showToast(`⚠️ O arquivo ${file.name} excede o limite de 20 MB.`);
+          continue;
+        }
+        try {
+          const uploadedJson = await prepareAndUploadAttachment(file, "mural", entityId);
+          newAtts.push(uploadedJson);
+        } catch (err) {
+          console.error("Erro ao enviar anexo do mural ao Storage:", err);
+          showToast(`⚠️ Não foi possível enviar o arquivo ${file.name} para o Storage.`);
+        }
+      }
+      if (newAtts.length > 0) {
+        setCommAttachments(prev => [...prev, ...newAtts]);
+      }
+    } finally {
+      setIsUploadingAttachment(false);
+    }
   };
 
   const handleAddTicketAttachments = async (
@@ -584,36 +657,30 @@ export default function InternalCommunication({
     setter: React.Dispatch<React.SetStateAction<string[]>>
   ) => {
     if (!files || files.length === 0) return;
+    setIsUploadingAttachment(true);
     const processed: string[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file.type.startsWith("image/") && file.size > 700 * 1024) {
-        showToast(`⚠️ O arquivo ${file.name} excede 700 KB para anexo direto em chamado.`);
-        continue;
-      }
-      if (file.size > 8 * 1024 * 1024) {
-        showToast(`⚠️ O arquivo ${file.name} excede o limite de 8 MB.`);
-        continue;
-      }
-      try {
-        if (file.type.startsWith("image/")) {
-          const compressed = await compressImageToWebResolution(file);
-          processed.push(JSON.stringify({ name: file.name, type: file.type, url: compressed }));
-        } else {
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
-            reader.readAsDataURL(file);
-          });
-          processed.push(JSON.stringify({ name: file.name, type: file.type, url: dataUrl }));
+    const entityId = String(selectedTicket?.id || currentUser?.username || currentUser?.id || "ticket");
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.size > 20 * 1024 * 1024) {
+          showToast(`⚠️ O arquivo ${file.name} excede o limite de 20 MB.`);
+          continue;
         }
-      } catch (err) {
-        console.error("Erro ao processar anexo do chamado:", err);
+        try {
+          const uploadedJson = await prepareAndUploadAttachment(file, "tickets", entityId);
+          processed.push(uploadedJson);
+        } catch (err: any) {
+          console.error("Erro ao enviar evidência do chamado para o Storage:", err);
+          showToast(`⚠️ Não foi possível enviar ${file.name} ao Storage. Verifique sua conexão.`);
+        }
       }
-    }
-    if (processed.length > 0) {
-      setter(prev => [...prev, ...processed]);
+      if (processed.length > 0) {
+        setter(prev => [...prev, ...processed]);
+      }
+    } finally {
+      setIsUploadingAttachment(false);
     }
   };
 
@@ -641,30 +708,35 @@ export default function InternalCommunication({
         messages: []
       };
 
-      await saveInternalTicket(ticket);
+      const saveRes = await saveInternalTicket(ticket, {
+        notifyEmail: true,
+        emailMode: "new_ticket"
+      });
 
-      safeFetch("/api/send-email", {
-        method: "POST",
-        body: JSON.stringify({
-          to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
-          subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
-              <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
-                <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
-                <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+      if (!saveRes.emailSent) {
+        safeFetch("/api/send-email", {
+          method: "POST",
+          body: JSON.stringify({
+            to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
+            subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+                <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+                  <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
+                  <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
+                </div>
+                <p>Um novo chamado foi aberto no portal:</p>
+                <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
+                <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+                  <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticket.title}</p>
+                  <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticket.description}</p>
+                </div>
+                <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
               </div>
-              <p>Um novo chamado foi aberto no portal:</p>
-              <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
-              <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
-                <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticket.title}</p>
-                <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticket.description}</p>
-              </div>
-              <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
-            </div>
-          `
-        })
-      }).catch(console.error);
+            `
+          })
+        }).catch(console.error);
+      }
 
       setTickets(prev => {
         const filtered = prev.filter(t => t.id !== ticket.id);
@@ -705,10 +777,14 @@ export default function InternalCommunication({
         status: isFinanceOrAdmin ? "respondido" : "aberto"
       } as InternalTicket;
 
-      await saveInternalTicket(updatedTicket);
+      const saveRes = await saveInternalTicket(updatedTicket, {
+        notifyEmail: true,
+        emailMode: "reply",
+        latestMessage: newMessage
+      });
       setSelectedTicket(updatedTicket);
 
-      if (isFinanceOrAdmin) {
+      if (isFinanceOrAdmin && !saveRes.emailSent) {
         let recipientEmail = updatedTicket.creatorEmail;
         if (!recipientEmail || !recipientEmail.includes('@')) {
           const cId = updatedTicket.creatorId || updatedTicket.creatorName;
@@ -788,6 +864,15 @@ export default function InternalCommunication({
     }
   };
 
+  const normalizeTicketIdentity = (value: unknown): string =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\beliuse\b/g, "eliseu")
+      .replace(/[^a-z0-9]/g, "");
+
   const filteredTickets = tickets.filter(t => {
     const q = ticketSearch.toLowerCase();
     const matchSearch =
@@ -803,10 +888,18 @@ export default function InternalCommunication({
     const myId = String(currentUser?.id || "").trim().toLowerCase();
     const tCreatorId = String(t.creatorId || "").trim().toLowerCase();
     const tCreatorName = String(t.creatorName || "").trim().toLowerCase();
+
+    const normMyUsername = normalizeTicketIdentity(myUsername);
+    const normMyName = normalizeTicketIdentity(myName);
+    const normCreatorId = normalizeTicketIdentity(tCreatorId);
+    const normCreatorName = normalizeTicketIdentity(tCreatorName);
+
     const matchUser =
       (myUsername && (tCreatorId === myUsername || tCreatorName === myUsername)) ||
       (myName && (tCreatorId === myName || tCreatorName === myName)) ||
-      (myId && tCreatorId === myId);
+      (myId && tCreatorId === myId) ||
+      (normMyUsername && (normCreatorId === normMyUsername || normCreatorName === normMyUsername)) ||
+      (normMyName && (normCreatorId === normMyName || normCreatorName === normMyName));
     return matchSearch && matchStatus && matchUser;
   });
 
@@ -1042,9 +1135,16 @@ export default function InternalCommunication({
                 const unread = isCommUnread(comm);
                 const isUrgent = comm.priority === "urgente";
                 const isHigh = comm.priority === "alta";
-                const userKey = currentUser?.username || currentUser?.id || "";
-                const myReadStatus = comm.readBy && (comm.readBy[userKey] || (currentUser?.id ? comm.readBy[currentUser.id] : null));
-                const readCount = comm.readBy ? Object.keys(comm.readBy).length : 0;
+                const myReadStatus = getMyReadReceipt(comm);
+                const uniqueReceipts = Object.values(normalizeReadReceiptsMap(comm.readBy)).reduce(
+                  (acc, item) => {
+                    const dedupKey = String(item.userId || item.userName || "").trim().toLowerCase();
+                    if (dedupKey && !acc.has(dedupKey)) acc.set(dedupKey, item);
+                    return acc;
+                  },
+                  new Map<string, { readAt: string; userName: string; userId?: string }>()
+                );
+                const readCount = uniqueReceipts.size;
                 const totalTargetUsers = comm.targetType === "all" 
                   ? eligibleEmployees.length 
                   : (comm.targetUserIds?.length || 1);
@@ -1450,11 +1550,11 @@ export default function InternalCommunication({
 
                     <button
                       type="submit"
-                      disabled={!messageText.trim() && messageAttachments.length === 0}
+                      disabled={isUploadingAttachment || (!messageText.trim() && messageAttachments.length === 0)}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center space-x-1 cursor-pointer"
                     >
                       <Send className="h-3.5 w-3.5" />
-                      <span>Enviar</span>
+                      <span>{isUploadingAttachment ? "Enviando anexo..." : "Enviar"}</span>
                     </button>
                   </div>
                 </form>
@@ -1790,23 +1890,35 @@ export default function InternalCommunication({
                 Colaboradores que já visualizaram no portal:
               </span>
 
-              {readReceiptModalComm.readBy && Object.keys(readReceiptModalComm.readBy).length > 0 ? (
-                Object.entries(readReceiptModalComm.readBy).map(([key, info]) => (
-                  <div key={key} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg text-xs border border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <CheckCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span className="font-bold text-slate-800">{info.userName || key}</span>
+              {(() => {
+                const entries = Array.from(
+                  Object.entries(normalizeReadReceiptsMap(readReceiptModalComm.readBy)).reduce(
+                    (acc, [k, info]) => {
+                      const dedupKey = String(info.userId || info.userName || k).trim().toLowerCase();
+                      if (dedupKey && !acc.has(dedupKey)) acc.set(dedupKey, [k, info]);
+                      return acc;
+                    },
+                    new Map<string, [string, { readAt: string; userName: string; userId?: string }]>()
+                  ).values()
+                );
+                return entries.length > 0 ? (
+                  entries.map(([key, info]) => (
+                    <div key={key} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg text-xs border border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <CheckCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-bold text-slate-800">{info.userName || key}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(info.readAt).toLocaleString('pt-BR')}
+                      </span>
                     </div>
-                    <span className="text-[10px] text-slate-400">
-                      {new Date(info.readAt).toLocaleString('pt-BR')}
-                    </span>
+                  ))
+                ) : (
+                  <div className="text-center py-6 text-slate-400 text-xs">
+                    Nenhum colaborador registrou leitura até o momento.
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-6 text-slate-400 text-xs">
-                  Nenhum colaborador registrou leitura até o momento.
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
@@ -1874,10 +1986,11 @@ export default function InternalCommunication({
                 </label>
                 <label className="px-3 py-2 border border-dashed border-blue-400 bg-blue-50/50 hover:bg-blue-50 text-blue-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer inline-flex">
                   <Paperclip className="h-4 w-4" />
-                  <span>Escolher Arquivos</span>
+                  <span>{isUploadingAttachment ? "Enviando para o Storage..." : "Escolher Arquivos"}</span>
                   <input
                     type="file"
                     multiple
+                    disabled={isUploadingAttachment}
                     className="hidden"
                     onChange={async (e) => {
                       await handleAddTicketAttachments(e.target.files, setNewAttachments);
@@ -1910,10 +2023,10 @@ export default function InternalCommunication({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingTicket}
+                  disabled={isSubmittingTicket || isUploadingAttachment}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-extrabold rounded-xl transition"
                 >
-                  {isSubmittingTicket ? "Enviando..." : "Abrir Chamado"}
+                  {isUploadingAttachment ? "Enviando anexo..." : isSubmittingTicket ? "Enviando..." : "Abrir Chamado"}
                 </button>
               </div>
             </form>

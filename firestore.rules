@@ -2,7 +2,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isInternalAccount() {
-      return request.auth != null && request.auth.token.accountType == 'internal';
+      return request.auth != null && (
+        request.auth.token.accountType == 'internal' ||
+        (request.auth.token.email is string && request.auth.token.email.matches('.*@comanins\\.internal$'))
+      );
     }
 
     function isClientAccount() {

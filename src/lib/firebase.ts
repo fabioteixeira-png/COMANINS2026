@@ -4331,8 +4331,15 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
         for (const localTicket of currentLocal) {
           if (!serverMap.has(localTicket.id)) {
             serverMap.set(localTicket.id, localTicket);
-            void saveInternalTicket(localTicket, true).catch((err) => {
+            void saveInternalTicket(localTicket, {
+              notifyEmail: true,
+              emailMode: 'new_ticket',
+            }).catch((err) => {
               console.warn('Reconciliação automática de chamado local pendente falhou:', err);
+              const latestCache = getLocalCache<InternalTicket[]>('internal_tickets', [])
+                .filter(t => t && t.id && t.id !== localTicket.id && t.isDeleted !== true);
+              setLocalCache('internal_tickets', latestCache);
+              callback(latestCache);
             });
           }
         }
@@ -4350,11 +4357,20 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
       if (!user) return;
       try {
         const token = await user.getIdToken();
-        const res = await fetch('/api/internal-tickets', {
+        let res = await fetch('/api/internal-tickets', {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         });
+        if (res.status === 401 || res.status === 403) {
+          await refreshCurrentInternalClaims().catch(() => {});
+          const freshToken = await user.getIdToken(true);
+          res = await fetch('/api/internal-tickets', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${freshToken}` },
+            cache: 'no-store',
+          });
+        }
         if (!res.ok) return;
         const data = await res.json().catch(() => null);
         if (data?.success && Array.isArray(data.tickets)) {
@@ -4393,27 +4409,147 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
   }
 }
 
+export interface SaveInternalTicketOptions {
+  notifyEmail?: boolean;
+  emailMode?: 'new_ticket' | 'reply' | 'none';
+  latestMessage?: any;
+}
+
+export async function uploadCommunicationAttachment(
+  fileOrBlob: File | Blob,
+  scope: 'tickets' | 'mural' = 'tickets',
+  entityId = 'geral',
+  customFileName?: string,
+  customContentType?: string,
+): Promise<{ name: string; type: string; url: string; storagePath?: string }> {
+  const fileName =
+    customFileName ||
+    (fileOrBlob instanceof File && fileOrBlob.name ? fileOrBlob.name : `evidencia_${Date.now()}.jpg`);
+  const contentType =
+    customContentType ||
+    fileOrBlob.type ||
+    (/\.(png)$/i.test(fileName)
+      ? 'image/png'
+      : /\.(webp)$/i.test(fileName)
+      ? 'image/webp'
+      : /\.(pdf)$/i.test(fileName)
+      ? 'application/pdf'
+      : 'image/jpeg');
+
+  const user = auth.currentUser;
+  if (user) {
+    const sendUpload = async (forceRefresh = false) => {
+      const token = await user.getIdToken(forceRefresh);
+      return fetch('/api/internal/communication-attachments', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': contentType,
+          'X-Upload-Scope': scope,
+          'X-Entity-Id': safeStorageSegment(entityId || user.uid || 'geral'),
+          'X-File-Name': encodeURIComponent(fileName),
+        },
+        body: fileOrBlob,
+      });
+    };
+
+    try {
+      let res = await sendUpload(false);
+      if (res.status === 401 || res.status === 403) {
+        await refreshCurrentInternalClaims().catch(() => {});
+        res = await sendUpload(true);
+      }
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.success && data?.url) {
+          return {
+            name: String(data.fileName || fileName),
+            type: String(data.contentType || contentType),
+            url: String(data.url),
+            storagePath: data.storagePath ? String(data.storagePath) : undefined,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Upload de anexo via backend indisponível, tentando Storage SDK direto:', err);
+    }
+  }
+
+  // Fallback: direct Firebase Storage SDK upload
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 140) || `evidencia_${Date.now()}.jpg`;
+  const storagePath = `internal-communications/${scope}/${safeStorageSegment(entityId)}/${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, storagePath);
+  await uploadBytes(storageRef, fileOrBlob, { contentType });
+  const downloadUrl = await getDownloadURL(storageRef);
+  return {
+    name: fileName,
+    type: contentType,
+    url: downloadUrl,
+    storagePath,
+  };
+}
+
 export async function saveInternalTicket(
   ticket: InternalTicket,
-  notifyOrphanReconciliation = false,
-): Promise<void> {
+  options: boolean | SaveInternalTicketOptions = false,
+): Promise<{ savedOnServer: boolean; emailSent: boolean }> {
+  const parsedOptions: SaveInternalTicketOptions =
+    typeof options === 'boolean'
+      ? { notifyEmail: options, emailMode: options ? 'new_ticket' : undefined }
+      : (options || {});
+
+  // Guard attachment size so total payload never exceeds Firestore's 1 MB document limit
+  const MAX_SAFE_CHARS = 720000;
+  let usedChars = 0;
+  const safeAttachments: string[] = [];
+  if (Array.isArray(ticket.attachments)) {
+    for (const att of ticket.attachments) {
+      const str = typeof att === 'string' ? att : JSON.stringify(att);
+      if (usedChars + str.length <= MAX_SAFE_CHARS) {
+        safeAttachments.push(str);
+        usedChars += str.length;
+      }
+    }
+  }
+
+  const safeMessages = Array.isArray(ticket.messages)
+    ? ticket.messages.map((msg) => {
+        if (!msg || typeof msg !== 'object') return msg;
+        const msgAtts = Array.isArray(msg.attachments) ? msg.attachments : [];
+        const kept: string[] = [];
+        for (const att of msgAtts) {
+          const str = typeof att === 'string' ? att : JSON.stringify(att);
+          if (usedChars + str.length <= MAX_SAFE_CHARS) {
+            kept.push(str);
+            usedChars += str.length;
+          }
+        }
+        return { ...msg, attachments: kept };
+      })
+    : [];
+
   const cleanTicket = stripUndefinedDeep({
     ...ticket,
+    attachments: safeAttachments,
+    messages: safeMessages,
     updatedAt: ticket.updatedAt || new Date().toISOString(),
   }) as InternalTicket;
 
-  const cached = getLocalCache<InternalTicket[]>('internal_tickets', [])
-    .filter(item => item && item.id && item.isDeleted !== true);
-  const nextCache = [cleanTicket, ...cached.filter(item => item.id !== cleanTicket.id)]
-    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  setLocalCache('internal_tickets', nextCache);
+  const updateLocalTicketCache = (persisted: InternalTicket) => {
+    const cached = getLocalCache<InternalTicket[]>('internal_tickets', [])
+      .filter(item => item && item.id && item.isDeleted !== true);
+    const nextCache = [persisted, ...cached.filter(item => item.id !== persisted.id)]
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    setLocalCache('internal_tickets', nextCache);
+  };
 
   let savedOnBackend = false;
+  let emailSent = false;
   const user = auth.currentUser;
   if (user) {
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/internal-tickets', {
+    const sendBackendPost = async (forceRefreshToken = false) => {
+      const token = await user.getIdToken(forceRefreshToken);
+      return fetch('/api/internal-tickets', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -4421,31 +4557,59 @@ export async function saveInternalTicket(
         },
         body: JSON.stringify({
           ticket: cleanTicket,
-          notifyEmail: notifyOrphanReconciliation,
-          emailMode: notifyOrphanReconciliation ? 'new_ticket' : undefined,
+          notifyEmail: parsedOptions.notifyEmail,
+          emailMode: parsedOptions.emailMode,
+          latestMessage: parsedOptions.latestMessage,
         }),
       });
+    };
+
+    try {
+      let response = await sendBackendPost(false);
+      if (response.status === 401 || response.status === 403) {
+        await refreshCurrentInternalClaims().catch(() => {});
+        response = await sendBackendPost(true);
+      }
       if (response.ok) {
         savedOnBackend = true;
+        const respData = await response.json().catch(() => null);
+        emailSent = Boolean(respData?.emailSent);
+        const persistedTicket = (respData?.ticket || cleanTicket) as InternalTicket;
+        updateLocalTicketCache(persistedTicket);
+        // Best-effort client mirror without blocking mobile UI if WebChannel is throttled
+        const docRef = doc(db, "internal_tickets", cleanTicket.id);
+        void setDoc(docRef, persistedTicket, { merge: true }).catch(() => {});
+        return { savedOnServer: true, emailSent };
       }
     } catch (backendErr) {
       console.warn('Persistência de chamado via /api/internal-tickets falhou, tentando Firestore direto:', backendErr);
     }
   }
 
+  const setDocWithTimeout = async (targetTicket: InternalTicket, timeoutMs = 10000) => {
+    const docRef = doc(db, "internal_tickets", targetTicket.id);
+    await Promise.race([
+      setDoc(docRef, targetTicket, { merge: true }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("FIRESTORE_SETDOC_TIMEOUT")), timeoutMs)
+      ),
+    ]);
+  };
+
   try {
-    const docRef = doc(db, "internal_tickets", cleanTicket.id);
-    await setDoc(docRef, cleanTicket, { merge: true });
-    return;
+    await setDocWithTimeout(cleanTicket);
+    updateLocalTicketCache(cleanTicket);
+    return { savedOnServer: true, emailSent };
   } catch (err) {
     try {
       await refreshCurrentInternalClaims();
-      const docRef = doc(db, "internal_tickets", cleanTicket.id);
-      await setDoc(docRef, cleanTicket, { merge: true });
-      return;
+      await setDocWithTimeout(cleanTicket);
+      updateLocalTicketCache(cleanTicket);
+      return { savedOnServer: true, emailSent };
     } catch (retryErr) {
       if (savedOnBackend) {
-        return;
+        updateLocalTicketCache(cleanTicket);
+        return { savedOnServer: true, emailSent };
       }
       console.error("Error saving internal ticket:", retryErr);
       throw retryErr;
@@ -4511,29 +4675,68 @@ export async function markCompanyCommunicationAsRead(
   communicationId: string,
   user: { id?: string; username?: string; name?: string }
 ): Promise<void> {
-  try {
-    const userKey = user.username || user.id || "anonymous";
-    const userName = user.name || user.username || "Colaborador";
-    const docRef = doc(db, "company_communications", communicationId);
-    const readPayload = {
-      readAt: new Date().toISOString(),
-      userName,
-      userId: user.id || user.username
-    };
+  const rawKey = String(user.username || user.id || "anonymous").trim();
+  const safeKey = rawKey.replace(/[.#$/[\]]/g, "_");
+  const userName = String(user.name || user.username || "Colaborador").trim();
+  const userId = String(user.id || user.username || rawKey).trim();
+  const readPayload = {
+    readAt: new Date().toISOString(),
+    userName,
+    userId
+  };
 
-    await updateDoc(docRef, {
-      [`readBy.${userKey}`]: readPayload
-    });
-
+  const updateLocalReadCache = () => {
     const cached = getLocalCache<CompanyCommunication[]>('company_communications', []);
     const existing = cached.find(c => c.id === communicationId);
     if (existing) {
       existing.readBy = existing.readBy || {};
-      existing.readBy[userKey] = readPayload;
+      existing.readBy[safeKey] = readPayload;
       setLocalCache('company_communications', cached);
     }
+  };
+
+  let savedViaBackend = false;
+  const currentUser = auth.currentUser;
+  if (currentUser) {
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`/api/company-communications/${encodeURIComponent(communicationId)}/read`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userKey: safeKey,
+          userName,
+          userId,
+        }),
+      });
+      if (res.ok) {
+        savedViaBackend = true;
+        updateLocalReadCache();
+      }
+    } catch {
+      // Fallback to direct Firestore setDoc below
+    }
+  }
+
+  try {
+    const docRef = doc(db, "company_communications", communicationId);
+    await setDoc(
+      docRef,
+      {
+        readBy: {
+          [safeKey]: readPayload,
+        },
+      },
+      { merge: true }
+    );
+    updateLocalReadCache();
   } catch (err) {
-    console.error("Error marking company communication as read:", err);
+    if (!savedViaBackend) {
+      console.error("Error marking company communication as read:", err);
+    }
   }
 }
 

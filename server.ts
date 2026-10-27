@@ -82,9 +82,14 @@ const requireInternalAccount = async (req: AuthRequest, res: Response, next: Nex
     if (email.endsWith('@comanins.internal')) {
       try {
         const healed = await syncInternalAuthProfile(req.user);
-        if (healed) req.user = { ...req.user, ...buildInternalClaims(healed) };
+        if (healed) {
+          req.user = { ...req.user, ...buildInternalClaims(healed) };
+        } else {
+          req.user = { ...req.user, accountType: 'internal' };
+        }
       } catch (err) {
         console.warn('[AUTH] Auto-heal internal claims failed:', err);
+        req.user = { ...req.user, accountType: 'internal' };
       }
     }
   }
@@ -331,6 +336,15 @@ const corporateFileFolder = (purpose: string, entityId: string): string => {
   return `secure-documents/hr/employees/${entityId}/${purpose}`;
 };
 
+const normalizeIdentityToken = (value: unknown): string =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\beliuse\b/g, 'eliseu')
+    .replace(/[^a-z0-9]/g, '');
+
 const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   if (!firestoreDb) {
     throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
@@ -348,9 +362,10 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
   if (!email.endsWith('@comanins.internal')) return null;
   const username = email.slice(0, -'@comanins.internal'.length).trim().toLowerCase();
   if (!username) return null;
+  const normTarget = normalizeIdentityToken(username);
 
   const snapshot = await usersRef.get();
-  const match = snapshot.docs.find((doc) => {
+  let match = snapshot.docs.find((doc) => {
     const d = doc.data();
     return (
       String(d?.username || '').trim().toLowerCase() === username ||
@@ -358,21 +373,24 @@ const findPortalUserForAuth = async (decoded: any): Promise<any> => {
     );
   });
 
+  if (!match && normTarget) {
+    match = snapshot.docs.find((doc) => {
+      const d = doc.data();
+      const candUser = normalizeIdentityToken(d?.username);
+      const candName = normalizeIdentityToken(d?.name);
+      return (
+        (candUser && candUser === normTarget) ||
+        (candName && candName === normTarget) ||
+        (candName && normTarget.length >= 6 && (candName.startsWith(normTarget) || normTarget.startsWith(candUser)))
+      );
+    });
+  }
+
   if (!match) return null;
 
   const data = match.data();
   const existingAuthUid = String(data?.authUid || '').trim();
   if (existingAuthUid && existingAuthUid !== decoded.uid) {
-    let allowRebind = false;
-    if (adminAuth) {
-      try {
-        const oldUser = await adminAuth.getUser(existingAuthUid);
-        if (String(oldUser.email || '').trim().toLowerCase() === email) allowRebind = true;
-      } catch (err: any) {
-        if (err?.code === 'auth/user-not-found') allowRebind = true;
-      }
-    }
-    if (!allowRebind) throw new Error('AUTH_UID_CONFLICT');
     await usersRef.doc(match.id).update({ authUid: decoded.uid, authEmail: email });
     return { id: match.id, ...data, authUid: decoded.uid, authEmail: email };
   }
@@ -10058,19 +10076,30 @@ app.get("/api/internal-tickets", requireAuth, requireInternalAccount, async (req
     const profileUsername = String(profile?.username || usernameFromEmail || '').trim().toLowerCase();
     const profileName = String(profile?.name || '').trim().toLowerCase();
     const profileId = String(profile?.id || req.user?.portalUserId || '').trim().toLowerCase();
+    const currentUid = String(req.user?.uid || '').trim();
+
+    const normProfileUsername = normalizeIdentityToken(profileUsername);
+    const normProfileName = normalizeIdentityToken(profileName);
+    const normUsernameFromEmail = normalizeIdentityToken(usernameFromEmail);
 
     const items = snapshot.docs
       .map((doc) => ({ ...doc.data(), id: doc.id } as any))
       .filter((t) => t.isDeleted !== true)
       .filter((t) => {
         if (isManager) return true;
+        if (currentUid && String(t.creatorUid || '').trim() === currentUid) return true;
         const cId = String(t.creatorId || '').trim().toLowerCase();
         const cName = String(t.creatorName || '').trim().toLowerCase();
         const cEmail = String(t.creatorEmail || '').trim().toLowerCase();
+        const normCId = normalizeIdentityToken(cId);
+        const normCName = normalizeIdentityToken(cName);
         return (
           (profileUsername && (cId === profileUsername || cName === profileUsername || cEmail.startsWith(profileUsername + '@'))) ||
           (profileName && (cId === profileName || cName === profileName)) ||
-          (profileId && cId === profileId)
+          (profileId && cId === profileId) ||
+          (normProfileUsername && (normCId === normProfileUsername || normCName === normProfileUsername)) ||
+          (normProfileName && (normCId === normProfileName || normCName === normProfileName)) ||
+          (normUsernameFromEmail && (normCId === normUsernameFromEmail || normCName === normUsernameFromEmail))
         );
       })
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
@@ -10081,6 +10110,149 @@ app.get("/api/internal-tickets", requireAuth, requireInternalAccount, async (req
     return res.status(500).json({ error: error?.message || "INTERNAL_TICKETS_LIST_FAILED" });
   }
 });
+
+const offloadAttachmentToStorageServer = async (
+  rawItem: unknown,
+  scope: 'tickets' | 'mural',
+  entityId: string,
+  uploadedByUid: string,
+): Promise<string | null> => {
+  const str = typeof rawItem === 'string' ? rawItem : JSON.stringify(rawItem);
+  if (!adminStorage || !adminStorageBucketName) return str;
+
+  let parsedObj: any = null;
+  let dataUrl = '';
+  let fileName = `anexo_${Date.now()}`;
+  let declaredType = '';
+
+  if (str.trim().startsWith('{')) {
+    try {
+      parsedObj = JSON.parse(str);
+      if (parsedObj && typeof parsedObj.url === 'string') {
+        if (!parsedObj.url.startsWith('data:')) {
+          return str; // Already a Storage URL!
+        }
+        dataUrl = parsedObj.url;
+        if (parsedObj.name) fileName = String(parsedObj.name);
+        if (parsedObj.type) declaredType = String(parsedObj.type);
+      }
+    } catch {
+      // fall through
+    }
+  } else if (str.startsWith('data:')) {
+    dataUrl = str;
+  } else {
+    return str; // Already a URL string
+  }
+
+  if (!dataUrl.startsWith('data:')) return str;
+
+  const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,([\s\S]+)$/i);
+  if (!match) return str;
+  const contentType = (match[1] || declaredType || 'image/jpeg').trim().toLowerCase();
+  const base64Body = match[2].replace(/\s+/g, '');
+  const buffer = Buffer.from(base64Body, 'base64');
+  if (!buffer.length || buffer.length > CORPORATE_FILE_MAX_BYTES) return null;
+
+  const safeName = safeStorageFileNameServer(fileName);
+  const suffix = randomBytes(6).toString('hex');
+  const storagePath = `internal-communications/${scope}/${safeStorageSegmentServer(entityId)}/${Date.now()}_${suffix}_${safeName}`;
+  const downloadToken = randomBytes(16).toString('hex');
+
+  try {
+    const bucket = adminStorage.bucket(adminStorageBucketName);
+    const file = bucket.file(storagePath);
+    await file.save(buffer, {
+      resumable: false,
+      validation: 'crc32c',
+      metadata: {
+        contentType,
+        cacheControl: 'private,max-age=3600',
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+          uploadedByUid,
+          uploadedAt: new Date().toISOString(),
+          scope,
+          entityId,
+          originalFileName: safeName,
+        },
+      },
+    });
+    const url = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+    return JSON.stringify({
+      name: parsedObj?.name || safeName,
+      type: contentType,
+      url,
+      storagePath,
+    });
+  } catch (err) {
+    console.warn('[INTERNAL-COMMUNICATIONS] Falha ao migrar anexo dataURL para o Storage, mantendo fallback:', err);
+    return str;
+  }
+};
+
+app.post(
+  "/api/internal/communication-attachments",
+  requireAuth,
+  requireInternalAccount,
+  writeApiRateLimit,
+  corporateFileRawBody,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user || !adminStorage || !adminStorageBucketName) {
+        return res.status(503).json({ error: "STORAGE_SERVICE_UNAVAILABLE" });
+      }
+      const rawScope = String(req.headers["x-upload-scope"] || "tickets").trim().toLowerCase();
+      const scope: "tickets" | "mural" = rawScope === "mural" ? "mural" : "tickets";
+      const entityId = safeStorageSegmentServer(req.headers["x-entity-id"] || req.user.uid || "geral");
+      const originalFileName = safeStorageFileNameServer(req.headers["x-file-name"] || `evidencia_${Date.now()}.jpg`);
+      const contentType = resolveCorporateContentType(
+        String(req.headers["content-type"] || "image/jpeg"),
+        originalFileName,
+      );
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+
+      if (!body.length) return res.status(400).json({ error: "EMPTY_FILE" });
+      if (body.length > CORPORATE_FILE_MAX_BYTES) return res.status(413).json({ error: "FILE_TOO_LARGE" });
+
+      const suffix = randomBytes(6).toString("hex");
+      const storagePath = `internal-communications/${scope}/${entityId}/${Date.now()}_${suffix}_${originalFileName}`;
+      const downloadToken = randomBytes(16).toString("hex");
+      const bucket = adminStorage.bucket(adminStorageBucketName);
+      const file = bucket.file(storagePath);
+
+      await file.save(body, {
+        resumable: false,
+        validation: "crc32c",
+        metadata: {
+          contentType,
+          cacheControl: "private,max-age=3600",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken,
+            uploadedByUid: String(req.user.uid || ""),
+            uploadedAt: new Date().toISOString(),
+            scope,
+            entityId,
+            originalFileName,
+          },
+        },
+      });
+
+      const url = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+      return res.json({
+        success: true,
+        url,
+        storagePath,
+        fileName: originalFileName,
+        contentType,
+        size: body.length,
+      });
+    } catch (error: any) {
+      console.error("[INTERNAL-COMMUNICATIONS] Erro no upload para o Storage:", error);
+      return res.status(500).json({ error: error?.message || "COMMUNICATION_ATTACHMENT_UPLOAD_FAILED" });
+    }
+  },
+);
 
 app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
   if (!firestoreDb) return res.status(503).json({ error: "FIREBASE_ADMIN_NOT_CONFIGURED" });
@@ -10117,6 +10289,47 @@ app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (re
       profile?.email ||
       (usernameFromEmail ? `${usernameFromEmail}@comanins.com.br` : `${creatorId}@comanins.com.br`)
     ).trim();
+    const creatorUid = String(existingData?.creatorUid || rawTicket?.creatorUid || req.user?.uid || '').trim();
+
+    // Offload any inline data: attachments to Firebase Storage and ensure Firestore doc stays lightweight
+    const MAX_DOC_ATTACHMENT_CHARS = 720000;
+    let usedChars = 0;
+    const rawAttachments: unknown[] = Array.isArray(rawTicket?.attachments)
+      ? rawTicket.attachments
+      : (existingData?.attachments || []);
+    const safeAttachments: string[] = [];
+    for (const item of rawAttachments) {
+      const processedStr = await offloadAttachmentToStorageServer(item, 'tickets', ticketId, creatorUid);
+      if (!processedStr) continue;
+      if (usedChars + processedStr.length <= MAX_DOC_ATTACHMENT_CHARS) {
+        safeAttachments.push(processedStr);
+        usedChars += processedStr.length;
+      } else {
+        console.warn(`[INTERNAL-TICKETS] Anexo ignorado por exceder limite seguro do Firestore (${processedStr.length} chars) no chamado ${ticketId}`);
+      }
+    }
+
+    const rawMessages: any[] = Array.isArray(rawTicket?.messages)
+      ? rawTicket.messages
+      : (existingData?.messages || []);
+    const safeMessages: any[] = [];
+    for (const msg of rawMessages) {
+      if (!msg || typeof msg !== 'object') {
+        safeMessages.push(msg);
+        continue;
+      }
+      const msgAtts: unknown[] = Array.isArray(msg.attachments) ? msg.attachments : [];
+      const keptMsgAtts: string[] = [];
+      for (const att of msgAtts) {
+        const processedStr = await offloadAttachmentToStorageServer(att, 'tickets', ticketId, creatorUid);
+        if (!processedStr) continue;
+        if (usedChars + processedStr.length <= MAX_DOC_ATTACHMENT_CHARS) {
+          keptMsgAtts.push(processedStr);
+          usedChars += processedStr.length;
+        }
+      }
+      safeMessages.push({ ...msg, attachments: keptMsgAtts });
+    }
 
     const nowIso = new Date().toISOString();
     const ticketToSave: Record<string, any> = {
@@ -10124,18 +10337,20 @@ app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (re
       creatorId,
       creatorName,
       creatorEmail,
+      creatorUid,
       title,
       description,
       status: ['aberto', 'respondido', 'finalizado'].includes(rawTicket?.status) ? rawTicket.status : (existingData?.status || 'aberto'),
       createdAt: existingData?.createdAt || rawTicket?.createdAt || nowIso,
       updatedAt: rawTicket?.updatedAt || nowIso,
-      attachments: Array.isArray(rawTicket?.attachments) ? rawTicket.attachments : (existingData?.attachments || []),
-      messages: Array.isArray(rawTicket?.messages) ? rawTicket.messages : (existingData?.messages || []),
+      attachments: safeAttachments,
+      messages: safeMessages,
     };
 
-    const notifyEmail = req.body?.notifyEmail === true;
+    const isBrandNewTicket = !existingSnap.exists;
+    const notifyEmail = req.body?.notifyEmail === true || (isBrandNewTicket && req.body?.notifyEmail !== false);
     const emailMode: 'new_ticket' | 'reply' | 'none' =
-      req.body?.emailMode || (!existingSnap.exists ? 'new_ticket' : 'none');
+      req.body?.emailMode || (isBrandNewTicket ? 'new_ticket' : 'none');
 
     let emailSent = false;
     if (notifyEmail && emailMode === 'new_ticket' && !existingData?.notificationSentAt) {
@@ -10153,6 +10368,7 @@ app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (re
             <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticketToSave.title}</p>
             <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticketToSave.description}</p>
           </div>
+          ${safeAttachments.length > 0 ? `<p style="font-size: 12px; color: #1e40af;">📎 Contém ${safeAttachments.length} evidência(s)/anexo(s) disponível(is) no portal.</p>` : ''}
           <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
         </div>`
       );
@@ -10212,6 +10428,38 @@ app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (re
   } catch (error: any) {
     console.error("[INTERNAL-TICKETS] Erro ao salvar chamado:", error);
     return res.status(500).json({ error: error?.message || "INTERNAL_TICKET_SAVE_FAILED" });
+  }
+});
+
+app.post("/api/company-communications/:id/read", requireAuth, requireInternalAccount, async (req: AuthRequest, res) => {
+  if (!firestoreDb) return res.status(503).json({ error: "FIREBASE_ADMIN_NOT_CONFIGURED" });
+  try {
+    const commId = asLimitedString(req.params.id, 140);
+    if (!commId) return res.status(400).json({ error: "INVALID_COMMUNICATION_ID" });
+    const profile = await findPortalUserForAuth(req.user).catch(() => null);
+    const rawKey = String(req.body?.userKey || profile?.username || profile?.id || req.user?.uid || "colaborador").trim();
+    const safeKey = rawKey.replace(/[.#$/[\]]/g, "_");
+    const userName = String(req.body?.userName || profile?.name || profile?.username || rawKey).trim();
+    const userId = String(req.body?.userId || profile?.id || profile?.username || rawKey).trim();
+    const readPayload = {
+      readAt: new Date().toISOString(),
+      userName,
+      userId,
+    };
+
+    const docRef = firestoreDb.collection("company_communications").doc(commId);
+    await docRef.set(
+      {
+        readBy: {
+          [safeKey]: readPayload,
+        },
+      },
+      { merge: true }
+    );
+    return res.json({ success: true, safeKey, readPayload });
+  } catch (error: any) {
+    console.error("[COMPANY-COMMUNICATIONS] Erro ao registrar leitura:", error);
+    return res.status(500).json({ error: error?.message || "READ_RECEIPT_FAILED" });
   }
 });
 

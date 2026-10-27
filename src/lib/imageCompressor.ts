@@ -70,8 +70,11 @@ export async function compressImageToWebResolution(
 
       // Try JPEG first at quality 0.65 for ultra-compact cross-platform payload (~30KB - 60KB)
       try {
-        const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+        let jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
         if (jpegDataUrl && jpegDataUrl.startsWith('data:image/jpeg')) {
+          if (jpegDataUrl.length > 420_000) {
+            jpegDataUrl = canvas.toDataURL('image/jpeg', 0.45);
+          }
           return jpegDataUrl;
         }
       } catch {}
@@ -85,7 +88,7 @@ export async function compressImageToWebResolution(
       } catch {}
 
       // Fallback
-      return canvas.toDataURL('image/jpeg', 0.6);
+      return canvas.toDataURL('image/jpeg', 0.55);
     };
 
     img.onload = () => {
@@ -104,17 +107,28 @@ export async function compressImageToWebResolution(
       // Fallback to FileReader if object URL fails (e.g. mobile Safari edge case)
       const reader = new FileReader();
       reader.onload = (e) => {
+        const rawDataUrl = (e.target?.result as string) || '';
         const fallbackImg = document.createElement('img');
         fallbackImg.onload = () => {
           try {
             const result = processImageOnCanvas(fallbackImg);
             resolve(result);
           } catch {
-            resolve((e.target?.result as string) || '');
+            if (rawDataUrl.length <= 500_000) {
+              resolve(rawDataUrl);
+            } else {
+              reject(new Error('Formato de imagem não suportado pelo navegador do celular (ex.: HEIC de alta resolução). Tire a foto em JPEG/PNG ou envie captura de tela.'));
+            }
           }
         };
-        fallbackImg.onerror = () => resolve((e.target?.result as string) || '');
-        fallbackImg.src = e.target?.result as string;
+        fallbackImg.onerror = () => {
+          if (rawDataUrl.length <= 500_000) {
+            resolve(rawDataUrl);
+          } else {
+            reject(new Error('Formato de imagem não suportado pelo navegador do celular (ex.: HEIC de alta resolução). Tire a foto em JPEG/PNG ou envie captura de tela.'));
+          }
+        };
+        fallbackImg.src = rawDataUrl;
       };
       reader.onerror = (err) => reject(err);
       reader.readAsDataURL(file);
