@@ -237,6 +237,7 @@ export const resolveUserAccessModules = (user?: AccessAwareUser | null): AccessM
     allowed = legacyProfile ? [...legacyProfile.modules] : [];
   }
 
+  // Garante que todos os colaboradores internos possam acessar e abrir chamados na Comunicação Interna e Meus Documentos
   const baseModules: AccessModuleId[] = ["dashboard", "personal_documents", "internal_communication"];
   for (const mod of baseModules) {
     if (!allowed.includes(mod)) allowed.push(mod);

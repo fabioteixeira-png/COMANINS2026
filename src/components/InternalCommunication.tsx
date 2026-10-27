@@ -641,35 +641,30 @@ export default function InternalCommunication({
         messages: []
       };
 
-      const saveResult = await saveInternalTicket(ticket, {
-        notifyEmail: true,
-        emailMode: "new_ticket",
-      });
+      await saveInternalTicket(ticket);
 
-      if (!saveResult?.emailSent) {
-        safeFetch("/api/send-email", {
-          method: "POST",
-          body: JSON.stringify({
-            to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
-            subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
-                <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
-                  <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
-                  <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
-                </div>
-                <p>Um novo chamado foi aberto no portal:</p>
-                <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
-                <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
-                  <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticket.title}</p>
-                  <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticket.description}</p>
-                </div>
-                <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
+      safeFetch("/api/send-email", {
+        method: "POST",
+        body: JSON.stringify({
+          to: "comercial@comanins.com.br, fabio.teixeira@comanins.com.br, financeiro@comanins.com.br, manutencao@comanins.com.br, isidro.teixeira@comanins.com.br",
+          subject: `[NOVO CHAMADO] ${ticket.title} - ${ticket.creatorName}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; padding: 24px; background-color: #ffffff; color: #0f172a;">
+              <div style="border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px;">
+                <h2 style="color: #1e40af; margin: 0; font-size: 18px;">📥 Novo Chamado no Portal</h2>
+                <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">COMANINS Metrology Suite - Comunicação Interna</p>
               </div>
-            `
-          })
-        }).catch(console.error);
-      }
+              <p>Um novo chamado foi aberto no portal:</p>
+              <p><b>Colaborador:</b> ${ticket.creatorName} (${ticket.creatorEmail})</p>
+              <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px; border-radius: 6px; margin: 16px 0;">
+                <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">${ticket.title}</p>
+                <p style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${ticket.description}</p>
+              </div>
+              <p style="font-size: 13px; color: #475569;">Acesse a aba <b>Comunicação Interna</b> no Portal COMANINS para responder.</p>
+            </div>
+          `
+        })
+      }).catch(console.error);
 
       setTickets(prev => {
         const filtered = prev.filter(t => t.id !== ticket.id);
@@ -710,14 +705,10 @@ export default function InternalCommunication({
         status: isFinanceOrAdmin ? "respondido" : "aberto"
       } as InternalTicket;
 
-      const saveResult = await saveInternalTicket(updatedTicket, {
-        notifyEmail: true,
-        emailMode: "reply",
-        latestMessage: newMessage,
-      });
+      await saveInternalTicket(updatedTicket);
       setSelectedTicket(updatedTicket);
 
-      if (isFinanceOrAdmin && !saveResult?.emailSent) {
+      if (isFinanceOrAdmin) {
         let recipientEmail = updatedTicket.creatorEmail;
         if (!recipientEmail || !recipientEmail.includes('@')) {
           const cId = updatedTicket.creatorId || updatedTicket.creatorName;

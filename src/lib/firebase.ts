@@ -4314,8 +4314,59 @@ export async function fetchFinanceAudit(limitItems = 150): Promise<FinanceAuditE
 export async function syncInternalTickets(callback: (tickets: InternalTicket[]) => void) {
   try {
     const cached = getLocalCache<InternalTicket[]>('internal_tickets', [])
-      .filter(ticket => ticket.isDeleted !== true);
+      .filter(ticket => ticket && ticket.id && ticket.isDeleted !== true);
     if (cached.length > 0) callback(cached);
+
+    const mergeAndPublishTickets = (incoming: InternalTicket[], reconcileLocalOrphans = false) => {
+      const currentLocal = getLocalCache<InternalTicket[]>('internal_tickets', [])
+        .filter(ticket => ticket && ticket.id && ticket.isDeleted !== true);
+      const serverMap = new Map<string, InternalTicket>();
+      for (const item of incoming) {
+        if (item && item.id && item.isDeleted !== true) {
+          serverMap.set(item.id, item);
+        }
+      }
+
+      if (reconcileLocalOrphans && auth.currentUser) {
+        for (const localTicket of currentLocal) {
+          if (!serverMap.has(localTicket.id)) {
+            serverMap.set(localTicket.id, localTicket);
+            void saveInternalTicket(localTicket, true).catch((err) => {
+              console.warn('Reconciliação automática de chamado local pendente falhou:', err);
+            });
+          }
+        }
+      }
+
+      const merged = Array.from(serverMap.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      setLocalCache('internal_tickets', merged);
+      callback(merged);
+    };
+
+    const fetchTicketsViaBackend = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/internal-tickets', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data?.success && Array.isArray(data.tickets)) {
+          mergeAndPublishTickets(data.tickets as InternalTicket[], true);
+        }
+      } catch (err) {
+        console.warn('Fallback /api/internal-tickets indisponível no momento:', err);
+      }
+    };
+
+    void fetchTicketsViaBackend();
+
     const q = query(collection(db, "internal_tickets"));
     return onSnapshot(
       q,
@@ -4323,12 +4374,16 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
         const list = snapshot.docs
           .map(d => ({ ...d.data(), id: d.id } as InternalTicket))
           .filter(ticket => ticket.isDeleted !== true);
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setLocalCache('internal_tickets', list);
-        callback(list);
+        mergeAndPublishTickets(list, !snapshot.metadata.fromCache);
       },
-      (error) => {
+      async (error) => {
         handleQuotaOrError(error);
+        try {
+          await refreshCurrentInternalClaims();
+        } catch {
+          // ignore claim refresh errors
+        }
+        await fetchTicketsViaBackend();
         callback(getLocalCache<InternalTicket[]>('internal_tickets', []).filter(ticket => ticket.isDeleted !== true));
       }
     );
@@ -4338,13 +4393,63 @@ export async function syncInternalTickets(callback: (tickets: InternalTicket[]) 
   }
 }
 
-export async function saveInternalTicket(ticket: InternalTicket): Promise<void> {
+export async function saveInternalTicket(
+  ticket: InternalTicket,
+  notifyOrphanReconciliation = false,
+): Promise<void> {
+  const cleanTicket = stripUndefinedDeep({
+    ...ticket,
+    updatedAt: ticket.updatedAt || new Date().toISOString(),
+  }) as InternalTicket;
+
+  const cached = getLocalCache<InternalTicket[]>('internal_tickets', [])
+    .filter(item => item && item.id && item.isDeleted !== true);
+  const nextCache = [cleanTicket, ...cached.filter(item => item.id !== cleanTicket.id)]
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  setLocalCache('internal_tickets', nextCache);
+
+  let savedOnBackend = false;
+  const user = auth.currentUser;
+  if (user) {
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch('/api/internal-tickets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ticket: cleanTicket,
+          notifyEmail: notifyOrphanReconciliation,
+          emailMode: notifyOrphanReconciliation ? 'new_ticket' : undefined,
+        }),
+      });
+      if (response.ok) {
+        savedOnBackend = true;
+      }
+    } catch (backendErr) {
+      console.warn('Persistência de chamado via /api/internal-tickets falhou, tentando Firestore direto:', backendErr);
+    }
+  }
+
   try {
-    const docRef = doc(db, "internal_tickets", ticket.id);
-    await setDoc(docRef, ticket);
+    const docRef = doc(db, "internal_tickets", cleanTicket.id);
+    await setDoc(docRef, cleanTicket, { merge: true });
+    return;
   } catch (err) {
-    console.error("Error saving internal ticket:", err);
-    throw err;
+    try {
+      await refreshCurrentInternalClaims();
+      const docRef = doc(db, "internal_tickets", cleanTicket.id);
+      await setDoc(docRef, cleanTicket, { merge: true });
+      return;
+    } catch (retryErr) {
+      if (savedOnBackend) {
+        return;
+      }
+      console.error("Error saving internal ticket:", retryErr);
+      throw retryErr;
+    }
   }
 }
 

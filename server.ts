@@ -10043,7 +10043,7 @@ app.get("/api/internal-tickets", requireAuth, requireInternalAccount, async (req
       })
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-    return res.json({ success: true, items });
+    return res.json({ success: true, items, tickets: items });
   } catch (error: any) {
     console.error("[INTERNAL-TICKETS] Erro ao listar chamados:", error);
     return res.status(500).json({ error: error?.message || "INTERNAL_TICKETS_LIST_FAILED" });
@@ -10101,7 +10101,7 @@ app.post("/api/internal-tickets", requireAuth, requireInternalAccount, async (re
       messages: Array.isArray(rawTicket?.messages) ? rawTicket.messages : (existingData?.messages || []),
     };
 
-    const notifyEmail = req.body?.notifyEmail !== false;
+    const notifyEmail = req.body?.notifyEmail === true;
     const emailMode: 'new_ticket' | 'reply' | 'none' =
       req.body?.emailMode || (!existingSnap.exists ? 'new_ticket' : 'none');
 
