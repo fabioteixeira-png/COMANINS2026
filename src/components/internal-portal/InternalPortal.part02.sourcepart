@@ -129,6 +129,19 @@
             <Gauge className="h-4 w-4 text-slate-500" />
             <span>Calibração</span>
           </button>}
+          {canAccessModule("calibration") && (
+            <button
+              onClick={() => setActiveTab("fichas_calibracao")}
+              className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
+                activeTab === "fichas_calibracao"
+                  ? "bg-blue-50 text-royal-blue font-bold"
+                  : "text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <FileSpreadsheet className="h-4 w-4 text-slate-500" />
+              <span>Fichas de Calibração</span>
+            </button>
+          )}
           {canAccessModule("field_service") && <button
             onClick={() => setActiveTab("field_service")}
             className={`w-full text-left px-3 py-2 rounded transition-colors flex items-center space-x-2 ${
@@ -335,6 +348,8 @@
                 ? "Painel Geral & Indicadores"
                 : activeTab === "instruments"
                 ? "Calibração e Instrumental"
+                : activeTab === "fichas_calibracao"
+                ? "Fichas de Calibração em Campo"
                 : activeTab === "colaboradores"
                 ? "Gestão de Colaboradores (RH)"
                 : activeTab === "financeiro"
@@ -2787,6 +2802,14 @@
               })()}
             </div>
           </div>
+        )}
+
+        {/* TAB: FICHAS DE CALIBRAÇÃO (Download e Impressão de Fichas em Branco) */}
+        {activeTab === "fichas_calibracao" && canAccessModule("calibration") && (
+          <CalibrationFieldSheetsTab
+            customLogo={customLogo}
+            clients={clients}
+          />
         )}
 
         {/* TAB: ENTRADA DE MATERIAL */}

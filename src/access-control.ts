@@ -310,6 +310,7 @@ export const activeTabAccessModule = (activeTab: string): AccessModuleId | null 
     registro_calibracao: "calibration",
     certificados: "calibration",
     etiquetas: "calibration",
+    fichas_calibracao: "calibration",
     minha_assinatura: "digital_signature",
     field_service: "field_service",
     controle_estoque: "inventory",
