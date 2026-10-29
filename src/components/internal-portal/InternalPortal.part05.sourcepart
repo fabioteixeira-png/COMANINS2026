@@ -2082,7 +2082,18 @@
                   <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><ClipboardCheck className="h-5 w-5 text-blue-600" /> Ficha do Instrumento</h3>
                   <p className="text-xs text-slate-500 mt-1">Consulta do cadastro de entrada e histórico de materiais utilizados em calibração.</p>
                 </div>
-                <button onClick={() => setInstrumentSheetInstrument(null)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500"><X className="h-5 w-5" /></button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintRegistrationLabel(instrument, sheetClient)}
+                    className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    title="Imprimir Etiqueta de Registro 40mm x 40mm (Impressora XD210, margem 1mm)"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    <span>Etiqueta Registro</span>
+                  </button>
+                  <button onClick={() => setInstrumentSheetInstrument(null)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500"><X className="h-5 w-5" /></button>
+                </div>
               </div>
               <div className="p-5 overflow-y-auto max-h-[calc(92vh-82px)] space-y-5">
                 <div className={`p-3 rounded-xl border text-xs ${historical ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>

@@ -2087,6 +2087,246 @@ export default function InternalPortal({
     return map;
   }, [clients]);
 
+  const handlePrintRegistrationLabel = (inst: Instrument, explicitClient?: Client) => {
+    if (!inst) return;
+    const snapshotData = (inst.registrationSnapshot?.data || {}) as Record<string, any>;
+    const resolvedClient =
+      explicitClient ||
+      clientsByIdMap.get(inst.clientId) ||
+      (snapshotData.clientId ? clientsByIdMap.get(String(snapshotData.clientId)) : undefined) ||
+      clients.find((c: any) => c.id === inst.clientId || c.id === snapshotData.clientId);
+
+    const clientName = String(
+      resolvedClient?.name ||
+      snapshotData.clientName ||
+      (inst as any).clientName ||
+      "Não informado"
+    ).trim();
+
+    const certOrComa = String(
+      inst.certificateNumber ||
+      inst.coma ||
+      snapshotData.certificateNumber ||
+      snapshotData.coma ||
+      "—"
+    ).trim();
+
+    const rawTag = String(inst.tag ?? snapshotData.tag ?? "").trim();
+    const hasTag = Boolean(
+      rawTag &&
+      !/^(n\/?a|s\/?tag|sem\s*tag|n[aã]o\s*informad[oa]|none|null|-|—)$/i.test(rawTag)
+    );
+
+    const entryNumber = String(
+      inst.numeroDaEntrada ||
+      (inst as any).numEntrada ||
+      snapshotData.numeroDaEntrada ||
+      snapshotData.numEntrada ||
+      "—"
+    ).trim();
+
+    const escapeHtmlText = (val: string) =>
+      String(val || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const clientFontPt =
+      clientName.length > 38 ? 6.0 : clientName.length > 26 ? 6.8 : clientName.length > 16 ? 7.6 : 8.5;
+    const certFontPt =
+      certOrComa.length > 16 ? 8.2 : certOrComa.length > 12 ? 9.5 : hasTag ? 10.8 : 12.0;
+    const tagFontPt =
+      rawTag.length > 16 ? 7.5 : rawTag.length > 12 ? 8.5 : 9.5;
+    const entryFontPt =
+      entryNumber.length > 14 ? 8.2 : hasTag ? 9.8 : 11.0;
+
+    const existingFrame = document.getElementById("xd210-registration-label-print-frame");
+    if (existingFrame && existingFrame.parentNode) {
+      existingFrame.parentNode.removeChild(existingFrame);
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "xd210-registration-label-print-frame";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+    iframe.style.border = "0";
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 1000);
+    };
+
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      cleanup();
+      return;
+    }
+
+    doc.open();
+    doc.write(`<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Etiqueta Registro XD210 - ${escapeHtmlText(certOrComa)}</title>
+    <style>
+      @page {
+        size: 40mm 40mm;
+        margin: 0mm;
+      }
+      * {
+        box-sizing: border-box;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 40mm !important;
+        height: 40mm !important;
+        min-width: 40mm !important;
+        min-height: 40mm !important;
+        max-width: 40mm !important;
+        max-height: 40mm !important;
+        overflow: hidden !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      .xd210-label-page {
+        width: 40mm !important;
+        height: 40mm !important;
+        padding: 1mm !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+        page-break-inside: avoid !important;
+        page-break-after: avoid !important;
+        break-inside: avoid !important;
+        break-after: avoid !important;
+      }
+      .xd210-label-frame {
+        width: 38mm !important;
+        height: 38mm !important;
+        border: 0.35mm solid #000000;
+        border-radius: 0.6mm;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+        background: #ffffff;
+      }
+      .xd210-header {
+        text-align: center;
+        font-size: 6pt;
+        font-weight: 900;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        padding: 0.6mm 1mm;
+        border-bottom: 0.35mm solid #000000;
+        line-height: 1.05;
+        flex-shrink: 0;
+      }
+      .xd210-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly;
+        overflow: hidden;
+      }
+      .xd210-row {
+        padding: 0.55mm 1.1mm;
+        border-bottom: 0.25mm solid #000000;
+        overflow: hidden;
+      }
+      .xd210-row:last-child {
+        border-bottom: none;
+      }
+      .xd210-field-label {
+        font-size: 5.2pt;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.2px;
+        line-height: 1;
+        margin-bottom: 0.35mm;
+        color: #000000;
+      }
+      .xd210-field-value {
+        font-weight: 900;
+        line-height: 1.08;
+        color: #000000;
+        word-break: break-word;
+        overflow: hidden;
+      }
+      .xd210-client-value {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .xd210-mono {
+        font-family: Arial, Helvetica, sans-serif;
+        letter-spacing: 0.15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="xd210-label-page">
+      <div class="xd210-label-frame">
+        <div class="xd210-header">COMANINS • ETIQUETA DE REGISTRO</div>
+        <div class="xd210-body">
+          <div class="xd210-row">
+            <div class="xd210-field-label">Cliente</div>
+            <div class="xd210-field-value xd210-client-value" style="font-size: ${clientFontPt}pt;">
+              ${escapeHtmlText(clientName)}
+            </div>
+          </div>
+          <div class="xd210-row">
+            <div class="xd210-field-label">Nº do Certificado / COMA</div>
+            <div class="xd210-field-value xd210-mono" style="font-size: ${certFontPt}pt;">
+              ${escapeHtmlText(certOrComa)}
+            </div>
+          </div>
+          ${
+            hasTag
+              ? `<div class="xd210-row">
+            <div class="xd210-field-label">TAG</div>
+            <div class="xd210-field-value xd210-mono" style="font-size: ${tagFontPt}pt;">
+              ${escapeHtmlText(rawTag)}
+            </div>
+          </div>`
+              : ""
+          }
+          <div class="xd210-row">
+            <div class="xd210-field-label">Nº da Entrada</div>
+            <div class="xd210-field-value xd210-mono" style="font-size: ${entryFontPt}pt;">
+              ${escapeHtmlText(entryNumber)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`);
+    doc.close();
+
+    iframe.contentWindow?.focus();
+    window.setTimeout(() => {
+      iframe.contentWindow?.print();
+      window.setTimeout(cleanup, 1500);
+    }, 200);
+  };
+
   const rncByInstrumentIdMap = React.useMemo(() => {
     const map = new Map<string, RncReport>();
     for (const r of rncReports) {
