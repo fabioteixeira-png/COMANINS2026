@@ -4735,10 +4735,17 @@
           clientTag={selectedInstLabelToPrint.clientTag}
           validityDate={selectedInstLabelToPrint.validityDate}
           periodicityMonths={selectedInstLabelToPrint.periodicityMonths}
+          isRegistrationLabel={selectedInstLabelToPrint.isRegistrationLabel}
+          clientName={selectedInstLabelToPrint.clientName}
+          instrumentRange={selectedInstLabelToPrint.instrumentRange}
+          entryNumber={selectedInstLabelToPrint.entryNumber}
           calibrationLogo={calibrationLogo}
           onClose={() => setSelectedInstLabelToPrint(null)}
           onPrinted={async () => {
-            if (selectedInstLabelToPrint.instrumentId) {
+            if (
+              selectedInstLabelToPrint.instrumentId &&
+              !selectedInstLabelToPrint.isRegistrationLabel
+            ) {
               try {
                 await recordInstrumentLabelPrinted(
                   selectedInstLabelToPrint.instrumentId,

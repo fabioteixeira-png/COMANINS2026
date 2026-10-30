@@ -2087,7 +2087,7 @@ export default function InternalPortal({
     return map;
   }, [clients]);
 
-  const handlePrintRegistrationLabel = async (inst: Instrument, explicitClient?: Client) => {
+  const handlePrintRegistrationLabel = (inst: Instrument, explicitClient?: Client) => {
     if (!inst) return;
     const snapshotData = (inst.registrationSnapshot?.data || {}) as Record<string, any>;
     const resolvedClient =
@@ -2119,6 +2119,27 @@ export default function InternalPortal({
       !/^(n\/?a|s\/?tag|sem\s*tag|n[aã]o\s*informad[oa]|none|null|-|—)$/i.test(rawTag)
     );
 
+    const rawRangeMin =
+      inst.rangeMin !== undefined && inst.rangeMin !== null && String(inst.rangeMin).trim() !== ""
+        ? inst.rangeMin
+        : snapshotData.rangeMin;
+    const rawRangeMax =
+      inst.rangeMax !== undefined && inst.rangeMax !== null && String(inst.rangeMax).trim() !== ""
+        ? inst.rangeMax
+        : snapshotData.rangeMax;
+    const rawUnit = String(inst.unit ?? snapshotData.unit ?? "").trim();
+    const rawEscala1 = String(inst.escala ?? snapshotData.escala ?? "").trim();
+
+    const range1 =
+      rawRangeMin !== undefined &&
+      rawRangeMin !== null &&
+      String(rawRangeMin).trim() !== "" &&
+      rawRangeMax !== undefined &&
+      rawRangeMax !== null &&
+      String(rawRangeMax).trim() !== ""
+        ? `${rawRangeMin} a ${rawRangeMax}${rawUnit ? ` ${rawUnit}` : ""}`.trim()
+        : rawEscala1 || "—";
+
     const entryNumber = String(
       inst.numeroDaEntrada ||
       (inst as any).numEntrada ||
@@ -2127,248 +2148,15 @@ export default function InternalPortal({
       "—"
     ).trim();
 
-    // Gera a imagem única da etiqueta 40mm x 40mm em alta resolução (600x600 px -> 15 px = 1 mm)
-    // Margem física de 1mm em todos os lados -> área útil de (15,15) até (585,585) = 570x570 px (38mm x 38mm)
-    const canvas = document.createElement("canvas");
-    const sizePx = 600;
-    const marginPx = 15; // 1 mm
-    const usableSizePx = sizePx - marginPx * 2; // 570 px = 38 mm
-    const innerPadX = 16;
-    const maxTextWidth = usableSizePx - innerPadX * 2; // 538 px (~35.8 mm)
-
-    canvas.width = sizePx;
-    canvas.height = sizePx;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Fundo branco puro
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, sizePx, sizePx);
-
-    // Moldura na margem de 1mm (38mm x 38mm úteis)
-    ctx.strokeStyle = "#000000";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(marginPx, marginPx, usableSizePx, usableSizePx);
-
-    const drawFittedText = (
-      text: string,
-      x: number,
-      y: number,
-      fontSizePx: number,
-      maxWidthPx: number,
-      weight = "900",
-      align: CanvasTextAlign = "left",
-    ) => {
-      ctx.save();
-      ctx.font = `${weight} ${fontSizePx}px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = "#000000";
-      ctx.textAlign = align;
-      ctx.textBaseline = "alphabetic";
-      const measured = ctx.measureText(text).width;
-      if (measured > maxWidthPx && measured > 0) {
-        const scaleX = maxWidthPx / measured;
-        ctx.translate(x, y);
-        ctx.scale(scaleX, 1);
-        ctx.fillText(text, 0, 0);
-      } else {
-        ctx.fillText(text, x, y);
-      }
-      ctx.restore();
-    };
-
-    const splitIntoTwoLines = (text: string, fontSizePx: number, maxWidthPx: number): string[] => {
-      ctx.font = `900 ${fontSizePx}px Arial, Helvetica, sans-serif`;
-      const normalized = text.replace(/\s+/g, " ").trim();
-      if (ctx.measureText(normalized).width <= maxWidthPx) {
-        return [normalized];
-      }
-      const words = normalized.split(" ");
-      if (words.length === 1) {
-        const mid = Math.ceil(normalized.length / 2);
-        return [normalized.slice(0, mid), normalized.slice(mid)];
-      }
-      let line1 = "";
-      let line2 = "";
-      for (const word of words) {
-        const candidate = line1 ? `${line1} ${word}` : word;
-        if (!line2 && ctx.measureText(candidate).width <= maxWidthPx) {
-          line1 = candidate;
-        } else {
-          line2 = line2 ? `${line2} ${word}` : word;
-        }
-      }
-      if (!line1) {
-        line1 = words[0];
-        line2 = words.slice(1).join(" ");
-      }
-      return line2 ? [line1, line2] : [line1];
-    };
-
-    // Cabeçalho dentro da margem de 1mm (altura: 52px = ~3.4mm)
-    const headerBottomY = marginPx + 52;
-    drawFittedText(
-      "COMANINS • ETIQUETA DE REGISTRO",
-      sizePx / 2,
-      marginPx + 35,
-      23,
-      maxTextWidth,
-      "900",
-      "center",
-    );
-    ctx.beginPath();
-    ctx.moveTo(marginPx, headerBottomY);
-    ctx.lineTo(sizePx - marginPx, headerBottomY);
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-
-    const textLeftX = marginPx + innerPadX;
-
-    if (hasTag) {
-      // 4 faixas dentro dos 518px restantes (de Y=67 até Y=585)
-      const row1Bottom = 202; // Cliente (altura 135px)
-      const row2Bottom = 334; // Certificado / COMA (altura 132px)
-      const row3Bottom = 460; // TAG (altura 126px)
-
-      // 1. CLIENTE
-      drawFittedText("CLIENTE", textLeftX, headerBottomY + 28, 20, maxTextWidth, "800");
-      const clientLines = splitIntoTwoLines(clientName, 30, maxTextWidth);
-      if (clientLines.length === 1) {
-        drawFittedText(clientLines[0], textLeftX, headerBottomY + 88, 34, maxTextWidth, "900");
-      } else {
-        drawFittedText(clientLines[0], textLeftX, headerBottomY + 68, 29, maxTextWidth, "900");
-        drawFittedText(clientLines[1], textLeftX, headerBottomY + 108, 29, maxTextWidth, "900");
-      }
-      ctx.beginPath();
-      ctx.moveTo(marginPx, row1Bottom);
-      ctx.lineTo(sizePx - marginPx, row1Bottom);
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // 2. Nº DO CERTIFICADO / COMA
-      drawFittedText("Nº DO CERTIFICADO / COMA", textLeftX, row1Bottom + 28, 20, maxTextWidth, "800");
-      drawFittedText(certOrComa, textLeftX, row1Bottom + 102, 52, maxTextWidth, "900");
-      ctx.beginPath();
-      ctx.moveTo(marginPx, row2Bottom);
-      ctx.lineTo(sizePx - marginPx, row2Bottom);
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // 3. TAG
-      drawFittedText("TAG", textLeftX, row2Bottom + 28, 20, maxTextWidth, "800");
-      drawFittedText(rawTag, textLeftX, row2Bottom + 96, 44, maxTextWidth, "900");
-      ctx.beginPath();
-      ctx.moveTo(marginPx, row3Bottom);
-      ctx.lineTo(sizePx - marginPx, row3Bottom);
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // 4. Nº DA ENTRADA
-      drawFittedText("Nº DA ENTRADA", textLeftX, row3Bottom + 28, 20, maxTextWidth, "800");
-      drawFittedText(entryNumber, textLeftX, row3Bottom + 98, 46, maxTextWidth, "900");
-    } else {
-      // 3 faixas dentro dos 518px restantes (de Y=67 até Y=585)
-      const row1Bottom = 242; // Cliente (altura 175px)
-      const row2Bottom = 414; // Certificado / COMA (altura 172px)
-
-      // 1. CLIENTE
-      drawFittedText("CLIENTE", textLeftX, headerBottomY + 34, 22, maxTextWidth, "800");
-      const clientLines = splitIntoTwoLines(clientName, 34, maxTextWidth);
-      if (clientLines.length === 1) {
-        drawFittedText(clientLines[0], textLeftX, headerBottomY + 114, 38, maxTextWidth, "900");
-      } else {
-        drawFittedText(clientLines[0], textLeftX, headerBottomY + 86, 33, maxTextWidth, "900");
-        drawFittedText(clientLines[1], textLeftX, headerBottomY + 134, 33, maxTextWidth, "900");
-      }
-      ctx.beginPath();
-      ctx.moveTo(marginPx, row1Bottom);
-      ctx.lineTo(sizePx - marginPx, row1Bottom);
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // 2. Nº DO CERTIFICADO / COMA
-      drawFittedText("Nº DO CERTIFICADO / COMA", textLeftX, row1Bottom + 34, 22, maxTextWidth, "800");
-      drawFittedText(certOrComa, textLeftX, row1Bottom + 128, 60, maxTextWidth, "900");
-      ctx.beginPath();
-      ctx.moveTo(marginPx, row2Bottom);
-      ctx.lineTo(sizePx - marginPx, row2Bottom);
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // 3. Nº DA ENTRADA
-      drawFittedText("Nº DA ENTRADA", textLeftX, row2Bottom + 34, 22, maxTextWidth, "800");
-      drawFittedText(entryNumber, textLeftX, row2Bottom + 128, 54, maxTextWidth, "900");
-    }
-
-    const labelImageUrl = canvas.toDataURL("image/png");
-
-    // Prepara o container exclusivo de impressão com APENAS a imagem 40mm x 40mm da etiqueta
-    let printContainer = document.getElementById("xd210-print-only-container");
-    if (printContainer) {
-      printContainer.remove();
-    }
-    printContainer = document.createElement("div");
-    printContainer.id = "xd210-print-only-container";
-
-    const labelImg = document.createElement("img");
-    labelImg.src = labelImageUrl;
-    labelImg.alt = `Etiqueta de Registro ${certOrComa}`;
-    printContainer.appendChild(labelImg);
-    document.body.appendChild(printContainer);
-
-    try {
-      if (typeof labelImg.decode === "function") {
-        await labelImg.decode();
-      }
-    } catch {
-      // Ignora caso decode já tenha concluído
-    }
-
-    // Troca a regra global @page para 40mm x 40mm (sem margin) no documento principal
-    let pageStyleEl = document.getElementById("comanins-page-size-rule") as HTMLStyleElement | null;
-    if (!pageStyleEl) {
-      pageStyleEl = document.createElement("style");
-      pageStyleEl.id = "comanins-page-size-rule";
-      document.head.appendChild(pageStyleEl);
-    }
-    pageStyleEl.textContent = `
-      @page {
-        size: 40mm 40mm;
-        margin: 0mm;
-      }
-      @media print {
-        @page {
-          size: 40mm 40mm;
-          margin: 0mm;
-        }
-      }
-    `;
-
-    document.documentElement.classList.add("printing-xd210-label-html");
-    document.body.classList.add("printing-xd210-label");
-
-    let cleanedUp = false;
-    const restoreAfterPrint = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      window.removeEventListener("afterprint", restoreAfterPrint);
-      document.documentElement.classList.remove("printing-xd210-label-html");
-      document.body.classList.remove("printing-xd210-label");
-      const containerEl = document.getElementById("xd210-print-only-container");
-      if (containerEl) containerEl.remove();
-      const ruleEl = document.getElementById("comanins-page-size-rule");
-      if (ruleEl) {
-        ruleEl.textContent = "@media print { @page { size: A4 portrait; margin: 10mm; } }";
-      }
-    };
-
-    window.addEventListener("afterprint", restoreAfterPrint, { once: true });
-
-    // Aguarda um frame de layout para o navegador aplicar @page 40mm x 40mm e exibir apenas a imagem da etiqueta na caixa de impressão
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.print();
-        window.setTimeout(restoreAfterPrint, 2000);
-      });
+    setSelectedInstLabelToPrint({
+      instrumentId: inst.id,
+      certificateNumber: certOrComa,
+      calibrationDate: "",
+      isRegistrationLabel: true,
+      clientName,
+      clientTag: hasTag ? rawTag : "",
+      instrumentRange: range1,
+      entryNumber,
     });
   };
 

@@ -32,6 +32,7 @@ const ACCEPTED_HASHES = new Set([
   "f35fec8fcde4b5cf89fdc44173c764062dfb3aebd3f63b2e8b5646ae8fb51f9e",
   "2220da10c47b33e12b0d3aa1a71619b4de5f8adde5ec413e1ae5dffc6fbcecc7",
   "211d61fdbda943dce25df6c1f61e9e5b4a578dce790ce33026498b662913dc78",
+  "4e893b57020514dafc2fad641cca69c5db56476bb7be2cd9a5bc9dab5c098d55",
 ]);
 const MAX_PART_BYTES = 400 * 1024;
 const PARTS = [

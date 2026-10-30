@@ -9,6 +9,10 @@ export interface CalibrationLabelData {
   clientTag?: string;
   validityDate?: string;
   periodicityMonths?: 3 | 6 | 12;
+  isRegistrationLabel?: boolean;
+  clientName?: string;
+  instrumentRange?: string;
+  entryNumber?: string;
 }
 
 export const DEFAULT_CALIBRATION_LABEL_LOGO =
@@ -118,6 +122,32 @@ const standardTagFontSize = (value: string): number => {
   return 29;
 };
 
+const fitRegistrationSvgText = (
+  value: string,
+  baseFontSize: number,
+  maxWidthUnits = 356,
+): {
+  fontSize: number;
+  textLength?: number;
+  lengthAdjust?: "spacingAndGlyphs";
+} => {
+  const len = Math.max(1, value.length);
+  const estimatedWidth = len * baseFontSize * 0.62;
+  if (estimatedWidth <= maxWidthUnits) {
+    return { fontSize: baseFontSize };
+  }
+  const scaledFont = Math.max(14, Math.floor((maxWidthUnits / (len * 0.62)) * 10) / 10);
+  const postScaleWidth = len * scaledFont * 0.62;
+  if (postScaleWidth > maxWidthUnits) {
+    return {
+      fontSize: scaledFont,
+      textLength: maxWidthUnits,
+      lengthAdjust: "spacingAndGlyphs",
+    };
+  }
+  return { fontSize: scaledFont };
+};
+
 export function CalibrationLabelArtwork({
   certificateNumber,
   calibrationDate,
@@ -125,6 +155,10 @@ export function CalibrationLabelArtwork({
   clientTag = "",
   validityDate = "",
   periodicityMonths,
+  isRegistrationLabel = false,
+  clientName = "",
+  instrumentRange = "",
+  entryNumber = "",
   calibrationLogo,
   className = "",
   printable = false,
@@ -133,6 +167,300 @@ export function CalibrationLabelArtwork({
   const formattedValidity = formatCalibrationLabelDate(validityDate);
   const cleanCert = certificateNumber.replace(/^COMA-/i, "").trim();
   const cleanTag = String(clientTag || "").trim().toUpperCase();
+
+  if (isRegistrationLabel) {
+    const cleanClientName = String(clientName || "NÃO INFORMADO").trim().toUpperCase();
+    const cleanRegCert = String(certificateNumber || "—").trim();
+    const hasTag = Boolean(
+      cleanTag &&
+        !/^(n\/?a|s\/?tag|sem\s*tag|n[aã]o\s*informad[oa]|none|null|-|—)$/i.test(
+          cleanTag,
+        ),
+    );
+    const cleanRange1 = String(instrumentRange || "—").trim();
+    const cleanEntry = String(entryNumber || "—").trim();
+
+    const clientFit = fitRegistrationSvgText(cleanClientName, hasTag ? 22 : 25, 356);
+    const certFit = fitRegistrationSvgText(cleanRegCert, hasTag ? 30 : 34, 356);
+    const tagFit = fitRegistrationSvgText(cleanTag, 25, 356);
+    const rangeFit = fitRegistrationSvgText(cleanRange1, hasTag ? 24 : 27, 356);
+    const entryFit = fitRegistrationSvgText(cleanEntry, hasTag ? 26 : 30, 356);
+
+    return (
+      <div
+        id={printable ? "calibration-label-print" : undefined}
+        className={`calibration-label-artwork overflow-hidden ${className}`}
+        style={{ aspectRatio: "1 / 1" }}
+        aria-label={`Etiqueta de registro 40 por 40 milímetros. Cliente ${cleanClientName}. Certificado ${cleanRegCert}. ${hasTag ? `TAG ${cleanTag}. ` : ""}Faixa 1 ${cleanRange1}. Entrada ${cleanEntry}.`}
+      >
+        <svg
+          className="block h-full w-full"
+          viewBox="0 0 400 400"
+          role="img"
+          aria-hidden="true"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* Fundo 40mm x 40mm (400 x 400 unidades -> 10 un = 1 mm) */}
+          <rect width="400" height="400" fill="#ffffff" />
+
+          {/* Moldura respeitando margem física de 1 mm (x=10, y=10, 380x380 = 38mm x 38mm) */}
+          <rect
+            x="10"
+            y="10"
+            width="380"
+            height="380"
+            rx="4"
+            fill="#ffffff"
+            stroke="#000000"
+            strokeWidth="3"
+          />
+
+          {/* Cabeçalho da etiqueta */}
+          <text
+            x="200"
+            y="32"
+            textAnchor="middle"
+            fontFamily="Arial, Helvetica, sans-serif"
+            fontSize="15"
+            fontWeight="900"
+            fill="#000000"
+          >
+            COMANINS • ETIQUETA DE REGISTRO
+          </text>
+          <line x1="10" y1="44" x2="390" y2="44" stroke="#000000" strokeWidth="2.5" />
+
+          {hasTag ? (
+            <>
+              {/* 1. CLIENTE (y: 44 -> 113) */}
+              <text
+                x="22"
+                y="61"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="11.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                CLIENTE
+              </text>
+              <text
+                x="22"
+                y="98"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={clientFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={clientFit.textLength}
+                lengthAdjust={clientFit.lengthAdjust}
+              >
+                {cleanClientName}
+              </text>
+              <line x1="10" y1="113" x2="390" y2="113" stroke="#000000" strokeWidth="2" />
+
+              {/* 2. Nº DO CERTIFICADO / COMA (y: 113 -> 185) */}
+              <text
+                x="22"
+                y="130"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="11.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                Nº DO CERTIFICADO / COMA
+              </text>
+              <text
+                x="22"
+                y="172"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={certFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={certFit.textLength}
+                lengthAdjust={certFit.lengthAdjust}
+              >
+                {cleanRegCert}
+              </text>
+              <line x1="10" y1="185" x2="390" y2="185" stroke="#000000" strokeWidth="2" />
+
+              {/* 3. TAG (y: 185 -> 253) */}
+              <text
+                x="22"
+                y="202"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="11.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                TAG
+              </text>
+              <text
+                x="22"
+                y="240"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={tagFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={tagFit.textLength}
+                lengthAdjust={tagFit.lengthAdjust}
+              >
+                {cleanTag}
+              </text>
+              <line x1="10" y1="253" x2="390" y2="253" stroke="#000000" strokeWidth="2" />
+
+              {/* 4. FAIXA DO INSTRUMENTO - FAIXA 1 (y: 253 -> 321) */}
+              <text
+                x="22"
+                y="270"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="11.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                FAIXA DO INSTRUMENTO (FAIXA 1)
+              </text>
+              <text
+                x="22"
+                y="308"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={rangeFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={rangeFit.textLength}
+                lengthAdjust={rangeFit.lengthAdjust}
+              >
+                {cleanRange1}
+              </text>
+              <line x1="10" y1="321" x2="390" y2="321" stroke="#000000" strokeWidth="2" />
+
+              {/* 5. Nº DA ENTRADA (y: 321 -> 390) */}
+              <text
+                x="22"
+                y="338"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="11.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                Nº DA ENTRADA
+              </text>
+              <text
+                x="22"
+                y="377"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={entryFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={entryFit.textLength}
+                lengthAdjust={entryFit.lengthAdjust}
+              >
+                {cleanEntry}
+              </text>
+            </>
+          ) : (
+            <>
+              {/* 1. CLIENTE (y: 44 -> 130) */}
+              <text
+                x="22"
+                y="64"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="12.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                CLIENTE
+              </text>
+              <text
+                x="22"
+                y="110"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={clientFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={clientFit.textLength}
+                lengthAdjust={clientFit.lengthAdjust}
+              >
+                {cleanClientName}
+              </text>
+              <line x1="10" y1="130" x2="390" y2="130" stroke="#000000" strokeWidth="2" />
+
+              {/* 2. Nº DO CERTIFICADO / COMA (y: 130 -> 218) */}
+              <text
+                x="22"
+                y="150"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="12.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                Nº DO CERTIFICADO / COMA
+              </text>
+              <text
+                x="22"
+                y="201"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={certFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={certFit.textLength}
+                lengthAdjust={certFit.lengthAdjust}
+              >
+                {cleanRegCert}
+              </text>
+              <line x1="10" y1="218" x2="390" y2="218" stroke="#000000" strokeWidth="2" />
+
+              {/* 3. FAIXA DO INSTRUMENTO - FAIXA 1 (y: 218 -> 304) */}
+              <text
+                x="22"
+                y="238"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="12.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                FAIXA DO INSTRUMENTO (FAIXA 1)
+              </text>
+              <text
+                x="22"
+                y="286"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={rangeFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={rangeFit.textLength}
+                lengthAdjust={rangeFit.lengthAdjust}
+              >
+                {cleanRange1}
+              </text>
+              <line x1="10" y1="304" x2="390" y2="304" stroke="#000000" strokeWidth="2" />
+
+              {/* 4. Nº DA ENTRADA (y: 304 -> 390) */}
+              <text
+                x="22"
+                y="324"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize="12.5"
+                fontWeight="800"
+                fill="#000000"
+              >
+                Nº DA ENTRADA
+              </text>
+              <text
+                x="22"
+                y="374"
+                fontFamily="Arial, Helvetica, sans-serif"
+                fontSize={entryFit.fontSize}
+                fontWeight="900"
+                fill="#000000"
+                textLength={entryFit.textLength}
+                lengthAdjust={entryFit.lengthAdjust}
+              >
+                {cleanEntry}
+              </text>
+            </>
+          )}
+        </svg>
+      </div>
+    );
+  }
 
   if (isComaninsStandard) {
     return (
@@ -284,6 +612,10 @@ export default function CalibrationLabelPrintModal({
   clientTag = "",
   validityDate = "",
   periodicityMonths,
+  isRegistrationLabel = false,
+  clientName = "",
+  instrumentRange = "",
+  entryNumber = "",
   calibrationLogo,
   onClose,
   onPrinted,
@@ -299,7 +631,7 @@ export default function CalibrationLabelPrintModal({
     // normal (36 x 15,98 mm), mas o Chrome/driver pode conservar o tamanho de
     // mídia anterior ao imprimir um subframe. Para a BPC usamos um documento
     // de impressão de nível superior, com @page e conteúdo fixos em 36 x 36 mm.
-    if (isComaninsStandard) {
+    if (isComaninsStandard && !isRegistrationLabel) {
       const printWindow = window.open(
         "",
         "_blank",
@@ -427,9 +759,17 @@ export default function CalibrationLabelPrintModal({
       return;
     }
 
-    // A etiqueta normal já está homologada no fluxo de 36 x 15,98 mm.
-    // Não alterar esse caminho.
-    const labelHeightMm = 15.98;
+    // Motor homologado da etiqueta de calibração (iframe oculto 1x1px),
+    // parametrizado para 40mm x 40mm na Etiqueta de Registro (XD210) ou 36mm x 15.98mm na Etiqueta de Calibração.
+    const labelWidthMm = isRegistrationLabel ? 40 : 36;
+    const labelHeightMm = isRegistrationLabel ? 40 : 15.98;
+
+    const pageStyleEl = document.getElementById("comanins-page-size-rule") as HTMLStyleElement | null;
+    const previousPageRule = pageStyleEl ? pageStyleEl.textContent : null;
+    if (pageStyleEl) {
+      pageStyleEl.textContent = `@page { size: ${labelWidthMm}mm ${labelHeightMm}mm; margin: 0; }`;
+    }
+
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.position = "fixed";
@@ -444,10 +784,12 @@ export default function CalibrationLabelPrintModal({
     const cleanup = () => {
       window.setTimeout(() => {
         if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        if (pageStyleEl && previousPageRule !== null) {
+          pageStyleEl.textContent = previousPageRule;
+        }
       }, 250);
     };
 
-    // Fluxo homologado da etiqueta normal (36 x 15,98 mm).
     document.body.appendChild(iframe);
     const doc = iframe.contentWindow?.document;
     if (!doc) {
@@ -462,20 +804,20 @@ export default function CalibrationLabelPrintModal({
           <title>Imprimir Etiqueta</title>
           <style>
             @page {
-              size: 36mm ${labelHeightMm}mm;
+              size: ${labelWidthMm}mm ${labelHeightMm}mm;
               margin: 0;
             }
             html, body {
               margin: 0 !important;
               padding: 0 !important;
-              width: 36mm !important;
+              width: ${labelWidthMm}mm !important;
               height: ${labelHeightMm}mm !important;
               overflow: hidden !important;
               background: transparent !important;
             }
             svg {
               display: block !important;
-              width: 36mm !important;
+              width: ${labelWidthMm}mm !important;
               height: ${labelHeightMm}mm !important;
             }
             .tze661-tape-background {
@@ -508,12 +850,16 @@ export default function CalibrationLabelPrintModal({
         <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div>
             <h2 id="calibration-label-title" className="text-base font-extrabold text-slate-900">
-              {isComaninsStandard
-                ? "Visualização da etiqueta do padrão COMANINS"
-                : "Visualização da etiqueta de calibração"}
+              {isRegistrationLabel
+                ? "Visualização da etiqueta de registro"
+                : isComaninsStandard
+                  ? "Visualização da etiqueta do padrão COMANINS"
+                  : "Visualização da etiqueta de calibração"}
             </h2>
             <p className="mt-1 text-xs text-slate-600">
-              Brother TZe-661 • 36 mm × {isComaninsStandard ? "36 mm" : "15,98 mm"} • impressão preta sobre fita amarela
+              {isRegistrationLabel
+                ? "Label Maker XD210 • 40 mm × 40 mm • margem de 1 mm"
+                : `Brother TZe-661 • 36 mm × ${isComaninsStandard ? "36 mm" : "15,98 mm"} • impressão preta sobre fita amarela`}
             </p>
           </div>
           <button
@@ -531,8 +877,9 @@ export default function CalibrationLabelPrintModal({
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                Na janela de impressão, selecione a impressora Brother, mídia contínua de 36 mm,
-                comprimento de {isComaninsStandard ? "36 mm" : "15,98 mm"}, margens zero, escala 100% e desative cabeçalhos e rodapés.
+                {isRegistrationLabel
+                  ? "Na janela de impressão, selecione a impressora Label Maker XD210, etiqueta de 40 mm × 40 mm, margem de 1 mm (já incorporada na arte), escala 100% e desative cabeçalhos e rodapés."
+                  : `Na janela de impressão, selecione a impressora Brother, mídia contínua de 36 mm, comprimento de ${isComaninsStandard ? "36 mm" : "15,98 mm"}, margens zero, escala 100% e desative cabeçalhos e rodapés.`}
               </p>
             </div>
           </div>
@@ -545,11 +892,17 @@ export default function CalibrationLabelPrintModal({
               clientTag={clientTag}
               validityDate={validityDate}
               periodicityMonths={periodicityMonths}
+              isRegistrationLabel={isRegistrationLabel}
+              clientName={clientName}
+              instrumentRange={instrumentRange}
+              entryNumber={entryNumber}
               calibrationLogo={calibrationLogo}
               printable
-              className={isComaninsStandard
-                ? "w-[min(520px,46dvh)] max-w-full shadow-lg"
-                : "w-full max-w-[720px] shadow-lg"}
+              className={
+                isRegistrationLabel || isComaninsStandard
+                  ? "w-[min(420px,46dvh)] max-w-full shadow-lg"
+                  : "w-full max-w-[720px] shadow-lg"
+              }
             />
           </div>
         </div>
