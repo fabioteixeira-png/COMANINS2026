@@ -80,15 +80,74 @@
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Print optimizations for A4 sheets */
+#xd210-print-only-container {
+  display: none;
+}
+
+/* Print optimizations */
 @media print {
-  html, body {
+  html:not(.printing-xd210-label-html),
+  body:not(.printing-xd210-label) {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
     height: auto !important;
+  }
+
+  html.printing-xd210-label-html,
+  body.printing-xd210-label {
+    background: #ffffff !important;
+    color: #000000 !important;
+    width: 40mm !important;
+    height: 40mm !important;
+    min-width: 40mm !important;
+    min-height: 40mm !important;
+    max-width: 40mm !important;
+    max-height: 40mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.printing-xd210-label > *:not(#xd210-print-only-container) {
+    display: none !important;
+  }
+
+  body.printing-xd210-label #xd210-print-only-container {
+    display: block !important;
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 40mm !important;
+    height: 40mm !important;
+    min-width: 40mm !important;
+    min-height: 40mm !important;
+    max-width: 40mm !important;
+    max-height: 40mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-inside: avoid !important;
+    break-after: avoid !important;
+  }
+
+  body.printing-xd210-label #xd210-print-only-container img {
+    display: block !important;
+    width: 40mm !important;
+    height: 40mm !important;
+    min-width: 40mm !important;
+    min-height: 40mm !important;
+    max-width: 40mm !important;
+    max-height: 40mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .no-print, 
@@ -128,11 +187,6 @@
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
-  }
-
-  @page {
-    size: A4 portrait;
-    margin: 10mm;
   }
 }
 
