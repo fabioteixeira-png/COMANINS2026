@@ -6881,6 +6881,7 @@ Status atual: ${e.status}.`,
         body: JSON.stringify({
           instrumentId: selectedInstId,
           instrumentType: selectedInstrumentType,
+          unitNegative: activeInst?.unitNegative || (selectedInstrumentType === "manovacuometro" ? "mmHg" : undefined),
           outputSignal: selectedInstrumentType === "transmissor" ? benchOutputSignal : undefined,
           standardSlots,
           standardIds,

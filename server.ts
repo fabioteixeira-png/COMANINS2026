@@ -9084,15 +9084,15 @@ function extractMeasurementUnitFromRange(raw: string): { unit: string; matchedTe
     { regex: /kgf\s*\/\s*cm\s*(?:\^?\s*2|²)/i, unit: 'kgf/cm2' },
     { regex: /kg\s*\/\s*cm\s*(?:\^?\s*2|²)/i, unit: 'kgf/cm2' },
     { regex: /(?<![a-z])kgf(?![a-z])/i, unit: 'kgf/cm2' },
-    { regex: /(?<![a-z])mm\s*h2o(?![a-z])/i, unit: 'mmh2o' },
-    { regex: /(?<![a-z])cm\s*h2o(?![a-z])/i, unit: 'cmh2o' },
-    { regex: /(?<![a-z])m\s*h2o(?![a-z])/i, unit: 'mh2o' },
-    { regex: /(?<![a-z])in\s*h2o(?![a-z])/i, unit: 'inh2o' },
-    { regex: /(?<![a-z])mmca(?![a-z])/i, unit: 'mmh2o' },
-    { regex: /(?<![a-z])cmca(?![a-z])/i, unit: 'cmh2o' },
-    { regex: /(?<![a-z])mca(?![a-z])/i, unit: 'mh2o' },
-    { regex: /(?<![a-z])mmhg(?![a-z])/i, unit: 'mmhg' },
-    { regex: /(?<![a-z])inhg(?![a-z])/i, unit: 'inhg' },
+    { regex: /(?<![a-z])mm\s*h\s*(?:\^?\s*2|²)\s*o(?![a-z])/i, unit: 'mmh2o' },
+    { regex: /(?<![a-z])cm\s*h\s*(?:\^?\s*2|²)\s*o(?![a-z])/i, unit: 'cmh2o' },
+    { regex: /(?<![a-z])m\s*h\s*(?:\^?\s*2|²)\s*o(?![a-z])/i, unit: 'mh2o' },
+    { regex: /(?<![a-z])in\s*h\s*(?:\^?\s*2|²)\s*o(?![a-z])/i, unit: 'inh2o' },
+    { regex: /(?<![a-z])mm\s*ca(?![a-z])/i, unit: 'mmh2o' },
+    { regex: /(?<![a-z])cm\s*ca(?![a-z])/i, unit: 'cmh2o' },
+    { regex: /(?<![a-z])m\s*ca(?![a-z])/i, unit: 'mh2o' },
+    { regex: /(?<![a-z])mm\s*hg(?![a-z])/i, unit: 'mmhg' },
+    { regex: /(?<![a-z])in\s*hg(?![a-z])/i, unit: 'inhg' },
     { regex: /(?<![a-z])mbar(?![a-z])/i, unit: 'mbar' },
     { regex: /(?<![a-z])mpa(?![a-z])/i, unit: 'mpa' },
     { regex: /(?<![a-z])kpa(?![a-z])/i, unit: 'kpa' },
@@ -9460,12 +9460,32 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
     const effectiveMin = hasCustomCalibrationRange ? rawCalMin! : instrumentMin;
     const effectiveMax = hasCustomCalibrationRange ? rawCalMax! : instrumentMax;
 
-    const instrumentMinCanonical = toCanonicalValue(effectiveMin, instrumentUnit);
+    const explicitNegUnit = String(
+      req.body?.unitNegative ||
+      instrument.unitNegative ||
+      instrument.registrationSnapshot?.data?.unitNegative ||
+      ''
+    ).trim();
+    const canonicalPosUnit = canonicalMeasurementUnit(instrumentUnit);
+    const isCompoundVacuumScale = effectiveMin < 0 && effectiveMax > 0;
+    const inferredNegUnit =
+      explicitNegUnit ||
+      (isCompoundVacuumScale &&
+      effectiveMin <= -500 &&
+      effectiveMin >= -765 &&
+      ['kgf/cm2', 'bar', 'psi', 'mpa', 'kpa'].includes(canonicalPosUnit)
+        ? 'mmHg'
+        : isCompoundVacuumScale && effectiveMin === -30 && canonicalPosUnit === 'psi'
+          ? 'inHg'
+          : instrumentUnit);
+    const instrumentMinUnit = effectiveMin < 0 && inferredNegUnit ? inferredNegUnit : instrumentUnit;
+
+    const instrumentMinCanonical = toCanonicalValue(effectiveMin, instrumentMinUnit);
     const instrumentMaxCanonical = toCanonicalValue(effectiveMax, instrumentUnit);
 
     if (!instrumentMinCanonical || !instrumentMaxCanonical || instrumentMinCanonical.domain !== instrumentMaxCanonical.domain) {
       return res.status(400).json({
-        error: `Não foi possível interpretar a faixa ${hasCustomCalibrationRange ? 'de calibração' : 'do instrumento'} (${effectiveMin} a ${effectiveMax} ${instrumentUnit}). Revise apenas faixa/unidade do cadastro.`,
+        error: `Não foi possível interpretar a faixa ${hasCustomCalibrationRange ? 'de calibração' : 'do instrumento'} (${effectiveMin} ${instrumentMinUnit} a ${effectiveMax} ${instrumentUnit}). Revise apenas faixa/unidade do cadastro.`,
       });
     }
 
@@ -9521,12 +9541,15 @@ app.post("/api/validate-calibration-standards", requireAuth, requireInternalAcco
       const rawRange = String(std.range || '').trim();
 
       // First parse the exact range field. If legacy data omitted the unit there,
-      // try the instrument-type text. As a last legacy fallback, assume the primary
-      // instrument unit so old numeric-only ranges do not become false negatives.
+      // try the instrument-type text. For classic -760 a 0 vacuum standards, default
+      // to mmHg before falling back to the instrument unit under test.
       let parsedRange = parseRangeText(rawRange);
       if (parsedRange && (!parsedRange.unit || parsedRange.canonicalMin === undefined || parsedRange.canonicalMax === undefined)) {
         const typeUnit = extractMeasurementUnitFromRange(String(std.instrumentType || ''))?.unit || '';
-        const fallbackUnit = typeUnit || instrumentUnit;
+        const isClassicMmHgVacuumRange =
+          Math.min(parsedRange.min, parsedRange.max) === -760 &&
+          Math.max(parsedRange.min, parsedRange.max) === 0;
+        const fallbackUnit = typeUnit || (isClassicMmHgVacuumRange ? 'mmhg' : instrumentUnit);
         if (fallbackUnit) {
           const minConverted = toCanonicalValue(parsedRange.min, fallbackUnit);
           const maxConverted = toCanonicalValue(parsedRange.max, fallbackUnit);
