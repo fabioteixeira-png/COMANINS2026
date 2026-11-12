@@ -5179,7 +5179,7 @@ const buildFieldServiceSnapshot = async (forceFresh = false): Promise<FieldServi
         'clientId', 'cliente', 'tag', 'equipamento', 'localizacao', 'certificate',
         'dataCalibracao', 'interventionDate', 'technician', 'area', 'range', 'operacao',
         'unidadeMedida', 'categoria', 'emissaoPdf', 'ordemServico', 'tipoServico',
-        'observacao', 'unidade', 'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid',
+        'observacao', 'unidade', 'fieldInspection', 'isDeleted', 'deletedAt', 'deletedBy', 'deletedByUid',
         'updatedAt', 'normalizedTag', 'normalizedCertificate',
       )
       .get();
@@ -5877,6 +5877,325 @@ app.post('/api/field-service/:id/archive', requireAuth, requireAdministratorAcco
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });
+
+const FIELD_INSPECTION_SEQUENCE_DOC = 'fieldInspectionSequence';
+const formatFieldInspectionNumber = (seq: number): string =>
+  `INSP-COM-${String(Math.max(1, Math.floor(seq))).padStart(3, '0')}`;
+
+app.get(
+  '/api/field-service/inspections/next-number',
+  requireAuth,
+  requireInternalAccount,
+  requireAccessModule('field_service'),
+  async (_req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    try {
+      const seqSnap = await firestoreDb.collection('systemSettings').doc(FIELD_INSPECTION_SEQUENCE_DOC).get();
+      const nextNumber = Math.max(1, Number(seqSnap.data()?.nextNumber || 1) || 1);
+      return res.json({
+        success: true,
+        nextNumber,
+        inspectionNumber: formatFieldInspectionNumber(nextNumber),
+      });
+    } catch (error) {
+      console.error('Failed to read field inspection sequence:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    }
+  },
+);
+
+app.post(
+  '/api/field-service/:id/inspection',
+  requireAuth,
+  requireInternalAccount,
+  requireEditModule('field_service'),
+  writeApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    const recordId = asLimitedString(req.params.id, 160);
+    if (!recordId) return res.status(400).json({ error: 'INVALID_RECORD_ID' });
+
+    const condicaoFisica = String(req.body?.condicaoFisica || '').trim().toUpperCase() === 'NOK' ? 'NOK' : 'OK';
+    const plaquetaInterna = String(req.body?.plaquetaInterna || '').trim().toUpperCase() === 'NOK' ? 'NOK' : 'OK';
+    const plaquetaExterna = String(req.body?.plaquetaExterna || '').trim().toUpperCase() === 'NOK' ? 'NOK' : 'OK';
+    const status = String(req.body?.status || '').trim().toUpperCase() === 'REPROVADO' ? 'REPROVADO' : 'APROVADO';
+    const ordemServico = asLimitedString(req.body?.ordemServico, 500);
+    const observacao = asLimitedString(req.body?.observacao, 5000);
+    const responsavelInspecao = asLimitedString(req.body?.responsavelInspecao, 500);
+    const dataInspecao = asLimitedString(req.body?.dataInspecao, 120);
+
+    if (!responsavelInspecao) {
+      return res.status(400).json({ error: 'RESPONSAVEL_REQUIRED', message: 'Informe o Responsável pela Inspeção.' });
+    }
+    if (!dataInspecao) {
+      return res.status(400).json({ error: 'DATA_REQUIRED', message: 'Informe a Data de Inspeção.' });
+    }
+
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Usuário Interno';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+    const nowIso = new Date().toISOString();
+
+    try {
+      const recordRef = firestoreDb.collection('fieldServiceRecords').doc(recordId);
+      const seqRef = firestoreDb.collection('systemSettings').doc(FIELD_INSPECTION_SEQUENCE_DOC);
+      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+
+      let savedInspection: Record<string, any> | null = null;
+      let updatedRecordData: Record<string, any> | null = null;
+
+      await firestoreDb.runTransaction(async (transaction) => {
+        const recordSnap = await transaction.get(recordRef);
+        if (!recordSnap.exists || recordSnap.data()?.isDeleted === true) {
+          const error: any = new Error('RECORD_NOT_FOUND');
+          error.code = 'RECORD_NOT_FOUND';
+          throw error;
+        }
+        const recordData: Record<string, any> = recordSnap.data() || {};
+        const existingInspection = recordData.fieldInspection && typeof recordData.fieldInspection === 'object'
+          ? recordData.fieldInspection
+          : null;
+
+        let sequenceNumber = Number(existingInspection?.sequenceNumber || 0);
+        let inspectionNumber = asLimitedString(existingInspection?.inspectionNumber, 80);
+        let inspectionId = asLimitedString(existingInspection?.id, 160);
+
+        if (!inspectionNumber || sequenceNumber <= 0) {
+          const seqSnap = await transaction.get(seqRef);
+          const nextNum = Math.max(1, Number(seqSnap.data()?.nextNumber || 1) || 1);
+          sequenceNumber = nextNum;
+          inspectionNumber = formatFieldInspectionNumber(nextNum);
+          inspectionId = `${recordId}_${inspectionNumber}`;
+          transaction.set(seqRef, {
+            prefix: 'INSP-COM-',
+            nextNumber: nextNum + 1,
+            updatedAt: nowIso,
+            updatedBy: actorName,
+          }, { merge: true });
+        } else if (!inspectionId) {
+          inspectionId = `${recordId}_${inspectionNumber}`;
+        }
+
+        const storagePath = `field-service-inspections/${recordId}/${inspectionNumber}.json`;
+
+        // Carrega apenas os 6 dados solicitados da linha referente:
+        // CERTIFICADO, TAG DO CLIENTE, EQUIPAMENTO, LOCALIZAÇÃO, AREA, UNIDADE
+        const inspectionPayload = {
+          id: inspectionId,
+          inspectionNumber,
+          sequenceNumber,
+          fieldServiceRecordId: recordId,
+          certificate: asLimitedString(recordData.certificate, 500),
+          tag: asLimitedString(recordData.tag, 500),
+          equipamento: asLimitedString(recordData.equipamento, 1000),
+          localizacao: asLimitedString(recordData.localizacao, 1000),
+          area: asLimitedString(recordData.area, 500),
+          unidade: asLimitedString(recordData.unidade, 500),
+          condicaoFisica,
+          plaquetaInterna,
+          plaquetaExterna,
+          ordemServico,
+          status,
+          observacao,
+          responsavelInspecao,
+          dataInspecao,
+          storagePath,
+          createdAt: asLimitedString(existingInspection?.createdAt, 80) || nowIso,
+          createdBy: asLimitedString(existingInspection?.createdBy, 160) || actorName,
+          createdByUid: asLimitedString(existingInspection?.createdByUid, 160) || actorUid,
+          updatedAt: nowIso,
+          updatedBy: actorName,
+          updatedByUid: actorUid,
+          isDeleted: false,
+        };
+
+        const inspectionDocRef = firestoreDb!.collection('fieldServiceInspections').doc(inspectionId);
+        transaction.set(inspectionDocRef, inspectionPayload, { merge: true });
+
+        transaction.update(recordRef, {
+          fieldInspection: inspectionPayload,
+          updatedAt: nowIso,
+        });
+
+        transaction.set(auditRef, {
+          action: existingInspection ? 'FIELD_SERVICE_INSPECTION_UPDATED' : 'FIELD_SERVICE_INSPECTION_CREATED',
+          entityType: 'fieldServiceInspection',
+          entityId: inspectionId,
+          actorUid,
+          actorName,
+          actorRole,
+          createdAt: nowIso,
+          immutable: true,
+          summary: `Inspeção de Campo ${inspectionNumber} (${status}) salva para TAG ${recordData.tag || '-'} / Certificado ${recordData.certificate || '-'}`,
+          metadata: {
+            inspectionNumber,
+            fieldServiceRecordId: recordId,
+            certificate: asLimitedString(recordData.certificate, 160),
+            tag: asLimitedString(recordData.tag, 160),
+            status,
+            storagePath,
+          },
+        });
+
+        savedInspection = inspectionPayload;
+        updatedRecordData = {
+          id: recordId,
+          ...recordData,
+          fieldInspection: inspectionPayload,
+          updatedAt: nowIso,
+        };
+      });
+
+      // Persiste também no Firebase Storage para garantir armazenamento redundante no Storage + Firestore
+      if (savedInspection && adminStorage && adminStorageBucketName) {
+        try {
+          const bucket = adminStorage.bucket(adminStorageBucketName);
+          const file = bucket.file(String((savedInspection as any).storagePath));
+          await file.save(Buffer.from(JSON.stringify(savedInspection, null, 2), 'utf8'), {
+            resumable: false,
+            contentType: 'application/json; charset=utf-8',
+            metadata: {
+              cacheControl: 'private, no-store',
+              metadata: {
+                inspectionNumber: String((savedInspection as any).inspectionNumber || ''),
+                fieldServiceRecordId: recordId,
+                status: String((savedInspection as any).status || ''),
+              },
+            },
+          });
+        } catch (storageErr) {
+          console.warn('Could not persist field inspection JSON in Firebase Storage:', storageErr);
+        }
+      }
+
+      fieldServiceSnapshotCache = null;
+
+      return res.json({
+        success: true,
+        inspection: savedInspection,
+        record: updatedRecordData,
+      });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('RECORD_NOT_FOUND')) {
+        return res.status(404).json({ error: 'RECORD_NOT_FOUND', message: 'Registro de Serviço de Campo não encontrado.' });
+      }
+      console.error('Field service inspection save failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR', message: 'Não foi possível salvar a Inspeção de Campo.' });
+    }
+  },
+);
+
+app.post(
+  '/api/field-service/:id/inspection/delete',
+  requireAuth,
+  requireAdministratorAccount,
+  adminApiRateLimit,
+  async (req: AuthRequest, res) => {
+    if (!firestoreDb) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    const recordId = asLimitedString(req.params.id, 160);
+    if (!recordId) return res.status(400).json({ error: 'INVALID_RECORD_ID' });
+
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+    const nowIso = new Date().toISOString();
+
+    try {
+      const recordRef = firestoreDb.collection('fieldServiceRecords').doc(recordId);
+      const auditRef = firestoreDb.collection('systemAuditLogs').doc();
+      let deletedInspection: Record<string, any> | null = null;
+      let updatedRecordData: Record<string, any> | null = null;
+
+      await firestoreDb.runTransaction(async (transaction) => {
+        const recordSnap = await transaction.get(recordRef);
+        if (!recordSnap.exists || recordSnap.data()?.isDeleted === true) {
+          const error: any = new Error('RECORD_NOT_FOUND');
+          error.code = 'RECORD_NOT_FOUND';
+          throw error;
+        }
+        const recordData: Record<string, any> = recordSnap.data() || {};
+        const existingInspection = recordData.fieldInspection && typeof recordData.fieldInspection === 'object'
+          ? recordData.fieldInspection
+          : null;
+        if (!existingInspection) {
+          const error: any = new Error('INSPECTION_NOT_FOUND');
+          error.code = 'INSPECTION_NOT_FOUND';
+          throw error;
+        }
+
+        deletedInspection = existingInspection;
+        const inspectionId = asLimitedString(existingInspection.id, 160) || `${recordId}_${existingInspection.inspectionNumber || 'INSP'}`;
+        const inspectionDocRef = firestoreDb!.collection('fieldServiceInspections').doc(inspectionId);
+
+        transaction.set(inspectionDocRef, {
+          ...existingInspection,
+          isDeleted: true,
+          deletedAt: nowIso,
+          deletedBy: actorName,
+          deletedByUid: actorUid,
+          updatedAt: nowIso,
+        }, { merge: true });
+
+        transaction.update(recordRef, {
+          fieldInspection: null,
+          updatedAt: nowIso,
+        });
+
+        transaction.set(auditRef, {
+          action: 'FIELD_SERVICE_INSPECTION_DELETED',
+          entityType: 'fieldServiceInspection',
+          entityId: inspectionId,
+          actorUid,
+          actorName,
+          actorRole,
+          createdAt: nowIso,
+          immutable: true,
+          summary: `Inspeção de Campo ${existingInspection.inspectionNumber || ''} excluída pelo Administrador (${actorName})`,
+          metadata: {
+            inspectionNumber: asLimitedString(existingInspection.inspectionNumber, 80),
+            fieldServiceRecordId: recordId,
+            certificate: asLimitedString(recordData.certificate, 160),
+            tag: asLimitedString(recordData.tag, 160),
+          },
+        });
+
+        updatedRecordData = {
+          id: recordId,
+          ...recordData,
+          fieldInspection: null,
+          updatedAt: nowIso,
+        };
+      });
+
+      if (deletedInspection && (deletedInspection as any).storagePath && adminStorage && adminStorageBucketName) {
+        try {
+          const bucket = adminStorage.bucket(adminStorageBucketName);
+          await bucket.file(String((deletedInspection as any).storagePath)).delete({ ignoreNotFound: true });
+        } catch (storageErr) {
+          console.warn('Could not delete field inspection file from Firebase Storage:', storageErr);
+        }
+      }
+
+      fieldServiceSnapshotCache = null;
+
+      return res.json({
+        success: true,
+        record: updatedRecordData,
+      });
+    } catch (error: any) {
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('RECORD_NOT_FOUND')) {
+        return res.status(404).json({ error: 'RECORD_NOT_FOUND', message: 'Registro de Serviço de Campo não encontrado.' });
+      }
+      if (code.includes('INSPECTION_NOT_FOUND')) {
+        return res.status(404).json({ error: 'INSPECTION_NOT_FOUND', message: 'Nenhuma Inspeção de Campo encontrada para este item.' });
+      }
+      console.error('Field service inspection delete failed:', error);
+      return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR', message: 'Não foi possível excluir a Inspeção de Campo.' });
+    }
+  },
+);
 
 
 const ARCHIVABLE_COLLECTIONS: Record<string, { area: 'rh' | 'health' | 'payslip' | 'finance' | 'operations'; label: string }> = {

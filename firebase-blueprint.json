@@ -151,6 +151,35 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["title", "docType", "issueDate", "expirationDate"]
+    },
+    "fieldServiceInspections": {
+      "title": "Inspeções de Campo",
+      "description": "Formulários de inspeção de campo gerados a partir da aba Serviço de Campo com numeração sequencial INSP-COM-001",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "inspectionNumber": { "type": "string" },
+        "sequenceNumber": { "type": "number" },
+        "fieldServiceRecordId": { "type": "string" },
+        "certificate": { "type": "string" },
+        "tag": { "type": "string" },
+        "equipamento": { "type": "string" },
+        "localizacao": { "type": "string" },
+        "area": { "type": "string" },
+        "unidade": { "type": "string" },
+        "condicaoFisica": { "type": "string", "enum": ["OK", "NOK"] },
+        "plaquetaInterna": { "type": "string", "enum": ["OK", "NOK"] },
+        "plaquetaExterna": { "type": "string", "enum": ["OK", "NOK"] },
+        "ordemServico": { "type": "string" },
+        "status": { "type": "string", "enum": ["APROVADO", "REPROVADO"] },
+        "observacao": { "type": "string" },
+        "responsavelInspecao": { "type": "string" },
+        "dataInspecao": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["inspectionNumber", "fieldServiceRecordId", "condicaoFisica", "plaquetaInterna", "plaquetaExterna", "status", "responsavelInspecao", "dataInspecao"]
     }
   }
 }

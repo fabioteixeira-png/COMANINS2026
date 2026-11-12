@@ -1,15 +1,23 @@
 import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
-import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer } from 'lucide-react';
+import { Upload, FileSpreadsheet, Plus, Save, X, Camera, RefreshCw, Trash2, Search, Download, ChevronLeft, ChevronRight, FileDown, Columns, Edit2, ChevronUp, ChevronDown, ChevronsUpDown, Printer, ClipboardCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Client, Instrument } from '../types';
 import {
   FieldServiceRecord,
+  FieldServiceInspection,
   syncFieldServiceRecords,
   addFieldServiceRecord,
   updateFieldServiceRecord,
   bulkUpsertFieldServiceRecords,
-  deleteFieldServiceRecord, clearAllFieldServiceRecords, syncInstruments, syncClients, refreshFieldServiceRecords
+  deleteFieldServiceRecord,
+  clearAllFieldServiceRecords,
+  syncInstruments,
+  syncClients,
+  refreshFieldServiceRecords,
+  fetchNextFieldInspectionNumber,
+  saveFieldServiceInspection,
+  deleteFieldServiceInspection,
 } from '../lib/firebase';
 import { authJsonFetch, verifyCurrentAdminPassword } from '../utils/authApi';
 import { buildFieldServiceA4Workbook } from '../utils/fieldServiceA4Workbook';
@@ -406,6 +414,346 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
       console.error(e);
       alert(e?.message || "Erro ao validar autorização administrativa.");
     }
+  };
+
+  const getTodayBrDate = () => {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  };
+
+  const [inspectionModalRecord, setInspectionModalRecord] = useState<FieldServiceRecord | null>(null);
+  const [inspectionPreviewNumber, setInspectionPreviewNumber] = useState<string>('INSP-COM-001');
+  const [isSavingInspection, setIsSavingInspection] = useState(false);
+  const [inspectionForm, setInspectionForm] = useState<{
+    condicaoFisica: 'OK' | 'NOK';
+    plaquetaInterna: 'OK' | 'NOK';
+    plaquetaExterna: 'OK' | 'NOK';
+    ordemServico: string;
+    status: 'APROVADO' | 'REPROVADO';
+    observacao: string;
+    responsavelInspecao: string;
+    dataInspecao: string;
+  }>({
+    condicaoFisica: 'OK',
+    plaquetaInterna: 'OK',
+    plaquetaExterna: 'OK',
+    ordemServico: '',
+    status: 'APROVADO',
+    observacao: '',
+    responsavelInspecao: '',
+    dataInspecao: getTodayBrDate(),
+  });
+
+  const handleOpenInspectionModal = async (record: FieldServiceRecord) => {
+    setInspectionModalRecord(record);
+    const existing = record.fieldInspection;
+    if (existing) {
+      setInspectionPreviewNumber(existing.inspectionNumber || 'INSP-COM-001');
+      setInspectionForm({
+        condicaoFisica: existing.condicaoFisica === 'NOK' ? 'NOK' : 'OK',
+        plaquetaInterna: existing.plaquetaInterna === 'NOK' ? 'NOK' : 'OK',
+        plaquetaExterna: existing.plaquetaExterna === 'NOK' ? 'NOK' : 'OK',
+        ordemServico: existing.ordemServico || record.ordemServico || '',
+        status: existing.status === 'REPROVADO' ? 'REPROVADO' : 'APROVADO',
+        observacao: existing.observacao || '',
+        responsavelInspecao: existing.responsavelInspecao || record.technician || currentUser?.username || '',
+        dataInspecao: existing.dataInspecao || getTodayBrDate(),
+      });
+    } else {
+      setInspectionPreviewNumber('Carregando...');
+      setInspectionForm({
+        condicaoFisica: 'OK',
+        plaquetaInterna: 'OK',
+        plaquetaExterna: 'OK',
+        ordemServico: record.ordemServico || '',
+        status: 'APROVADO',
+        observacao: '',
+        responsavelInspecao: record.technician || currentUser?.username || '',
+        dataInspecao: getTodayBrDate(),
+      });
+      try {
+        const nextNum = await fetchNextFieldInspectionNumber();
+        setInspectionPreviewNumber(nextNum);
+      } catch {
+        setInspectionPreviewNumber('INSP-COM-001');
+      }
+    }
+  };
+
+  const handleSaveInspection = async () => {
+    if (!inspectionModalRecord) return;
+    if (!canEdit) {
+      alert('Seu perfil possui somente permissão de visualização no módulo Serviço de Campo.');
+      return;
+    }
+    if (!inspectionForm.responsavelInspecao.trim()) {
+      alert('Informe o Responsável pela Inspeção.');
+      return;
+    }
+    if (!inspectionForm.dataInspecao.trim()) {
+      alert('Informe a Data de Inspeção.');
+      return;
+    }
+
+    setIsSavingInspection(true);
+    try {
+      const { inspection } = await saveFieldServiceInspection(inspectionModalRecord.id, {
+        condicaoFisica: inspectionForm.condicaoFisica,
+        plaquetaInterna: inspectionForm.plaquetaInterna,
+        plaquetaExterna: inspectionForm.plaquetaExterna,
+        ordemServico: inspectionForm.ordemServico.trim(),
+        status: inspectionForm.status,
+        observacao: inspectionForm.observacao.trim(),
+        responsavelInspecao: inspectionForm.responsavelInspecao.trim(),
+        dataInspecao: inspectionForm.dataInspecao.trim(),
+      });
+      setRecords((current) =>
+        current.map((item) =>
+          item.id === inspectionModalRecord.id
+            ? { ...item, fieldInspection: inspection }
+            : item,
+        ),
+      );
+      setInspectionModalRecord((prev) => (prev ? { ...prev, fieldInspection: inspection } : null));
+      setInspectionPreviewNumber(inspection.inspectionNumber);
+      alert(`Inspeção de Campo ${inspection.inspectionNumber} salva com sucesso no Firestore e Storage!`);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || 'Erro ao salvar a Inspeção de Campo.');
+    } finally {
+      setIsSavingInspection(false);
+    }
+  };
+
+  const handleDeleteInspection = async (record: FieldServiceRecord) => {
+    if (!isUserAdmin || !currentUser?.username) {
+      alert('Somente o perfil Administrador pode excluir uma Inspeção de Campo.');
+      return;
+    }
+    const inspNum = record.fieldInspection?.inspectionNumber || '';
+    const pwd = prompt(
+      `Digite a senha do administrador logado (${currentUser.username}) para excluir a Inspeção de Campo ${inspNum}:`,
+    );
+    if (pwd === null) return;
+    if (!pwd.trim()) {
+      alert('Informe a senha do administrador para continuar.');
+      return;
+    }
+
+    try {
+      const isAdminValid = await verifyCurrentAdminPassword(pwd);
+      if (!isAdminValid) {
+        alert('Credencial administrativa inválida.');
+        return;
+      }
+      if (!confirm(`Tem certeza que deseja excluir a Inspeção de Campo ${inspNum}?`)) {
+        return;
+      }
+      await deleteFieldServiceInspection(record.id);
+      setRecords((current) =>
+        current.map((item) =>
+          item.id === record.id ? { ...item, fieldInspection: null } : item,
+        ),
+      );
+      if (inspectionModalRecord?.id === record.id) {
+        setInspectionModalRecord(null);
+      }
+      alert(`Inspeção de Campo ${inspNum} excluída com sucesso.`);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || 'Erro ao excluir a Inspeção de Campo.');
+    }
+  };
+
+  const escapeHtml = (val: unknown): string =>
+    String(val ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const handlePrintInspection = (record: FieldServiceRecord, overrideInspection?: FieldServiceInspection) => {
+    const inspection = overrideInspection || record.fieldInspection;
+    if (!inspection) {
+      alert('Salve a Inspeção de Campo antes de imprimir.');
+      return;
+    }
+
+    const certificate = inspection.certificate || record.certificate || '-';
+    const tag = inspection.tag || record.tag || '-';
+    const equipamento = inspection.equipamento || record.equipamento || '-';
+    const localizacao = inspection.localizacao || record.localizacao || '-';
+    const area = inspection.area || record.area || '-';
+    const unidade = inspection.unidade || record.unidade || '-';
+
+    const isApproved = inspection.status === 'APROVADO';
+    const statusColor = isApproved ? '#047857' : '#b91c1c';
+    const statusBg = isApproved ? '#ecfdf5' : '#fef2f2';
+    const statusBorder = isApproved ? '#6ee7b7' : '#fca5a5';
+
+    const badgeStyle = (val: 'OK' | 'NOK') =>
+      val === 'OK'
+        ? 'background:#ecfdf5;color:#047857;border:1px solid #6ee7b7;'
+        : 'background:#fef2f2;color:#b91c1c;border:1px solid #fca5a5;';
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Inspeção de Campo ${escapeHtml(inspection.inspectionNumber)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 14mm; }
+    * { box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
+    body { margin: 0; padding: 0; color: #0f172a; background: #fff; font-size: 12px; }
+    .sheet { border: 1.5px solid #cbd5e1; border-radius: 10px; padding: 18px 20px; }
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 14px; margin-bottom: 16px; }
+    .logo { height: 46px; object-fit: contain; }
+    .title-block { text-align: right; }
+    .title-block h1 { margin: 0; font-size: 18px; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.5px; }
+    .id-badge { display: inline-block; margin-top: 6px; padding: 4px 10px; border-radius: 6px; background: #eff6ff; border: 1px solid #93c5fd; color: #1d4ed8; font-weight: 800; font-size: 13px; }
+    .section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: #334155; background: #f1f5f9; padding: 6px 10px; border-left: 4px solid #1e3a8a; margin: 14px 0 10px 0; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .field-box { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; background: #f8fafc; }
+    .field-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
+    .field-value { font-size: 13px; font-weight: 700; color: #0f172a; word-break: break-word; }
+    .check-badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 800; font-size: 12px; }
+    .status-banner { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 8px; background: ${statusBg}; border: 1.5px solid ${statusBorder}; color: ${statusColor}; font-weight: 800; font-size: 14px; margin-top: 10px; }
+    .obs-box { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; min-height: 75px; background: #f8fafc; white-space: pre-wrap; font-size: 12px; color: #1e293b; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 40px; padding-top: 10px; }
+    .sig-line { border-top: 1px solid #475569; text-align: center; padding-top: 6px; font-size: 11px; color: #334155; }
+    .footer-meta { margin-top: 22px; font-size: 10px; color: #64748b; text-align: right; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <img src="/COMANINS%202026_logo_horizontal_transparente.png" alt="COMANINS" class="logo" />
+      <div class="title-block">
+        <h1>Relatório de Inspeção de Campo</h1>
+        <div class="id-badge">Nº ${escapeHtml(inspection.inspectionNumber)}</div>
+      </div>
+    </div>
+
+    <div class="section-title">1. Dados do Item (Linha de Referência)</div>
+    <div class="grid-3">
+      <div class="field-box">
+        <div class="field-label">Certificado</div>
+        <div class="field-value">${escapeHtml(certificate)}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">TAG do Cliente</div>
+        <div class="field-value">${escapeHtml(tag)}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Equipamento</div>
+        <div class="field-value">${escapeHtml(equipamento)}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Localização</div>
+        <div class="field-value">${escapeHtml(localizacao)}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Área</div>
+        <div class="field-value">${escapeHtml(area)}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Unidade</div>
+        <div class="field-value">${escapeHtml(unidade)}</div>
+      </div>
+    </div>
+
+    <div class="section-title">2. Avaliação de Inspeção de Campo</div>
+    <div class="grid-3">
+      <div class="field-box">
+        <div class="field-label">Condição Física</div>
+        <div class="field-value"><span class="check-badge" style="${badgeStyle(inspection.condicaoFisica)}">${escapeHtml(inspection.condicaoFisica)}</span></div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Plaqueta Interna</div>
+        <div class="field-value"><span class="check-badge" style="${badgeStyle(inspection.plaquetaInterna)}">${escapeHtml(inspection.plaquetaInterna)}</span></div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Plaqueta Externa</div>
+        <div class="field-value"><span class="check-badge" style="${badgeStyle(inspection.plaquetaExterna)}">${escapeHtml(inspection.plaquetaExterna)}</span></div>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-top: 10px;">
+      <div class="field-box">
+        <div class="field-label">Ordem de Serviço (OS)</div>
+        <div class="field-value">${escapeHtml(inspection.ordemServico || '-')}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Responsável pela Inspeção</div>
+        <div class="field-value">${escapeHtml(inspection.responsavelInspecao || '-')}</div>
+      </div>
+      <div class="field-box">
+        <div class="field-label">Data de Inspeção</div>
+        <div class="field-value">${escapeHtml(inspection.dataInspecao || '-')}</div>
+      </div>
+    </div>
+
+    <div class="status-banner">
+      <span>STATUS FINAL DA INSPEÇÃO</span>
+      <span>${escapeHtml(inspection.status)}</span>
+    </div>
+
+    <div class="section-title">3. Observação</div>
+    <div class="obs-box">${escapeHtml(inspection.observacao || 'Sem observações registradas.')}</div>
+
+    <div class="signatures">
+      <div class="sig-line">
+        <strong>${escapeHtml(inspection.responsavelInspecao || 'Responsável pela Inspeção')}</strong><br/>
+        Responsável pela Inspeção (${escapeHtml(inspection.dataInspecao || '-')})
+      </div>
+      <div class="sig-line">
+        <strong>Cliente / Acompanhante</strong><br/>
+        Visto / Recebimento
+      </div>
+    </div>
+
+    <div class="footer-meta">
+      Documento de Inspeção de Campo Nº ${escapeHtml(inspection.inspectionNumber)} • Emitido via Portal Interno COMANINS
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      document.body.removeChild(iframe);
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } finally {
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 2000);
+      }
+    }, 350);
   };
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -2304,44 +2652,92 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
                       return <td key={col.id} className={`px-4 py-3 whitespace-nowrap ${canEdit ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''}`} title={canEdit ? "Clique para editar" : "Somente visualização"} onClick={() => canEdit && setEditingCell({rowId: record.id, colId: col.id})}>{value || '-'}</td>;
                     })}
                     <td className="px-4 py-3 whitespace-nowrap text-right">
-                      {(() => {
-                        const matchingInst = findInstrumentByCertificate(record.certificate);
-                        if (matchingInst && onPrintCertificate) {
-                          const context: FieldServiceCertificateContext = {
-                            fieldServiceRecordId: record.id,
-                            clientId: record.clientId,
-                            cliente: record.cliente || '',
-                            unidade: record.unidade || '',
-                          };
-                          return (
+                      <div className="inline-flex items-center justify-end gap-2">
+                        {record.fieldInspection ? (
+                          <div className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50/80 px-2 py-1">
                             <button
-                              onClick={() => onPrintCertificate(
-                                matchingInst.id,
-                                record.tag || '',
-                                record.equipamento || '',
-                                context,
-                              )}
-                              className="text-emerald-500 hover:text-emerald-600 mr-3"
-                              title="Visualizar / imprimir Certificado de Calibração"
+                              type="button"
+                              onClick={() => void handleOpenInspectionModal(record)}
+                              className={`inline-flex items-center gap-1 text-xs font-bold cursor-pointer ${
+                                record.fieldInspection.status === 'REPROVADO'
+                                  ? 'text-rose-700 hover:text-rose-800'
+                                  : 'text-blue-700 hover:text-blue-900'
+                              }`}
+                              title={`Abrir Inspeção de Campo ${record.fieldInspection.inspectionNumber} (${record.fieldInspection.status})`}
                             >
-                              <Printer className="w-4 h-4" />
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                              <span>{record.fieldInspection.inspectionNumber}</span>
                             </button>
-                          );
-                        }
-                        return null;
-                      })()}
-                      {canEdit && (
-                        <>
-                          <button onClick={() => { setFormData(record); setShowAddModal(true); }} className="text-slate-400 hover:text-royal-blue mr-3" title="Editar Formulário">
-                            <Edit2 className="w-4 h-4" />
+                            <button
+                              type="button"
+                              onClick={() => handlePrintInspection(record)}
+                              className="p-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100 rounded transition-colors cursor-pointer"
+                              title={`Imprimir Inspeção de Campo (${record.fieldInspection.inspectionNumber})`}
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                            {isUserAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteInspection(record)}
+                                className="p-1 text-rose-600 hover:text-rose-800 hover:bg-rose-100 rounded transition-colors cursor-pointer"
+                                title="Excluir Inspeção de Campo (somente Administrador)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenInspectionModal(record)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-royal-blue border border-blue-200 text-xs font-bold transition-colors cursor-pointer"
+                            title="Criar / abrir Inspeção de Campo para este item"
+                          >
+                            <ClipboardCheck className="w-3.5 h-3.5" />
+                            <span>Inspeção de Campo</span>
                           </button>
-                          {isUserAdmin && (
-                            <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500" title="Excluir (requer senha do Administrador logado)">
-                              <Trash2 className="w-4 h-4" />
+                        )}
+
+                        {(() => {
+                          const matchingInst = findInstrumentByCertificate(record.certificate);
+                          if (matchingInst && onPrintCertificate) {
+                            const context: FieldServiceCertificateContext = {
+                              fieldServiceRecordId: record.id,
+                              clientId: record.clientId,
+                              cliente: record.cliente || '',
+                              unidade: record.unidade || '',
+                            };
+                            return (
+                              <button
+                                onClick={() => onPrintCertificate(
+                                  matchingInst.id,
+                                  record.tag || '',
+                                  record.equipamento || '',
+                                  context,
+                                )}
+                                className="text-emerald-500 hover:text-emerald-600 p-1"
+                                title="Visualizar / imprimir Certificado de Calibração"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+                        {canEdit && (
+                          <>
+                            <button onClick={() => { setFormData(record); setShowAddModal(true); }} className="text-slate-400 hover:text-royal-blue p-1" title="Editar Formulário">
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                          )}
-                        </>
-                      )}
+                            {isUserAdmin && (
+                              <button onClick={() => handleDeleteRecord(record.id)} className="text-slate-400 hover:text-red-500 p-1" title="Excluir Registro da Planilha (requer senha do Administrador logado)">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -2540,6 +2936,272 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
                 <Save className="h-4 w-4" />
                 Salvar Registro
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {inspectionModalRecord && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-blue-100 text-royal-blue">
+                  <ClipboardCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-lg text-slate-800">Inspeção de Campo</h3>
+                    <span className="inline-flex items-center rounded-md bg-blue-600 px-2.5 py-0.5 text-xs font-extrabold text-white">
+                      {inspectionModalRecord.fieldInspection?.inspectionNumber || inspectionPreviewNumber}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {inspectionModalRecord.fieldInspection
+                      ? 'Inspeção registrada e armazenada no Firestore e Storage.'
+                      : 'Numeração sequencial automática ao salvar no Firestore e Storage.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInspectionModalRecord(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-6">
+              {/* Dados vinculados da linha (exclusivamente Certificado, TAG do Cliente, Equipamento, Localização, Área, Unidade) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-3">
+                  Dados da Linha Referente
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400">Certificado</span>
+                    <span className="text-sm font-bold text-slate-800">{inspectionModalRecord.certificate || '-'}</span>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400">TAG do Cliente</span>
+                    <span className="text-sm font-bold text-slate-800">{inspectionModalRecord.tag || '-'}</span>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400">Equipamento</span>
+                    <span className="text-sm font-bold text-slate-800">{inspectionModalRecord.equipamento || '-'}</span>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400">Localização</span>
+                    <span className="text-sm font-bold text-slate-800">{inspectionModalRecord.localizacao || '-'}</span>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400">Área</span>
+                    <span className="text-sm font-bold text-slate-800">{inspectionModalRecord.area || '-'}</span>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400">Unidade</span>
+                    <span className="text-sm font-bold text-slate-800">{inspectionModalRecord.unidade || '-'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Campos do formulário de Inspeção de Campo */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                  Formulário de Inspeção
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Condição Física</label>
+                    <select
+                      value={inspectionForm.condicaoFisica}
+                      onChange={(e) =>
+                        setInspectionForm({
+                          ...inspectionForm,
+                          condicaoFisica: e.target.value === 'NOK' ? 'NOK' : 'OK',
+                        })
+                      }
+                      disabled={!canEdit}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-royal-blue ${
+                        inspectionForm.condicaoFisica === 'OK'
+                          ? 'border-emerald-300 bg-emerald-50/60 text-emerald-800'
+                          : 'border-rose-300 bg-rose-50/60 text-rose-800'
+                      }`}
+                    >
+                      <option value="OK">OK</option>
+                      <option value="NOK">NOK</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Plaqueta Interna</label>
+                    <select
+                      value={inspectionForm.plaquetaInterna}
+                      onChange={(e) =>
+                        setInspectionForm({
+                          ...inspectionForm,
+                          plaquetaInterna: e.target.value === 'NOK' ? 'NOK' : 'OK',
+                        })
+                      }
+                      disabled={!canEdit}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-royal-blue ${
+                        inspectionForm.plaquetaInterna === 'OK'
+                          ? 'border-emerald-300 bg-emerald-50/60 text-emerald-800'
+                          : 'border-rose-300 bg-rose-50/60 text-rose-800'
+                      }`}
+                    >
+                      <option value="OK">OK</option>
+                      <option value="NOK">NOK</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Plaqueta Externa</label>
+                    <select
+                      value={inspectionForm.plaquetaExterna}
+                      onChange={(e) =>
+                        setInspectionForm({
+                          ...inspectionForm,
+                          plaquetaExterna: e.target.value === 'NOK' ? 'NOK' : 'OK',
+                        })
+                      }
+                      disabled={!canEdit}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-royal-blue ${
+                        inspectionForm.plaquetaExterna === 'OK'
+                          ? 'border-emerald-300 bg-emerald-50/60 text-emerald-800'
+                          : 'border-rose-300 bg-rose-50/60 text-rose-800'
+                      }`}
+                    >
+                      <option value="OK">OK</option>
+                      <option value="NOK">NOK</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Ordem de Serviço</label>
+                    <input
+                      type="text"
+                      value={inspectionForm.ordemServico}
+                      onChange={(e) => setInspectionForm({ ...inspectionForm, ordemServico: e.target.value })}
+                      disabled={!canEdit}
+                      placeholder="Informe o nº da Ordem de Serviço..."
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
+                    <select
+                      value={inspectionForm.status}
+                      onChange={(e) =>
+                        setInspectionForm({
+                          ...inspectionForm,
+                          status: e.target.value === 'REPROVADO' ? 'REPROVADO' : 'APROVADO',
+                        })
+                      }
+                      disabled={!canEdit}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm font-extrabold outline-none focus:ring-2 focus:ring-royal-blue ${
+                        inspectionForm.status === 'APROVADO'
+                          ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                          : 'border-rose-400 bg-rose-50 text-rose-800'
+                      }`}
+                    >
+                      <option value="APROVADO">APROVADO</option>
+                      <option value="REPROVADO">REPROVADO</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Responsável pela Inspeção *</label>
+                    <input
+                      type="text"
+                      value={inspectionForm.responsavelInspecao}
+                      onChange={(e) => setInspectionForm({ ...inspectionForm, responsavelInspecao: e.target.value })}
+                      disabled={!canEdit}
+                      placeholder="Nome do técnico / responsável..."
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Data de Inspeção *</label>
+                    <input
+                      type="text"
+                      value={inspectionForm.dataInspecao}
+                      onChange={(e) => setInspectionForm({ ...inspectionForm, dataInspecao: dateMask(e.target.value) })}
+                      disabled={!canEdit}
+                      placeholder="DD/MM/AAAA"
+                      maxLength={10}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Observação</label>
+                  <textarea
+                    value={inspectionForm.observacao}
+                    onChange={(e) => setInspectionForm({ ...inspectionForm, observacao: e.target.value })}
+                    disabled={!canEdit}
+                    placeholder="Observações técnicas da inspeção de campo..."
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-royal-blue outline-none min-h-[85px]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2">
+              <div>
+                {inspectionModalRecord.fieldInspection && isUserAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteInspection(inspectionModalRecord)}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-lg transition-colors flex items-center gap-1.5 text-sm cursor-pointer"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span>Excluir Inspeção</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInspectionModalRecord(null)}
+                  className="px-4 py-2 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition-colors text-sm cursor-pointer"
+                >
+                  Fechar
+                </button>
+
+                {inspectionModalRecord.fieldInspection && (
+                  <button
+                    type="button"
+                    onClick={() => handlePrintInspection(inspectionModalRecord)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2 text-sm shadow-sm cursor-pointer"
+                  >
+                    <Printer className="h-4 w-4" />
+                    <span>Imprimir Inspeção</span>
+                  </button>
+                )}
+
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveInspection()}
+                    disabled={isSavingInspection}
+                    className="px-4 py-2 bg-royal-blue hover:bg-blue-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2 text-sm shadow-sm disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSavingInspection ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    <span>{isSavingInspection ? 'Salvando...' : 'Salvar Inspeção'}</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

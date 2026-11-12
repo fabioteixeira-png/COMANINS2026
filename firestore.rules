@@ -701,6 +701,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Inspeções de Campo vinculadas ao Serviço de Campo (INSP-COM-001...).
+    // A leitura respeita a permissão do módulo Serviço de Campo; criação, edição
+    // e exclusão administrativa passam exclusivamente pelo backend transacional.
+    match /fieldServiceInspections/{inspectionId} {
+      allow read: if hasModule('field_service');
+      allow create, update, delete: if false;
+    }
+
     // Financeiro: acesso somente para Financeiro e Administradores.
     match /financeTransactions/{document=**} {
       allow read: if canManageFinance();

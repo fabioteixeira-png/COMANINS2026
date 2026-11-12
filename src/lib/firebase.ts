@@ -4948,6 +4948,34 @@ export async function syncClientIntakes(clientId: string, callback: (intakes: Sa
   });
 }
 
+export interface FieldServiceInspection {
+  id: string;
+  inspectionNumber: string;
+  sequenceNumber: number;
+  fieldServiceRecordId: string;
+  certificate: string;
+  tag: string;
+  equipamento: string;
+  localizacao: string;
+  area: string;
+  unidade: string;
+  condicaoFisica: 'OK' | 'NOK';
+  plaquetaInterna: 'OK' | 'NOK';
+  plaquetaExterna: 'OK' | 'NOK';
+  ordemServico: string;
+  status: 'APROVADO' | 'REPROVADO';
+  observacao: string;
+  responsavelInspecao: string;
+  dataInspecao: string;
+  storagePath?: string;
+  createdAt: string;
+  createdBy?: string;
+  createdByUid?: string;
+  updatedAt: string;
+  updatedBy?: string;
+  updatedByUid?: string;
+}
+
 export interface FieldServiceRecord {
   id: string;
   clientId?: string;
@@ -4969,6 +4997,7 @@ export interface FieldServiceRecord {
   tipoServico: string;
   observacao: string;
   unidade: string;
+  fieldInspection?: FieldServiceInspection | null;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
@@ -5511,6 +5540,88 @@ export async function deleteFieldServiceRecord(id: string): Promise<void> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.message || payload?.error || 'Não foi possível arquivar o registro.');
   fieldServiceCache = fieldServiceCache.filter((record) => record.id !== id);
+  notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
+}
+
+export async function fetchNextFieldInspectionNumber(): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/field-service/inspections/next-number', {
+    method: 'GET',
+    headers: { 'Authorization': `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.inspectionNumber) {
+    return 'INSP-COM-001';
+  }
+  return String(payload.inspectionNumber);
+}
+
+export interface SaveFieldServiceInspectionInput {
+  condicaoFisica: 'OK' | 'NOK';
+  plaquetaInterna: 'OK' | 'NOK';
+  plaquetaExterna: 'OK' | 'NOK';
+  ordemServico: string;
+  status: 'APROVADO' | 'REPROVADO';
+  observacao: string;
+  responsavelInspecao: string;
+  dataInspecao: string;
+}
+
+export async function saveFieldServiceInspection(
+  recordId: string,
+  input: SaveFieldServiceInspectionInput,
+): Promise<{ inspection: FieldServiceInspection; record: FieldServiceRecord }> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/field-service/${encodeURIComponent(recordId)}/inspection`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.inspection) {
+    throw new Error(payload?.message || payload?.error || 'Não foi possível salvar a Inspeção de Campo.');
+  }
+  const updatedRecord = payload.record as FieldServiceRecord;
+  const savedInspection = payload.inspection as FieldServiceInspection;
+  fieldServiceCache = fieldServiceCache.map((record) =>
+    record.id === recordId
+      ? { ...record, ...(updatedRecord || {}), fieldInspection: savedInspection }
+      : record,
+  );
+  notifyFieldServiceSubscribers();
+  schedulePersistFieldServiceCache();
+  return { inspection: savedInspection, record: updatedRecord };
+}
+
+export async function deleteFieldServiceInspection(recordId: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/field-service/${encodeURIComponent(recordId)}/inspection/delete`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error || 'Não foi possível excluir a Inspeção de Campo.');
+  }
+  fieldServiceCache = fieldServiceCache.map((record) =>
+    record.id === recordId
+      ? { ...record, fieldInspection: null, updatedAt: new Date().toISOString() }
+      : record,
+  );
   notifyFieldServiceSubscribers();
   schedulePersistFieldServiceCache();
 }
