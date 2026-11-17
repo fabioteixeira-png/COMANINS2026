@@ -54,7 +54,30 @@ const COLUMNS = [
   { id: 'observacao', label: 'Observação', minW: '150px' },
   { id: 'unidade', label: 'Unidade', minW: '120px' },
   { id: 'cliente', label: 'Cliente', minW: '150px' },
+  { id: 'inspecaoCampo', label: 'Inspeção de Campo', minW: '165px' },
+  { id: 'dataInspecao', label: 'Data Inspeção', minW: '130px' },
 ] as const;
+
+const normalizeInspectionDateToIso = (raw?: string): string => {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const brMatch = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+  }
+  return '';
+};
+
+const formatInspectionDateBr = (raw?: string): string => {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  }
+  return s;
+};
 
 type FieldServiceImportProgress = {
   percent: number;
@@ -120,6 +143,8 @@ const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   tipoServico: true,
   observacao: false,
   unidade: false,
+  inspecaoCampo: true,
+  dataInspecao: true,
 };
 
 const DEFAULT_FILTERS: Record<string, string> = {
@@ -141,6 +166,11 @@ const DEFAULT_FILTERS: Record<string, string> = {
   tipoServico: '',
   observacao: '',
   unidade: '',
+  inspecaoCampo: '',
+  dataInspecao: '',
+  inspectionStatusFilter: '',
+  inspectionDateFrom: '',
+  inspectionDateTo: '',
 };
 
 const loadInitialVisibleColumns = (): Record<string, boolean> => {
@@ -1756,6 +1786,10 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
       'Observação': record.observacao || '',
       'Unidade': record.unidade || '',
       'Cliente': record.cliente || '',
+      'Nº Inspeção de Campo': record.fieldInspection?.inspectionNumber || '',
+      'Status Inspeção': record.fieldInspection?.status || 'PENDENTE',
+      'Data Inspeção': formatInspectionDateBr(record.fieldInspection?.dataInspecao) || '',
+      'Responsável Inspeção': record.fieldInspection?.responsavelInspecao || '',
     })));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'ServicoCampo');
@@ -2023,6 +2057,11 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
     [deferredFilters],
   );
 
+  const inspectedRecordsCount = useMemo(
+    () => records.filter((r) => Boolean(r.fieldInspection)).length,
+    [records],
+  );
+
   // Índice textual pré-calculado. Antes, cada tecla digitada reconstruía strings
   // de até 18 colunas para todos os ~17 mil registros. Agora esse custo ocorre
   // apenas quando a base muda; a busca usa somente Map.get + includes.
@@ -2041,6 +2080,14 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
               || (numericCertificate ? instrumentLookup.byNumericCertificate.get(numericCertificate) : undefined)
             : undefined;
           rawValue = formatCalibrationDate(linkedInstrument?.lastCalibrationDate || record.dataCalibracao || '');
+        } else if (column.id === 'inspecaoCampo') {
+          rawValue = record.fieldInspection
+            ? `${record.fieldInspection.inspectionNumber} ${record.fieldInspection.status} realizada preenchida sim ${record.fieldInspection.responsavelInspecao || ''}`
+            : 'pendente sem inspecao nao';
+        } else if (column.id === 'dataInspecao') {
+          const brDate = formatInspectionDateBr(record.fieldInspection?.dataInspecao);
+          const isoDate = normalizeInspectionDateToIso(record.fieldInspection?.dataInspecao);
+          rawValue = `${brDate} ${isoDate}`;
         }
         values[column.id] = normalizeSearchValue(rawValue);
       }
@@ -2062,17 +2109,44 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
   const calibrationLookupDependency = needsCalibrationLookupForList ? instrumentLookup : null;
 
   const sortedRecords = useMemo(() => {
-    const activeFilters = Object.entries(deferredFilters)
-      .filter(([, value]) => String(value || '').trim() !== '')
+    const statusFilter = String(deferredFilters.inspectionStatusFilter || '').trim();
+    const dateFromFilter = String(deferredFilters.inspectionDateFrom || '').trim();
+    const dateToFilter = String(deferredFilters.inspectionDateTo || '').trim();
+
+    const activeColumnFilters = Object.entries(deferredFilters)
+      .filter(([key, value]) =>
+        key !== 'inspectionStatusFilter' &&
+        key !== 'inspectionDateFrom' &&
+        key !== 'inspectionDateTo' &&
+        String(value || '').trim() !== '',
+      )
       .map(([key, value]) => [key, normalizeSearchValue(value)] as const);
 
-    let filtered = activeFilters.length === 0
-      ? [...records]
-      : records.filter((record) => {
-          const indexed = recordSearchIndex.get(record.id);
-          if (!indexed) return false;
-          return activeFilters.every(([key, search]) => (indexed[key] || '').includes(search));
-        });
+    let filtered = records.filter((record) => {
+      const hasInspection = Boolean(record.fieldInspection);
+      if (statusFilter === 'realizada' && !hasInspection) return false;
+      if (statusFilter === 'pendente' && hasInspection) return false;
+      if (statusFilter === 'aprovado' && (!hasInspection || record.fieldInspection?.status !== 'APROVADO')) return false;
+      if (statusFilter === 'reprovado' && (!hasInspection || record.fieldInspection?.status !== 'REPROVADO')) return false;
+
+      if (dateFromFilter || dateToFilter) {
+        if (!hasInspection) return false;
+        const recordIsoDate = normalizeInspectionDateToIso(record.fieldInspection?.dataInspecao);
+        if (!recordIsoDate) return false;
+        if (dateFromFilter && recordIsoDate < dateFromFilter) return false;
+        if (dateToFilter && recordIsoDate > dateToFilter) return false;
+      }
+
+      if (activeColumnFilters.length > 0) {
+        const indexed = recordSearchIndex.get(record.id);
+        if (!indexed) return false;
+        if (!activeColumnFilters.every(([key, search]) => (indexed[key] || '').includes(search))) {
+          return false;
+        }
+      }
+
+      return true;
+    });
 
     if (sortConfig !== null) {
       filtered.sort((a, b) => {
@@ -2085,6 +2159,17 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
           const dateA = parseDateForSort(resolveCalibrationDate(a));
           const dateB = parseDateForSort(resolveCalibrationDate(b));
           return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
+        }
+        if (sortConfig.key === 'dataInspecao') {
+          const dateA = parseDateForSort(formatInspectionDateBr(a.fieldInspection?.dataInspecao));
+          const dateB = parseDateForSort(formatInspectionDateBr(b.fieldInspection?.dataInspecao));
+          return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
+        }
+        if (sortConfig.key === 'inspecaoCampo') {
+          const valA = String(a.fieldInspection?.inspectionNumber || '').toLocaleLowerCase('pt-BR');
+          const valB = String(b.fieldInspection?.inspectionNumber || '').toLocaleLowerCase('pt-BR');
+          const comparison = valA.localeCompare(valB, 'pt-BR', { numeric: true, sensitivity: 'base' });
+          return sortConfig.direction === 'asc' ? comparison : -comparison;
         }
 
         const valA = String((a as any)[sortConfig.key] || '').toLocaleLowerCase('pt-BR');
@@ -2509,6 +2594,107 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
           </div>
         </div>
 
+        {/* BARRA DE FILTRO RÁPIDO: INSPEÇÃO DE CAMPO E PERÍODO DE DATA DA INSPEÇÃO */}
+        <div className="px-4 py-3 border-b border-slate-200 bg-blue-50/40 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="h-4 w-4 text-royal-blue" />
+              <span className="text-xs font-extrabold uppercase tracking-wide text-slate-800">
+                Filtro de Inspeção de Campo:
+              </span>
+              <span className="inline-flex items-center rounded-md bg-blue-100 border border-blue-200 px-2 py-0.5 text-[11px] font-bold text-blue-800">
+                {inspectedRecordsCount} realizada(s)
+              </span>
+            </div>
+
+            <select
+              value={filters.inspectionStatusFilter || ''}
+              onChange={(e) => handleFilterChange('inspectionStatusFilter', e.target.value)}
+              className={`text-xs rounded-lg border px-2.5 py-1.5 font-semibold outline-none transition-colors cursor-pointer ${
+                filters.inspectionStatusFilter
+                  ? 'border-royal-blue bg-blue-600 text-white'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-royal-blue'
+              }`}
+            >
+              <option value="" className="bg-white text-slate-800">Todos os itens (Com e Sem Inspeção)</option>
+              <option value="realizada" className="bg-white text-slate-800">Somente com Inspeção Realizada ({inspectedRecordsCount})</option>
+              <option value="aprovado" className="bg-white text-slate-800">Inspeção Realizada — APROVADO</option>
+              <option value="reprovado" className="bg-white text-slate-800">Inspeção Realizada — REPROVADO</option>
+              <option value="pendente" className="bg-white text-slate-800">Sem Inspeção (Pendentes)</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() =>
+                handleFilterChange(
+                  'inspectionStatusFilter',
+                  filters.inspectionStatusFilter === 'realizada' ? '' : 'realizada',
+                )
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                filters.inspectionStatusFilter === 'realizada'
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+              }`}
+              title="Alternar visualização apenas dos itens que possuem Inspeção de Campo preenchida"
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              <span>
+                {filters.inspectionStatusFilter === 'realizada'
+                  ? 'Exibindo apenas inspecionados'
+                  : 'Ver apenas inspecionados'}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-bold text-slate-700">Data da Inspeção:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500 font-semibold">De:</span>
+              <input
+                type="date"
+                value={filters.inspectionDateFrom || ''}
+                onChange={(e) => handleFilterChange('inspectionDateFrom', e.target.value)}
+                className={`px-2 py-1 rounded-lg border text-xs outline-none ${
+                  filters.inspectionDateFrom
+                    ? 'border-royal-blue bg-blue-50 font-bold text-blue-900'
+                    : 'border-slate-300 bg-white text-slate-700'
+                }`}
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500 font-semibold">Até:</span>
+              <input
+                type="date"
+                value={filters.inspectionDateTo || ''}
+                onChange={(e) => handleFilterChange('inspectionDateTo', e.target.value)}
+                className={`px-2 py-1 rounded-lg border text-xs outline-none ${
+                  filters.inspectionDateTo
+                    ? 'border-royal-blue bg-blue-50 font-bold text-blue-900'
+                    : 'border-slate-300 bg-white text-slate-700'
+                }`}
+              />
+            </div>
+            {(filters.inspectionStatusFilter || filters.inspectionDateFrom || filters.inspectionDateTo || filters.inspecaoCampo || filters.dataInspecao) && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleFilterChange('inspectionStatusFilter', '');
+                  handleFilterChange('inspectionDateFrom', '');
+                  handleFilterChange('inspectionDateTo', '');
+                  handleFilterChange('inspecaoCampo', '');
+                  handleFilterChange('dataInspecao', '');
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold transition-colors cursor-pointer"
+                title="Limpar filtros de Inspeção de Campo"
+              >
+                <X className="h-3.5 w-3.5" />
+                <span>Limpar filtro inspeção</span>
+              </button>
+            )}
+          </div>
+        </div>
+
         <div
           ref={topScrollRef}
           onScroll={syncTopScroll}
@@ -2600,6 +2786,58 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
 
                       if (col.id === 'dataCalibracao') {
                         value = resolveCalibrationDate(record) || '-';
+                      }
+
+                      if (col.id === 'inspecaoCampo') {
+                        const insp = record.fieldInspection;
+                        return (
+                          <td
+                            key={col.id}
+                            className="px-4 py-3 whitespace-nowrap cursor-pointer hover:bg-blue-50/60 transition-colors"
+                            onClick={() => void handleOpenInspectionModal(record)}
+                            title={insp ? `Abrir Inspeção ${insp.inspectionNumber}` : 'Clique para preencher a Inspeção de Campo'}
+                          >
+                            {insp ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-blue-100 border border-blue-300 px-2 py-0.5 text-xs font-extrabold text-blue-900">
+                                  <ClipboardCheck className="w-3.5 h-3.5 text-royal-blue" />
+                                  {insp.inspectionNumber}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-extrabold uppercase ${
+                                    insp.status === 'REPROVADO'
+                                      ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  }`}
+                                >
+                                  {insp.status}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center rounded bg-slate-100 border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                                Pendente
+                              </span>
+                            )}
+                          </td>
+                        );
+                      }
+
+                      if (col.id === 'dataInspecao') {
+                        const inspDate = formatInspectionDateBr(record.fieldInspection?.dataInspecao);
+                        return (
+                          <td
+                            key={col.id}
+                            className="px-4 py-3 whitespace-nowrap font-mono text-xs cursor-pointer hover:bg-blue-50/60 transition-colors"
+                            onClick={() => void handleOpenInspectionModal(record)}
+                            title={inspDate ? `Inspeção realizada em ${inspDate}` : 'Sem data de inspeção'}
+                          >
+                            {inspDate ? (
+                              <span className="font-bold text-slate-800">{inspDate}</span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                        );
                       }
 
                       const isEditing = canEdit && editingCell?.rowId === record.id && editingCell?.colId === col.id;
@@ -2889,7 +3127,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
 
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao').map(col => (
+                {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao' && c.id !== 'inspecaoCampo' && c.id !== 'dataInspecao').map(col => (
                   <div key={col.id}>
                     <label className="block text-xs font-bold text-slate-700 mb-1">{col.label}</label>
                     {col.id === 'cliente' ? (
