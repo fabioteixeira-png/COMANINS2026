@@ -6798,6 +6798,225 @@ app.post('/api/internal/archive-record', requireAuth, requireInternalAccount, wr
   }
 });
 
+app.post('/api/internal/employees/:employeeId/archive-aso', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  if (!firestoreDb || !req.user) return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+
+  let freshProfile: any = null;
+  try {
+    freshProfile = await findPortalUserForAuth(req.user);
+  } catch (error) {
+    console.warn('Could not refresh ASO archive authorization profile:', error);
+  }
+  const isFreshAdministrator = isAdministratorProfile(freshProfile || req.user);
+  const allowed = isFreshAdministrator || isRhEditor(req.user);
+  if (!allowed) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const employeeId = asLimitedString(req.params.employeeId, 180);
+  const asoId = asLimitedString(req.body?.asoId, 180);
+  const username = asLimitedString(req.body?.username, 180).toLowerCase();
+  const employeeName = asLimitedString(req.body?.employeeName, 180);
+  const contractName = asLimitedString(req.body?.contractName, 180);
+  const unitArea = asLimitedString(req.body?.unitArea, 180);
+  const examType = asLimitedString(req.body?.examType, 120);
+  const validityDate = asLimitedString(req.body?.validityDate, 40);
+
+  if (!employeeId && !username && !asoId) {
+    return res.status(400).json({ error: 'INVALID_ARCHIVE_TARGET' });
+  }
+
+  const normalizeKey = (val: unknown) => String(val ?? '').trim().toLowerCase();
+  const matchesTargetAso = (item: any) => {
+    if (!item || typeof item !== 'object') return false;
+    if (asoId && String(item.id || '').trim() === asoId) return true;
+    const itemContract = normalizeKey(item.contractName);
+    const itemArea = normalizeKey(item.unitArea);
+    const itemType = normalizeKey(item.examType);
+    const itemValidity = String(item.validityDate || '').trim();
+    if (
+      contractName &&
+      validityDate &&
+      itemContract === normalizeKey(contractName) &&
+      itemValidity === validityDate &&
+      (!examType || itemType === normalizeKey(examType)) &&
+      (!unitArea || itemArea === normalizeKey(unitArea))
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  try {
+    const nowIso = new Date().toISOString();
+    const actorName = asLimitedString(req.user?.name || req.user?.username || req.user?.email, 160) || 'Administrador';
+    const actorUid = asLimitedString(req.user?.uid, 160);
+    const actorRole = asLimitedString(req.user?.permissionLevel || req.user?.role, 100);
+
+    let archivedInCollectionCount = 0;
+    let archivedInPortalUserCount = 0;
+    let updatedAsoContractsResult: any[] | null = null;
+    let nextAsoValidityResult: string | undefined = undefined;
+
+    // 1. Archive matching documents in employeeAsos collection (by docId, internal id, or composite fields for this employee)
+    const candidateEmployeeIds = Array.from(
+      new Set([employeeId, username].filter((v) => Boolean(v)))
+    );
+
+    const asoDocRefsToArchive = new Map<string, DocumentReference>();
+
+    if (asoId) {
+      const directAsoSnap = await firestoreDb.collection('employeeAsos').doc(asoId).get();
+      if (directAsoSnap.exists && directAsoSnap.data()?.isDeleted !== true) {
+        asoDocRefsToArchive.set(directAsoSnap.id, directAsoSnap.ref);
+      }
+    }
+
+    for (const empKey of candidateEmployeeIds) {
+      const empAsosSnap = await firestoreDb
+        .collection('employeeAsos')
+        .where('employeeId', '==', empKey)
+        .get();
+      for (const docSnap of empAsosSnap.docs) {
+        const data = docSnap.data() || {};
+        if (data.isDeleted === true) continue;
+        if (docSnap.id === asoId || matchesTargetAso({ ...data, id: data.id || docSnap.id })) {
+          asoDocRefsToArchive.set(docSnap.id, docSnap.ref);
+        }
+      }
+    }
+
+    if (employeeName) {
+      const empByNameSnap = await firestoreDb
+        .collection('employeeAsos')
+        .where('employeeName', '==', employeeName)
+        .get();
+      for (const docSnap of empByNameSnap.docs) {
+        const data = docSnap.data() || {};
+        if (data.isDeleted === true) continue;
+        if (docSnap.id === asoId || matchesTargetAso({ ...data, id: data.id || docSnap.id })) {
+          asoDocRefsToArchive.set(docSnap.id, docSnap.ref);
+        }
+      }
+    }
+
+    for (const [, docRef] of asoDocRefsToArchive) {
+      await docRef.update({
+        isDeleted: true,
+        deletedAt: nowIso,
+        deletedBy: actorName,
+        deletedByUid: actorUid,
+        updatedAt: nowIso,
+      });
+      archivedInCollectionCount += 1;
+    }
+
+    // 2. Archive matching items inside portalUsers/{id}.asoContracts (never removing from array, only marking isDeleted: true)
+    const portalUserDocsMap = new Map<string, any>();
+    if (employeeId) {
+      const directUserSnap = await firestoreDb.collection('portalUsers').doc(employeeId).get();
+      if (directUserSnap.exists) {
+        portalUserDocsMap.set(directUserSnap.id, directUserSnap);
+      }
+      const byFieldIdSnap = await firestoreDb
+        .collection('portalUsers')
+        .where('id', '==', employeeId)
+        .get();
+      for (const d of byFieldIdSnap.docs) {
+        portalUserDocsMap.set(d.id, d);
+      }
+    }
+    if (username) {
+      const byUsernameSnap = await firestoreDb
+        .collection('portalUsers')
+        .where('username', '==', username)
+        .get();
+      for (const d of byUsernameSnap.docs) {
+        portalUserDocsMap.set(d.id, d);
+      }
+    }
+
+    for (const [, userSnap] of portalUserDocsMap) {
+      const userData: any = userSnap.data() || {};
+      const currentContracts: any[] = Array.isArray(userData.asoContracts) ? userData.asoContracts : [];
+      let changed = false;
+
+      const updatedContracts = currentContracts.map((item: any, idx: number) => {
+        if (item?.isDeleted === true) return item;
+        if (matchesTargetAso(item)) {
+          changed = true;
+          archivedInPortalUserCount += 1;
+          return {
+            ...item,
+            id: item.id || asoId || `aso_legacy_${idx}`,
+            isDeleted: true,
+            deletedAt: nowIso,
+            deletedBy: actorName,
+            deletedByUid: actorUid,
+          };
+        }
+        return item;
+      });
+
+      const activeLegacyContracts = updatedContracts
+        .filter((item: any) => item && item.isDeleted !== true && item.validityDate)
+        .sort((a: any, b: any) => new Date(a.validityDate).getTime() - new Date(b.validityDate).getTime());
+
+      const nextValidity = activeLegacyContracts.length > 0 ? String(activeLegacyContracts[0].validityDate || '') : '';
+      const shouldClearRootValidity =
+        activeLegacyContracts.length === 0 &&
+        userData.asoValidity &&
+        (!validityDate || String(userData.asoValidity).trim() === validityDate);
+
+      if (changed || shouldClearRootValidity) {
+        const updatePayload: Record<string, any> = {
+          asoContracts: updatedContracts,
+        };
+        if (activeLegacyContracts.length > 0 || shouldClearRootValidity) {
+          updatePayload.asoValidity = nextValidity;
+          nextAsoValidityResult = nextValidity;
+        }
+        await userSnap.ref.update(updatePayload);
+        updatedAsoContractsResult = updatedContracts;
+      }
+    }
+
+    // 3. Record immutable audit log
+    await firestoreDb.collection('systemAuditLogs').add({
+      action: 'CRITICAL_RECORD_ARCHIVED',
+      entityType: 'employeeAsos',
+      entityId: asoId || `${employeeId}:${contractName}:${validityDate}`,
+      actorUid,
+      actorName,
+      actorRole,
+      createdAt: nowIso,
+      immutable: true,
+      summary: `ASO arquivado (${employeeName || username || employeeId})`,
+      metadata: {
+        collectionName: 'employeeAsos',
+        employeeId,
+        username,
+        employeeName,
+        contractName,
+        unitArea,
+        examType,
+        validityDate,
+        archivedInCollectionCount,
+        archivedInPortalUserCount,
+      },
+    });
+
+    return res.json({
+      success: true,
+      archivedInCollectionCount,
+      archivedInPortalUserCount,
+      asoContracts: updatedAsoContractsResult,
+      asoValidity: nextAsoValidityResult,
+    });
+  } catch (error: any) {
+    console.error('Archive employee ASO failed:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
 // Firestore/Firebase Admin are the only production data stores.
 
 // Lazy initialize Gemini API to handle missing keys gracefully
@@ -7764,7 +7983,7 @@ app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res)
 
     const snapshot = await firestoreDb.collection('portalUsers').get();
     const users = snapshot.docs.map((doc) => {
-      const profile = { id: doc.id, ...doc.data() };
+      const profile = { ...doc.data(), id: doc.id };
       return canReadFullProfiles
         ? sanitizePortalUserForClient(profile)
         : sanitizePortalUserForDirectory(profile);
@@ -7787,6 +8006,87 @@ app.get('/api/internal/portal-users', requireAuth, async (req: AuthRequest, res)
       return res.status(404).json({ error: 'INTERNAL_PROFILE_NOT_FOUND' });
     }
     console.error('Internal portal users directory error:', error);
+    return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+});
+
+app.patch('/api/internal/portal-users/:id', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user || !firestoreDb) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    const requesterProfile = await requireInternalPortalRequester(req.user);
+    const canManageEmployee =
+      isAdministratorProfile(requesterProfile) || isRhEditor(requesterProfile);
+    if (!canManageEmployee) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const targetId = asLimitedString(req.params.id, 180);
+    if (!targetId) {
+      return res.status(400).json({ error: 'INVALID_USER_ID' });
+    }
+
+    const rawUpdates = req.body?.updates;
+    if (!rawUpdates || typeof rawUpdates !== 'object' || Array.isArray(rawUpdates)) {
+      return res.status(400).json({ error: 'INVALID_UPDATES' });
+    }
+
+    const forbiddenKeys = new Set([
+      'password',
+      'permissionLevel',
+      'accessProfileId',
+      'accessProfileName',
+      'accessProfileVersion',
+      'allowedModules',
+      'editableModules',
+      'accessProfileUpdatedAt',
+      'accessProfileUpdatedBy',
+    ]);
+    if (!isAdministratorProfile(requesterProfile)) {
+      forbiddenKeys.add('username');
+      forbiddenKeys.add('authUid');
+      forbiddenKeys.add('authEmail');
+      forbiddenKeys.add('passwordChangeRequired');
+      forbiddenKeys.add('mustChangePassword');
+      forbiddenKeys.add('signaturePath');
+      forbiddenKeys.add('signatureVersion');
+      forbiddenKeys.add('signatureDate');
+    }
+
+    const cleanUpdates: Record<string, any> = {};
+    for (const [key, val] of Object.entries(rawUpdates)) {
+      if (forbiddenKeys.has(key)) continue;
+      if (val === null) {
+        cleanUpdates[key] = FieldValue.delete();
+      } else if (val !== undefined) {
+        cleanUpdates[key] = val;
+      }
+    }
+
+    let targetDocRef: DocumentReference | null = null;
+    const directSnap = await firestoreDb.collection('portalUsers').doc(targetId).get();
+    if (directSnap.exists) {
+      targetDocRef = directSnap.ref;
+    } else {
+      const byFieldId = await firestoreDb
+        .collection('portalUsers')
+        .where('id', '==', targetId)
+        .limit(1)
+        .get();
+      if (!byFieldId.empty) {
+        targetDocRef = byFieldId.docs[0].ref;
+      }
+    }
+
+    if (!targetDocRef) {
+      return res.status(404).json({ error: 'USER_NOT_FOUND' });
+    }
+
+    await targetDocRef.update(cleanUpdates);
+    return res.json({ success: true, id: targetDocRef.id });
+  } catch (error: any) {
+    console.error('Update portal user fallback error:', error);
     return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
   }
 });

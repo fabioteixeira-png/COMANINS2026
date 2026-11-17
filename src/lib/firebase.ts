@@ -3032,7 +3032,29 @@ export async function updatePortalUserDoc(id: string, updates: Partial<PortalUse
       0,
     );
   }
-  await updateDoc(doc(db, 'portalUsers', id), nextUpdates);
+  try {
+    await updateDoc(doc(db, 'portalUsers', id), nextUpdates);
+  } catch (clientError) {
+    console.warn('Direct updatePortalUserDoc failed; trying authenticated backend fallback:', clientError);
+    const headers = await corporateFileAuthHeaders();
+    const fallbackPayload: Record<string, any> = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (k === 'photoUrl' && typeof nextUpdates.photoUrl === 'string') {
+        fallbackPayload[k] = nextUpdates.photoUrl;
+      } else {
+        fallbackPayload[k] = v;
+      }
+    }
+    const response = await fetch(`/api/internal/portal-users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates: fallbackPayload }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.success !== true) {
+      throw clientError;
+    }
+  }
 }
 
 export async function uploadSignatureImage(file: File, userId: string, version: number): Promise<string> {
@@ -3131,6 +3153,71 @@ export async function updateEmployeeAsoDoc(id: string, data: Partial<EmployeeAso
 
 export async function deleteEmployeeAsoDoc(id: string): Promise<void> {
   await archiveCriticalRecord('employeeAsos', id);
+}
+
+export async function archiveEmployeeAsoRecord(params: {
+  employeeId?: string;
+  username?: string;
+  employeeName?: string;
+  asoId?: string;
+  contractName?: string;
+  unitArea?: string;
+  examType?: string;
+  validityDate?: string;
+  actorName?: string;
+}): Promise<{
+  handledByServer: boolean;
+  asoContracts?: any[] | null;
+  asoValidity?: string;
+}> {
+  const targetEmployeeKey = String(params.employeeId || params.username || 'unknown').trim();
+  try {
+    const headers = await corporateFileAuthHeaders();
+    const response = await fetch(`/api/internal/employees/${encodeURIComponent(targetEmployeeKey)}/archive-aso`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asoId: params.asoId || '',
+        username: params.username || '',
+        employeeName: params.employeeName || '',
+        contractName: params.contractName || '',
+        unitArea: params.unitArea || '',
+        examType: params.examType || '',
+        validityDate: params.validityDate || '',
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload?.success === true) {
+      return {
+        handledByServer: true,
+        asoContracts: payload.asoContracts ?? null,
+        asoValidity: payload.asoValidity,
+      };
+    }
+    if (response.status === 403) {
+      throw new Error('Seu perfil não possui permissão para arquivar este ASO.');
+    }
+  } catch (err: any) {
+    if (err?.message?.includes('permissão')) throw err;
+    console.warn('Server archive-aso fallback to client:', err);
+  }
+
+  // Fallback client-side soft-archive in employeeAsos if applicable
+  if (params.asoId) {
+    try {
+      const nowIso = new Date().toISOString();
+      await updateDoc(doc(db, 'employeeAsos', params.asoId), {
+        isDeleted: true,
+        deletedAt: nowIso,
+        deletedBy: params.actorName || 'Administrador',
+        updatedAt: nowIso,
+      });
+    } catch {
+      // Document may live only inside portalUsers.asoContracts
+    }
+  }
+
+  return { handledByServer: false };
 }
 
 // 9. Employee Trainings

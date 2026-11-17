@@ -3677,9 +3677,40 @@ Status atual: ${e.status}.`,
 
     // 1. ASO, CNH, REGISTRO PROFISSIONAL & ANIVERSÁRIOS de internalUsers
     (internalUsers || []).forEach((u: any) => {
-      // 1a. ASO por contrato / geral
-      if (u.asoContracts && u.asoContracts.length > 0) {
-        u.asoContracts.forEach((asoItem: any) => {
+      // 1a. ASO por contrato / geral (ignora registros arquivados com isDeleted === true)
+      const buildKey = (item: any) =>
+        `${String(item?.contractName || "").trim().toLowerCase()}|${String(item?.unitArea || "").trim().toLowerCase()}|${String(item?.examType || "").trim().toLowerCase()}|${String(item?.validityDate || "").trim()}`;
+      const userCollectionAsos = (employeeAsos || []).filter(
+        (a: any) =>
+          a &&
+          (a.employeeId === u.id ||
+            a.employeeId === u.username ||
+            (u.name && String(a.employeeName || "").trim().toLowerCase() === String(u.name).trim().toLowerCase())),
+      );
+      const deletedIds = new Set<string>();
+      const deletedKeys = new Set<string>();
+      for (const item of [...(u.asoContracts || []), ...userCollectionAsos]) {
+        if (item?.isDeleted === true) {
+          if (item.id) deletedIds.add(String(item.id).trim());
+          const k = buildKey(item);
+          if (k) deletedKeys.add(k);
+        }
+      }
+      const seenIds = new Set<string>();
+      const seenKeys = new Set<string>();
+      const activeAsos = [...userCollectionAsos, ...(u.asoContracts || [])].filter((item: any) => {
+        if (!item || item.isDeleted === true) return false;
+        const idStr = String(item.id || "").trim();
+        const k = buildKey(item);
+        if (idStr && (deletedIds.has(idStr) || seenIds.has(idStr))) return false;
+        if (k && (deletedKeys.has(k) || seenKeys.has(k))) return false;
+        if (idStr) seenIds.add(idStr);
+        if (k) seenKeys.add(k);
+        return true;
+      });
+
+      if (activeAsos.length > 0) {
+        activeAsos.forEach((asoItem: any) => {
           if (asoItem.validityDate) {
             const valDate = new Date(
               asoItem.validityDate +
@@ -3705,7 +3736,7 @@ Status atual: ${e.status}.`,
             }
           }
         });
-      } else if (u.asoValidity) {
+      } else if (u.asoValidity && !(u.asoContracts && u.asoContracts.length > 0)) {
         const valDate = new Date(
           u.asoValidity + (u.asoValidity.includes("T") ? "" : "T00:00:00"),
         );

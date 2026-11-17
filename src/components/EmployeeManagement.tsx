@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { PortalUser, Dependent, AuditLogEntry, AsoContractItem, addEmployeeTrainingDoc,
   addEmployeeAsoDoc,
-  deleteEmployeeAsoDoc, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument,
+  deleteEmployeeAsoDoc, archiveEmployeeAsoRecord, deleteEmployeeTrainingDoc, getEmployeeDocuments, addEmployeeDocument, deleteEmployeeDocument, EmployeeDocument,
   uploadCorporateFile, uploadCorporateDataUrl, openCorporateFile, downloadCorporateFile, uploadEmployeePhotoToStorage } from '../lib/firebase';
 import { maskCPF, maskPhone, maskCEP } from '../utils/masks';
 import { compressImageToWebResolution } from '../lib/imageCompressor';
@@ -89,6 +89,86 @@ export default function EmployeeManagement({
   const [newAsoClinicDoctor, setNewAsoClinicDoctor] = useState('');
   const [newAsoNotes, setNewAsoNotes] = useState('');
   const [newAsoDocFile, setNewAsoDocFile] = useState<File | null>(null);
+  const [locallyArchivedAsoKeys, setLocallyArchivedAsoKeys] = useState<string[]>([]);
+
+  const buildAsoCompositeKey = (item: any): string => {
+    if (!item || typeof item !== 'object') return '';
+    const c = String(item.contractName || '').trim().toLowerCase();
+    const u = String(item.unitArea || '').trim().toLowerCase();
+    const t = String(item.examType || '').trim().toLowerCase();
+    const v = String(item.validityDate || '').trim();
+    if (!c && !v) return '';
+    return `${c}|${u}|${t}|${v}`;
+  };
+
+  const matchesTargetAsoItem = (item: any, target: any): boolean => {
+    if (!item || !target) return false;
+    const itemId = String(item.id || '').trim();
+    const targetId = String(target.id || '').trim();
+    if (itemId && targetId && itemId === targetId) return true;
+    const itemKey = buildAsoCompositeKey(item);
+    const targetKey = buildAsoCompositeKey(target);
+    return Boolean(itemKey && targetKey && itemKey === targetKey);
+  };
+
+  const getMergedActiveAsoRecords = (
+    legacyContracts: any[] | undefined,
+    collectionAsos: any[] | undefined,
+    empIds: (string | undefined)[],
+    empName?: string,
+  ): any[] => {
+    const validIds = new Set(
+      empIds.map((v) => String(v || '').trim()).filter(Boolean)
+    );
+    const normalizedEmpName = String(empName || '').trim().toLowerCase();
+
+    const matchingCollectionAsos = (collectionAsos || []).filter((a: any) => {
+      if (!a) return false;
+      const aEmpId = String(a.employeeId || '').trim();
+      const aEmpName = String(a.employeeName || '').trim().toLowerCase();
+      return (aEmpId && validIds.has(aEmpId)) || (normalizedEmpName && aEmpName === normalizedEmpName);
+    });
+
+    const deletedIds = new Set<string>(locallyArchivedAsoKeys);
+    const deletedCompKeys = new Set<string>(locallyArchivedAsoKeys);
+
+    for (const item of [...(legacyContracts || []), ...matchingCollectionAsos]) {
+      if (item?.isDeleted === true) {
+        const idStr = String(item.id || '').trim();
+        if (idStr) deletedIds.add(idStr);
+        const cKey = buildAsoCompositeKey(item);
+        if (cKey) deletedCompKeys.add(cKey);
+      }
+    }
+
+    const combined = [
+      ...matchingCollectionAsos,
+      ...(legacyContracts || []),
+    ].filter((item: any) => {
+      if (!item || item.isDeleted === true) return false;
+      const idStr = String(item.id || '').trim();
+      if (idStr && deletedIds.has(idStr)) return false;
+      const cKey = buildAsoCompositeKey(item);
+      if (cKey && deletedCompKeys.has(cKey)) return false;
+      return true;
+    });
+
+    const seenIds = new Set<string>();
+    const seenCompKeys = new Set<string>();
+    const deduplicated: any[] = [];
+
+    for (const item of combined) {
+      const idStr = String(item.id || '').trim();
+      const cKey = buildAsoCompositeKey(item);
+      if (idStr && seenIds.has(idStr)) continue;
+      if (cKey && seenCompKeys.has(cKey)) continue;
+      if (idStr) seenIds.add(idStr);
+      if (cKey) seenCompKeys.add(cKey);
+      deduplicated.push(item);
+    }
+
+    return deduplicated;
+  };
 
   // NR Training launch form state
   const [newNrTrainingId, setNewNrTrainingId] = useState('');
@@ -460,33 +540,91 @@ export default function EmployeeManagement({
     }
   };
 
-    const handleRemoveAsoContract = async (asoId: string) => {
+    const handleRemoveAsoContract = async (targetAsoOrId: any) => {
     const authorized = await confirmAdministratorPassword('o arquivamento deste ASO');
     if (!authorized) return;
+
+    const targetAso =
+      typeof targetAsoOrId === 'object' && targetAsoOrId !== null
+        ? targetAsoOrId
+        : { id: String(targetAsoOrId || '') };
+    const asoId = String(targetAso?.id || '').trim();
+    const compKey = buildAsoCompositeKey(targetAso);
 
     try {
       const now = new Date().toISOString();
       const actor = currentUser?.name || currentUser?.username || 'Administrador';
+      const empId = selectedUser?.id || formData.id || formData.username || selectedUser?.username;
+      const empUsername = selectedUser?.username || formData.username;
+      const empName = selectedUser?.name || formData.name;
 
-      if (asoId.startsWith('easo_')) {
-        // Registros novos vivem em employeeAsos e são arquivados pelo backend.
-        await deleteEmployeeAsoDoc(asoId);
-      } else if (selectedUser && onUpdateInternalUser) {
-        // Registros legados ainda embutidos no portalUsers nunca são removidos do
-        // array: apenas marcados como arquivados para preservar o histórico.
-        const archivedLegacy = (formData.asoContracts || []).map((item: any) =>
-          item.id === asoId
-            ? { ...item, isDeleted: true, deletedAt: now, deletedBy: actor }
-            : item
-        );
-        onUpdateInternalUser(selectedUser.id, { asoContracts: archivedLegacy });
+      const archiveResult = await archiveEmployeeAsoRecord({
+        employeeId: empId,
+        username: empUsername,
+        employeeName: empName,
+        asoId,
+        contractName: targetAso?.contractName,
+        unitArea: targetAso?.unitArea,
+        examType: targetAso?.examType,
+        validityDate: targetAso?.validityDate,
+        actorName: actor,
+      });
+
+      const currentContracts = Array.isArray(formData.asoContracts)
+        ? formData.asoContracts
+        : Array.isArray(selectedUser?.asoContracts)
+          ? selectedUser.asoContracts
+          : [];
+
+      const archivedLegacy = currentContracts.map((item: any, idx: number) =>
+        matchesTargetAsoItem(item, targetAso)
+          ? {
+              ...item,
+              id: item.id || asoId || `aso_legacy_${idx}`,
+              isDeleted: true,
+              deletedAt: now,
+              deletedBy: actor,
+            }
+          : item
+      );
+
+      const remainingActive = getMergedActiveAsoRecords(
+        archivedLegacy,
+        employeeAsos,
+        [selectedUser?.id, formData.id, selectedUser?.username, formData.username],
+        empName,
+      ).filter((item: any) => !matchesTargetAsoItem(item, targetAso));
+
+      const nextValidity =
+        remainingActive.length > 0
+          ? String(remainingActive[0]?.validityDate || '')
+          : '';
+
+      if (selectedUser && onUpdateInternalUser) {
+        await onUpdateInternalUser(selectedUser.id, {
+          asoContracts: archiveResult.asoContracts || archivedLegacy,
+          asoValidity: archiveResult.asoValidity !== undefined ? archiveResult.asoValidity : nextValidity,
+        });
       }
 
-      const visibleList = (formData.asoContracts || []).filter((item: any) => item.id !== asoId && item.isDeleted !== true);
+      setLocallyArchivedAsoKeys((prev) =>
+        Array.from(new Set([...prev, ...(asoId ? [asoId] : []), ...(compKey ? [compKey] : [])]))
+      );
+
+      setSelectedUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              asoContracts: archiveResult.asoContracts || archivedLegacy,
+              asoValidity: archiveResult.asoValidity !== undefined ? archiveResult.asoValidity : nextValidity,
+            }
+          : prev
+      );
+
       setFormData((prev: any) => ({
         ...prev,
-        asoContracts: visibleList,
-        asoValidity: visibleList.length > 0 ? (visibleList[0]?.validityDate || '') : ''
+        asoContracts: archiveResult.asoContracts || archivedLegacy,
+        asoValidity: archiveResult.asoValidity !== undefined ? archiveResult.asoValidity : nextValidity,
       }));
     } catch (err) {
       console.error("Erro ao arquivar ASO:", err);
@@ -512,14 +650,20 @@ export default function EmployeeManagement({
 
     internalUsers.forEach((u) => {
       // 1. ASO (Suporta Múltiplos Contratos e Áreas)
-      if (u.asoContracts && u.asoContracts.some((asoItem: any) => asoItem.isDeleted !== true)) {
-        u.asoContracts.filter((asoItem: any) => asoItem.isDeleted !== true).forEach((asoItem) => {
+      const activeUserAsos = getMergedActiveAsoRecords(
+        u.asoContracts,
+        employeeAsos,
+        [u.id, u.username],
+        u.name,
+      );
+      if (activeUserAsos.length > 0) {
+        activeUserAsos.forEach((asoItem) => {
           if (asoItem.validityDate) {
             const valDate = new Date(asoItem.validityDate);
             const diffDays = Math.ceil((valDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
             if (diffDays <= 30) {
               alerts.push({
-                id: `aso_${u.id}_${asoItem.id}`,
+                id: `aso_${u.id}_${asoItem.id || buildAsoCompositeKey(asoItem)}`,
                 employeeName: u.name,
                 employeeRole: u.role,
                 type: 'ASO',
@@ -531,7 +675,7 @@ export default function EmployeeManagement({
             }
           }
         });
-      } else if (u.asoValidity) {
+      } else if (u.asoValidity && !(u.asoContracts && u.asoContracts.length > 0)) {
         const valDate = new Date(u.asoValidity);
         const diffDays = Math.ceil((valDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
         if (diffDays <= 30) {
@@ -1890,7 +2034,12 @@ export default function EmployeeManagement({
                           </div>
                         </div>
                         <span className="text-[11px] font-mono font-bold bg-royal-blue text-white px-2.5 py-1 rounded-full">
-                          {((employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username)).length + (formData.asoContracts || []).filter((a: any) => a.isDeleted !== true).length)} ASO(s) Registrado(s)
+                          {getMergedActiveAsoRecords(
+                            formData.asoContracts,
+                            employeeAsos,
+                            [formData.id, formData.username, selectedUser?.id, selectedUser?.username],
+                            formData.name || selectedUser?.name,
+                          ).length} ASO(s) Registrado(s)
                         </span>
                       </div>
 
@@ -2033,10 +2182,12 @@ export default function EmployeeManagement({
 
                       {/* LISTA DE ASOs CADASTRADOS POR CONTRATO */}
                       {(() => {
-                        const asoRecords = [
-                          ...(formData.asoContracts || []).filter((a: any) => a.isDeleted !== true),
-                          ...(employeeAsos || []).filter(a => a.employeeId === (formData.id || formData.username || selectedUser?.id || selectedUser?.username))
-                        ].filter((v,i,a) => a.findIndex(t=>(t.id === v.id))===i);
+                        const asoRecords = getMergedActiveAsoRecords(
+                          formData.asoContracts,
+                          employeeAsos,
+                          [formData.id, formData.username, selectedUser?.id, selectedUser?.username],
+                          formData.name || selectedUser?.name,
+                        );
                         
                         return asoRecords.length > 0 && (
                         <div className="space-y-2">
@@ -2132,7 +2283,7 @@ export default function EmployeeManagement({
                                       {isUserAdmin && (
                                         <button
                                           type="button"
-                                          onClick={() => handleRemoveAsoContract(asoItem.id)}
+                                          onClick={() => handleRemoveAsoContract(asoItem)}
                                           className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
                                           title="Arquivar ASO"
                                         >
@@ -3305,10 +3456,12 @@ export default function EmployeeManagement({
 
                 {/* TABELA DE ASOs POR CONTRATO */}
                 {(() => {
-                  const asoRecords = [
-                    ...(selectedUser.asoContracts || []).filter((a: any) => a.isDeleted !== true),
-                    ...(employeeAsos || []).filter(a => a.employeeId === selectedUser?.id || a.employeeId === selectedUser?.username)
-                  ].filter((v,i,a) => a.findIndex(t=>(t.id === v.id))===i);
+                  const asoRecords = getMergedActiveAsoRecords(
+                    selectedUser.asoContracts,
+                    employeeAsos,
+                    [selectedUser?.id, selectedUser?.username],
+                    selectedUser?.name,
+                  );
                   
                   return asoRecords.length > 0 && (
                   <div className="pt-2 border-t border-slate-200">
