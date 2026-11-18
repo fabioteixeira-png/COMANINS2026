@@ -55,6 +55,7 @@ const COLUMNS = [
   { id: 'unidade', label: 'Unidade', minW: '120px' },
   { id: 'cliente', label: 'Cliente', minW: '150px' },
   { id: 'inspecaoCampo', label: 'Inspeção de Campo', minW: '165px' },
+  { id: 'omInspecao', label: 'OM Inspeção', minW: '125px' },
   { id: 'dataInspecao', label: 'Data Inspeção', minW: '130px' },
 ] as const;
 
@@ -144,6 +145,7 @@ const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   observacao: false,
   unidade: false,
   inspecaoCampo: true,
+  omInspecao: true,
   dataInspecao: true,
 };
 
@@ -167,6 +169,7 @@ const DEFAULT_FILTERS: Record<string, string> = {
   observacao: '',
   unidade: '',
   inspecaoCampo: '',
+  omInspecao: '',
   dataInspecao: '',
   inspectionStatusFilter: '',
   inspectionDateFrom: '',
@@ -486,7 +489,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
         condicaoFisica: existing.condicaoFisica === 'NOK' ? 'NOK' : 'OK',
         plaquetaInterna: existing.plaquetaInterna === 'NOK' ? 'NOK' : 'OK',
         plaquetaExterna: existing.plaquetaExterna === 'NOK' ? 'NOK' : 'OK',
-        ordemServico: existing.ordemServico || record.ordemServico || '',
+        ordemServico: existing.ordemServico ?? '',
         status: existing.status === 'REPROVADO' ? 'REPROVADO' : 'APROVADO',
         observacao: existing.observacao || '',
         responsavelInspecao: existing.responsavelInspecao || record.technician || currentUser?.username || '',
@@ -498,7 +501,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
         condicaoFisica: 'OK',
         plaquetaInterna: 'OK',
         plaquetaExterna: 'OK',
-        ordemServico: record.ordemServico || '',
+        ordemServico: '',
         status: 'APROVADO',
         observacao: '',
         responsavelInspecao: record.technician || currentUser?.username || '',
@@ -1787,9 +1790,14 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
       'Unidade': record.unidade || '',
       'Cliente': record.cliente || '',
       'Nº Inspeção de Campo': record.fieldInspection?.inspectionNumber || '',
+      'OM / OS Inspeção': record.fieldInspection?.ordemServico || '',
       'Status Inspeção': record.fieldInspection?.status || 'PENDENTE',
       'Data Inspeção': formatInspectionDateBr(record.fieldInspection?.dataInspecao) || '',
       'Responsável Inspeção': record.fieldInspection?.responsavelInspecao || '',
+      'Condição Física (Inspeção)': record.fieldInspection?.condicaoFisica || '',
+      'Plaqueta Interna (Inspeção)': record.fieldInspection?.plaquetaInterna || '',
+      'Plaqueta Externa (Inspeção)': record.fieldInspection?.plaquetaExterna || '',
+      'Observação da Inspeção': record.fieldInspection?.observacao || '',
     })));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'ServicoCampo');
@@ -1817,6 +1825,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
           certificate: String(record.certificate || ''),
           tipoServico: String(record.tipoServico || ''),
           ordemServico: String(record.ordemServico || ''),
+          ordemServicoInspecao: String(record.fieldInspection?.ordemServico || ''),
           observacao: String(record.observacao || ''),
           unidade: String(record.unidade || ''),
         })),
@@ -2082,8 +2091,10 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
           rawValue = formatCalibrationDate(linkedInstrument?.lastCalibrationDate || record.dataCalibracao || '');
         } else if (column.id === 'inspecaoCampo') {
           rawValue = record.fieldInspection
-            ? `${record.fieldInspection.inspectionNumber} ${record.fieldInspection.status} realizada preenchida sim ${record.fieldInspection.responsavelInspecao || ''}`
+            ? `${record.fieldInspection.inspectionNumber} ${record.fieldInspection.status} realizada preenchida sim ${record.fieldInspection.responsavelInspecao || ''} ${record.fieldInspection.ordemServico || ''}`
             : 'pendente sem inspecao nao';
+        } else if (column.id === 'omInspecao') {
+          rawValue = record.fieldInspection?.ordemServico || '';
         } else if (column.id === 'dataInspecao') {
           const brDate = formatInspectionDateBr(record.fieldInspection?.dataInspecao);
           const isoDate = normalizeInspectionDateToIso(record.fieldInspection?.dataInspecao);
@@ -2168,6 +2179,12 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
         if (sortConfig.key === 'inspecaoCampo') {
           const valA = String(a.fieldInspection?.inspectionNumber || '').toLocaleLowerCase('pt-BR');
           const valB = String(b.fieldInspection?.inspectionNumber || '').toLocaleLowerCase('pt-BR');
+          const comparison = valA.localeCompare(valB, 'pt-BR', { numeric: true, sensitivity: 'base' });
+          return sortConfig.direction === 'asc' ? comparison : -comparison;
+        }
+        if (sortConfig.key === 'omInspecao') {
+          const valA = String(a.fieldInspection?.ordemServico || '').toLocaleLowerCase('pt-BR');
+          const valB = String(b.fieldInspection?.ordemServico || '').toLocaleLowerCase('pt-BR');
           const comparison = valA.localeCompare(valB, 'pt-BR', { numeric: true, sensitivity: 'base' });
           return sortConfig.direction === 'asc' ? comparison : -comparison;
         }
@@ -2675,7 +2692,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
                 }`}
               />
             </div>
-            {(filters.inspectionStatusFilter || filters.inspectionDateFrom || filters.inspectionDateTo || filters.inspecaoCampo || filters.dataInspecao) && (
+            {(filters.inspectionStatusFilter || filters.inspectionDateFrom || filters.inspectionDateTo || filters.inspecaoCampo || filters.omInspecao || filters.dataInspecao) && (
               <button
                 type="button"
                 onClick={() => {
@@ -2683,6 +2700,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
                   handleFilterChange('inspectionDateFrom', '');
                   handleFilterChange('inspectionDateTo', '');
                   handleFilterChange('inspecaoCampo', '');
+                  handleFilterChange('omInspecao', '');
                   handleFilterChange('dataInspecao', '');
                 }}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold transition-colors cursor-pointer"
@@ -2817,6 +2835,24 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
                               <span className="inline-flex items-center rounded bg-slate-100 border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
                                 Pendente
                               </span>
+                            )}
+                          </td>
+                        );
+                      }
+
+                      if (col.id === 'omInspecao') {
+                        const inspOm = String(record.fieldInspection?.ordemServico || '').trim();
+                        return (
+                          <td
+                            key={col.id}
+                            className="px-4 py-3 whitespace-nowrap font-mono text-xs cursor-pointer hover:bg-blue-50/60 transition-colors"
+                            onClick={() => void handleOpenInspectionModal(record)}
+                            title={inspOm ? `OM da Inspeção: ${inspOm}` : 'Clique para informar a OM da Inspeção de Campo'}
+                          >
+                            {inspOm ? (
+                              <span className="font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">{inspOm}</span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
                             )}
                           </td>
                         );
@@ -3127,7 +3163,7 @@ export default function FieldService({ canEdit = false, canClearData = false, cu
 
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao' && c.id !== 'inspecaoCampo' && c.id !== 'dataInspecao').map(col => (
+                {COLUMNS.filter(c => c.id !== 'observacao' && c.id !== 'dataCalibracao' && c.id !== 'inspecaoCampo' && c.id !== 'omInspecao' && c.id !== 'dataInspecao').map(col => (
                   <div key={col.id}>
                     <label className="block text-xs font-bold text-slate-700 mb-1">{col.label}</label>
                     {col.id === 'cliente' ? (

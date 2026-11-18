@@ -11,6 +11,7 @@ export interface FieldServiceA4Row {
   certificate: string;
   tipoServico: string;
   ordemServico: string;
+  ordemServicoInspecao?: string;
   observacao: string;
   unidade: string;
 }
@@ -33,22 +34,24 @@ const cell = (ref: string, value: unknown, style: number): string => (
 
 const A4_COLUMNS = [
   { header: 'TAG', key: 'tag', width: 13 },
-  { header: 'EQUIPAMENTO', key: 'equipamento', width: 20 },
-  { header: 'LOCALIZAÇÃO', key: 'localizacao', width: 15 },
-  { header: 'ÁREA', key: 'area', width: 9 },
-  { header: 'RANGE', key: 'range', width: 12 },
-  { header: 'OPERAÇÃO', key: 'operacao', width: 11 },
-  { header: 'UM', key: 'unidadeMedida', width: 7 },
-  { header: 'CERTIFICADO', key: 'certificate', width: 12 },
-  { header: 'CERT. NOV', key: 'certNovo', width: 11 },
-  { header: 'DATA MANUT', key: 'dataManut', width: 11 },
-  { header: 'TIPO SERV', key: 'tipoServico', width: 11 },
+  { header: 'EQUIPAMENTO', key: 'equipamento', width: 19 },
+  { header: 'LOCALIZAÇÃO', key: 'localizacao', width: 14 },
+  { header: 'ÁREA', key: 'area', width: 8 },
+  { header: 'RANGE', key: 'range', width: 11 },
+  { header: 'OPERAÇÃO', key: 'operacao', width: 10 },
+  { header: 'UM', key: 'unidadeMedida', width: 6 },
+  { header: 'CERTIFICADO', key: 'certificate', width: 11 },
+  { header: 'CERT. NOV', key: 'certNovo', width: 10 },
+  { header: 'DATA MANUT', key: 'dataManut', width: 10 },
+  { header: 'TIPO SERV', key: 'tipoServico', width: 10 },
   { header: 'OM', key: 'ordemServico', width: 10 },
-  { header: 'OBSERVAÇÃO', key: 'observacao', width: 20 },
-  { header: 'UNIDADE', key: 'unidade', width: 11 },
+  { header: 'OM INSP.', key: 'ordemServicoInspecao', width: 10 },
+  { header: 'OBSERVAÇÃO', key: 'observacao', width: 18 },
+  { header: 'UNIDADE', key: 'unidade', width: 10 },
 ] as const;
 
 const colLetters = A4_COLUMNS.map((_, index) => String.fromCharCode(65 + index));
+const lastColLetter = colLetters[colLetters.length - 1];
 
 const contentTypesXml = `${XML_HEADER}
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -176,11 +179,12 @@ export const buildFieldServiceA4Workbook = (
       dataManut: '',
       tipoServico: row.tipoServico,
       ordemServico: row.ordemServico,
+      ordemServicoInspecao: row.ordemServicoInspecao || '',
       observacao: row.observacao,
       unidade: row.unidade,
     };
     const cells = A4_COLUMNS.map((column, index) => {
-      const centered = ['area', 'range', 'operacao', 'unidadeMedida', 'certificate', 'certNovo', 'dataManut', 'tipoServico', 'ordemServico', 'unidade'].includes(column.key);
+      const centered = ['area', 'range', 'operacao', 'unidadeMedida', 'certificate', 'certNovo', 'dataManut', 'tipoServico', 'ordemServico', 'ordemServicoInspecao', 'unidade'].includes(column.key);
       return cell(`${colLetters[index]}${excelRow}`, values[column.key], centered ? 4 : 3);
     }).join('');
     return `<row r="${excelRow}" ht="22" customHeight="1">${cells}</row>`;
@@ -190,13 +194,13 @@ export const buildFieldServiceA4Workbook = (
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
-  <dimension ref="A1:N${lastRow}"/>
+  <dimension ref="A1:${lastColLetter}${lastRow}"/>
   <sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="15"/>
   <cols>${columnsXml}</cols>
   <sheetData>${titleRowsXml}${headerRowXml}${dataRowsXml}</sheetData>
-  <autoFilter ref="A4:N${lastRow}"/>
-  <mergeCells count="1"><mergeCell ref="D1:N3"/></mergeCells>
+  <autoFilter ref="A4:${lastColLetter}${lastRow}"/>
+  <mergeCells count="1"><mergeCell ref="D1:${lastColLetter}3"/></mergeCells>
   <printOptions horizontalCentered="0" verticalCentered="0"/>
   <pageMargins left="0.15" right="0.15" top="0.20" bottom="0.20" header="0.10" footer="0.10"/>
   <pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0" horizontalDpi="300" verticalDpi="300"/>
@@ -209,7 +213,7 @@ export const buildFieldServiceA4Workbook = (
   <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000"/></bookViews>
   <sheets><sheet name="Lista de Serviços" sheetId="1" r:id="rId1"/></sheets>
   <definedNames>
-    <definedName name="_xlnm.Print_Area" localSheetId="0">'Lista de Serviços'!$A$1:$N$${lastRow}</definedName>
+    <definedName name="_xlnm.Print_Area" localSheetId="0">'Lista de Serviços'!$A$1:$${lastColLetter}$${lastRow}</definedName>
     <definedName name="_xlnm.Print_Titles" localSheetId="0">'Lista de Serviços'!$4:$4</definedName>
   </definedNames>
   <calcPr calcId="191029"/>
