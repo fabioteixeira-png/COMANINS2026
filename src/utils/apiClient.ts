@@ -67,10 +67,11 @@ export interface FetchOptions extends RequestInit {
   ttlMs?: number; // Cache TTL in ms (0 = disable cache)
   maxRetries?: number; // Max retries for 429
   initialRetryDelayMs?: number; // Initial exponential backoff delay in ms
+  timeoutMs?: number; // Request timeout in ms (default 45000)
 }
 
 /**
- * Enhanced fetch wrapper with rate limiting, deduplication, caching, and exponential backoff.
+ * Enhanced fetch wrapper with rate limiting, deduplication, caching, timeout, and exponential backoff.
  */
 export async function safeFetch<T = any>(
   url: string,
@@ -80,9 +81,11 @@ export async function safeFetch<T = any>(
     ttlMs = 0,
     maxRetries = 3,
     initialRetryDelayMs = 1000,
+    timeoutMs = 45_000,
     method = 'GET',
     body,
     headers,
+    signal: externalSignal,
     ...restInit
   } = options;
 
@@ -102,13 +105,29 @@ export async function safeFetch<T = any>(
     return pendingRequests.get(requestKey) as Promise<T>;
   }
 
-  // 3. Define execution logic with Exponential Backoff Retry for 429
+  // 3. Define execution logic with timeout, 401 refresh, and Exponential Backoff Retry for 429
   const executeFetch = async (): Promise<T> => {
     return limiter.run(async () => {
       let attempt = 0;
       let delay = initialRetryDelayMs;
+      let didRefreshToken = false;
 
       while (attempt <= maxRetries) {
+        const controller = new AbortController();
+        let timedOut = false;
+        const timeoutId =
+          timeoutMs > 0
+            ? setTimeout(() => {
+                timedOut = true;
+                controller.abort();
+              }, timeoutMs)
+            : null;
+        const onExternalAbort = () => controller.abort();
+        if (externalSignal) {
+          if (externalSignal.aborted) controller.abort();
+          else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+        }
+
         try {
           const requestHeaders = new Headers(headers || {});
           // Do not add Content-Type to bodyless GET requests. Adding
@@ -121,7 +140,7 @@ export async function safeFetch<T = any>(
           // Attach Firebase ID token only to this application's API routes.
           // Never forward COMANINS credentials to third-party URLs (e.g. api.ipify.org).
           if (url.startsWith('/api/') && auth.currentUser && !requestHeaders.has('Authorization')) {
-            const token = await auth.currentUser.getIdToken();
+            const token = await auth.currentUser.getIdToken(didRefreshToken);
             requestHeaders.set('Authorization', `Bearer ${token}`);
           }
 
@@ -129,8 +148,16 @@ export async function safeFetch<T = any>(
             method,
             headers: requestHeaders,
             body,
+            signal: controller.signal,
             ...restInit,
           });
+
+          // If a long-lived session woke from idle/sleep with a stale token,
+          // refresh the Firebase ID token once and retry immediately.
+          if (res.status === 401 && url.startsWith('/api/') && auth.currentUser && !didRefreshToken) {
+            didRefreshToken = true;
+            continue;
+          }
 
           // Check for Rate Limit (HTTP 429)
           if (res.status === 429) {
@@ -169,6 +196,10 @@ export async function safeFetch<T = any>(
 
           return data as T;
         } catch (err: any) {
+          if (timedOut || err?.name === 'AbortError') {
+            throw new Error('REQUEST_TIMEOUT: O servidor demorou mais do que o esperado para responder.');
+          }
+
           if (
             err.message === 'RATE_EXCEEDED' ||
             String(err).includes('429') ||
@@ -197,6 +228,9 @@ export async function safeFetch<T = any>(
           attempt++;
           await new Promise((resolve) => setTimeout(resolve, delay));
           delay *= 2;
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+          if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
         }
       }
 

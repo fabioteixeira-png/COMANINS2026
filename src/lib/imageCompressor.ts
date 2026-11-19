@@ -14,6 +14,7 @@ export async function compressImageToWebResolution(
   preserveTransparency = false
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     let objectUrl: string | null = null;
     try {
       if (typeof URL !== 'undefined' && URL.createObjectURL) {
@@ -31,8 +32,29 @@ export async function compressImageToWebResolution(
         try {
           URL.revokeObjectURL(objectUrl);
         } catch {}
+        objectUrl = null;
       }
     };
+
+    const finishResolve = (value: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      cleanUp();
+      resolve(value);
+    };
+
+    const finishReject = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      cleanUp();
+      reject(err);
+    };
+
+    const timeoutId = setTimeout(() => {
+      finishReject(new Error('Tempo limite excedido ao processar a foto no navegador. Tente selecionar a imagem novamente (JPEG/PNG).'));
+    }, 20_000);
 
     const processImageOnCanvas = (targetImg: HTMLImageElement): string => {
       let width = targetImg.naturalWidth || targetImg.width || 800;
@@ -94,11 +116,9 @@ export async function compressImageToWebResolution(
     img.onload = () => {
       try {
         const result = processImageOnCanvas(img);
-        cleanUp();
-        resolve(result);
+        finishResolve(result);
       } catch (err) {
-        cleanUp();
-        reject(err);
+        finishReject(err);
       }
     };
 
@@ -112,25 +132,25 @@ export async function compressImageToWebResolution(
         fallbackImg.onload = () => {
           try {
             const result = processImageOnCanvas(fallbackImg);
-            resolve(result);
+            finishResolve(result);
           } catch {
             if (rawDataUrl.length <= 500_000) {
-              resolve(rawDataUrl);
+              finishResolve(rawDataUrl);
             } else {
-              reject(new Error('Formato de imagem não suportado pelo navegador do celular (ex.: HEIC de alta resolução). Tire a foto em JPEG/PNG ou envie captura de tela.'));
+              finishReject(new Error('Formato de imagem não suportado pelo navegador do celular (ex.: HEIC de alta resolução). Tire a foto em JPEG/PNG ou envie captura de tela.'));
             }
           }
         };
         fallbackImg.onerror = () => {
           if (rawDataUrl.length <= 500_000) {
-            resolve(rawDataUrl);
+            finishResolve(rawDataUrl);
           } else {
-            reject(new Error('Formato de imagem não suportado pelo navegador do celular (ex.: HEIC de alta resolução). Tire a foto em JPEG/PNG ou envie captura de tela.'));
+            finishReject(new Error('Formato de imagem não suportado pelo navegador do celular (ex.: HEIC de alta resolução). Tire a foto em JPEG/PNG ou envie captura de tela.'));
           }
         };
         fallbackImg.src = rawDataUrl;
       };
-      reader.onerror = (err) => reject(err);
+      reader.onerror = (err) => finishReject(err);
       reader.readAsDataURL(file);
     };
 
@@ -141,7 +161,7 @@ export async function compressImageToWebResolution(
       reader.onload = (e) => {
         img.src = e.target?.result as string;
       };
-      reader.onerror = (err) => reject(err);
+      reader.onerror = (err) => finishReject(err);
       reader.readAsDataURL(file);
     }
   });

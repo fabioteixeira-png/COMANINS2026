@@ -68,6 +68,7 @@ import {
   CertSequenceConfig,
   addInstrumentDoc,
   updateInstrumentDoc,
+  saveInstrumentPhotoDoc,
   recordInstrumentLabelPrinted,
   countInstrumentsForIntake,
   instrumentCertificateExists,
@@ -1584,6 +1585,7 @@ export default function InternalPortal({
   >("registration");
   const [isUploadingInstPhoto, setIsUploadingInstPhoto] =
     useState<boolean>(false);
+  const [photoUploadStage, setPhotoUploadStage] = useState<string>("");
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null);
   const [isCondicaoDropdownOpen, setIsCondicaoDropdownOpen] =
     useState<boolean>(false);
@@ -5846,6 +5848,7 @@ Status atual: ${e.status}.`,
 
     try {
       setIsUploadingInstPhoto(true);
+      setPhotoUploadStage("Otimizando imagem...");
       const firstFile = e.target.files[0];
       // Foto pós-laboratório precisa preservar texto pequeno da etiqueta e da escala.
       // 800 px era suficiente para armazenamento, mas pode destruir caracteres finos
@@ -5860,6 +5863,7 @@ Status atual: ${e.status}.`,
 
       let photoAiValidation: any = undefined;
       if (photoModalType === "calibrated") {
+        setPhotoUploadStage("Validando foto com IA...");
         const detectedPhotoInstType = detectInstrumentType(photoModalInstrument);
         const isScaleInstrument =
           detectedPhotoInstType === "manometro" ||
@@ -5869,12 +5873,17 @@ Status atual: ${e.status}.`,
           const validation = await safeFetch<any>("/api/validate-calibration-photo", {
             method: "POST",
             maxRetries: 1,
+            timeoutMs: 40_000,
             body: JSON.stringify({
               instrumentId: photoModalInstrument.id,
               instrumentType: detectedPhotoInstType,
               imageBase64: photoDataUrl,
             }),
           });
+          if (validation?.rateExceeded) {
+            alert("Não foi possível validar a Foto Após Laboratório com a IA. A imagem não foi salva.\n\nA cota temporária da IA foi atingida. Aguarde alguns instantes e tente novamente.");
+            return;
+          }
           if (!validation || validation.overallStatus !== "PASS") {
             const issues = Array.isArray(validation?.issues) && validation.issues.length
               ? `\n\n${validation.issues.map((item: string) => `• ${item}`).join("\n")}`
@@ -5893,18 +5902,22 @@ Status atual: ${e.status}.`,
           console.error("Erro na validação IA da foto pós-laboratório:", validationError);
           const rawMessage = String(validationError?.message || validationError || "");
           let detail = "Falha técnica ao comunicar com a IA do servidor.";
-          if (rawMessage.includes("AI_NOT_CONFIGURED") || rawMessage.includes("GEMINI_API_KEY")) {
+          if (rawMessage.includes("REQUEST_TIMEOUT") || rawMessage.includes("AI_TIMEOUT") || rawMessage.includes("504")) {
+            detail = "A validação visual por IA demorou mais que o tempo limite (instabilidade momentânea da API). Tente enviar a foto novamente em instantes.";
+          } else if (rawMessage.includes("AI_NOT_CONFIGURED") || rawMessage.includes("GEMINI_API_KEY")) {
             detail = "A IA não está configurada no servidor. É necessário configurar GEMINI_API_KEY no ambiente de produção e reiniciar o serviço.";
           } else if (rawMessage.includes("AI_AUTH_FAILED") || rawMessage.includes("401")) {
-            detail = "A chave Gemini configurada no servidor não foi aceita pelo Google.";
+            detail = "A chave Gemini configurada no servidor não foi aceita pelo Google ou a sessão expirou. Recarregue a página e tente novamente.";
           } else if (rawMessage.includes("AI_PERMISSION_DENIED") || rawMessage.includes("403")) {
             detail = "A chave/projeto Gemini não possui permissão para o modelo de visão configurado.";
           } else if (rawMessage.includes("AI_MODEL_UNAVAILABLE") || rawMessage.includes("404")) {
-            detail = "O modelo de visão configurado não está disponível para este projeto. O servidor deve utilizar GEMINI_VISION_MODEL=gemini-3.8-flash ou um modelo Flash habilitado para o projeto.";
+            detail = "O modelo de visão configurado não está disponível para este projeto. O servidor deve utilizar GEMINI_VISION_MODEL=gemini-2.5-flash ou outro modelo Flash habilitado.";
           } else if (rawMessage.includes("AI_RATE_LIMITED") || rawMessage.includes("429") || rawMessage.includes("RATE_EXCEEDED")) {
             detail = "A cota temporária da IA foi atingida. Aguarde alguns instantes e tente novamente.";
           } else if (rawMessage.includes("AI_INVALID_RESPONSE")) {
             detail = "A IA respondeu em formato inválido. Tente novamente; se persistir, revise o modelo configurado no servidor.";
+          } else if (rawMessage.includes("AI_NETWORK_ERROR")) {
+            detail = "Falha temporária de comunicação com a API do Gemini. Tente enviar novamente.";
           }
           alert(`Não foi possível validar a Foto Após Laboratório com a IA. A imagem não foi salva.\n\n${detail}`);
           return;
@@ -5919,6 +5932,7 @@ Status atual: ${e.status}.`,
         photoModalType === "registration"
           ? "photoRegistrationPath"
           : "photoCalibratedPath";
+      setPhotoUploadStage("Enviando foto ao servidor...");
       const uploadedPhoto = await uploadInstrumentPhotoToStorage(
         photoModalInstrument.id,
         photoModalType,
@@ -5946,13 +5960,8 @@ Status atual: ${e.status}.`,
         }
       }
 
-      await updateInstrumentDoc(photoModalInstrument.id, updatePayload);
-      if (updatePayload.status && onUpdateInstrumentStatus) {
-        await onUpdateInstrumentStatus(
-          photoModalInstrument.id,
-          updatePayload.status,
-        );
-      }
+      setPhotoUploadStage("Salvando no cadastro...");
+      await saveInstrumentPhotoDoc(photoModalInstrument.id, updatePayload);
 
       setPhotoModalInstrument((prev) =>
         prev
@@ -5964,6 +5973,7 @@ Status atual: ${e.status}.`,
       alert("Erro ao salvar foto do instrumento: " + (err?.message || "Tente novamente."));
     } finally {
       setIsUploadingInstPhoto(false);
+      setPhotoUploadStage("");
       e.target.value = "";
     }
   };

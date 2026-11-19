@@ -49,6 +49,28 @@ export const db = firebaseConfig.firestoreDatabaseId
   : getFirestore(app);
 
 export const storage = getStorage(app);
+// Cap Firebase Web SDK Storage retry windows (SDK default is 10 minutes = 600000ms)
+// so fallback uploads fail fast instead of spinning indefinitely in the UI.
+storage.maxUploadRetryTime = 20_000;
+storage.maxOperationRetryTime = 15_000;
+
+const withClientTimeout = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
 const refreshCurrentInternalClaims = async (): Promise<void> => {
   const user = auth.currentUser;
@@ -115,20 +137,42 @@ const uploadOperationalImageViaBackend = async (
 ): Promise<{ url: string; path: string }> => {
   const user = auth.currentUser;
   if (!user) throw new Error('Sessão expirada. Faça login novamente.');
-  const token = await user.getIdToken();
-  const response = await fetch('/api/internal/upload-operational-image', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ purpose, entityId, imageDataUrl, sequence }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data?.success !== true || !data?.url || !data?.path) {
-    throw new Error(data?.error || 'Não foi possível enviar a imagem ao Storage.');
-  }
-  return { url: String(data.url), path: String(data.path) };
+
+  const executeAttempt = async (forceRefreshToken: boolean): Promise<{ url: string; path: string }> => {
+    const token = await user.getIdToken(forceRefreshToken);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch('/api/internal/upload-operational-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ purpose, entityId, imageDataUrl, sequence }),
+        signal: controller.signal,
+      });
+      if (response.status === 401 && !forceRefreshToken) {
+        return await executeAttempt(true);
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.success !== true || !data?.url || !data?.path) {
+        const err: any = new Error(data?.error || 'Não foi possível enviar a imagem ao Storage.');
+        err.status = response.status;
+        throw err;
+      }
+      return { url: String(data.url), path: String(data.path) };
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Tempo limite excedido ao enviar a foto ao servidor. Verifique a conexão e tente novamente.');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  return executeAttempt(false);
 };
 
 export async function persistInlineImageToStorage(
@@ -1352,6 +1396,62 @@ export async function updateInstrumentDoc(id: string, updates: Partial<Instrumen
   if (existing) {
     mergeInstrumentIntoCache({ ...existing, ...cleaned, id } as Instrument);
     notifyInstrumentSubscribers();
+  }
+}
+
+export async function saveInstrumentPhotoDoc(
+  id: string,
+  updates: Partial<Instrument>,
+): Promise<void> {
+  try {
+    await withClientTimeout(
+      updateInstrumentDoc(id, updates),
+      15_000,
+      'FIRESTORE_CLIENT_TIMEOUT',
+    );
+    return;
+  } catch (clientError) {
+    console.warn('Direct saveInstrumentPhotoDoc failed or timed out; using authenticated backend fallback:', clientError);
+    const user = auth.currentUser;
+    if (!user) throw clientError;
+
+    const persistViaBackend = async (forceRefreshToken: boolean): Promise<Record<string, any>> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25_000);
+      try {
+        const response = await fetch(`/api/internal/instruments/${encodeURIComponent(id)}/photo`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${await user.getIdToken(forceRefreshToken)}`,
+          },
+          body: JSON.stringify(updates),
+          signal: controller.signal,
+        });
+        if (response.status === 401 && !forceRefreshToken) {
+          return await persistViaBackend(true);
+        }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.success !== true) {
+          throw new Error(data?.error || 'Não foi possível salvar o registro da foto no cadastro do instrumento.');
+        }
+        return (data.updates && typeof data.updates === 'object') ? data.updates : updates;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          throw new Error('Tempo limite excedido ao gravar a foto no cadastro. Tente novamente.');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+
+    const persistedUpdates = await persistViaBackend(false);
+    const existing = instrumentCache.get(id);
+    if (existing) {
+      mergeInstrumentIntoCache({ ...existing, ...persistedUpdates, id } as Instrument);
+      notifyInstrumentSubscribers();
+    }
   }
 }
 
@@ -2882,8 +2982,14 @@ export async function uploadIntakeDeliveryImage(
   const safeIntakeId = String(intakeId).replace(/[^a-zA-Z0-9_-]/g, '_');
   const filePath = `intake-deliveries/${safeIntakeId}/${category}/${Date.now()}_${sequence}.${extension}`;
   const storageRef = ref(storage, filePath);
-  await uploadBytes(storageRef, blob, { contentType });
-  return await getDownloadURL(storageRef);
+  return await withClientTimeout(
+    (async () => {
+      await uploadBytes(storageRef, blob, { contentType });
+      return await getDownloadURL(storageRef);
+    })(),
+    25_000,
+    'Tempo limite excedido ao enviar a foto de entrega ao Storage. Tente novamente.',
+  );
 }
 
 export async function uploadIntakeEntryImage(
@@ -2905,13 +3011,22 @@ export async function uploadIntakeEntryImage(
   // operational upload disappear. Direct Storage remains as a fallback only.
   try {
     return await uploadOperationalImageViaBackend('intake-entry', intakeId, imageDataUrl, sequence);
-  } catch (backendError) {
+  } catch (backendError: any) {
+    if ([400, 403, 413].includes(Number(backendError?.status))) {
+      throw backendError;
+    }
     console.warn('Backend intake image upload failed; trying direct Storage fallback:', backendError);
     const extension = extensionFromContentType(contentType);
     const path = `intake-entry-photos/${safeStorageSegment(intakeId)}/${Date.now()}_${sequence}.${extension}`;
     const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, blob, { contentType });
-    return { url: await getDownloadURL(storageRef), path };
+    return await withClientTimeout(
+      (async () => {
+        await uploadBytes(storageRef, blob, { contentType });
+        return { url: await getDownloadURL(storageRef), path };
+      })(),
+      25_000,
+      'Tempo limite excedido ao enviar a foto ao Storage. Verifique a conexão e tente novamente.',
+    );
   }
 }
 
@@ -2932,13 +3047,22 @@ export async function uploadInstrumentPhotoToStorage(
   const purpose = category === 'registration' ? 'instrument-registration' : 'instrument-calibrated';
   try {
     return await uploadOperationalImageViaBackend(purpose, instrumentId, imageDataUrl);
-  } catch (backendError) {
+  } catch (backendError: any) {
+    if ([400, 403, 413].includes(Number(backendError?.status))) {
+      throw backendError;
+    }
     console.warn('Backend instrument image upload failed; trying direct Storage fallback:', backendError);
     const extension = extensionFromContentType(contentType);
     const path = `instrument-photos/${safeStorageSegment(instrumentId)}/${category}/${Date.now()}.${extension}`;
     const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, blob, { contentType });
-    return { url: await getDownloadURL(storageRef), path };
+    return await withClientTimeout(
+      (async () => {
+        await uploadBytes(storageRef, blob, { contentType });
+        return { url: await getDownloadURL(storageRef), path };
+      })(),
+      25_000,
+      'Tempo limite excedido ao enviar a foto do instrumento ao Storage. Verifique a conexão e tente novamente.',
+    );
   }
 }
 
@@ -2963,23 +3087,45 @@ export async function uploadInventoryAttachment(
 
 export async function updateIntakePhotosDoc(id: string, photos: string[]): Promise<void> {
   try {
-    await updateDoc(doc(db, 'savedIntakes', id), { photos });
+    await withClientTimeout(
+      updateDoc(doc(db, 'savedIntakes', id), { photos }),
+      15_000,
+      'FIRESTORE_CLIENT_TIMEOUT',
+    );
   } catch (clientError) {
     console.warn('Direct updateIntakePhotosDoc failed; trying authenticated backend fallback:', clientError);
     const user = auth.currentUser;
     if (!user) throw clientError;
-    const response = await fetch(`/api/internal/intakes/${encodeURIComponent(id)}/photos`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${await user.getIdToken()}`,
-      },
-      body: JSON.stringify({ photos }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data?.success !== true) {
-      throw clientError;
-    }
+    const persistViaBackend = async (forceRefreshToken: boolean): Promise<void> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25_000);
+      try {
+        const response = await fetch(`/api/internal/intakes/${encodeURIComponent(id)}/photos`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${await user.getIdToken(forceRefreshToken)}`,
+          },
+          body: JSON.stringify({ photos }),
+          signal: controller.signal,
+        });
+        if (response.status === 401 && !forceRefreshToken) {
+          return await persistViaBackend(true);
+        }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.success !== true) {
+          throw new Error(data?.error || 'Não foi possível salvar as fotos da entrada.');
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          throw new Error('Tempo limite excedido ao salvar as fotos da entrada. Tente novamente.');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+    await persistViaBackend(false);
   }
 }
 

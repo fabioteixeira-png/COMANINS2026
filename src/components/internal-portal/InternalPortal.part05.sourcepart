@@ -2338,7 +2338,7 @@
                             <Upload className="h-4 w-4 text-slate-600" />
                             <span>
                               {isUploadingInstPhoto
-                                ? "Substituindo..."
+                                ? (photoUploadStage || "Substituindo...")
                                 : "Substituir Foto"}
                             </span>
                             <input
@@ -2395,7 +2395,7 @@
                         <Plus className="h-4 w-4" />
                         <span>
                           {isUploadingInstPhoto
-                            ? "Otimizando e Salvando..."
+                            ? (photoUploadStage || "Otimizando e Salvando...")
                             : "Selecionar Foto (Celular ou Computador)"}
                         </span>
                         <input

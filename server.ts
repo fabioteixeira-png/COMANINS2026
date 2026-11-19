@@ -151,7 +151,7 @@ const createRateLimiter = (scope: string, windowMs: number, maxRequests: number)
     next();
   };
 
-const aiApiRateLimit = createRateLimiter('ai-api', 5 * 60 * 1000, 30);
+const aiApiRateLimit = createRateLimiter('ai-api', 5 * 60 * 1000, 90);
 const emailApiRateLimit = createRateLimiter('email-api', 10 * 60 * 1000, 30);
 const adminApiRateLimit = createRateLimiter('admin-api', 5 * 60 * 1000, 30);
 const writeApiRateLimit = createRateLimiter('write-api', 60 * 1000, 120);
@@ -7044,19 +7044,42 @@ function getGeminiClient(): GoogleGenAI | null {
   }
 }
 
+const withServerTimeout = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutCode: string,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutCode)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const INVALID_LEGACY_VISION_MODELS = new Set(['gemini-3.8-flash']);
+
 const getGeminiVisionModels = (): string[] => {
-  const configured = String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || '').trim();
+  const configuredRaw = String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || '').trim();
+  const configured = INVALID_LEGACY_VISION_MODELS.has(configuredRaw.toLowerCase()) ? '' : configuredRaw;
   return Array.from(new Set([
     configured,
-    'gemini-3.8-flash',
-    'gemini-flash-latest',
     'gemini-2.5-flash',
+    'gemini-flash-latest',
   ].filter(Boolean)));
 };
 
 const classifyGeminiRuntimeError = (error: unknown): { code: string; message: string } => {
   const raw = String((error as any)?.message || error || '');
   const lower = raw.toLowerCase();
+  if (lower.includes('ai_timeout') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('aborted')) {
+    return { code: 'AI_TIMEOUT', message: 'A validação visual por IA excedeu o tempo limite. Tente enviar a foto novamente em instantes.' };
+  }
   if (lower.includes('api key') || lower.includes('api_key') || lower.includes('unauthenticated') || lower.includes('401')) {
     return { code: 'AI_AUTH_FAILED', message: 'A chave GEMINI_API_KEY do servidor não foi aceita pela API do Google.' };
   }
@@ -7072,11 +7095,13 @@ const classifyGeminiRuntimeError = (error: unknown): { code: string; message: st
   if (lower.includes('empty_ai_response') || lower.includes('invalid_ai_json') || lower.includes('json')) {
     return { code: 'AI_INVALID_RESPONSE', message: 'A IA respondeu em formato inválido e a validação visual não pôde ser concluída.' };
   }
-  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('fetch failed') || lower.includes('network')) {
+  if (lower.includes('fetch failed') || lower.includes('network') || lower.includes('econnreset') || lower.includes('etimedout')) {
     return { code: 'AI_NETWORK_ERROR', message: 'Falha temporária de comunicação com a API do Gemini.' };
   }
   return { code: 'AI_VALIDATION_FAILED', message: 'A análise visual do Gemini falhou antes de concluir a validação.' };
 };
+
+const GEMINI_VISION_TIMEOUT_MS = 25_000;
 
 async function generateVisionContentWithModelFallback(
   gemini: GoogleGenAI,
@@ -7089,27 +7114,48 @@ async function generateVisionContentWithModelFallback(
 
   for (const model of models) {
     try {
-      const response = await callGeminiWithRetry(() => gemini.models.generateContent({
-        model,
-        // A Part[] is intentionally used here; @google/genai aggregates the parts into
-        // a single user Content, which is the documented multimodal request shape.
-        contents: [
-          { text: prompt },
-          { inlineData: { mimeType, data: imageData } },
-        ],
-        config: {
-          temperature: 0.05,
-          responseMimeType: 'application/json',
-        },
-      }), 2, 900);
+      const normalizedModel = model.toLowerCase();
+      const isGemini4 = normalizedModel.startsWith('gemini-4-');
+      const isGemini25Flash = normalizedModel.startsWith('gemini-2.5-flash');
+      const config: Record<string, any> = {
+        responseMimeType: 'application/json',
+      };
+      if (!isGemini4) {
+        config.temperature = 0.05;
+      }
+      if (isGemini25Flash) {
+        // Disable extended thinking on visual label/scale inspection to avoid
+        // 20-60s stalls during peak afternoon API latency.
+        config.thinkingConfig = { thinkingBudget: 0 };
+      }
+
+      const response = await callGeminiWithRetry(
+        () =>
+          withServerTimeout(
+            gemini.models.generateContent({
+              model,
+              // A Part[] is intentionally used here; @google/genai aggregates the parts into
+              // a single user Content, which is the documented multimodal request shape.
+              contents: [
+                { text: prompt },
+                { inlineData: { mimeType, data: imageData } },
+              ],
+              config,
+            }),
+            GEMINI_VISION_TIMEOUT_MS,
+            'AI_TIMEOUT',
+          ),
+        1,
+        900,
+      );
       return { response, model };
     } catch (error) {
       lastError = error;
       const classified = classifyGeminiRuntimeError(error);
       console.warn(`[Gemini Vision] modelo ${model} falhou: ${classified.code}`);
       // Authentication, permission and quota failures are account-level; trying another
-      // model would only add latency. Model-not-found/availability errors can fall back.
-      if (!['AI_MODEL_UNAVAILABLE', 'AI_VALIDATION_FAILED'].includes(classified.code)) break;
+      // model would only add latency. Model-not-found/availability/timeout errors can fall back.
+      if (!['AI_MODEL_UNAVAILABLE', 'AI_VALIDATION_FAILED', 'AI_TIMEOUT', 'AI_NETWORK_ERROR'].includes(classified.code)) break;
     }
   }
 
@@ -8545,25 +8591,30 @@ app.post('/api/internal/upload-operational-image', requireAuth, requireInternalA
     const bucket = adminStorage.bucket(adminStorageBucketName);
     const file = bucket.file(path);
     const downloadToken = randomBytes(16).toString('hex');
-    await file.save(buffer, {
-      resumable: false,
-      validation: 'crc32c',
-      metadata: {
-        contentType,
-        cacheControl: 'private,max-age=3600',
+    await withServerTimeout(
+      file.save(buffer, {
+        resumable: false,
+        validation: 'crc32c',
         metadata: {
-          firebaseStorageDownloadTokens: downloadToken,
-          uploadedByUid: req.user.uid,
-          uploadedAt: new Date().toISOString(),
-          purpose,
+          contentType,
+          cacheControl: 'private,max-age=3600',
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken,
+            uploadedByUid: req.user.uid,
+            uploadedAt: new Date().toISOString(),
+            purpose,
+          },
         },
-      },
-    });
+      }),
+      25_000,
+      'UPLOAD_TIMEOUT',
+    );
     const url = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(path)}?alt=media&token=${downloadToken}`;
     return res.json({ success: true, url, path });
   } catch (error: any) {
     if (error?.message === 'INVALID_IMAGE_DATA') return res.status(400).json({ error: 'INVALID_IMAGE_DATA' });
     if (error?.message === 'IMAGE_TOO_LARGE') return res.status(413).json({ error: 'IMAGE_TOO_LARGE' });
+    if (error?.message === 'UPLOAD_TIMEOUT') return res.status(504).json({ error: 'UPLOAD_TIMEOUT' });
     console.error('Operational image upload error:', error);
     return res.status(500).json({ error: 'UPLOAD_FAILED' });
   }
@@ -8759,6 +8810,102 @@ app.patch('/api/internal/intakes/:id/photos', requireAuth, requireInternalAccoun
   } catch (error: any) {
     console.error('Update intake photos error:', error);
     return res.status(500).json({ error: 'UPDATE_PHOTOS_FAILED' });
+  }
+});
+
+app.patch('/api/internal/instruments/:id/photo', requireAuth, requireInternalAccount, writeApiRateLimit, async (req: AuthRequest, res) => {
+  try {
+    if (!firestoreDb || !req.user) {
+      return res.status(503).json({ error: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    const requesterProfile = await requireInternalPortalRequester(req.user);
+    const isStandardRequester =
+      requesterProfile?.accessProfileId === 'standard' ||
+      requesterProfile?.permissionLevel === 'Padrão' ||
+      requesterProfile?.permissionLevel === 'Padrao' ||
+      req.user?.accessProfileId === 'standard' ||
+      (req.user as any)?.permissionLevel === 'Padrão' ||
+      (req.user as any)?.permissionLevel === 'Padrao';
+    const canEdit =
+      isAdministratorProfile(requesterProfile) ||
+      isStandardRequester ||
+      userCanEditModule(requesterProfile as any, 'calibration') ||
+      userCanEditModule(req.user as any, 'calibration');
+    if (!canEdit) {
+      return res.status(403).json({ error: 'MODULE_EDIT_DENIED', moduleId: 'calibration' });
+    }
+
+    const instrumentId = asLimitedString(req.params.id, 180);
+    if (!instrumentId) return res.status(400).json({ error: 'INVALID_INSTRUMENT_ID' });
+
+    const instrumentRef = firestoreDb.collection('instruments').doc(instrumentId);
+    const snap = await instrumentRef.get();
+    if (!snap.exists) return res.status(404).json({ error: 'INSTRUMENT_NOT_FOUND' });
+    const currentData = (snap.data() || {}) as Record<string, any>;
+
+    if (currentData.status === 'Entregue') {
+      return res.status(400).json({ error: 'INSTRUMENT_DELIVERED_LOCKED' });
+    }
+    if (currentData.adminCalibrationReplacementPending === true) {
+      return res.status(409).json({ error: 'ADMIN_REPLACEMENT_PENDING' });
+    }
+
+    const finalizedStatuses = new Set([
+      'Calibrado',
+      'Aguardando Emissão de Certificado',
+      'Disponível para Retirada',
+      'Disponível na Prateleira',
+      'Entregue',
+      'Não Conforme',
+      'RNC',
+    ]);
+    const isFinalized = finalizedStatuses.has(String(currentData.status || '')) || currentData.hasRnc === true;
+
+    const updates: Record<string, any> = {};
+    const incomingPhotoRegistration = typeof req.body?.photoRegistration === 'string' ? req.body.photoRegistration.trim() : '';
+    const incomingPhotoRegistrationPath = typeof req.body?.photoRegistrationPath === 'string' ? req.body.photoRegistrationPath.trim() : '';
+    const incomingPhotoCalibrated = typeof req.body?.photoCalibrated === 'string' ? req.body.photoCalibrated.trim() : '';
+    const incomingPhotoCalibratedPath = typeof req.body?.photoCalibratedPath === 'string' ? req.body.photoCalibratedPath.trim() : '';
+
+    if (incomingPhotoRegistration) {
+      if (isFinalized && String(currentData.photoRegistration || '').trim()) {
+        return res.status(403).json({ error: 'PHOTO_LOCKED_ADMIN_REQUIRED' });
+      }
+      updates.photoRegistration = incomingPhotoRegistration;
+      if (incomingPhotoRegistrationPath) updates.photoRegistrationPath = incomingPhotoRegistrationPath;
+    }
+
+    if (incomingPhotoCalibrated) {
+      if (isFinalized && String(currentData.photoCalibrated || '').trim()) {
+        return res.status(403).json({ error: 'PHOTO_LOCKED_ADMIN_REQUIRED' });
+      }
+      updates.photoCalibrated = incomingPhotoCalibrated;
+      if (incomingPhotoCalibratedPath) updates.photoCalibratedPath = incomingPhotoCalibratedPath;
+      if (req.body?.photoCalibratedAiValidation && typeof req.body.photoCalibratedAiValidation === 'object') {
+        updates.photoCalibratedAiValidation = req.body.photoCalibratedAiValidation;
+      }
+      const incomingStatus = asLimitedString(req.body?.status, 80);
+      if (
+        incomingStatus === 'Aguardando Emissão de Certificado' &&
+        !['Entregue', 'Disponível para Retirada', 'Disponível na Prateleira', 'Não Conforme'].includes(String(currentData.status || ''))
+      ) {
+        updates.status = incomingStatus;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'NO_VALID_PHOTO_UPDATE' });
+    }
+
+    updates.updatedAt = new Date().toISOString();
+    await withServerTimeout(instrumentRef.update(updates), 15_000, 'FIRESTORE_UPDATE_TIMEOUT');
+    return res.json({ success: true, updates });
+  } catch (error: any) {
+    if (error?.message === 'FIRESTORE_UPDATE_TIMEOUT') {
+      return res.status(504).json({ error: 'FIRESTORE_UPDATE_TIMEOUT' });
+    }
+    console.error('Update instrument photo error:', error);
+    return res.status(500).json({ error: 'UPDATE_INSTRUMENT_PHOTO_FAILED' });
   }
 });
 
@@ -10774,7 +10921,12 @@ FORMATO:
   } catch (err: any) {
     const classified = classifyGeminiRuntimeError(err);
     console.error('Erro ao validar foto pós-laboratório:', classified.code, err);
-    const httpStatus = classified.code === 'AI_RATE_LIMITED' ? 429 : 502;
+    const httpStatus =
+      classified.code === 'AI_RATE_LIMITED'
+        ? 429
+        : classified.code === 'AI_TIMEOUT'
+          ? 504
+          : 502;
     return res.status(httpStatus).json({
       error: classified.code,
       message: classified.message,
