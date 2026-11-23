@@ -602,23 +602,35 @@ export const downloadCertificateDomAsPdf = async (
           ),
         }
       : null;
-    const resultsBreakFitsFirstPage =
+    const hasExplicitTwoPageBreak =
       measuredResultsBreak !== null &&
       measuredResultsBreak.firstPageEndY > 0 &&
-      measuredResultsBreak.firstPageEndY <= pageContentHeightPx &&
       measuredResultsBreak.continuationStartY >= measuredResultsBreak.firstPageEndY &&
       measuredResultsBreak.continuationStartY < canvas.height;
 
     let sourceY = 0;
     let pageIndex = 0;
     while (sourceY < canvas.height) {
-      const useMeasuredResultsBreak = pageIndex === 0 && resultsBreakFitsFirstPage;
-      const sourceHeight = useMeasuredResultsBreak
-        ? measuredResultsBreak.firstPageEndY
-        : findSafePageSliceHeight(canvas, sourceY, pageContentHeightPx);
-      const nextSourceY = useMeasuredResultsBreak
-        ? measuredResultsBreak.continuationStartY
-        : sourceY + sourceHeight;
+      let sourceHeight: number;
+      let nextSourceY: number;
+
+      if (hasExplicitTwoPageBreak && pageIndex === 0) {
+        sourceHeight = measuredResultsBreak.firstPageEndY;
+        nextSourceY = measuredResultsBreak.continuationStartY;
+      } else if (hasExplicitTwoPageBreak && pageIndex === 1) {
+        sourceHeight = canvas.height - sourceY;
+        nextSourceY = canvas.height;
+      } else {
+        sourceHeight = findSafePageSliceHeight(canvas, sourceY, pageContentHeightPx);
+        nextSourceY = sourceY + sourceHeight;
+      }
+
+      const fitScale =
+        sourceHeight > pageCanvas.height ? pageCanvas.height / sourceHeight : 1;
+      const drawWidth = Math.round(canvas.width * fitScale);
+      const drawHeight = Math.round(sourceHeight * fitScale);
+      const drawOffsetX = Math.round((pageCanvas.width - drawWidth) / 2);
+
       pageContext.save();
       pageContext.fillStyle = "#ffffff";
       pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
@@ -628,10 +640,10 @@ export const downloadCertificateDomAsPdf = async (
         sourceY,
         canvas.width,
         sourceHeight,
+        drawOffsetX,
         0,
-        0,
-        canvas.width,
-        sourceHeight,
+        drawWidth,
+        drawHeight,
       );
       pageContext.restore();
 
