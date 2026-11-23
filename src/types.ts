@@ -218,11 +218,185 @@ export interface ReferenceStandard {
   rbcLab: string;
   identification?: string;
   range?: string;
+  expandedUncertainty?: number;
+  uncertaintyUnit?: 'unidade' | '%' | string;
+  kFactor?: number;
+  resolution?: number;
+  drift?: number;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
   deletedByUid?: string;
   updatedAt?: string;
+}
+
+/**
+ * Tabela t-Student oficial (GUM ISO/IEC Guide 98-3 / NIT-DICLA-021) para
+ * probabilidade de abrangência p = 95,45% em função dos graus de liberdade efetivos (veff).
+ */
+export function getStudentTKFactor9545(veff: number): number {
+  if (!Number.isFinite(veff) || veff > 100) return 2.0;
+  const v = Math.max(1, Math.floor(veff));
+  const table: Record<number, number> = {
+    1: 13.97,
+    2: 4.53,
+    3: 3.31,
+    4: 2.87,
+    5: 2.65,
+    6: 2.52,
+    7: 2.43,
+    8: 2.37,
+    9: 2.32,
+    10: 2.28,
+    11: 2.25,
+    12: 2.23,
+    13: 2.21,
+    14: 2.20,
+    15: 2.18,
+    16: 2.17,
+    17: 2.16,
+    18: 2.15,
+    19: 2.14,
+    20: 2.13,
+    25: 2.11,
+    30: 2.09,
+    35: 2.07,
+    40: 2.06,
+    45: 2.06,
+    50: 2.05,
+    60: 2.04,
+    80: 2.03,
+    100: 2.02,
+  };
+  if (table[v] !== undefined) return table[v];
+  const keys = Object.keys(table)
+    .map(Number)
+    .sort((a, b) => a - b);
+  for (let i = 0; i < keys.length - 1; i++) {
+    const kLow = keys[i];
+    const kHigh = keys[i + 1];
+    if (v > kLow && v < kHigh) {
+      const ratio = (v - kLow) / (kHigh - kLow);
+      return Number((table[kLow] + ratio * (table[kHigh] - table[kLow])).toFixed(2));
+    }
+  }
+  return 2.0;
+}
+
+export interface GumPointUncertaintyInput {
+  uA: number;
+  count: number;
+  subdivision: number;
+  localHysteresis: number;
+  span: number;
+  mpePercent: number;
+  standards?: ReferenceStandard[];
+}
+
+export interface GumPointUncertaintyResult {
+  uA: number;
+  uB_res: number;
+  uB_hist: number;
+  uB_std: number;
+  uc: number;
+  veff: number;
+  kFactor: number;
+  expandedUncertainty: number;
+  usedRegisteredStandardUncertainty: boolean;
+}
+
+/**
+ * Calcula a Incerteza Combinada (uc), os Graus de Liberdade Efetivos (veff via Welch-Satterthwaite),
+ * o Fator de Abrangência (k para 95,45%) e a Incerteza Expandida (U) de um ponto de calibração.
+ *
+ * - Quando o(s) padrão(ões) vinculado(s) possuem `expandedUncertainty` cadastrado, utiliza
+ *   uB_cert_pad = U_pad / k_pad, além de resolução do padrão (d_pad / (2*sqrt(3))) e deriva (D_pad / sqrt(3)) se informados.
+ * - Caso o padrão ainda não possua `expandedUncertainty` cadastrado (retrocompatibilidade com registros antigos),
+ *   mantém a estimativa 4:1 sobre o MPE com k_pad = 2,00.
+ */
+export function calculateGumPointUncertainty(
+  input: GumPointUncertaintyInput,
+): GumPointUncertaintyResult {
+  const { uA, count, subdivision, localHysteresis, span, mpePercent, standards } = input;
+  const safeSpan = span > 0 ? span : 1;
+  const uB_res = subdivision > 0 ? subdivision / 2 / Math.sqrt(3) : 0;
+  const uB_hist = localHysteresis > 0 ? localHysteresis / (2 * Math.sqrt(3)) : 0;
+
+  const validStds = (standards || []).filter(
+    (s) =>
+      s &&
+      ((s.expandedUncertainty !== undefined &&
+        s.expandedUncertainty !== null &&
+        Number(s.expandedUncertainty) > 0) ||
+        (s.resolution !== undefined && s.resolution !== null && Number(s.resolution) > 0) ||
+        (s.drift !== undefined && s.drift !== null && Number(s.drift) > 0)),
+  );
+
+  let uB_std = 0;
+  let usedRegisteredStandardUncertainty = false;
+
+  if (validStds.length > 0) {
+    let sumVarStd = 0;
+    for (const s of validStds) {
+      const rawU = Number(s.expandedUncertainty) || 0;
+      const rawK = Number(s.kFactor) > 0 ? Number(s.kFactor) : 2.0;
+      if (rawU > 0) {
+        const uInUnit = s.uncertaintyUnit === '%' ? (rawU * safeSpan) / 100 : rawU;
+        const uCert = uInUnit / rawK;
+        sumVarStd += uCert * uCert;
+        usedRegisteredStandardUncertainty = true;
+      }
+      const rawRes = Number(s.resolution) || 0;
+      if (rawRes > 0) {
+        const uResStd = rawRes / (2 * Math.sqrt(3));
+        sumVarStd += uResStd * uResStd;
+      }
+      const rawDrift = Number(s.drift) || 0;
+      if (rawDrift > 0) {
+        const uDriftStd = rawDrift / Math.sqrt(3);
+        sumVarStd += uDriftStd * uDriftStd;
+      }
+    }
+    if (!usedRegisteredStandardUncertainty) {
+      const stdErrorOrMpe = mpePercent > 0 ? (mpePercent * safeSpan) / 100 / 4 : safeSpan * 0.0025;
+      const fallbackU = stdErrorOrMpe / 2;
+      sumVarStd += fallbackU * fallbackU;
+    }
+    uB_std = Math.sqrt(sumVarStd);
+  } else {
+    const stdErrorOrMpe = mpePercent > 0 ? (mpePercent * safeSpan) / 100 / 4 : safeSpan * 0.0025;
+    uB_std = stdErrorOrMpe / 2;
+  }
+
+  const uc = Math.sqrt(
+    Math.pow(uA, 2) + Math.pow(uB_res, 2) + Math.pow(uB_hist, 2) + Math.pow(uB_std, 2),
+  );
+
+  const vA = Math.max(1, count - 1);
+  let veff = Infinity;
+  let kFactor = 2.0;
+
+  if (usedRegisteredStandardUncertainty && uA > 0 && count > 1 && uc > 0) {
+    const denom = Math.pow(uA, 4) / vA;
+    if (denom > 0) {
+      veff = Math.max(1, Math.floor(Math.pow(uc, 4) / denom));
+      kFactor = getStudentTKFactor9545(veff);
+    }
+  }
+
+  const expandedUncertainty = Number((uc * kFactor).toFixed(2));
+
+  return {
+    uA,
+    uB_res,
+    uB_hist,
+    uB_std,
+    uc,
+    veff,
+    kFactor,
+    expandedUncertainty,
+    usedRegisteredStandardUncertainty,
+  };
 }
 
 
@@ -315,6 +489,8 @@ export interface CalibrationReport {
   maxDeadband?: number;
   maxExpandedUncertainty?: number;
   expandedUncertaintyPct?: number;
+  coverageFactorK?: number;
+  effectiveDegreesOfFreedom?: number;
   approved: boolean;
   observations: string;
   temperature?: number;

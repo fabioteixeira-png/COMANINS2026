@@ -1642,6 +1642,8 @@ export async function saveCalibrationDoc(data: {
   mpe?: number;
   maxExpandedUncertainty?: number;
   expandedUncertaintyPct?: number;
+  coverageFactorK?: number;
+  effectiveDegreesOfFreedom?: number;
   points: any[];
   observations: string;
   curveCount?: number;
@@ -2031,6 +2033,16 @@ export async function saveCalibrationDoc(data: {
     expandedUncertaintyPct:
       data.expandedUncertaintyPct !== undefined && !isNaN(Number(data.expandedUncertaintyPct))
         ? Number(data.expandedUncertaintyPct)
+        : undefined,
+    coverageFactorK:
+      data.coverageFactorK !== undefined && !isNaN(Number(data.coverageFactorK)) && Number(data.coverageFactorK) > 0
+        ? Number(data.coverageFactorK)
+        : undefined,
+    effectiveDegreesOfFreedom:
+      data.effectiveDegreesOfFreedom !== undefined &&
+      Number.isFinite(Number(data.effectiveDegreesOfFreedom)) &&
+      Number(data.effectiveDegreesOfFreedom) > 0
+        ? Number(data.effectiveDegreesOfFreedom)
         : undefined,
     approved:
       data.instrumentType === 'psv' || data.instrumentType === 'pcv'
@@ -3840,7 +3852,10 @@ export function syncReferenceStandards(callback: (standards: ReferenceStandard[]
 
 export async function addReferenceStandardDoc(data: Omit<ReferenceStandard, 'id'>): Promise<ReferenceStandard> {
   const newId = 'std_' + Date.now();
-  const item: ReferenceStandard = { ...data, id: newId };
+  const sanitizedData = Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined),
+  ) as Omit<ReferenceStandard, 'id'>;
+  const item: ReferenceStandard = { ...sanitizedData, id: newId };
   await setDoc(doc(db, 'referenceStandards', newId), item);
   
   const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
@@ -3851,10 +3866,21 @@ export async function addReferenceStandardDoc(data: Omit<ReferenceStandard, 'id'
 }
 
 export async function updateReferenceStandardDoc(id: string, updates: Partial<ReferenceStandard>): Promise<void> {
-  await updateDoc(doc(db, 'referenceStandards', id), updates);
+  const firestorePayload: Record<string, any> = {};
+  const cacheUpdates: Record<string, any> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) {
+      firestorePayload[key] = deleteField();
+      cacheUpdates[key] = undefined;
+    } else {
+      firestorePayload[key] = value;
+      cacheUpdates[key] = value;
+    }
+  }
+  await updateDoc(doc(db, 'referenceStandards', id), firestorePayload);
   
   const cached = getLocalCache<ReferenceStandard[]>('referenceStandards', []);
-  const updated = cached.map(s => s.id === id ? { ...s, ...updates } : s);
+  const updated = cached.map(s => s.id === id ? { ...s, ...cacheUpdates } : s);
   setLocalCache('referenceStandards', updated);
 }
 

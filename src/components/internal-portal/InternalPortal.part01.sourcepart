@@ -226,6 +226,7 @@ import {
   CALIBRATION_LOCATION_FIELD,
   CALIBRATION_LOCATION_OPTIONS,
   resolveCalibrationProcedure,
+  calculateGumPointUncertainty,
 } from "../types";
 import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
@@ -2867,6 +2868,11 @@ export default function InternalPortal({
   const [stdRbcLab, setStdRbcLab] = useState<string>("");
   const [stdIdentification, setStdIdentification] = useState<string>("");
   const [stdRange, setStdRange] = useState<string>("");
+  const [stdExpandedUncertainty, setStdExpandedUncertainty] = useState<string>("");
+  const [stdUncertaintyUnit, setStdUncertaintyUnit] = useState<string>("unidade");
+  const [stdKFactor, setStdKFactor] = useState<string>("2.00");
+  const [stdResolution, setStdResolution] = useState<string>("");
+  const [stdDrift, setStdDrift] = useState<string>("");
   const [stdSuccessMsg, setStdSuccessMsg] = useState<string>("");
   const [stdErrorMsg, setStdErrorMsg] = useState<string>("");
 
@@ -7044,6 +7050,8 @@ Status atual: ${e.status}.`,
 
         let computedMaxExpandedUncertainty: number | undefined = undefined;
         let computedExpandedUncertaintyPct: number | undefined = undefined;
+        let computedCoverageFactorK: number | undefined = undefined;
+        let computedEffectiveDegreesOfFreedom: number | undefined = undefined;
         if (
           (selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro" ||
@@ -7061,17 +7069,14 @@ Status atual: ${e.status}.`,
               : Number(activeInst?.rangeMax) || 0;
           const spanRaw = Math.abs((Number(activeInst?.rangeMax) || 0) - (Number(activeInst?.rangeMin) || 0)) || 1;
           const mpeRaw = benchMpe !== undefined && benchMpe !== null ? Number(benchMpe) : Number(activeInst?.mpe) || 0;
-          const stdErrorOrMpe = mpeRaw > 0 ? (mpeRaw * spanRaw) / 100 / 4 : spanRaw * 0.0025;
-          const uB_std = stdErrorOrMpe / 2;
           const res =
             !isNaN(parsedBenchSubdiv) && parsedBenchSubdiv > 0
               ? parsedBenchSubdiv
               : 0.1;
-          const uB_res = res / (2 * Math.sqrt(3));
           const isThreeCyclesType =
             selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro";
-          const pointUncertainties = benchPoints.map((p: any) => {
+          const pointResults = benchPoints.map((p: any) => {
             const rawVals = isThreeCyclesType
               ? [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2, p.refAsc3, p.refDesc3]
               : [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2];
@@ -7108,17 +7113,26 @@ Status atual: ${e.status}.`,
               uA = uA / scaleDiv;
               localHyst = localHyst / scaleDiv;
             }
-            const uB_hyst = localHyst / (2 * Math.sqrt(3));
-            const uc = Math.sqrt(
-              Math.pow(uA, 2) +
-                Math.pow(uB_std, 2) +
-                Math.pow(uB_res, 2) +
-                Math.pow(uB_hyst, 2),
-            );
-            return Number((uc * 2.0).toFixed(2));
+            return calculateGumPointUncertainty({
+              uA,
+              count,
+              subdivision: res,
+              localHysteresis: localHyst,
+              span: spanRaw,
+              mpePercent: mpeRaw,
+              standards: selectedStandards,
+            });
           });
-          computedMaxExpandedUncertainty =
-            pointUncertainties.length > 0 ? Math.max(...pointUncertainties) : 0;
+          let dominantPoint = pointResults[0];
+          for (const pr of pointResults) {
+            if (!dominantPoint || pr.expandedUncertainty > dominantPoint.expandedUncertainty) {
+              dominantPoint = pr;
+            }
+          }
+          computedMaxExpandedUncertainty = dominantPoint ? dominantPoint.expandedUncertainty : 0;
+          computedCoverageFactorK = dominantPoint ? dominantPoint.kFactor : 2.0;
+          computedEffectiveDegreesOfFreedom =
+            dominantPoint && Number.isFinite(dominantPoint.veff) ? dominantPoint.veff : undefined;
           const effSpan =
             selectedInstrumentType === "manovacuometro" && minRaw < 0
               ? (minRaw <= -700
@@ -7160,6 +7174,8 @@ Status atual: ${e.status}.`,
           mpe: benchMpe,
           maxExpandedUncertainty: computedMaxExpandedUncertainty,
           expandedUncertaintyPct: computedExpandedUncertaintyPct,
+          coverageFactorK: computedCoverageFactorK,
+          effectiveDegreesOfFreedom: computedEffectiveDegreesOfFreedom,
           points:
             selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro" ||

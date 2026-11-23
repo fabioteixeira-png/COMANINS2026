@@ -1120,6 +1120,11 @@
                         setStdRbcLab("");
                         setStdIdentification("");
                         setStdRange("");
+                        setStdExpandedUncertainty("");
+                        setStdUncertaintyUnit("unidade");
+                        setStdKFactor("2.00");
+                        setStdResolution("");
+                        setStdDrift("");
                         setShowStandardForm(true);
                       }}
                       className="bg-royal-blue hover:bg-royal-blue-hover text-white font-bold py-2.5 px-4 rounded-xl transition-all flex items-center space-x-2 text-xs shadow-md cursor-pointer active:scale-95"
@@ -1225,30 +1230,83 @@
                             }
                           }
 
+                          const parsedU =
+                            stdExpandedUncertainty.trim() !== ""
+                              ? Number(stdExpandedUncertainty.replace(",", "."))
+                              : undefined;
+                          const parsedK =
+                            stdKFactor.trim() !== ""
+                              ? Number(stdKFactor.replace(",", "."))
+                              : undefined;
+                          const parsedRes =
+                            stdResolution.trim() !== ""
+                              ? Number(stdResolution.replace(",", "."))
+                              : undefined;
+                          const parsedDrift =
+                            stdDrift.trim() !== ""
+                              ? Number(stdDrift.replace(",", "."))
+                              : undefined;
+
+                          if (
+                            parsedU !== undefined &&
+                            (isNaN(parsedU) || parsedU < 0)
+                          ) {
+                            setStdErrorMsg(
+                              "Informe um valor numérico válido para a Incerteza Expandida do Padrão (U).",
+                            );
+                            return;
+                          }
+                          if (
+                            parsedK !== undefined &&
+                            (isNaN(parsedK) || parsedK <= 0)
+                          ) {
+                            setStdErrorMsg(
+                              "Informe um valor numérico maior que zero para o Fator de Abrangência (k) do Padrão.",
+                            );
+                            return;
+                          }
+
+                          const metrologicalPayload = {
+                            certificateNumber: stdCertNumber,
+                            instrumentType: stdType,
+                            expirationDate: stdValidity,
+                            rbcLab: stdRbcLab,
+                            identification: stdIdentification,
+                            range: stdRange,
+                            expandedUncertainty:
+                              parsedU !== undefined && !isNaN(parsedU) && parsedU > 0
+                                ? parsedU
+                                : undefined,
+                            uncertaintyUnit:
+                              parsedU !== undefined && !isNaN(parsedU) && parsedU > 0
+                                ? stdUncertaintyUnit || "unidade"
+                                : undefined,
+                            kFactor:
+                              parsedK !== undefined && !isNaN(parsedK) && parsedK > 0
+                                ? parsedK
+                                : 2.0,
+                            resolution:
+                              parsedRes !== undefined && !isNaN(parsedRes) && parsedRes > 0
+                                ? parsedRes
+                                : undefined,
+                            drift:
+                              parsedDrift !== undefined &&
+                              !isNaN(parsedDrift) &&
+                              parsedDrift > 0
+                                ? parsedDrift
+                                : undefined,
+                          };
+
                           if (editingStandard) {
                             await updateReferenceStandardDoc(
                               editingStandard.id,
-                              {
-                                certificateNumber: stdCertNumber,
-                                instrumentType: stdType,
-                                expirationDate: stdValidity,
-                                rbcLab: stdRbcLab,
-                                identification: stdIdentification,
-                                range: stdRange,
-                              },
+                              metrologicalPayload,
                             );
                             setStdSuccessMsg(
                               "✓ Padrão de referência atualizado com sucesso!",
                             );
                           } else {
-                            await addReferenceStandardDoc({
-                              certificateNumber: stdCertNumber,
-                              instrumentType: stdType,
-                              expirationDate: stdValidity,
-                              rbcLab: stdRbcLab,
-                              identification: stdIdentification,
-                              range: stdRange,
-                            });
+                            await addReferenceStandardDoc(metrologicalPayload);
                             setStdSuccessMsg(
                               "✓ Padrão de referência cadastrado com sucesso!",
                             );
@@ -1262,6 +1320,11 @@
                           setStdRbcLab("");
                           setStdIdentification("");
                           setStdRange("");
+                          setStdExpandedUncertainty("");
+                          setStdUncertaintyUnit("unidade");
+                          setStdKFactor("2.00");
+                          setStdResolution("");
+                          setStdDrift("");
                           setTimeout(() => setStdSuccessMsg(""), 4000);
                         }}
                         className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs"
@@ -1349,7 +1412,91 @@
                           />
                         </div>
 
-                        <div className="md:col-span-4 flex justify-end space-x-2 pt-2">
+                        <div className="sm:col-span-2 md:col-span-3 border-t border-slate-200 pt-3 mt-1">
+                          <p className="font-bold text-slate-800 text-[11px] uppercase tracking-wider mb-2">
+                            Parâmetros Metrológicos do Certificado RBC (Cálculo de Incerteza GUM / NIT-DICLA-021)
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Incerteza Expandida (U_pad)
+                              </label>
+                              <div className="flex gap-1.5">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={stdExpandedUncertainty}
+                                  onChange={(e) =>
+                                    setStdExpandedUncertainty(e.target.value)
+                                  }
+                                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue"
+                                  placeholder="Ex: 0.02"
+                                />
+                                <select
+                                  value={stdUncertaintyUnit}
+                                  onChange={(e) =>
+                                    setStdUncertaintyUnit(e.target.value)
+                                  }
+                                  className="bg-white border border-slate-300 rounded-lg px-2 py-2 text-slate-800 font-semibold text-[11px] focus:ring-1 focus:ring-royal-blue"
+                                  title="Unidade da Incerteza do Padrão"
+                                >
+                                  <option value="unidade">Unid.</option>
+                                  <option value="%">% Faixa</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Fator de Abrangência (k_pad)
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                min="1"
+                                value={stdKFactor}
+                                onChange={(e) => setStdKFactor(e.target.value)}
+                                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue"
+                                placeholder="Ex: 2.00"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Resolução do Padrão (d_pad)
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                value={stdResolution}
+                                onChange={(e) =>
+                                  setStdResolution(e.target.value)
+                                }
+                                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue"
+                                placeholder="Opcional (Ex: 0.01)"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Deriva / Estabilidade (D_pad)
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                value={stdDrift}
+                                onChange={(e) => setStdDrift(e.target.value)}
+                                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-mono text-xs focus:ring-1 focus:ring-royal-blue"
+                                placeholder="Opcional (Ex: 0.01)"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2 md:col-span-3 flex justify-end space-x-2 pt-2">
                           <button
                             type="button"
                             onClick={() => setShowStandardForm(false)}
@@ -1382,6 +1529,7 @@
                           <th className="p-3 whitespace-nowrap">Nº Certificado</th>
                           <th className="p-3 whitespace-nowrap">Tipo do Instrumento</th>
                           <th className="p-3 whitespace-nowrap">Faixa (Range)</th>
+                          <th className="p-3 whitespace-nowrap">Incerteza (U / k)</th>
                           <th className="p-3 whitespace-nowrap">Validade</th>
                           <th className="p-3 whitespace-nowrap">Laboratório RBC</th>
                           <th className="p-3 whitespace-nowrap text-center">Status</th>
@@ -1392,7 +1540,7 @@
                         {referenceStandards.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={8}
+                              colSpan={9}
                               className="p-8 text-center text-slate-400 italic"
                             >
                               Nenhum padrão de referência cadastrado. Clique em
@@ -1441,6 +1589,33 @@
                                   {std.range || "—"}
                                 </td>
                                 <td className="p-3 font-mono text-slate-700">
+                                  {std.expandedUncertainty !== undefined &&
+                                  std.expandedUncertainty !== null &&
+                                  Number(std.expandedUncertainty) > 0 ? (
+                                    <span className="inline-flex flex-col text-[11px]">
+                                      <span className="font-bold text-slate-900">
+                                        ±{std.expandedUncertainty}
+                                        {std.uncertaintyUnit === "%"
+                                          ? "%"
+                                          : ""}{" "}
+                                        (k={Number(std.kFactor || 2).toFixed(2)})
+                                      </span>
+                                      {(std.resolution || std.drift) && (
+                                        <span className="text-[10px] text-slate-500">
+                                          {std.resolution
+                                            ? `d=${std.resolution} `
+                                            : ""}
+                                          {std.drift ? `D=${std.drift}` : ""}
+                                        </span>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 italic text-[11px]">
+                                      Padrão (4:1 / k=2,00)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 font-mono text-slate-700">
                                   {expDate
                                     ? expDate.toLocaleDateString("pt-BR")
                                     : "—"}
@@ -1479,6 +1654,33 @@
                                           std.identification || "",
                                         );
                                         setStdRange(std.range || "");
+                                        setStdExpandedUncertainty(
+                                          std.expandedUncertainty !== undefined &&
+                                            std.expandedUncertainty !== null
+                                            ? String(std.expandedUncertainty)
+                                            : "",
+                                        );
+                                        setStdUncertaintyUnit(
+                                          std.uncertaintyUnit || "unidade",
+                                        );
+                                        setStdKFactor(
+                                          std.kFactor !== undefined &&
+                                            std.kFactor !== null
+                                            ? String(std.kFactor)
+                                            : "2.00",
+                                        );
+                                        setStdResolution(
+                                          std.resolution !== undefined &&
+                                            std.resolution !== null
+                                            ? String(std.resolution)
+                                            : "",
+                                        );
+                                        setStdDrift(
+                                          std.drift !== undefined &&
+                                            std.drift !== null
+                                            ? String(std.drift)
+                                            : "",
+                                        );
                                         setShowStandardForm(true);
                                       }}
                                       className="p-1.5 text-slate-600 hover:text-royal-blue hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"

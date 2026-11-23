@@ -38,6 +38,7 @@ import {
   RncReport,
   CALIBRATION_LOCATION_LABORATORY,
   resolveCalibrationProcedure,
+  calculateGumPointUncertainty,
 } from '../types';
 import { detectInstrumentType, METROLOGICAL_NORMS_INFO } from './InternalPortal';
 
@@ -1180,16 +1181,21 @@ export default function ClientPortal({
                    }
                  }
 
-                 // --- CÁLCULO DA INCERTEZA EXPANDIDA (ABNT NBR ISO/IEC 17025 & GUM) ---
-                  // Incerteza só é calculada com base na subdivisão real informada
+                 // --- CÁLCULO DA INCERTEZA EXPANDIDA (ABNT NBR ISO/IEC 17025 & GUM / NIT-DICLA-021) ---
                   let expandedUncertainty = 0;
+                  let pointKFactor = 2.0;
                   if (hasSubdivision && count > 0) {
-                     const uB_res = (parsedSubdiv / 2) / Math.sqrt(3);
-                     const uB_hist = normalizedLocalHyst / (2 * Math.sqrt(3));
-                     const stdErrorOrMpe = mpeVal > 0 ? ((mpeVal * span / 100) / 4) : (span * 0.0025);
-                     const uB_std = stdErrorOrMpe / 2;
-                     const uc = Math.sqrt(Math.pow(normalizedUA, 2) + Math.pow(uB_res, 2) + Math.pow(uB_hist, 2) + Math.pow(uB_std, 2));
-                     expandedUncertainty = Number((uc * 2.00).toFixed(2));
+                     const gumResult = calculateGumPointUncertainty({
+                       uA: normalizedUA,
+                       count,
+                       subdivision: parsedSubdiv,
+                       localHysteresis: normalizedLocalHyst,
+                       span,
+                       mpePercent: mpeVal,
+                       standards: selectedReport?.referenceStandards || [],
+                     });
+                     expandedUncertainty = gumResult.expandedUncertainty;
+                     pointKFactor = gumResult.kFactor;
                   }
 
                  return {
@@ -1204,6 +1210,7 @@ export default function ClientPortal({
                    d3,
                    count,
                    expandedUncertainty,
+                   pointKFactor,
                    refAsc1: p.refAsc1,
                    refDesc1: p.refDesc1,
                    refAsc2: p.refAsc2,
@@ -1224,9 +1231,18 @@ export default function ClientPortal({
               const classPct = span > 0 ? (maxAbsError / span) * 100 : 0;
               const hysteresisPct = span > 0 ? (maxHysteresis / span) * 100 : 0;
               const repPct = span > 0 ? (maxRepeatability / span) * 100 : 0;
-              const maxExpandedUncertainty = hasSubdivision && formattedPoints.length > 0
-                ? Math.max(...formattedPoints.map((fp: any) => Number(fp.expandedUncertainty) || 0))
+              let dominantClientPoint: any = null;
+              for (const fp of formattedPoints) {
+                if (!dominantClientPoint || (Number(fp.expandedUncertainty) || 0) > (Number(dominantClientPoint.expandedUncertainty) || 0)) {
+                  dominantClientPoint = fp;
+                }
+              }
+              const maxExpandedUncertainty = hasSubdivision && dominantClientPoint
+                ? Number(dominantClientPoint.expandedUncertainty) || 0
                 : 0;
+              const coverageFactorK = hasSubdivision && dominantClientPoint
+                ? Number(dominantClientPoint.pointKFactor) || Number(selectedReport?.coverageFactorK) || 2.0
+                : Number(selectedReport?.coverageFactorK) || 2.0;
               const uncertaintyPct = hasSubdivision && span > 0 ? (maxExpandedUncertainty / span) * 100 : 0;
 
               const renderCertificateHeader = (pageLabel: "1/2" | "2/2") => (
@@ -1660,7 +1676,7 @@ export default function ClientPortal({
                               <p>Repetitividade (%): {repPct.toFixed(3)}</p>
                               <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
                               {hasSubdivision && (
-                                <p>Incerteza de Medição (U): ± {maxExpandedUncertainty.toFixed(2)} {inst?.unit} ({uncertaintyPct.toFixed(2)} %) (k = 2,00; 95,45%)</p>
+                                <p>Incerteza de Medição (U): ± {maxExpandedUncertainty.toFixed(2)} {inst?.unit} ({uncertaintyPct.toFixed(2)} %) (k = {coverageFactorK.toFixed(2).replace('.', ',')}; 95,45%)</p>
                               )}
                             </div>
                           </>
