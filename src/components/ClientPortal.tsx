@@ -982,17 +982,7 @@ export default function ClientPortal({
                   title="Imprimir Certificado de Calibração"
                 >
                   <Printer className="h-4 w-4" />
-                  <span>Imprimir / PDF</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDownloadCertificate()}
-                  disabled={isDownloadingCertificatePdf}
-                  className="p-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-300 disabled:cursor-wait text-white rounded-lg transition-all flex items-center text-xs font-bold gap-1.5 shadow-sm cursor-pointer"
-                  title="Baixar Certificado de Calibração em PDF"
-                >
-                  <Download className={`h-4 w-4 ${isDownloadingCertificatePdf ? 'animate-pulse' : ''}`} />
-                  <span>{isDownloadingCertificatePdf ? 'Baixando...' : 'Baixar PDF'}</span>
+                  <span>Imprimir</span>
                 </button>
                 <button
                   onClick={() => {

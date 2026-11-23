@@ -1455,8 +1455,9 @@ export default function InternalPortal({
     });
   };
 
-  const handleCertificatePrint = () => {
-    printCurrentCertificate();
+  const handleCertificatePrint = (certificateNumber?: unknown, clientTag?: unknown) => {
+    const suggestedTitle = buildCertificateSuggestedTitle(certificateNumber, clientTag);
+    printCurrentCertificate(suggestedTitle || undefined);
   };
 
   const handleCertificateSave = (certificateNumber: unknown, clientTag: unknown) => {

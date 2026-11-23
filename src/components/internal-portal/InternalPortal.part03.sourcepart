@@ -3903,41 +3903,13 @@
                         {/* Sheet actions - HIDDEN in printing */}
                         <div data-certificate-pdf-ignore="true" className="absolute -top-4 -right-4 flex items-center space-x-2 print:hidden z-10">
                           <button
-                            onClick={() => handleCertificatePrint()}
+                            onClick={() => handleCertificatePrint(certNumber, certificateClientTag)}
                             className="p-2 px-4 bg-royal-blue text-white hover:bg-blue-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
                             title="Imprimir Certificado de Calibração"
                           >
                             <Printer className="h-4 w-4" />
-                            <span>Imprimir PDF</span>
+                            <span>Imprimir</span>
                           </button>
-                          {certificateReturnTab === "field_service" ? (
-                            <button
-                              type="button"
-                              onClick={() => handleCertificateSave(certNumber, certificateClientTag)}
-                              className="p-2 px-4 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
-                              title="Abrir a impressão nativa para salvar o certificado em PDF com nome sugerido automaticamente"
-                            >
-                              <Save className="h-4 w-4" />
-                              <span>Salvar PDF</span>
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleCertificateDownload(
-                                  certNumber,
-                                  certificateClientTag,
-                                )
-                              }
-                              disabled={isDownloadingCertificatePdf}
-                              aria-busy={isDownloadingCertificatePdf}
-                              className="p-2 px-4 bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-wait rounded-lg transition-all flex items-center text-xs font-bold gap-2 shadow-md cursor-pointer"
-                              title="Baixar o certificado aberto em PDF"
-                            >
-                              <Download className={`h-4 w-4 ${isDownloadingCertificatePdf ? "animate-pulse" : ""}`} />
-                              <span>{isDownloadingCertificatePdf ? "Baixando..." : "Baixar PDF"}</span>
-                            </button>
-                          )}
                           {isUserAdmin && report?.id && (
                             <button
                               type="button"
