@@ -336,6 +336,32 @@ const loadCertificateFontStylesheet = async (root: Document): Promise<void> => {
 const measureResultsPageBreak = (
   root: HTMLElement,
 ): CertificateClone["resultsPageBreak"] => {
+  const explicitPage2 = root.querySelector<HTMLElement>(
+    '[data-certificate-page-2="true"]',
+  );
+  if (explicitPage2) {
+    const rootRect = root.getBoundingClientRect();
+    const page2Rect = explicitPage2.getBoundingClientRect();
+    const prevSibling = explicitPage2.previousElementSibling;
+    const prevRect =
+      prevSibling instanceof HTMLElement
+        ? prevSibling.getBoundingClientRect()
+        : null;
+    const continuationStartY = Math.max(
+      1,
+      Math.floor(page2Rect.top - rootRect.top),
+    );
+    const firstPageEndY = prevRect
+      ? Math.min(
+          continuationStartY,
+          Math.max(1, Math.ceil(prevRect.bottom - rootRect.top)),
+        )
+      : continuationStartY;
+    if (firstPageEndY > 0 && continuationStartY >= firstPageEndY) {
+      return { firstPageEndY, continuationStartY };
+    }
+  }
+
   const table = Array.from(root.querySelectorAll("table")).find((candidate) =>
     candidate.nextElementSibling?.textContent?.includes("Índice de Classe"),
   );
@@ -580,7 +606,7 @@ export const downloadCertificateDomAsPdf = async (
       measuredResultsBreak !== null &&
       measuredResultsBreak.firstPageEndY > 0 &&
       measuredResultsBreak.firstPageEndY <= pageContentHeightPx &&
-      measuredResultsBreak.continuationStartY > measuredResultsBreak.firstPageEndY &&
+      measuredResultsBreak.continuationStartY >= measuredResultsBreak.firstPageEndY &&
       measuredResultsBreak.continuationStartY < canvas.height;
 
     let sourceY = 0;
@@ -686,10 +712,17 @@ export const printCertificateDomOnly = async (element: HTMLElement, documentTitl
 
     const isolationStyle = frameDocument.createElement("style");
     isolationStyle.textContent = `
+      @page { size: A4 portrait; margin: 10mm; }
       html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
       body { overflow: visible !important; }
       @media print {
         html, body { width: auto !important; height: auto !important; overflow: visible !important; }
+        [data-certificate-page-2="true"] {
+          break-before: page !important;
+          page-break-before: always !important;
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+        }
       }
     `;
     frameDocument.head.appendChild(isolationStyle);

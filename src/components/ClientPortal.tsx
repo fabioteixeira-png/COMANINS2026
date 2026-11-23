@@ -1073,13 +1073,17 @@ export default function ClientPortal({
                  const rawD1 = p.refDesc1 !== undefined ? p.refDesc1 : (p.instrumentDescending !== undefined ? p.instrumentDescending : (p.standardValue !== undefined ? p.standardValue : p.instrumentValue));
                  const rawA2 = p.refAsc2;
                  const rawD2 = p.refDesc2;
+                 const rawA3 = p.refAsc3;
+                 const rawD3 = p.refDesc3;
 
                  const a1 = (rawA1 !== '' && rawA1 !== undefined && rawA1 !== null) ? Number(rawA1) : null;
                  const d1 = (rawD1 !== '' && rawD1 !== undefined && rawD1 !== null) ? Number(rawD1) : null;
                  const a2 = (rawA2 !== '' && rawA2 !== undefined && rawA2 !== null) ? Number(rawA2) : null;
                  const d2 = (rawD2 !== '' && rawD2 !== undefined && rawD2 !== null) ? Number(rawD2) : null;
+                 const a3 = (rawA3 !== '' && rawA3 !== undefined && rawA3 !== null) ? Number(rawA3) : null;
+                 const d3 = (rawD3 !== '' && rawD3 !== undefined && rawD3 !== null) ? Number(rawD3) : null;
 
-                 const validVals = [a1, d1, a2, d2].filter((v): v is number => v !== null && !isNaN(v));
+                 const validVals = [a1, d1, a2, d2, a3, d3].filter((v): v is number => v !== null && !isNaN(v));
                  const count = validVals.length;
                  const sum = validVals.reduce((acc, curr) => acc + curr, 0);
                  const avg = count > 0 ? sum / count : 0;
@@ -1122,14 +1126,37 @@ export default function ClientPortal({
                     if (normalizedHyst2 > maxHysteresis) maxHysteresis = normalizedHyst2;
                     localHyst = Math.max(localHyst, hyst2);
                  }
+                 if (a3 !== null && d3 !== null) {
+                    let hyst3 = Math.abs(d3 - a3);
+                    let normalizedHyst3 = hyst3;
+                    if (inst?.typeSpec === 'manovacuometro' && nominal < 0) {
+                       const minVal = inst?.rangeMin || 0;
+                       if (minVal <= -700) normalizedHyst3 = hyst3 / 760;
+                       else if (minVal <= -25) normalizedHyst3 = hyst3 / 29.92;
+                    }
+                    if (normalizedHyst3 > maxHysteresis) maxHysteresis = normalizedHyst3;
+                    localHyst = Math.max(localHyst, hyst3);
+                 }
 
-                 // Repetitividade Metrológica (Diferença entre medições no mesmo sentido entre ciclos)
-                 if (a1 !== null && a2 !== null) {
-                    const repAsc = Math.abs(a2 - a1);
+                 // Repetitividade Metrológica (Amplitude máxima entre medições no mesmo sentido entre ciclos)
+                 const ascVals = [a1, a2, a3].filter((v): v is number => v !== null && !isNaN(v));
+                 if (ascVals.length >= 2) {
+                    let repAsc = Math.max(...ascVals) - Math.min(...ascVals);
+                    if (inst?.typeSpec === 'manovacuometro' && nominal < 0) {
+                       const minVal = inst?.rangeMin || 0;
+                       if (minVal <= -700) repAsc = repAsc / 760;
+                       else if (minVal <= -25) repAsc = repAsc / 29.92;
+                    }
                     if (repAsc > maxRepeatability) maxRepeatability = repAsc;
                  }
-                 if (d1 !== null && d2 !== null) {
-                    const repDesc = Math.abs(d2 - d1);
+                 const descVals = [d1, d2, d3].filter((v): v is number => v !== null && !isNaN(v));
+                 if (descVals.length >= 2) {
+                    let repDesc = Math.max(...descVals) - Math.min(...descVals);
+                    if (inst?.typeSpec === 'manovacuometro' && nominal < 0) {
+                       const minVal = inst?.rangeMin || 0;
+                       if (minVal <= -700) repDesc = repDesc / 760;
+                       else if (minVal <= -25) repDesc = repDesc / 29.92;
+                    }
                     if (repDesc > maxRepeatability) maxRepeatability = repDesc;
                  }
 
@@ -1165,8 +1192,34 @@ export default function ClientPortal({
                      expandedUncertainty = Number((uc * 2.00).toFixed(2));
                   }
 
-                 return { nominal, avg, err, a1: a1 ?? 0, d1: d1 ?? 0, a2: a2 ?? 0, d2: d2 ?? 0, count, expandedUncertainty, refAsc1: p.refAsc1, refDesc1: p.refDesc1, refAsc2: p.refAsc2, refDesc2: p.refDesc2 };
+                 return {
+                   nominal,
+                   avg,
+                   err,
+                   a1: a1 ?? 0,
+                   d1: d1 ?? 0,
+                   a2: a2 ?? 0,
+                   d2: d2 ?? 0,
+                   a3,
+                   d3,
+                   count,
+                   expandedUncertainty,
+                   refAsc1: p.refAsc1,
+                   refDesc1: p.refDesc1,
+                   refAsc2: p.refAsc2,
+                   refDesc2: p.refDesc2,
+                   refAsc3: p.refAsc3,
+                   refDesc3: p.refDesc3,
+                 };
               });
+
+              const hasThirdCycle =
+                (clientInstrumentType === 'manometro' || clientInstrumentType === 'manovacuometro') &&
+                formattedPoints.some(
+                  (fp: any) =>
+                    (fp.refAsc3 !== undefined && fp.refAsc3 !== null && fp.refAsc3 !== '') ||
+                    (fp.refDesc3 !== undefined && fp.refDesc3 !== null && fp.refDesc3 !== '')
+                );
               
               const classPct = span > 0 ? (maxAbsError / span) * 100 : 0;
               const hysteresisPct = span > 0 ? (maxHysteresis / span) * 100 : 0;
@@ -1176,37 +1229,41 @@ export default function ClientPortal({
                 : 0;
               const uncertaintyPct = hasSubdivision && span > 0 ? (maxExpandedUncertainty / span) * 100 : 0;
 
-              return (
-                <div className="space-y-6">
-                  {/* Header */}
-                  <div className="border-b border-slate-300 pb-2">
-                    <div className="flex items-start justify-between gap-4">
-                      {customLogo ? (
-                        <img src={customLogo} alt="Logo" className="h-16 object-contain" />
-                      ) : (
-                        <ComaninsLogo size={180} />
-                      )}
-                      <div className="flex-1 text-center mt-2">
-                        <h1 className="font-bold text-sm text-slate-900 leading-tight">
-                          Laboratório de Calibração Rastreada de acordo com a ABNT NBR ISO/ IEC 17025
-                        </h1>
-                        <h2 className="font-bold text-lg text-slate-900 mt-1 uppercase">CERTIFICADO DE CALIBRAÇÃO Nº {certNumber}</h2>
-                        <p className="text-[10px] font-bold mt-1 font-mono text-slate-800">
-                          Chave de Autenticidade (QRCode): <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 font-extrabold text-blue-900 tracking-wider select-all">{certAuthKey}</span>
-                        </p>
-                      </div>
-                      <div className="text-right flex flex-col items-end">
-                        <div className="p-1 bg-white border border-slate-300 rounded shadow-xs inline-block">
-                          <QRCodeSVG value={`https://www.comanins.com.br?chave=${certAuthKey}`} size={56} level="M" />
-                        </div>
-                        <p className="text-[8px] font-mono font-bold text-slate-700 mt-0.5">www.comanins.com.br</p>
-                        <p className="text-[10px] text-slate-600 mt-0.5">Pág. 1/1</p>
-                      </div>
+              const renderCertificateHeader = (pageLabel: "1/2" | "2/2") => (
+                <div className="border-b border-slate-300 pb-2">
+                  <div className="flex items-start justify-between gap-4">
+                    {customLogo ? (
+                      <img src={customLogo} alt="Logo" className="h-16 object-contain" />
+                    ) : (
+                      <ComaninsLogo size={180} />
+                    )}
+                    <div className="flex-1 text-center mt-2">
+                      <h1 className="font-bold text-sm text-slate-900 leading-tight">
+                        Laboratório de Calibração Rastreada de acordo com a ABNT NBR ISO/ IEC 17025
+                      </h1>
+                      <h2 className="font-bold text-lg text-slate-900 mt-1 uppercase">CERTIFICADO DE CALIBRAÇÃO Nº {certNumber}</h2>
+                      <p className="text-[10px] font-bold mt-1 font-mono text-slate-800">
+                        Chave de Autenticidade (QRCode): <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 font-extrabold text-blue-900 tracking-wider select-all">{certAuthKey}</span>
+                      </p>
                     </div>
-                    <div className="text-center mt-2 text-[8px] text-slate-500">
-                      Rua A3, N° 09, Poloplast, Camaçari-BA - CEP: 42801-581 - Fone: (71) 3621-0311 - comercial@comanins.com.br
+                    <div className="text-right flex flex-col items-end">
+                      <div className="p-1 bg-white border border-slate-300 rounded shadow-xs inline-block">
+                        <QRCodeSVG value={`https://www.comanins.com.br?chave=${certAuthKey}`} size={56} level="M" />
+                      </div>
+                      <p className="text-[8px] font-mono font-bold text-slate-700 mt-0.5">www.comanins.com.br</p>
+                      <p className="text-[10px] text-slate-600 mt-0.5 font-semibold">Pág. {pageLabel}</p>
                     </div>
                   </div>
+                  <div className="text-center mt-2 text-[8px] text-slate-500">
+                    Rua A3, N° 09, Poloplast, Camaçari-BA - CEP: 42801-581 - Fone: (71) 3621-0311 - comercial@comanins.com.br
+                  </div>
+                </div>
+              );
+
+              return (
+                <div className="space-y-6">
+                  {/* Header Page 1 */}
+                  {renderCertificateHeader("1/2")}
 
                   <div className="space-y-4 text-[11px] leading-relaxed">
                     <div>
@@ -1544,6 +1601,9 @@ export default function ClientPortal({
                                 <th className="p-1 border border-slate-300" rowSpan={2}>VI<br/>(Nominal)</th>
                                 <th className="p-1 border border-slate-300" colSpan={2}>VRef Primeiro Ciclo</th>
                                 <th className="p-1 border border-slate-300" colSpan={2}>VRef Segundo Ciclo</th>
+                                {hasThirdCycle && (
+                                  <th className="p-1 border border-slate-300" colSpan={2}>VRef Terceiro Ciclo</th>
+                                )}
                                 <th className="p-1 border border-slate-300" rowSpan={2}>VRef Média<br/>de Leituras</th>
                                 <th className="p-1 border border-slate-300" rowSpan={2}>Erro</th>
                                 <th className="p-1 border border-slate-300" rowSpan={2}>Unidade<br/>de Medida</th>
@@ -1553,16 +1613,28 @@ export default function ClientPortal({
                                 <th className="p-1 border border-slate-300">Decrescente</th>
                                 <th className="p-1 border border-slate-300">Crescente</th>
                                 <th className="p-1 border border-slate-300">Decrescente</th>
+                                {hasThirdCycle && (
+                                  <>
+                                    <th className="p-1 border border-slate-300">Crescente</th>
+                                    <th className="p-1 border border-slate-300">Decrescente</th>
+                                  </>
+                                )}
                               </tr>
                             </thead>
                             <tbody>
                               {formattedPoints.map((point: any, idx: number) => (
                                 <tr key={idx}>
                                   <td className="p-1 border border-slate-300 font-bold">{point.nominal}</td>
-                                  <td className="p-1 border border-slate-300">{point.refAsc1 !== undefined ? point.refAsc1 : (point.a1 !== 0 ? point.a1 : '-')}</td>
-                                  <td className="p-1 border border-slate-300">{point.refDesc1 !== undefined ? point.refDesc1 : (point.d1 !== 0 ? point.d1 : '-')}</td>
-                                  <td className="p-1 border border-slate-300">{point.refAsc2 !== undefined ? point.refAsc2 : (point.a2 !== 0 ? point.a2 : '-')}</td>
-                                  <td className="p-1 border border-slate-300">{point.refDesc2 !== undefined ? point.refDesc2 : (point.d2 !== 0 ? point.d2 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refAsc1 !== undefined && point.refAsc1 !== '' ? point.refAsc1 : (point.a1 !== 0 ? point.a1 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refDesc1 !== undefined && point.refDesc1 !== '' ? point.refDesc1 : (point.d1 !== 0 ? point.d1 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refAsc2 !== undefined && point.refAsc2 !== '' ? point.refAsc2 : (point.a2 !== 0 ? point.a2 : '-')}</td>
+                                  <td className="p-1 border border-slate-300">{point.refDesc2 !== undefined && point.refDesc2 !== '' ? point.refDesc2 : (point.d2 !== 0 ? point.d2 : '-')}</td>
+                                  {hasThirdCycle && (
+                                    <>
+                                      <td className="p-1 border border-slate-300">{point.refAsc3 !== undefined && point.refAsc3 !== '' ? point.refAsc3 : '-'}</td>
+                                      <td className="p-1 border border-slate-300">{point.refDesc3 !== undefined && point.refDesc3 !== '' ? point.refDesc3 : '-'}</td>
+                                    </>
+                                  )}
                                   <td className="p-1 border border-slate-300">{point.count > 0 ? point.avg.toFixed(2) : '-'}</td>
                                   <td className="p-1 border border-slate-300">{point.count > 0 ? (point.err > 0 ? `+${point.err}` : point.err) : '-'}</td>
                                   <td className="p-1 border border-slate-300">
@@ -1574,7 +1646,24 @@ export default function ClientPortal({
                               ))}
                             </tbody>
                           </table>
-                          <div className="mt-4 font-bold text-[10px]">
+                        </>
+                      )}
+                    </div>
+
+                    {/* PAGE 2: Official Header Pág. 2/2 + Metrological Summary + Signatures */}
+                    <div
+                      data-certificate-page-2="true"
+                      className="pt-6 print:pt-0 space-y-6"
+                      style={{ breakBefore: "page", pageBreakBefore: "always" }}
+                    >
+                      {renderCertificateHeader("2/2")}
+
+                      {!isPsvCertificate &&
+                        !isPcvCertificate &&
+                        clientInstrumentType !== 'transmissor' &&
+                        clientInstrumentType !== 'pressostato' &&
+                        clientInstrumentType !== 'termostato' && (
+                          <div className="pt-2 font-bold text-[10px] space-y-0.5">
                             <p>Índice de Classe (%): {classPct.toFixed(2)}</p>
                             <p>Repetitividade (%): {repPct.toFixed(3)}</p>
                             <p>Histerese (%): {hysteresisPct.toFixed(2)}</p>
@@ -1582,34 +1671,33 @@ export default function ClientPortal({
                               <p>Incerteza de Medição (U): ± {maxExpandedUncertainty.toFixed(2)} {inst?.unit} ({uncertaintyPct.toFixed(2)} %) (k = 2,00; 95,45%)</p>
                             )}
                           </div>
-                        </>
-                      )}
-                    </div>
-
-                    <div className="mt-16 grid grid-cols-2 gap-8 px-12">
-                      <div className="flex flex-col items-center justify-end text-center pt-2">
-                        {selectedReport?.signaturePath ? (
-                          <img src={selectedReport.signaturePath} alt="Assinatura do Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" />
-                        ) : (
-                          <div className="h-16 w-full flex items-center justify-center text-xs text-slate-400 italic mb-2">Assinatura Pendente</div>
                         )}
-                        <div className="w-full border-t border-slate-400 pt-2">
-                          <p className="font-bold">{selectedReport?.technicianName || 'Técnico Executante'}</p>
-                          <p className="text-xs text-slate-600">Executante</p>
+
+                      <div className="mt-16 grid grid-cols-2 gap-8 px-12">
+                        <div className="flex flex-col items-center justify-end text-center pt-2">
+                          {selectedReport?.signaturePath ? (
+                            <img src={selectedReport.signaturePath} alt="Assinatura do Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" />
+                          ) : (
+                            <div className="h-16 w-full flex items-center justify-center text-xs text-slate-400 italic mb-2">Assinatura Pendente</div>
+                          )}
+                          <div className="w-full border-t border-slate-400 pt-2">
+                            <p className="font-bold">{selectedReport?.technicianName || 'Técnico Executante'}</p>
+                            <p className="text-xs text-slate-600">Executante</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-center justify-end text-center pt-2">
+                          <img src="/assinatura_rt.png" alt="Assinatura do Responsável Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                          <div className="w-full border-t border-slate-400 pt-2">
+                            <p className="font-bold">Fabio Henrique de Sena Teixeira</p>
+                            <p className="text-xs text-slate-600">Responsável Técnico</p>
+                            <p className="text-xs text-slate-600">CFT-80333478568/BA</p>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex flex-col items-center justify-end text-center pt-2">
-                        <img src="/assinatura_rt.png" alt="Assinatura do Responsável Técnico" className="h-16 object-contain mb-2 mix-blend-multiply" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                        <div className="w-full border-t border-slate-400 pt-2">
-                          <p className="font-bold">Fabio Henrique de Sena Teixeira</p>
-                          <p className="text-xs text-slate-600">Responsável Técnico</p>
-                          <p className="text-xs text-slate-600">CFT-80333478568/BA</p>
-                        </div>
+                      
+                      <div className="text-center text-[8px] text-slate-400 mt-8">
+                        Este documento foi produzido e assinado eletronicamente no Portal COMANINS.
                       </div>
-                    </div>
-                    
-                    <div className="text-center text-[8px] text-slate-400 mt-8">
-                      Este documento foi produzido e assinado eletronicamente no Portal COMANINS.
                     </div>
 
                   </div>

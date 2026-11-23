@@ -1761,16 +1761,20 @@ export async function saveCalibrationDoc(data: {
       };
     }
     
-    // new trescal-style points
+    // new trescal-style points (supports 2 cycles for thermometers/legacy and 3 cycles for manometers/manovacuometers)
     if (p.nominal !== undefined && p.refAsc1 !== undefined) {
       const a1 = Number(p.refAsc1) || 0;
       const d1 = Number(p.refDesc1) || 0;
       const a2 = Number(p.refAsc2) || 0;
       const d2 = Number(p.refDesc2) || 0;
-      const count = [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2].filter(x => x !== '' && x !== undefined).length;
-      const sum = [a1, d1, a2, d2].reduce((a,b, i) => {
-          const val = [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2][i];
-          return a + (val !== '' && val !== undefined ? Number(val) : 0);
+      const a3 = Number(p.refAsc3) || 0;
+      const d3 = Number(p.refDesc3) || 0;
+      const rawReadings = [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2, p.refAsc3, p.refDesc3];
+      const numericReadings = [a1, d1, a2, d2, a3, d3];
+      const count = rawReadings.filter((x) => x !== '' && x !== undefined && x !== null).length;
+      const sum = numericReadings.reduce((acc, _b, i) => {
+        const val = rawReadings[i];
+        return acc + (val !== '' && val !== undefined && val !== null ? Number(val) : 0);
       }, 0);
       const avg = count > 0 ? sum / count : 0;
       const err = Number((p.nominal - avg).toFixed(2));

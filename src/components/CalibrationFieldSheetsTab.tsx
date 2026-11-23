@@ -621,16 +621,19 @@ export default function CalibrationFieldSheetsTab({
                   <span className="font-mono font-normal text-[8px] text-slate-600">Norma: ABNT NBR 14105 / NBR 13881</span>
                 </div>
                 <div className="p-1">
-                  <table className="w-full text-center border-collapse text-[9px]">
+                  <table className="w-full text-center border-collapse text-[8.5px]">
                     <thead>
                       <tr className="bg-slate-100 font-bold border border-slate-400">
-                        <th className="p-1 border border-slate-300" rowSpan={2} style={{ width: "15%" }}>VI (Nominal)<br/>Instrumento</th>
-                        <th className="p-1 border border-slate-300" colSpan={2} style={{ width: "28%" }}>VRef 1º Ciclo (Padrão)</th>
-                        <th className="p-1 border border-slate-300" colSpan={2} style={{ width: "28%" }}>VRef 2º Ciclo (Padrão)</th>
-                        <th className="p-1 border border-slate-300" rowSpan={2} style={{ width: "15%" }}>Média VRef</th>
-                        <th className="p-1 border border-slate-300" rowSpan={2} style={{ width: "14%" }}>Erro (VI - VRef)</th>
+                        <th className="p-1 border border-slate-300" rowSpan={2} style={{ width: "13%" }}>VI (Nominal)<br/>Instrumento</th>
+                        <th className="p-1 border border-slate-300" colSpan={2} style={{ width: "21%" }}>VRef 1º Ciclo (Padrão)</th>
+                        <th className="p-1 border border-slate-300" colSpan={2} style={{ width: "21%" }}>VRef 2º Ciclo (Padrão)</th>
+                        <th className="p-1 border border-slate-300" colSpan={2} style={{ width: "21%" }}>VRef 3º Ciclo (Padrão)</th>
+                        <th className="p-1 border border-slate-300" rowSpan={2} style={{ width: "12%" }}>Média VRef</th>
+                        <th className="p-1 border border-slate-300" rowSpan={2} style={{ width: "12%" }}>Erro (VI - VRef)</th>
                       </tr>
                       <tr className="bg-slate-100 font-bold border border-slate-400">
+                        <th className="p-1 border border-slate-300">Crescente (Asc.)</th>
+                        <th className="p-1 border border-slate-300">Decrescente (Desc.)</th>
                         <th className="p-1 border border-slate-300">Crescente (Asc.)</th>
                         <th className="p-1 border border-slate-300">Decrescente (Desc.)</th>
                         <th className="p-1 border border-slate-300">Crescente (Asc.)</th>
@@ -643,6 +646,8 @@ export default function CalibrationFieldSheetsTab({
                           <td className="p-1 border border-slate-300 font-mono text-center font-bold bg-slate-50">
                             Ponto {idx}
                           </td>
+                          <td className="p-1 border border-slate-300">&nbsp;</td>
+                          <td className="p-1 border border-slate-300">&nbsp;</td>
                           <td className="p-1 border border-slate-300">&nbsp;</td>
                           <td className="p-1 border border-slate-300">&nbsp;</td>
                           <td className="p-1 border border-slate-300">&nbsp;</td>

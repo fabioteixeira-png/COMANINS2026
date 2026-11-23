@@ -2528,6 +2528,8 @@ export default function InternalPortal({
         refDesc1: "",
         refAsc2: "",
         refDesc2: "",
+        refAsc3: "",
+        refDesc3: "",
       }));
     } else if (isBipolarTermometro) {
       // Metrologia ABNT NBR 13881 / IEC 60751 / ITS-90 / DOQ-CGCRE-008:
@@ -2592,6 +2594,8 @@ export default function InternalPortal({
         refDesc1: "",
         refAsc2: "",
         refDesc2: "",
+        refAsc3: "",
+        refDesc3: "",
       }));
     } else {
       // Escala unipolar convencional (ex: 0 a 10 bar, 0 a 100 °C, etc.):
@@ -2614,6 +2618,8 @@ export default function InternalPortal({
         refDesc1: "",
         refAsc2: "",
         refDesc2: "",
+        refAsc3: "",
+        refDesc3: "",
       }));
     }
     return pts;
@@ -6665,6 +6671,9 @@ Status atual: ${e.status}.`,
       } else if (!benchPoints || benchPoints.length === 0) {
         isAllFilled = false;
       } else {
+        const isThreeCyclesType =
+          selectedInstrumentType === "manometro" ||
+          selectedInstrumentType === "manovacuometro";
         for (const p of benchPoints) {
           const a1 =
             p.refAsc1 !== "" && p.refAsc1 !== undefined
@@ -6682,12 +6691,31 @@ Status atual: ${e.status}.`,
             p.refDesc2 !== "" && p.refDesc2 !== undefined
               ? Number(p.refDesc2)
               : NaN;
+          const a3 =
+            p.refAsc3 !== "" && p.refAsc3 !== undefined
+              ? Number(p.refAsc3)
+              : NaN;
+          const d3 =
+            p.refDesc3 !== "" && p.refDesc3 !== undefined
+              ? Number(p.refDesc3)
+              : NaN;
 
-          if (isNaN(a1) || isNaN(d1) || isNaN(a2) || isNaN(d2)) {
+          if (
+            isNaN(a1) ||
+            isNaN(d1) ||
+            isNaN(a2) ||
+            isNaN(d2) ||
+            (isThreeCyclesType && (isNaN(a3) || isNaN(d3)))
+          ) {
             isAllFilled = false;
+            specificValidationErrorMessage = isThreeCyclesType
+              ? "Preencha todas as leituras dos 3 ciclos completos (Crescente e Decrescente) para todos os pontos."
+              : "Preencha todas as leituras dos 2 ciclos completos (Crescente e Decrescente) para todos os pontos.";
             break;
           }
-          const vals = [a1, d1, a2, d2];
+          const vals = isThreeCyclesType
+            ? [a1, d1, a2, d2, a3, d3]
+            : [a1, d1, a2, d2];
           const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
           const errVal = Math.abs(Number((p.nominal - avg).toFixed(2)));
 
@@ -7040,22 +7068,41 @@ Status atual: ${e.status}.`,
               ? parsedBenchSubdiv
               : 0.1;
           const uB_res = res / (2 * Math.sqrt(3));
+          const isThreeCyclesType =
+            selectedInstrumentType === "manometro" ||
+            selectedInstrumentType === "manovacuometro";
           const pointUncertainties = benchPoints.map((p: any) => {
-            const vals = [
-              Number(p.refAsc1) || 0,
-              Number(p.refDesc1) || 0,
-              Number(p.refAsc2) || 0,
-              Number(p.refDesc2) || 0,
-            ];
-            const avg = vals.reduce((s, v) => s + v, 0) / 4;
+            const rawVals = isThreeCyclesType
+              ? [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2, p.refAsc3, p.refDesc3]
+              : [p.refAsc1, p.refDesc1, p.refAsc2, p.refDesc2];
+            const vals = rawVals
+              .filter((v) => v !== "" && v !== undefined && v !== null && !isNaN(Number(v)))
+              .map((v) => Number(v));
+            const count = vals.length || 1;
+            const avg = vals.reduce((s, v) => s + v, 0) / count;
             const variance =
-              vals.reduce((acc, v) => acc + Math.pow(v - avg, 2), 0) / 3;
+              count > 1
+                ? vals.reduce((acc, v) => acc + Math.pow(v - avg, 2), 0) / (count - 1)
+                : 0;
             const stdDev = Math.sqrt(variance);
-            let uA = stdDev / 2;
-            let localHyst = Math.max(
-              Math.abs(vals[0] - vals[1]),
-              Math.abs(vals[2] - vals[3]),
-            );
+            let uA = stdDev / Math.sqrt(count);
+            const h1 =
+              p.refAsc1 !== "" && p.refDesc1 !== "" && p.refAsc1 !== undefined && p.refDesc1 !== undefined
+                ? Math.abs(Number(p.refAsc1) - Number(p.refDesc1))
+                : 0;
+            const h2 =
+              p.refAsc2 !== "" && p.refDesc2 !== "" && p.refAsc2 !== undefined && p.refDesc2 !== undefined
+                ? Math.abs(Number(p.refAsc2) - Number(p.refDesc2))
+                : 0;
+            const h3 =
+              isThreeCyclesType &&
+              p.refAsc3 !== "" &&
+              p.refDesc3 !== "" &&
+              p.refAsc3 !== undefined &&
+              p.refDesc3 !== undefined
+                ? Math.abs(Number(p.refAsc3) - Number(p.refDesc3))
+                : 0;
+            let localHyst = Math.max(h1, h2, h3);
             if (selectedInstrumentType === "manovacuometro" && Number(p.nominal) < 0) {
               const scaleDiv = minRaw <= -700 ? 760 : minRaw <= -25 ? 29.92 : 1;
               uA = uA / scaleDiv;
@@ -7088,6 +7135,10 @@ Status atual: ${e.status}.`,
         const startInfo =
           calibrationStartTimes[selectedInstId] ||
           (await recordCalibrationStart(selectedInstId));
+        const normalizedBenchPoints =
+          selectedInstrumentType === "termometro"
+            ? (benchPoints || []).map(({ refAsc3, refDesc3, ...rest }: any) => rest)
+            : benchPoints;
         await onSaveCalibration({
           instrumentId: selectedInstId,
           technicianName: benchTechnician,
@@ -7113,7 +7164,7 @@ Status atual: ${e.status}.`,
             selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro" ||
             selectedInstrumentType === "termometro"
-              ? benchPoints
+              ? normalizedBenchPoints
               : [],
           transmitterPoints:
             selectedInstrumentType === "transmissor" ? benchTransmitterPoints : [],
@@ -7496,7 +7547,9 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
             selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro" ||
             selectedInstrumentType === "termometro"
-              ? benchPoints
+              ? selectedInstrumentType === "termometro"
+                ? (benchPoints || []).map(({ refAsc3, refDesc3, ...rest }: any) => rest)
+                : benchPoints
               : [],
           transmitterPoints:
             selectedInstrumentType === "transmissor" ? benchTransmitterPoints : [],

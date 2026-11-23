@@ -147,6 +147,13 @@ export interface RncReport {
 export interface CalibrationPoint {
   id: string;
   nominalValue: number;
+  nominal?: number;
+  refAsc1?: string | number;
+  refDesc1?: string | number;
+  refAsc2?: string | number;
+  refDesc2?: string | number;
+  refAsc3?: string | number;
+  refDesc3?: string | number;
   standardValue?: number; // legacy
   instrumentValue?: number; // legacy
   error?: number; // legacy
