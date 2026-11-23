@@ -538,6 +538,7 @@ service cloud.firestore {
           'regulatorMode', 'regulatorActuation',
           'accuracyClass', 'subdivision', 'mpe', 'temperature', 'humidity',
           'calibrationRangeMin', 'calibrationRangeMax', 'calibrationRange', 'isCustomCalibrationRange',
+          'calibrationLocation', 'calibrationProcedure',
           'manualCalibrationDateAllowed', 'reissueSuggestedCalibrationDate',
           'calibrationStartedAt', 'calibrationTechnicianName', 'calibrationPreviousStatus',
           'adminCalibrationReplacementPending',

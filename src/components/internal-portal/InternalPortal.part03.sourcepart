@@ -291,6 +291,26 @@
                         <p className="text-[10px] text-slate-500 mt-1">Regra: 50% ± 20%</p>
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1 text-sm">
+                        Local de Calibração <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        required
+                        value={benchCalibrationLocation}
+                        onChange={(e) => setBenchCalibrationLocation(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-900 focus:ring-1 focus:ring-royal-blue font-semibold text-xs"
+                      >
+                        {CALIBRATION_LOCATION_OPTIONS.map((locOption) => (
+                          <option key={locOption} value={locOption}>
+                            {locOption}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Padrão principal: Instalação Permanente do Laboratório Comanins (altere apenas quando o serviço for em campo).
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -384,6 +404,15 @@
                                     type="button"
                                     onClick={() => {
                                       setSelectedInstrumentType(t);
+                                      setBenchCalibrationProcedure(
+                                        resolveCalibrationProcedure({
+                                          instrumentType: t,
+                                          instrument: activeInst,
+                                          client: clients.find(
+                                            (c) => c.id === activeInst.clientId,
+                                          ),
+                                        }),
+                                      );
                                       const nextSignal =
                                         activeInst.outputSignal ||
                                         info.defaultSignal;
@@ -482,6 +511,68 @@
                               {currentNorm.code})
                             </span>
                           </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3 border-b border-slate-200/80">
+                            <div>
+                              <label className="block text-slate-600 font-bold mb-1">
+                                Local de Calibração (Item 3 do Certificado)
+                              </label>
+                              <select
+                                value={benchCalibrationLocation}
+                                onChange={(e) =>
+                                  setBenchCalibrationLocation(e.target.value)
+                                }
+                                className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-semibold"
+                              >
+                                {CALIBRATION_LOCATION_OPTIONS.map((locOption) => (
+                                  <option key={locOption} value={locOption}>
+                                    {locOption}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-slate-600 font-bold mb-1">
+                                Procedimento de Calibração (Item 5 do Certificado)
+                              </label>
+                              {selectedInstrumentType === "manometro" ||
+                              selectedInstrumentType === "manovacuometro" ? (
+                                <select
+                                  value={
+                                    benchCalibrationProcedure === "PR-002-2017"
+                                      ? "PR-002-2017"
+                                      : "PR-001-2017"
+                                  }
+                                  onChange={(e) =>
+                                    setBenchCalibrationProcedure(e.target.value)
+                                  }
+                                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-semibold"
+                                >
+                                  <option value="PR-001-2017">
+                                    PR-001-2017 (Manômetros / Manovacuômetros)
+                                  </option>
+                                  <option value="PR-002-2017">
+                                    PR-002-2017 (Manômetros Padrões Comanins)
+                                  </option>
+                                </select>
+                              ) : (
+                                <div className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-900 font-mono font-bold flex items-center justify-between">
+                                  <span>
+                                    {resolveCalibrationProcedure({
+                                      instrumentType: selectedInstrumentType,
+                                      instrument: activeInst,
+                                      client: clients.find(
+                                        (c) => c.id === activeInst.clientId,
+                                      ),
+                                      explicitProcedure: benchCalibrationProcedure,
+                                    })}
+                                  </span>
+                                  <span className="text-[10px] font-sans font-normal text-slate-500">
+                                    Automático por tipo
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             {/* Fields per type */}
                             {(selectedInstrumentType === "manometro" ||
@@ -3821,7 +3912,9 @@
                               <span className="font-bold">
                                 Local de calibração:
                               </span>{" "}
-                              Instalação Permanente do Laboratório Comanins
+                              {report?.calibrationLocation ||
+                                (inst as any)?.calibrationLocation ||
+                                CALIBRATION_LOCATION_LABORATORY}
                             </p>
                           </div>
 
@@ -3868,7 +3961,21 @@
                                 <span className="font-bold">
                                   Método de Calibração:
                                 </span>{" "}
-                                procedimento PR-001-2017 Rev. 4, com referência técnica {certificateInstrumentType === "psv" && report?.acceptanceCriterion ? report.acceptanceCriterion : (report?.metrologicalNorm || certificateNorm.code)}
+                                procedimento{" "}
+                                {resolveCalibrationProcedure({
+                                  instrumentType: certificateInstrumentType,
+                                  instrument: inst,
+                                  client,
+                                  explicitProcedure:
+                                    report?.calibrationProcedure ||
+                                    (inst as any)?.calibrationProcedure,
+                                })}
+                                , com referência técnica{" "}
+                                {certificateInstrumentType === "psv" &&
+                                report?.acceptanceCriterion
+                                  ? report.acceptanceCriterion
+                                  : report?.metrologicalNorm ||
+                                    certificateNorm.code}
                               </p>
                               <p>
                                 <span className="font-bold">
@@ -4259,7 +4366,7 @@
                               )}
                               <div className="w-full border-t border-slate-400 pt-2">
                                 <p className="font-bold">{report?.technicianName || 'Técnico Executante'}</p>
-                                <p className="text-xs text-slate-600">Técnico de Laboratório</p>
+                                <p className="text-xs text-slate-600">Executante</p>
                               </div>
                             </div>
                             <div className="flex flex-col items-center justify-end text-center pt-2">

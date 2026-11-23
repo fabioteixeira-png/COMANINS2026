@@ -116,6 +116,8 @@ export interface Instrument {
   calibrationRange?: string;
   isCustomCalibrationRange?: boolean;
   hasCustomCalibrationRange?: boolean;
+  calibrationLocation?: string;
+  calibrationProcedure?: string;
 }
 
 export interface RncReport {
@@ -335,6 +337,93 @@ export interface CalibrationReport {
   calibrationRange?: string;
   isCustomCalibrationRange?: boolean;
   hasCustomCalibrationRange?: boolean;
+  calibrationLocation?: string;
+  calibrationProcedure?: string;
+}
+
+export const CALIBRATION_LOCATION_LABORATORY =
+  'Instalação Permanente do Laboratório Comanins';
+export const CALIBRATION_LOCATION_FIELD = 'Calibração em campo';
+export const CALIBRATION_LOCATION_OPTIONS = [
+  CALIBRATION_LOCATION_LABORATORY,
+  CALIBRATION_LOCATION_FIELD,
+] as const;
+
+export function isComaninsStandardGauge(
+  instrument?: Partial<Instrument> | null,
+  clientNameOrClient?: string | Partial<Client> | null,
+): boolean {
+  if (!instrument) return false;
+  const rawClientName =
+    typeof clientNameOrClient === 'string'
+      ? clientNameOrClient
+      : clientNameOrClient?.name || (clientNameOrClient as any)?.razaoSocial || '';
+  const normalizedClient = String(rawClientName || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+  const normalizedTag = String(instrument.tag || '').trim().toUpperCase();
+  const normalizedDesc = String(instrument.description || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+
+  if (normalizedClient.startsWith('COMANINS') || normalizedClient.includes('COMANINS')) {
+    return true;
+  }
+  if (/^BPC(?:[-/\s]|$)/i.test(normalizedTag)) {
+    return true;
+  }
+  if (
+    normalizedDesc.includes('PADRAO COMANINS') ||
+    normalizedDesc.includes('MANOMETRO PADRAO') ||
+    normalizedDesc.includes('MANOVACUOMETRO PADRAO')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function resolveCalibrationProcedure(options: {
+  instrumentType?: InstrumentType | string | null;
+  instrument?: Partial<Instrument> | null;
+  client?: string | Partial<Client> | null;
+  explicitProcedure?: string | null;
+}): string {
+  const { instrumentType, instrument, client, explicitProcedure } = options;
+  const trimmedExplicit = String(explicitProcedure || '').trim();
+
+  const resolvedType = (instrumentType || instrument?.typeSpec || '').toString().toLowerCase();
+
+  if (resolvedType === 'transmissor') {
+    return 'PR-MET-BRK-003';
+  }
+  if (resolvedType === 'termometro') {
+    return 'PR-MET-CM-002';
+  }
+  if (resolvedType === 'pressostato' || resolvedType === 'termostato') {
+    return 'PR-MET-CM-004';
+  }
+  if (resolvedType === 'manometro' || resolvedType === 'manovacuometro') {
+    if (trimmedExplicit === 'PR-002-2017' || trimmedExplicit === 'PR-001-2017') {
+      return trimmedExplicit;
+    }
+    return isComaninsStandardGauge(instrument, client) ? 'PR-002-2017' : 'PR-001-2017';
+  }
+
+  if (
+    trimmedExplicit === 'PR-001-2017' ||
+    trimmedExplicit === 'PR-002-2017' ||
+    trimmedExplicit === 'PR-MET-BRK-003' ||
+    trimmedExplicit === 'PR-MET-CM-002' ||
+    trimmedExplicit === 'PR-MET-CM-004'
+  ) {
+    return trimmedExplicit;
+  }
+
+  return isComaninsStandardGauge(instrument, client) ? 'PR-002-2017' : 'PR-001-2017';
 }
 
 export interface CalibrationAuditLog {

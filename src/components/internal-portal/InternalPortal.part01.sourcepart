@@ -222,6 +222,10 @@ import {
   Payslip,
   PayslipItem,
   RncReport,
+  CALIBRATION_LOCATION_LABORATORY,
+  CALIBRATION_LOCATION_FIELD,
+  CALIBRATION_LOCATION_OPTIONS,
+  resolveCalibrationProcedure,
 } from "../types";
 import ComaninsLogo from "./ComaninsLogo";
 import EmployeeManagement from "./EmployeeManagement";
@@ -2452,6 +2456,10 @@ export default function InternalPortal({
   const [benchCalibrationRangeMin, setBenchCalibrationRangeMin] = useState<string | number>("");
   const [benchCalibrationRangeMax, setBenchCalibrationRangeMax] = useState<string | number>("");
   const [isCustomCalibrationRange, setIsCustomCalibrationRange] = useState<boolean>(false);
+  const [benchCalibrationLocation, setBenchCalibrationLocation] = useState<string>(
+    CALIBRATION_LOCATION_LABORATORY,
+  );
+  const [benchCalibrationProcedure, setBenchCalibrationProcedure] = useState<string>("PR-001-2017");
   const [showAllTypeOptions, setShowAllTypeOptions] = useState<boolean>(false);
 
   const generatePointsForRange = (
@@ -3970,6 +3978,18 @@ Status atual: ${e.status}.`,
         const detectedType = detectInstrumentType(inst);
         setSelectedInstrumentType(detectedType);
         setShowAllTypeOptions(false);
+        const instClient = clients.find((c) => c.id === inst.clientId);
+        setBenchCalibrationLocation(
+          inst.calibrationLocation || CALIBRATION_LOCATION_LABORATORY,
+        );
+        setBenchCalibrationProcedure(
+          resolveCalibrationProcedure({
+            instrumentType: detectedType,
+            instrument: inst,
+            client: instClient,
+            explicitProcedure: inst.calibrationProcedure,
+          }),
+        );
 
         const normInfo = METROLOGICAL_NORMS_INFO[detectedType];
         setBenchSensorType(inst.sensorType || normInfo.defaultSensor);
@@ -7188,6 +7208,14 @@ Status atual: ${e.status}.`,
               ? `${benchCalibrationRangeMin} a ${benchCalibrationRangeMax} ${activeInst?.unit || ""}`
               : undefined,
           isCustomCalibrationRange,
+          calibrationLocation:
+            benchCalibrationLocation || CALIBRATION_LOCATION_LABORATORY,
+          calibrationProcedure: resolveCalibrationProcedure({
+            instrumentType: selectedInstrumentType,
+            instrument: activeInst,
+            client: clients.find((c) => c.id === activeInst?.clientId),
+            explicitProcedure: benchCalibrationProcedure,
+          }),
           auditStartTime: startInfo?.startTime || activeInst?.calibrationStartedAt,
           auditTechnicianName:
             startInfo?.technicianName || benchTechnician || currentUser?.name,
@@ -7234,6 +7262,8 @@ Status atual: ${e.status}.`,
           setBenchCalibrationRangeMax("");
           setBenchSubdivision("");
           setIsCustomCalibrationRange(false);
+          setBenchCalibrationLocation(CALIBRATION_LOCATION_LABORATORY);
+          setBenchCalibrationProcedure("PR-001-2017");
           setBenchCalibrationDate(currentCalibrationDate());
           setActiveTab("instruments");
         }, 3000);
@@ -7454,6 +7484,14 @@ Recomenda-se manutenção/diagnóstico, ajuste quando aplicável e posterior rec
               ? `${benchCalibrationRangeMin} a ${benchCalibrationRangeMax} ${activeInst?.unit || ""}`
               : undefined,
           isCustomCalibrationRange: isCustomCalibrationRange,
+          calibrationLocation:
+            benchCalibrationLocation || CALIBRATION_LOCATION_LABORATORY,
+          calibrationProcedure: resolveCalibrationProcedure({
+            instrumentType: selectedInstrumentType,
+            instrument: activeInst,
+            client,
+            explicitProcedure: benchCalibrationProcedure,
+          }),
           points:
             selectedInstrumentType === "manometro" ||
             selectedInstrumentType === "manovacuometro" ||

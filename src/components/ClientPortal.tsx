@@ -31,7 +31,15 @@ import {
   Tooltip, 
   ReferenceLine 
 } from 'recharts';
-import { Client, Instrument, CalibrationReport, RncReport } from '../types';
+import {
+  Client,
+  Instrument,
+  CalibrationReport,
+  RncReport,
+  CALIBRATION_LOCATION_LABORATORY,
+  resolveCalibrationProcedure,
+} from '../types';
+import { detectInstrumentType, METROLOGICAL_NORMS_INFO } from './InternalPortal';
 
 import type { FieldServiceRecord, SavedIntake } from '../lib/firebase';
 import { PrivacyPolicyModal } from './LGPDPrivacy';
@@ -1007,16 +1015,36 @@ export default function ClientPortal({
               const certNumber = selectedReport?.certNumber || (inst?.certificateNumber ? inst.certificateNumber : `COMA-${inst?.id.substring(0,4).toUpperCase()}`);
               const certAuthKey = getReportAuthKey(selectedReport, inst?.id + certNumber);
               const points = selectedReport?.points || (inst as any)?.calibrationPoints || [];
-              const clientInstrumentType = selectedReport?.instrumentType || inst?.typeSpec;
+              const clientInstrumentType =
+                selectedReport?.instrumentType ||
+                (inst ? detectInstrumentType(inst) : undefined);
               const isPsvCertificate = clientInstrumentType === 'psv';
               const isPcvCertificate = clientInstrumentType === 'pcv';
-              const calibrationReference = isPsvCertificate && selectedReport?.acceptanceCriterion
-                ? selectedReport.acceptanceCriterion
-                : (selectedReport?.metrologicalNorm || (isPsvCertificate
-                    ? 'NR-13 / ISO 4126-1:2013+Amd 1:2016 / API RP 576 (5ª ed. + A1) / API Std 527 (5ª ed.) / ASME BPVC XIII:2025 (quando aplicável)'
-                    : isPcvCertificate
-                      ? 'IEC 60534-1:2023 / IEC 60534-4:2021 / IOGP S-739 (revisão contratual aplicável)'
-                      : 'PR-001-2017 Rev. 4'));
+              const clientNormInfo = clientInstrumentType
+                ? METROLOGICAL_NORMS_INFO[clientInstrumentType]
+                : undefined;
+              const calibrationReference =
+                isPsvCertificate && selectedReport?.acceptanceCriterion
+                  ? selectedReport.acceptanceCriterion
+                  : selectedReport?.metrologicalNorm ||
+                    clientNormInfo?.code ||
+                    (isPsvCertificate
+                      ? 'NR-13 / ISO 4126-1:2013+Amd 1:2016 / API RP 576 (5ª ed. + A1) / API Std 527 (5ª ed.) / ASME BPVC XIII:2025 (quando aplicável)'
+                      : isPcvCertificate
+                        ? 'IEC 60534-1:2023 / IEC 60534-4:2021 / IOGP S-739 (revisão contratual aplicável)'
+                        : 'ABNT NBR 14105-1 / NBR 14105-2');
+              const calibrationProcedure = resolveCalibrationProcedure({
+                instrumentType: clientInstrumentType,
+                instrument: inst,
+                client,
+                explicitProcedure:
+                  selectedReport?.calibrationProcedure ||
+                  (inst as any)?.calibrationProcedure,
+              });
+              const calibrationLocation =
+                selectedReport?.calibrationLocation ||
+                (inst as any)?.calibrationLocation ||
+                CALIBRATION_LOCATION_LABORATORY;
               
               let maxHysteresis = 0;
               let maxRepeatability = 0;
@@ -1243,7 +1271,7 @@ export default function ClientPortal({
                         })()}</p>
                         <p><span className="font-bold">Data de emissão:</span> {new Date().toLocaleDateString('pt-BR')}</p>
                       </div>
-                      <p className="pl-4 mt-1"><span className="font-bold">Local de calibração:</span> Instalação Permanente do Laboratório Comanins</p>
+                      <p className="pl-4 mt-1"><span className="font-bold">Local de calibração:</span> {calibrationLocation}</p>
                     </div>
 
                     <div>
@@ -1279,13 +1307,15 @@ export default function ClientPortal({
                     <div>
                       <p className="font-bold text-sm uppercase mb-1">5. Resumo do Método de Calibração:</p>
                       <div className="pl-4">
-                        <p><span className="font-bold">Método de Calibração:</span> procedimento PR-001-2017 Rev. 4, com referência técnica {calibrationReference}</p>
+                        <p><span className="font-bold">Método de Calibração:</span> procedimento {calibrationProcedure}, com referência técnica {calibrationReference}</p>
                         <p><span className="font-bold">Descrição do Método:</span>{' '}
                           {isPsvCertificate
                             ? 'Ensaio em bancada para determinação da pressão de abertura, repetibilidade, reassentamento/blowdown e estanqueidade da sede, conforme o critério de aceitação registrado para o equipamento.'
                             : isPcvCertificate
                               ? 'Verificação do set point por aproximação ascendente e descendente, com cálculo de erro e histerese. Estanqueidade e droop são declarados somente quando efetivamente ensaiados.'
-                              : 'A calibração foi realizada conforme procedimento PR-001-2017 Rev. 4 comparando-se o instrumento com o padrão listado no item 7. As medições estão registradas nas tabelas de valores encontrados.'}
+                              : clientNormInfo?.methodology
+                                ? `${clientNormInfo.methodology} O instrumento foi comparado com o(s) padrão(ões) rastreável(is) listado(s) no item 7 e os resultados efetivamente ensaiados estão registrados no item 8.`
+                                : `A calibração foi realizada conforme procedimento ${calibrationProcedure} comparando-se o instrumento com o padrão listado no item 7. As medições estão registradas nas tabelas de valores encontrados.`}
                         </p>
                       </div>
                     </div>
@@ -1307,7 +1337,7 @@ export default function ClientPortal({
                             </p>
                           ))
                         ) : (
-                          <p className="text-slate-500 italic">Padrões de referência rastreados RBC/Inmetro utilizados conforme PR-001-2017.</p>
+                          <p className="text-slate-500 italic">Padrões de referência rastreados RBC/Inmetro utilizados conforme {calibrationProcedure}.</p>
                         )}
                       </div>
                     </div>
@@ -1565,7 +1595,7 @@ export default function ClientPortal({
                         )}
                         <div className="w-full border-t border-slate-400 pt-2">
                           <p className="font-bold">{selectedReport?.technicianName || 'Técnico Executante'}</p>
-                          <p className="text-xs text-slate-600">Técnico de Laboratório</p>
+                          <p className="text-xs text-slate-600">Executante</p>
                         </div>
                       </div>
                       <div className="flex flex-col items-center justify-end text-center pt-2">

@@ -1687,6 +1687,8 @@ export async function saveCalibrationDoc(data: {
   calibrationRangeMin?: number;
   calibrationRangeMax?: number;
   isCustomCalibrationRange?: boolean;
+  calibrationLocation?: string;
+  calibrationProcedure?: string;
 }, activeInst: Instrument): Promise<{ report: CalibrationReport; instrument: Instrument }> {
   let maxError = 0;
   let maxHysteresis = 0;
@@ -2102,6 +2104,8 @@ export async function saveCalibrationDoc(data: {
       ? `${Number(data.calibrationRangeMin)} a ${Number(data.calibrationRangeMax)} ${activeInst.unit}`
       : undefined,
     isCustomCalibrationRange: data.isCustomCalibrationRange === true ? true : undefined,
+    calibrationLocation: data.calibrationLocation || 'Instalação Permanente do Laboratório Comanins',
+    calibrationProcedure: data.calibrationProcedure || undefined,
   };
 
   const nextCal = new Date(`${calibrationDate}T12:00:00.000Z`);
@@ -2135,7 +2139,9 @@ export async function saveCalibrationDoc(data: {
     ...(report.calibrationRangeMin !== undefined ? { calibrationRangeMin: report.calibrationRangeMin } : {}),
     ...(report.calibrationRangeMax !== undefined ? { calibrationRangeMax: report.calibrationRangeMax } : {}),
     ...(report.calibrationRange !== undefined ? { calibrationRange: report.calibrationRange } : {}),
-    ...(report.isCustomCalibrationRange !== undefined ? { isCustomCalibrationRange: report.isCustomCalibrationRange } : {})
+    ...(report.isCustomCalibrationRange !== undefined ? { isCustomCalibrationRange: report.isCustomCalibrationRange } : {}),
+    ...(report.calibrationLocation ? { calibrationLocation: report.calibrationLocation } : {}),
+    ...(report.calibrationProcedure ? { calibrationProcedure: report.calibrationProcedure } : {})
   };
 
   const instrumentUpdates = stripUndefinedDeep({
@@ -2164,6 +2170,8 @@ export async function saveCalibrationDoc(data: {
     calibrationRangeMax: report.calibrationRangeMax,
     calibrationRange: report.calibrationRange,
     isCustomCalibrationRange: report.isCustomCalibrationRange,
+    calibrationLocation: report.calibrationLocation,
+    calibrationProcedure: report.calibrationProcedure,
     updatedAt: new Date().toISOString(),
   });
   const cacheableInstrumentUpdates = { ...instrumentUpdates };
